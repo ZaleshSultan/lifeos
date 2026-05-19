@@ -1,0 +1,816 @@
+import { healthModeLabel, resolveHealthMode, scoreFocus } from "@lifeos/core";
+import type {
+  CreateLifeEntityInput,
+  Json,
+  LifeEntityRecord,
+  LifeOSStore,
+  TelegramUserRecord,
+} from "@lifeos/db";
+import type {
+  TelegramBotRuntime,
+  TelegramMessage,
+  TelegramUpdate,
+} from "./types.js";
+
+interface ParsedCommand {
+  command: string;
+  args: string;
+}
+
+interface HealthSignalArgs {
+  sleepHours?: number;
+  moodScore?: number;
+  energyScore?: number;
+  stressScore?: number;
+}
+
+const HELP_TEXT = [
+  "LifeOS bot commands:",
+  "/cap quick capture",
+  "/task task title",
+  "/deadline 2026-05-20 task title",
+  "/today",
+  "/focus [sleep 7 mood 8 energy 7 stress 3]",
+  "/health [sleep 7 mood 8 energy 7 stress 3 notes]",
+  "/healthsync_status",
+  "/mode [sleep 7 mood 8 energy 7 stress 3]",
+  "/review review notes",
+  "/spend 1200 KZT lunch",
+  "/finance",
+  "/workout [title]",
+  "/status",
+].join("\n");
+
+const CREATE_COMMANDS = new Set([
+  "cap",
+  "task",
+  "deadline",
+  "health",
+  "mode",
+  "review",
+  "spend",
+  "workout",
+]);
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+function parseCommand(text: string): ParsedCommand | null {
+  const [head = "", ...rest] = text.trim().split(/\s+/);
+
+  if (!head.startsWith("/")) {
+    return {
+      command: "cap",
+      args: text.trim(),
+    };
+  }
+
+  const command = head.slice(1).split("@")[0]?.toLowerCase();
+
+  if (!command) {
+    return null;
+  }
+
+  return {
+    command,
+    args: rest.join(" ").trim(),
+  };
+}
+
+function requireText(
+  command: string,
+  args: string,
+  usage: string,
+): string | null {
+  if (args.trim()) {
+    return args.trim();
+  }
+
+  return `Usage: /${command} ${usage}`;
+}
+
+async function resolveUser(
+  message: TelegramMessage,
+  runtime: TelegramBotRuntime,
+): Promise<TelegramUserRecord | null> {
+  if (!runtime.store) {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "Database is not configured for this bot instance yet.",
+    });
+    return null;
+  }
+
+  if (!message.from?.id) {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "I could not identify the Telegram user for this message.",
+    });
+    return null;
+  }
+
+  const user = await runtime.store.resolveTelegramUser(message.from.id);
+
+  if (!user) {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: [
+        "Your Telegram account is not linked to LifeOS yet.",
+        `Telegram user id: <code>${message.from.id}</code>`,
+        "Link this id to your LifeOS profile, then try again.",
+      ].join("\n"),
+    });
+    return null;
+  }
+
+  return user;
+}
+
+async function createEntityAndQueueSync(
+  store: LifeOSStore,
+  message: TelegramMessage,
+  input: Omit<CreateLifeEntityInput, "telegramChatId" | "telegramMessageId">,
+): Promise<LifeEntityRecord> {
+  const entity = await store.createLifeEntity({
+    ...input,
+    telegramChatId: message.chat.id,
+    telegramMessageId: message.message_id,
+  });
+
+  await store.enqueueObsidianSync({
+    userId: input.userId,
+    lifeEntityId: entity.id,
+    payload: {
+      entityType: input.entityType,
+      title: input.title,
+      sourceCommand: input.sourceCommand,
+    },
+  });
+
+  return entity;
+}
+
+function parseHealthSignalArgs(args: string): HealthSignalArgs {
+  const signals: HealthSignalArgs = {};
+  const patterns: Array<[keyof HealthSignalArgs, RegExp]> = [
+    ["sleepHours", /\bsleep\s*[:=]?\s*(\d+(?:\.\d+)?)/i],
+    ["moodScore", /\bmood\s*[:=]?\s*(10|[1-9])\b/i],
+    ["energyScore", /\benergy\s*[:=]?\s*(10|[1-9])\b/i],
+    ["stressScore", /\bstress\s*[:=]?\s*(10|[1-9])\b/i],
+  ];
+
+  for (const [key, pattern] of patterns) {
+    const match = args.match(pattern);
+
+    if (match?.[1]) {
+      signals[key] = Number(match[1]);
+    }
+  }
+
+  return signals;
+}
+
+function parseSpendArgs(args: string): {
+  amount: number | null;
+  currency: string | null;
+} {
+  const amountMatch = args.match(/(?:^|\s)(\d+(?:[.,]\d{1,2})?)(?:\s|$)/);
+  const currencyMatch = args.match(/\b([A-Z]{3})\b/);
+
+  return {
+    amount: amountMatch?.[1] ? Number(amountMatch[1].replace(",", ".")) : null,
+    currency: currencyMatch?.[1] ?? null,
+  };
+}
+
+function extractDeadline(
+  args: string,
+  now: Date,
+): { title: string; dueAt: string | null } {
+  const trimmed = args.trim();
+  const isoDate = trimmed.match(/\b(\d{4}-\d{2}-\d{2})\b/);
+  const lower = trimmed.toLowerCase();
+  const due = new Date(now);
+  let dueAt: string | null = null;
+  let title = trimmed;
+
+  if (isoDate?.[1]) {
+    dueAt = new Date(`${isoDate[1]}T23:59:00.000Z`).toISOString();
+    title = title
+      .replace(isoDate[1], "")
+      .replace(/\bby\b/i, "")
+      .trim();
+  } else if (lower.includes("tomorrow")) {
+    due.setUTCDate(due.getUTCDate() + 1);
+    due.setUTCHours(23, 59, 0, 0);
+    dueAt = due.toISOString();
+    title = title
+      .replace(/\btomorrow\b/i, "")
+      .replace(/\bby\b/i, "")
+      .trim();
+  } else if (lower.includes("today")) {
+    due.setUTCHours(23, 59, 0, 0);
+    dueAt = due.toISOString();
+    title = title
+      .replace(/\btoday\b/i, "")
+      .replace(/\bby\b/i, "")
+      .trim();
+  }
+
+  return {
+    title: title || trimmed,
+    dueAt,
+  };
+}
+
+function utcDayBounds(now: Date): { dayStart: string; dayEnd: string } {
+  const dayStart = new Date(now);
+  dayStart.setUTCHours(0, 0, 0, 0);
+  const dayEnd = new Date(dayStart);
+  dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
+
+  return {
+    dayStart: dayStart.toISOString(),
+    dayEnd: dayEnd.toISOString(),
+  };
+}
+
+function buildWorkoutUrl(tmaUrl: string, workoutId: string): string | null {
+  try {
+    const url = new URL(tmaUrl);
+    url.searchParams.set("workoutId", workoutId);
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function entitySummary(entity: LifeEntityRecord): string {
+  return `Saved <b>${escapeHtml(entity.entityType)}</b>: ${escapeHtml(entity.title)}`;
+}
+
+function metadata(value: Record<string, unknown>): Json {
+  return value as Json;
+}
+
+function bootstrapProfileSql(userId: string, telegramUserId: number): string {
+  return [
+    "insert into public.profiles (user_id, telegram_user_id, display_name, timezone, locale)",
+    `values ('${userId}', ${telegramUserId}, 'LifeOS User', 'UTC', 'en')`,
+    "on conflict (user_id) do update set",
+    "  telegram_user_id = excluded.telegram_user_id,",
+    "  display_name = coalesce(public.profiles.display_name, excluded.display_name),",
+    "  timezone = excluded.timezone,",
+    "  locale = excluded.locale,",
+    "  updated_at = now();",
+  ].join("\n");
+}
+
+function bootstrapHint(message: TelegramMessage, runtime: TelegramBotRuntime) {
+  if (!message.from?.id || !runtime.defaultUserId) {
+    return [
+      "Create or update a profile row in Supabase, then try again.",
+      message.from?.id
+        ? `Telegram user id: <code>${message.from.id}</code>`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  return [
+    "Run this SQL after the auth.users row exists:",
+    `<pre>${escapeHtml(
+      bootstrapProfileSql(runtime.defaultUserId, message.from.id),
+    )}</pre>`,
+  ].join("\n");
+}
+
+async function handleStartCommand(
+  message: TelegramMessage,
+  runtime: TelegramBotRuntime,
+): Promise<void> {
+  const telegramUserId = message.from?.id;
+
+  if (!telegramUserId) {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "LifeOS bot is online, but I could not identify your Telegram user id.",
+    });
+    return;
+  }
+
+  if (!runtime.store) {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: [
+        "LifeOS bot is online.",
+        "Database is not configured, so I cannot link this Telegram account yet.",
+        bootstrapHint(message, runtime),
+      ].join("\n"),
+    });
+    return;
+  }
+
+  const existing = await runtime.store.resolveTelegramUser(telegramUserId);
+
+  if (existing) {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: [
+        "LifeOS bot is online.",
+        `Linked profile: <code>${existing.userId}</code>`,
+        "Use /help to see commands.",
+      ].join("\n"),
+    });
+    return;
+  }
+
+  const canBootstrap =
+    runtime.defaultUserId &&
+    runtime.defaultTelegramUserId &&
+    runtime.defaultTelegramUserId === telegramUserId;
+
+  if (canBootstrap && runtime.defaultUserId) {
+    try {
+      const linked = await runtime.store.linkDefaultTelegramUser({
+        userId: runtime.defaultUserId,
+        telegramUserId,
+        displayName: message.from?.first_name ?? null,
+      });
+
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: [
+          "LifeOS bot is online.",
+          `Linked this Telegram account to <code>${linked.userId}</code>.`,
+          "Use /help to see commands.",
+        ].join("\n"),
+      });
+      return;
+    } catch (error) {
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: [
+          "LifeOS bot is online, but automatic linking failed.",
+          error instanceof Error ? escapeHtml(error.message) : "Unknown error",
+          bootstrapHint(message, runtime),
+        ].join("\n"),
+      });
+      return;
+    }
+  }
+
+  await runtime.telegram.sendMessage({
+    chatId: message.chat.id,
+    text: [
+      "LifeOS bot is online.",
+      "Your Telegram account is not linked yet.",
+      bootstrapHint(message, runtime),
+    ].join("\n"),
+  });
+}
+
+async function handleCreateCommand(
+  command: string,
+  args: string,
+  message: TelegramMessage,
+  runtime: TelegramBotRuntime,
+): Promise<void> {
+  const user = await resolveUser(message, runtime);
+
+  if (!user || !runtime.store) {
+    return;
+  }
+
+  if (command === "cap") {
+    const text = requireText(command, args, "quick capture");
+
+    if (!text || text.startsWith("Usage:")) {
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: text ?? "",
+      });
+      return;
+    }
+
+    const entity = await createEntityAndQueueSync(runtime.store, message, {
+      userId: user.userId,
+      entityType: "capture",
+      title: text,
+      body: text,
+      sourceCommand: "/cap",
+    });
+
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: entitySummary(entity),
+    });
+    return;
+  }
+
+  if (command === "task") {
+    const title = requireText(command, args, "task title");
+
+    if (!title || title.startsWith("Usage:")) {
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: title ?? "",
+      });
+      return;
+    }
+
+    const task = await runtime.store.createTask({
+      userId: user.userId,
+      title,
+      source: "telegram",
+    });
+    const entity = await createEntityAndQueueSync(runtime.store, message, {
+      userId: user.userId,
+      entityType: "task",
+      title,
+      sourceCommand: "/task",
+      linkedTable: "tasks",
+      linkedId: task.id,
+    });
+
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: `${entitySummary(entity)}\nTask id: <code>${task.id}</code>`,
+    });
+    return;
+  }
+
+  if (command === "deadline") {
+    const raw = requireText(command, args, "2026-05-20 task title");
+
+    if (!raw || raw.startsWith("Usage:")) {
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: raw ?? "",
+      });
+      return;
+    }
+
+    const deadline = extractDeadline(raw, runtime.now?.() ?? new Date());
+    const task = await runtime.store.createTask({
+      userId: user.userId,
+      title: deadline.title,
+      dueAt: deadline.dueAt,
+      source: "telegram",
+    });
+    const entity = await createEntityAndQueueSync(runtime.store, message, {
+      userId: user.userId,
+      entityType: "deadline",
+      title: deadline.title,
+      body: raw,
+      dueAt: deadline.dueAt,
+      sourceCommand: "/deadline",
+      linkedTable: "tasks",
+      linkedId: task.id,
+      metadata: metadata({ dueAt: deadline.dueAt }),
+    });
+
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: `${entitySummary(entity)}${deadline.dueAt ? `\nDue: <code>${deadline.dueAt}</code>` : ""}`,
+    });
+    return;
+  }
+
+  if (command === "health") {
+    const signals = parseHealthSignalArgs(args);
+    const mode = resolveHealthMode(signals);
+    const focus = scoreFocus({ ...signals, healthMode: mode });
+    const entity = await createEntityAndQueueSync(runtime.store, message, {
+      userId: user.userId,
+      entityType: "health",
+      title: args.trim() || `Health check: ${healthModeLabel(mode)}`,
+      body: args.trim() || null,
+      sourceCommand: "/health",
+      metadata: metadata({ ...signals, mode, focusScore: focus.score }),
+    });
+
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: `${entitySummary(entity)}\nMode: <b>${healthModeLabel(mode)}</b>\nFocus score: <b>${focus.score}</b>`,
+    });
+    return;
+  }
+
+  if (command === "mode") {
+    const signals = parseHealthSignalArgs(args);
+    const mode = resolveHealthMode(signals);
+    const entity = await createEntityAndQueueSync(runtime.store, message, {
+      userId: user.userId,
+      entityType: "mode",
+      title: `Mode: ${healthModeLabel(mode)}`,
+      body: args.trim() || null,
+      sourceCommand: "/mode",
+      metadata: metadata({ ...signals, mode }),
+    });
+
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: `${entitySummary(entity)}\nCurrent mode: <b>${healthModeLabel(mode)}</b>`,
+    });
+    return;
+  }
+
+  if (command === "review") {
+    const text = requireText(command, args, "review notes");
+
+    if (!text || text.startsWith("Usage:")) {
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: text ?? "",
+      });
+      return;
+    }
+
+    const entity = await createEntityAndQueueSync(runtime.store, message, {
+      userId: user.userId,
+      entityType: "review",
+      title: text.slice(0, 120),
+      body: text,
+      sourceCommand: "/review",
+    });
+
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: entitySummary(entity),
+    });
+    return;
+  }
+
+  if (command === "spend") {
+    const text = requireText(command, args, "1200 KZT lunch");
+
+    if (!text || text.startsWith("Usage:")) {
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: text ?? "",
+      });
+      return;
+    }
+
+    const parsedSpend = parseSpendArgs(text);
+    const entity = await createEntityAndQueueSync(runtime.store, message, {
+      userId: user.userId,
+      entityType: "spend",
+      title: text,
+      body: text,
+      sourceCommand: "/spend",
+      metadata: metadata(parsedSpend),
+    });
+
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: entitySummary(entity),
+    });
+    return;
+  }
+
+  if (command === "workout") {
+    const now = runtime.now?.() ?? new Date();
+    const workout = await runtime.store.getOrCreateCurrentWorkout({
+      userId: user.userId,
+      title: args.trim() || null,
+      now: now.toISOString(),
+    });
+
+    if (workout.created) {
+      const entity = await createEntityAndQueueSync(runtime.store, message, {
+        userId: user.userId,
+        entityType: "workout",
+        title: workout.title ?? "Workout",
+        sourceCommand: "/workout",
+        linkedTable: "workouts",
+        linkedId: workout.id,
+        metadata: metadata({ workoutId: workout.id }),
+      });
+      void entity;
+    }
+
+    const workoutUrl = runtime.tmaUrl
+      ? buildWorkoutUrl(runtime.tmaUrl, workout.id)
+      : null;
+
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: [
+        workout.created ? "Workout started." : "Current workout loaded.",
+        `Workout id: <code>${workout.id}</code>`,
+      ].join("\n"),
+      replyMarkup: workoutUrl
+        ? {
+            inline_keyboard: [
+              [
+                {
+                  text: "Open workout",
+                  web_app: {
+                    url: workoutUrl,
+                  },
+                },
+              ],
+            ],
+          }
+        : undefined,
+    });
+  }
+}
+
+async function handleReadCommand(
+  command: string,
+  args: string,
+  message: TelegramMessage,
+  runtime: TelegramBotRuntime,
+): Promise<void> {
+  if (command === "start") {
+    await handleStartCommand(message, runtime);
+    return;
+  }
+
+  if (command === "help") {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: HELP_TEXT,
+    });
+    return;
+  }
+
+  if (command === "status") {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: [
+        "LifeOS bot status:",
+        `Database: <b>${runtime.store ? "configured" : "missing"}</b>`,
+        `TMA_URL: <b>${runtime.tmaUrl ? "configured" : "missing"}</b>`,
+        "Polling: <b>disabled</b>",
+      ].join("\n"),
+    });
+    return;
+  }
+
+  const user = await resolveUser(message, runtime);
+
+  if (!user || !runtime.store) {
+    return;
+  }
+
+  if (command === "today") {
+    const bounds = utcDayBounds(runtime.now?.() ?? new Date());
+    const entities = await runtime.store.listTodayEntities({
+      userId: user.userId,
+      ...bounds,
+    });
+    const lines = entities.map((entity, index) => {
+      return `${index + 1}. ${entity.entityType}: ${escapeHtml(entity.title)}`;
+    });
+
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: lines.length
+        ? `Today:\n${lines.join("\n")}`
+        : "No LifeOS entries captured today yet.",
+    });
+    return;
+  }
+
+  if (command === "focus") {
+    const signals = args.trim()
+      ? parseHealthSignalArgs(args)
+      : await runtime.store.getLatestDailyLog(user.userId).then((log) => ({
+          moodScore: log?.moodScore ?? undefined,
+          energyScore: log?.energyScore ?? undefined,
+        }));
+    const result = scoreFocus(signals);
+
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: [
+        `Focus score: <b>${result.score}</b>`,
+        `Band: <b>${result.band}</b>`,
+        result.reasons.length ? `Reasons: ${result.reasons.join(", ")}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    });
+    return;
+  }
+
+  if (command === "health") {
+    const health = await runtime.store.getTmaHealthSummary(user.userId);
+
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: [
+        `Health date: <b>${health.date}</b>`,
+        `Recovery mode: <b>${healthModeLabel(health.recoveryMode)}</b>`,
+        `Data completeness: <b>${health.dataCompletenessScore}</b>`,
+        `Samples: <b>${health.samplesCount}</b>`,
+      ].join("\n"),
+    });
+    return;
+  }
+
+  if (command === "healthsync_status") {
+    const status = await runtime.store.getHealthSyncStatus(user.userId);
+    const counts = status.counts;
+    const runs = status.runs;
+    const runLines = runs.map((run, index) => {
+      const missing = Object.entries(run.missingMetrics)
+        .filter(([, isMissing]) => isMissing)
+        .map(([name]) => name)
+        .join(", ");
+
+      return `${index + 1}. ${escapeHtml(run.syncDate)} ${escapeHtml(run.syncReason)} ${escapeHtml(run.status)} score=${run.dataCompletenessScore ?? "n/a"} missing=${missing || "none"}`;
+    });
+
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: [
+        "Health sync runs:",
+        `Success: <b>${counts.success ?? 0}</b>`,
+        `Failed: <b>${counts.failed ?? 0}</b>`,
+        runLines.length ? runLines.join("\n") : "No health sync runs yet.",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    });
+    return;
+  }
+
+  if (command === "finance") {
+    const since = new Date(runtime.now?.() ?? new Date());
+    since.setUTCDate(since.getUTCDate() - 30);
+    const summary = await runtime.store.getFinanceSummary({
+      userId: user.userId,
+      since: since.toISOString(),
+    });
+
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: [
+        "Finance summary, last 30 days:",
+        `Spend captures: <b>${summary.capturedSpendCount}</b>`,
+        summary.capturedSpendTotal === null
+          ? "Captured total: unavailable"
+          : `Captured total: <b>${summary.capturedSpendTotal}</b>`,
+      ].join("\n"),
+    });
+    return;
+  }
+
+  if (command === "mode") {
+    const log = await runtime.store.getLatestDailyLog(user.userId);
+    const mode = resolveHealthMode({
+      moodScore: log?.moodScore ?? undefined,
+      energyScore: log?.energyScore ?? undefined,
+    });
+
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: `Current mode: <b>${healthModeLabel(mode)}</b>`,
+    });
+    return;
+  }
+
+  await runtime.telegram.sendMessage({
+    chatId: message.chat.id,
+    text: `Unknown command: /${escapeHtml(command)}\nUse /help.`,
+  });
+}
+
+export async function handleTelegramUpdate(
+  update: TelegramUpdate,
+  runtime: TelegramBotRuntime,
+): Promise<void> {
+  const message = update.message;
+
+  if (!message?.text) {
+    return;
+  }
+
+  const parsed = parseCommand(message.text);
+
+  if (!parsed) {
+    return;
+  }
+
+  const shouldCreate =
+    CREATE_COMMANDS.has(parsed.command) &&
+    !(parsed.command === "mode" && !parsed.args) &&
+    !(parsed.command === "health" && !parsed.args);
+
+  if (shouldCreate) {
+    await handleCreateCommand(parsed.command, parsed.args, message, runtime);
+    return;
+  }
+
+  await handleReadCommand(parsed.command, parsed.args, message, runtime);
+}

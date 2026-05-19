@@ -1,0 +1,85 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  --lifeos-bg: var(--tg-theme-bg-color, #05070b);
+  --lifeos-panel: var(--tg-theme-secondary-bg-color, #0d131d);
+  --lifeos-text: var(--tg-theme-text-color, #e4e4e7);
+  --lifeos-muted: var(--tg-theme-hint-color, #71717a);
+  --lifeos-accent: var(--tg-theme-button-color, #22d3ee);
+  --lifeos-accent-text: var(--tg-theme-button-text-color, #05070b);
+  background: #05070b;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background:
+    radial-gradient(
+      circle at 18% 0%,
+      color-mix(in srgb, var(--lifeos-accent) 10%, transparent),
+      transparent 30rem
+    ),
+    radial-gradient(
+      circle at 95% 16%,
+      rgba(251, 191, 36, 0.06),
+      transparent 25rem
+    ),
+    linear-gradient(180deg, var(--lifeos-bg) 0%, #090d14 52%, #05070b 100%);
+  color: var(--lifeos-text);
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--lifeos-accent) 55%, transparent);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--lifeos-accent) 18%, transparent);
+  color: #fff;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+.safe-shell {
+  padding-top: max(1rem, env(safe-area-inset-top));
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
