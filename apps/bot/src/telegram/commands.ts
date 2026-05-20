@@ -26,7 +26,10 @@ interface HealthSignalArgs {
 
 const HELP_TEXT = [
   "LifeOS bot commands:",
+  "",
+  "Core commands:",
   "/cap quick capture",
+  "/log текст — быстро добавить запись в Obsidian Inbox",
   "/task task title",
   "/deadline 2026-05-20 task title",
   "/today",
@@ -43,6 +46,7 @@ const HELP_TEXT = [
 
 const CREATE_COMMANDS = new Set([
   "cap",
+  "log",
   "task",
   "deadline",
   "health",
@@ -249,6 +253,13 @@ function buildWorkoutUrl(tmaUrl: string, workoutId: string): string | null {
   }
 }
 
+function inboxLogTargetPath(now: Date): string {
+  const iso = now.toISOString();
+  const timestamp = `${iso.slice(0, 10)}-${iso.slice(11, 13)}${iso.slice(14, 16)}${iso.slice(17, 19)}`;
+
+  return `00_Dashboard/Inbox/${timestamp}-log.md`;
+}
+
 function entitySummary(entity: LifeEntityRecord): string {
   return `Saved <b>${escapeHtml(entity.entityType)}</b>: ${escapeHtml(entity.title)}`;
 }
@@ -381,6 +392,14 @@ async function handleCreateCommand(
   message: TelegramMessage,
   runtime: TelegramBotRuntime,
 ): Promise<void> {
+  if (command === "log" && !args.trim()) {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "/log текст — быстро добавить запись в Obsidian Inbox",
+    });
+    return;
+  }
+
   const user = await resolveUser(message, runtime);
 
   if (!user || !runtime.store) {
@@ -409,6 +428,65 @@ async function handleCreateCommand(
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
       text: entitySummary(entity),
+    });
+    return;
+  }
+
+  if (command === "log") {
+    const text = args.trim();
+    const now = runtime.now?.() ?? new Date();
+    const rawPayload = metadata({
+      telegram_user_id: message.from?.id ?? null,
+      chat_id: message.chat.id,
+      message_id: message.message_id,
+      command: "/log",
+    });
+    const capture = await runtime.store.createLifeCapture({
+      userId: user.userId,
+      text,
+      source: "telegram",
+      status: "inbox",
+      chatId: message.chat.id,
+      messageId: message.message_id,
+      metadata: rawPayload,
+    });
+    const entity = await runtime.store.createLifeEntity({
+      userId: user.userId,
+      entityType: "capture",
+      domain: "personal",
+      status: "inbox",
+      source: "telegram",
+      sourceCommand: "/log",
+      title: text.slice(0, 80),
+      description: text,
+      body: text,
+      telegramChatId: message.chat.id,
+      telegramMessageId: message.message_id,
+      linkedTable: "life_captures",
+      linkedId: capture.id,
+      metadata: metadata({
+        captureId: capture.id,
+        rawPayload,
+      }),
+      rawPayloadJson: rawPayload,
+    });
+
+    await runtime.store.enqueueObsidianSync({
+      userId: user.userId,
+      lifeEntityId: entity.id,
+      entityType: "capture",
+      action: "upsert",
+      targetPath: inboxLogTargetPath(now),
+      payloadJson: metadata({
+        entity,
+        capture,
+        originalText: text,
+      }),
+    });
+
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "✅ Добавил в Inbox.",
     });
     return;
   }

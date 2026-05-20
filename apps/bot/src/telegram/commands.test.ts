@@ -1,5 +1,7 @@
+import { readFile } from "node:fs/promises";
 import type { HealthIngestPayload } from "@lifeos/core";
 import type {
+  CreateLifeCaptureInput,
   CreateLifeEntityInput,
   CreateTaskInput,
   CurrentWorkoutSummary,
@@ -27,8 +29,12 @@ import type {
 
 class FakeStore implements LifeOSStore {
   readonly tasks: CreateTaskInput[] = [];
+  readonly captures: CreateLifeCaptureInput[] = [];
   readonly entities: LifeEntityRecord[] = [];
   readonly syncEntityIds: string[] = [];
+  readonly syncJobs: Array<
+    Parameters<LifeOSStore["enqueueObsidianSync"]>[0]
+  > = [];
 
   user: TelegramUserRecord | null = {
     userId: "user-1",
@@ -65,6 +71,19 @@ class FakeStore implements LifeOSStore {
     };
   }
 
+  async createLifeCapture(input: CreateLifeCaptureInput) {
+    this.captures.push(input);
+    return {
+      id: `capture-${this.captures.length}`,
+      userId: input.userId,
+      text: input.text,
+      source: input.source ?? "telegram",
+      status: input.status ?? "inbox",
+      chatId: input.chatId ?? null,
+      createdAt: "2026-05-18T00:00:00.000Z",
+    };
+  }
+
   async createLifeEntity(
     input: CreateLifeEntityInput,
   ): Promise<LifeEntityRecord> {
@@ -72,19 +91,31 @@ class FakeStore implements LifeOSStore {
       id: `entity-${this.entities.length + 1}`,
       userId: input.userId,
       entityType: input.entityType,
+      domain: input.domain ?? "personal",
+      status: input.status ?? "inbox",
       title: input.title,
+      description: input.description ?? null,
       body: input.body ?? null,
+      source: input.source ?? "telegram",
+      sourceCommand: input.sourceCommand ?? null,
+      telegramChatId: input.telegramChatId ?? null,
+      telegramMessageId: input.telegramMessageId ?? null,
       dueAt: input.dueAt ?? null,
       linkedTable: input.linkedTable ?? null,
       linkedId: input.linkedId ?? null,
+      metadata: input.metadata ?? {},
+      rawPayloadJson: input.rawPayloadJson ?? {},
       createdAt: "2026-05-18T00:00:00.000Z",
     };
     this.entities.push(entity);
     return entity;
   }
 
-  async enqueueObsidianSync(input: { lifeEntityId: string }): Promise<void> {
+  async enqueueObsidianSync(
+    input: Parameters<LifeOSStore["enqueueObsidianSync"]>[0],
+  ): Promise<void> {
     this.syncEntityIds.push(input.lifeEntityId);
+    this.syncJobs.push(input);
   }
 
   async listTodayEntities(): Promise<LifeEntityRecord[]> {
@@ -300,6 +331,93 @@ function runtime(store = new FakeStore()): TelegramBotRuntime & {
 }
 
 describe("Telegram commands", () => {
+  it("returns /log usage when text is missing", async () => {
+    const context = runtime();
+
+    await handleTelegramUpdate(update("/log"), context);
+
+    expect(context.sent.at(-1)?.text).toBe(
+      "/log текст — быстро добавить запись в Obsidian Inbox",
+    );
+    expect(context.store.captures).toHaveLength(0);
+    expect(context.store.entities).toHaveLength(0);
+    expect(context.store.syncJobs).toHaveLength(0);
+  });
+
+  it("creates capture, entity, and Obsidian queue rows for /log", async () => {
+    const context = runtime();
+    const text = "Записать идею про утренний фокус и короткую прогулку";
+
+    await handleTelegramUpdate(update(`/log ${text}`), context);
+
+    expect(context.store.captures).toMatchObject([
+      {
+        userId: "user-1",
+        text,
+        source: "telegram",
+        status: "inbox",
+        chatId: 20,
+        messageId: 10,
+        metadata: {
+          telegram_user_id: 30,
+          chat_id: 20,
+          message_id: 10,
+          command: "/log",
+        },
+      },
+    ]);
+    expect(context.store.entities).toMatchObject([
+      {
+        entityType: "capture",
+        domain: "personal",
+        status: "inbox",
+        source: "telegram",
+        title: text.slice(0, 80),
+        description: text,
+        body: text,
+        linkedTable: "life_captures",
+        linkedId: "capture-1",
+        rawPayloadJson: {
+          telegram_user_id: 30,
+          chat_id: 20,
+          message_id: 10,
+          command: "/log",
+        },
+      },
+    ]);
+    expect(context.store.syncJobs).toMatchObject([
+      {
+        userId: "user-1",
+        lifeEntityId: "entity-1",
+        entityType: "capture",
+        action: "upsert",
+        targetPath: "00_Dashboard/Inbox/2026-05-18-120000-log.md",
+        payloadJson: {
+          originalText: text,
+          capture: {
+            id: "capture-1",
+            text,
+          },
+          entity: {
+            id: "entity-1",
+            entityType: "capture",
+          },
+        },
+      },
+    ]);
+    expect(context.sent.at(-1)?.text).toBe("✅ Добавил в Inbox.");
+  });
+
+  it("keeps /log filesystem access out of Telegram command handlers", async () => {
+    const source = await readFile(new URL("./commands.ts", import.meta.url), {
+      encoding: "utf8",
+    });
+
+    expect(source).not.toContain("OBSIDIAN_VAULT_PATH");
+    expect(source).not.toMatch(/from\s+["'](?:node:)?fs(?:\/promises)?["']/);
+    expect(source).not.toMatch(/from\s+["'](?:node:)?path["']/);
+  });
+
   it("creates a task, life entity, and Obsidian sync job", async () => {
     const context = runtime();
 

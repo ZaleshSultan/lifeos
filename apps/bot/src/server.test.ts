@@ -85,6 +85,9 @@ function tmaStore(events: string[] = []): LifeOSStore {
     async createTask() {
       throw new Error("not used");
     },
+    async createLifeCapture() {
+      throw new Error("not used");
+    },
     async createLifeEntity() {
       throw new Error("not used");
     },

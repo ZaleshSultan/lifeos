@@ -900,12 +900,41 @@ export interface Database {
           updated_at?: string;
         }
       >;
+      life_captures: TableDefinition<
+        {
+          id: string;
+          user_id: string;
+          text: string;
+          source: string;
+          status: string;
+          chat_id: number | null;
+          message_id: number | null;
+          metadata: Json;
+          created_at: string;
+          updated_at: string;
+        },
+        {
+          id?: string;
+          user_id: string;
+          text: string;
+          source?: string;
+          status?: string;
+          chat_id?: number | null;
+          message_id?: number | null;
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        }
+      >;
       life_entities: TableDefinition<
         {
           id: string;
           user_id: string;
           entity_type: LifeEntityType;
+          domain: string;
+          status: string;
           title: string;
+          description: string | null;
           body: string | null;
           occurred_at: string;
           due_at: string | null;
@@ -916,6 +945,7 @@ export interface Database {
           linked_table: string | null;
           linked_id: string | null;
           metadata: Json;
+          raw_payload_json: Json;
           created_at: string;
           updated_at: string;
         },
@@ -923,7 +953,10 @@ export interface Database {
           id?: string;
           user_id: string;
           entity_type: LifeEntityType;
+          domain?: string;
+          status?: string;
           title: string;
+          description?: string | null;
           body?: string | null;
           occurred_at?: string;
           due_at?: string | null;
@@ -934,6 +967,7 @@ export interface Database {
           linked_table?: string | null;
           linked_id?: string | null;
           metadata?: Json;
+          raw_payload_json?: Json;
           created_at?: string;
           updated_at?: string;
         }
@@ -944,6 +978,9 @@ export interface Database {
           user_id: string;
           life_entity_id: string | null;
           operation: string;
+          entity_type: LifeEntityType | null;
+          action: string;
+          target_path: string | null;
           status: ObsidianSyncStatus;
           attempts: number;
           available_at: string;
@@ -951,6 +988,7 @@ export interface Database {
           completed_at: string | null;
           last_error: string | null;
           payload: Json;
+          payload_json: Json;
           created_at: string;
           updated_at: string;
         },
@@ -959,6 +997,9 @@ export interface Database {
           user_id: string;
           life_entity_id?: string | null;
           operation?: string;
+          entity_type?: LifeEntityType | null;
+          action?: string;
+          target_path?: string | null;
           status?: ObsidianSyncStatus;
           attempts?: number;
           available_at?: string;
@@ -966,6 +1007,7 @@ export interface Database {
           completed_at?: string | null;
           last_error?: string | null;
           payload?: Json;
+          payload_json?: Json;
           created_at?: string;
           updated_at?: string;
         }

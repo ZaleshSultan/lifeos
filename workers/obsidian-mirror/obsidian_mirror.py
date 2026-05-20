@@ -315,6 +315,23 @@ def note_path(vault: Path, relative_segments: list[str]) -> Path:
     return target
 
 
+def queued_target_segments(job: JsonObject) -> list[str] | None:
+    target_path = str(job.get("target_path") or "").strip()
+
+    if not target_path:
+        return None
+
+    if target_path.startswith(("/", "\\")):
+        raise WorkerError("Queue target_path must be relative")
+
+    segments = [segment for segment in re.split(r"[\\/]+", target_path) if segment]
+
+    if not segments or any(segment in {".", ".."} for segment in segments):
+        raise WorkerError("Queue target_path contains an unsafe segment")
+
+    return segments
+
+
 def atomic_write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temp_name = tempfile.mkstemp(
@@ -745,9 +762,14 @@ def fetch_linked_detail(client: SupabaseRestClient, entity: JsonObject) -> JsonO
     return client.fetch_one(str(linked_table), str(linked_id))
 
 
-def write_entity_note(settings: Settings, entity: JsonObject, detail: JsonObject | None) -> Path:
+def write_entity_note(
+    settings: Settings,
+    entity: JsonObject,
+    detail: JsonObject | None,
+    target_segments: list[str] | None = None,
+) -> Path:
     rendered = render_entity(entity, detail)
-    target = note_path(settings.vault_path, rendered.relative_segments)
+    target = note_path(settings.vault_path, target_segments or rendered.relative_segments)
     atomic_write(target, rendered.markdown)
     return target
 
@@ -772,7 +794,7 @@ def process_job(settings: Settings, client: SupabaseRestClient, job: JsonObject)
             raise WorkerError(f"Life entity not found: {life_entity_id}")
 
         detail = fetch_linked_detail(client, entity)
-        target = write_entity_note(settings, entity, detail)
+        target = write_entity_note(settings, entity, detail, queued_target_segments(claimed))
         client.complete_job(job_id)
         print(f"mirrored {life_entity_id} -> {target}")
         return True

@@ -40,18 +40,30 @@ export interface LifeEntityRecord {
   id: string;
   userId: string;
   entityType: LifeEntityType;
+  domain?: string;
+  status?: string;
   title: string;
+  description?: string | null;
   body: string | null;
+  source?: string;
+  sourceCommand?: string | null;
+  telegramChatId?: number | null;
+  telegramMessageId?: number | null;
   dueAt: string | null;
   linkedTable: string | null;
   linkedId: string | null;
+  metadata?: Json;
+  rawPayloadJson?: Json;
   createdAt: string;
 }
 
 export interface CreateLifeEntityInput {
   userId: string;
   entityType: LifeEntityType;
+  domain?: string;
+  status?: string;
   title: string;
+  description?: string | null;
   body?: string | null;
   occurredAt?: string;
   dueAt?: string | null;
@@ -61,6 +73,27 @@ export interface CreateLifeEntityInput {
   telegramMessageId?: number | null;
   linkedTable?: string | null;
   linkedId?: string | null;
+  metadata?: Json;
+  rawPayloadJson?: Json;
+}
+
+export interface LifeCaptureRecord {
+  id: string;
+  userId: string;
+  text: string;
+  source: string;
+  status: string;
+  chatId: number | null;
+  createdAt: string;
+}
+
+export interface CreateLifeCaptureInput {
+  userId: string;
+  text: string;
+  source?: string;
+  status?: string;
+  chatId?: number | null;
+  messageId?: number | null;
   metadata?: Json;
 }
 
@@ -214,11 +247,16 @@ export interface LifeOSStore {
     input: BootstrapTelegramUserInput,
   ): Promise<TelegramUserRecord>;
   createTask(input: CreateTaskInput): Promise<TaskRecord>;
+  createLifeCapture(input: CreateLifeCaptureInput): Promise<LifeCaptureRecord>;
   createLifeEntity(input: CreateLifeEntityInput): Promise<LifeEntityRecord>;
   enqueueObsidianSync(input: {
     userId: string;
     lifeEntityId: string;
+    entityType?: LifeEntityType;
+    action?: string;
+    targetPath?: string | null;
     payload?: Json;
+    payloadJson?: Json;
   }): Promise<void>;
   listTodayEntities(input: {
     userId: string;
@@ -303,11 +341,20 @@ function toLifeEntityRecord(
     id: row.id,
     userId: row.user_id,
     entityType: row.entity_type,
+    domain: row.domain,
+    status: row.status,
     title: row.title,
+    description: row.description,
     body: row.body,
+    source: row.source,
+    sourceCommand: row.source_command,
+    telegramChatId: row.telegram_chat_id,
+    telegramMessageId: row.telegram_message_id,
     dueAt: row.due_at,
     linkedTable: row.linked_table,
     linkedId: row.linked_id,
+    metadata: row.metadata,
+    rawPayloadJson: row.raw_payload_json,
     createdAt: row.created_at,
   };
 }
@@ -471,6 +518,38 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     };
   }
 
+  async createLifeCapture(
+    input: CreateLifeCaptureInput,
+  ): Promise<LifeCaptureRecord> {
+    const { data, error } = await this.client
+      .from("life_captures")
+      .insert({
+        user_id: input.userId,
+        text: input.text,
+        source: input.source ?? "telegram",
+        status: input.status ?? "inbox",
+        chat_id: input.chatId,
+        message_id: input.messageId,
+        metadata: input.metadata ?? {},
+      })
+      .select("id, user_id, text, source, status, chat_id, created_at")
+      .single();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to create life capture");
+    }
+
+    return {
+      id: data.id,
+      userId: data.user_id,
+      text: data.text,
+      source: data.source,
+      status: data.status,
+      chatId: data.chat_id,
+      createdAt: data.created_at,
+    };
+  }
+
   async createLifeEntity(
     input: CreateLifeEntityInput,
   ): Promise<LifeEntityRecord> {
@@ -479,7 +558,10 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       .insert({
         user_id: input.userId,
         entity_type: input.entityType,
+        domain: input.domain ?? "personal",
+        status: input.status ?? "inbox",
         title: input.title,
+        description: input.description,
         body: input.body,
         occurred_at: input.occurredAt,
         due_at: input.dueAt,
@@ -490,6 +572,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
         linked_table: input.linkedTable,
         linked_id: input.linkedId,
         metadata: input.metadata ?? {},
+        raw_payload_json: input.rawPayloadJson ?? {},
       })
       .select("*")
       .single();
@@ -504,12 +587,22 @@ export class SupabaseLifeOSStore implements LifeOSStore {
   async enqueueObsidianSync(input: {
     userId: string;
     lifeEntityId: string;
+    entityType?: LifeEntityType;
+    action?: string;
+    targetPath?: string | null;
     payload?: Json;
+    payloadJson?: Json;
   }): Promise<void> {
+    const payloadJson = input.payloadJson ?? input.payload ?? {};
     const { error } = await this.client.from("obsidian_sync_queue").insert({
       user_id: input.userId,
       life_entity_id: input.lifeEntityId,
-      payload: input.payload ?? {},
+      operation: input.action ?? "upsert_note",
+      entity_type: input.entityType,
+      action: input.action ?? "upsert",
+      target_path: input.targetPath,
+      payload: payloadJson,
+      payload_json: payloadJson,
     });
 
     if (error) {
