@@ -1,10 +1,22 @@
 import {
+  applyModeToFocusScoring,
   calculateHealthIngestDaily,
+  explainModeReason,
+  getModeLabel,
   healthModeLabel,
+  parseLifeMode,
   resolveHealthMode,
+  resolveCurrentMode as resolveCoreCurrentMode,
   scoreFocus,
+  type FocusScoringItem,
   type HealthIngestPayload,
   type HealthMode,
+  type LifeMode,
+  type LifeModeProjectSprint,
+  type LifeModeRecord,
+  type LifeModeResolution,
+  type LifeSeasonRecord,
+  type ModeAwareFocusItem,
 } from "@lifeos/core";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
@@ -13,6 +25,7 @@ import type {
   Json,
   LifeEntityType,
   ObsidianSyncStatus,
+  WorkoutIntensity,
 } from "./types.js";
 
 type LifeOSSupabaseClient = SupabaseClient<Database>;
@@ -21,6 +34,9 @@ type WorkoutSetRow = Database["public"]["Tables"]["workout_sets"]["Row"];
 type FitnessExerciseRow =
   Database["public"]["Tables"]["fitness_exercises"]["Row"];
 type HealthDailyRow = Database["public"]["Tables"]["health_daily"]["Row"];
+type LifeModeRow = Database["public"]["Tables"]["life_modes"]["Row"];
+type LifeSeasonRow = Database["public"]["Tables"]["life_seasons"]["Row"];
+type ProjectRow = Database["public"]["Tables"]["projects"]["Row"];
 
 export interface TelegramUserRecord {
   userId: string;
@@ -126,6 +142,24 @@ export interface WorkoutRecord {
   created: boolean;
 }
 
+export interface SetManualLifeModeInput {
+  userId: string;
+  mode: LifeMode;
+  reason?: string | null;
+  activeUntil?: string | null;
+  priorityJson?: Record<string, number>;
+}
+
+export interface FocusItemRecord extends FocusScoringItem {
+  id: string;
+  sourceType: "task" | "life_entity";
+  title: string;
+  dueAt: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export type ModeAwareFocusItemRecord = ModeAwareFocusItem<FocusItemRecord>;
+
 export interface WorkoutSetSummary {
   id: string;
   index: number;
@@ -201,6 +235,9 @@ export interface HealthIngestResult {
 export interface TmaHomeSummary {
   displayName?: string;
   localDate: string;
+  mode: LifeMode;
+  modeLabel: string;
+  modeReason: string;
   recoveryMode: HealthMode;
   focusScore: number | null;
   activeWorkout: {
@@ -215,6 +252,9 @@ export interface TmaHomeSummary {
 
 export interface TmaHealthSummary {
   date: string;
+  lifeMode: LifeMode;
+  lifeModeLabel: string;
+  recommendation: string;
   recoveryMode: HealthMode;
   dataCompletenessScore: number;
   sleepMinutes: number | null;
@@ -234,9 +274,14 @@ export interface TmaFocusSummary {
   score: number;
   band: "low" | "medium" | "high";
   mode: HealthMode;
+  lifeMode: LifeMode;
+  lifeModeLabel: string;
+  lifeModeReason: string;
   reasons: string[];
   nextBestAction: string | null;
   openTaskCount: number;
+  topItems: ModeAwareFocusItemRecord[];
+  priorityWeights: Record<string, number>;
 }
 
 export interface LifeOSStore {
@@ -266,10 +311,19 @@ export interface LifeOSStore {
   getLatestDailyLog(userId: string): Promise<DailyLogRecord | null>;
   getObsidianSyncStatus(userId: string): Promise<ObsidianSyncStatusSummary>;
   getHealthSyncStatus(userId: string): Promise<HealthSyncStatusSummary>;
+  resolveCurrentMode(userId: string): Promise<LifeModeResolution>;
+  setManualLifeMode(input: SetManualLifeModeInput): Promise<LifeModeResolution>;
+  clearManualLifeMode(userId: string): Promise<LifeModeResolution>;
+  listModeAwareFocusItems(input: {
+    userId: string;
+    mode: LifeMode;
+    limit?: number;
+  }): Promise<ModeAwareFocusItemRecord[]>;
   getOrCreateCurrentWorkout(input: {
     userId: string;
     title?: string | null;
     now: string;
+    lifeMode?: LifeMode;
   }): Promise<WorkoutRecord>;
   getCurrentWorkout(input: {
     userId: string;
@@ -300,6 +354,17 @@ export interface LifeOSStore {
     payload: HealthIngestPayload,
   ): Promise<HealthIngestResult>;
 }
+
+type WorkoutPlan = ReadonlyArray<{
+  name: string;
+  category: string;
+  equipment: string;
+  sets: ReadonlyArray<{
+    reps: number;
+    weightKg: number | null;
+    restSeconds: number;
+  }>;
+}>;
 
 const DEFAULT_WORKOUT_PLAN = [
   {
@@ -334,6 +399,45 @@ const DEFAULT_WORKOUT_PLAN = [
   },
 ] as const;
 
+const RECOVERY_WORKOUT_PLAN = [
+  {
+    name: "Mobility Flow",
+    category: "mobility",
+    equipment: "bodyweight",
+    sets: [
+      { reps: 8, weightKg: null, restSeconds: 45 },
+      { reps: 8, weightKg: null, restSeconds: 45 },
+    ],
+  },
+  {
+    name: "Easy Walk",
+    category: "cardio",
+    equipment: "bodyweight",
+    sets: [{ reps: 1, weightKg: null, restSeconds: 60 }],
+  },
+] as const satisfies WorkoutPlan;
+
+const EXAM_WAR_WORKOUT_PLAN = [
+  {
+    name: "Push-up",
+    category: "strength",
+    equipment: "bodyweight",
+    sets: [
+      { reps: 8, weightKg: null, restSeconds: 60 },
+      { reps: 8, weightKg: null, restSeconds: 60 },
+    ],
+  },
+  {
+    name: "Bodyweight Squat",
+    category: "strength",
+    equipment: "bodyweight",
+    sets: [
+      { reps: 10, weightKg: null, restSeconds: 60 },
+      { reps: 10, weightKg: null, restSeconds: 60 },
+    ],
+  },
+] as const satisfies WorkoutPlan;
+
 function toLifeEntityRecord(
   row: Database["public"]["Tables"]["life_entities"]["Row"],
 ): LifeEntityRecord {
@@ -355,6 +459,34 @@ function toLifeEntityRecord(
     linkedId: row.linked_id,
     metadata: row.metadata,
     rawPayloadJson: row.raw_payload_json,
+    createdAt: row.created_at,
+  };
+}
+
+function toLifeModeRecord(row: LifeModeRow): LifeModeRecord {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    mode: row.mode,
+    source: row.source,
+    reason: row.reason,
+    activeFrom: row.active_from,
+    activeUntil: row.active_until,
+    isActive: row.is_active,
+    priorityJson: jsonNumberRecord(row.priority_json),
+    createdAt: row.created_at,
+  };
+}
+
+function toLifeSeasonRecord(row: LifeSeasonRow): LifeSeasonRecord {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    name: row.name,
+    mode: row.mode,
+    startsOn: row.starts_on,
+    endsOn: row.ends_on,
+    priorityJson: jsonNumberRecord(row.priority_json),
     createdAt: row.created_at,
   };
 }
@@ -401,8 +533,170 @@ function jsonBooleanRecord(
   );
 }
 
+function jsonNumberRecord(
+  value: Json | null | undefined,
+): Record<string, number> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).filter((entry): entry is [string, number] => {
+      return typeof entry[1] === "number";
+    }),
+  );
+}
+
+function jsonObject(value: Json | null | undefined): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return {};
+  }
+
+  return value as Record<string, unknown>;
+}
+
 function addSeconds(timestamp: string, seconds: number): string {
   return new Date(new Date(timestamp).getTime() + seconds * 1000).toISOString();
+}
+
+function defaultWorkoutTitle(mode: LifeMode): string {
+  switch (mode) {
+    case "recovery":
+      return "Recovery workout";
+    case "exam_war":
+      return "Short exam workout";
+    case "summer":
+      return "Fitness workout";
+    default:
+      return "Telegram workout";
+  }
+}
+
+function workoutTypeForMode(mode: LifeMode | undefined): string {
+  switch (mode) {
+    case "recovery":
+      return "mobility";
+    case "summer":
+      return "fitness";
+    default:
+      return "strength";
+  }
+}
+
+function workoutIntensityForMode(
+  mode: LifeMode | undefined,
+): WorkoutIntensity | null {
+  switch (mode) {
+    case "recovery":
+      return "easy";
+    case "exam_war":
+      return "moderate";
+    case "summer":
+      return "hard";
+    default:
+      return null;
+  }
+}
+
+function workoutTemplateForMode(mode: LifeMode | undefined): string {
+  switch (mode) {
+    case "recovery":
+      return "recovery_mobility";
+    case "exam_war":
+      return "exam_war_short";
+    case "summer":
+      return "summer_fitness";
+    default:
+      return "default_strength";
+  }
+}
+
+function healthRecommendationForMode(mode: LifeMode): string {
+  switch (mode) {
+    case "recovery":
+      return "Protect sleep, reduce load, and keep movement easy.";
+    case "exam_war":
+      return "Keep workouts short and preserve sleep for study retention.";
+    case "summer":
+      return "Use the wider runway for fitness, recovery, and consistency.";
+    case "project_sprint":
+      return "Keep health anchors stable while the sprint gets priority.";
+    case "maintenance":
+      return "Maintain sleep, food, and money routines before adding load.";
+    case "trimester":
+      return "Balance study blocks with health and finance basics.";
+  }
+}
+
+function workoutPlanForMode(mode: LifeMode | undefined): WorkoutPlan {
+  switch (mode) {
+    case "recovery":
+      return RECOVERY_WORKOUT_PLAN;
+    case "exam_war":
+      return EXAM_WAR_WORKOUT_PLAN;
+    default:
+      return DEFAULT_WORKOUT_PLAN;
+  }
+}
+
+function dueDateScore(dueAt: string | null): number {
+  if (!dueAt) {
+    return 0;
+  }
+
+  const diffMs = new Date(dueAt).getTime() - Date.now();
+  const diffDays = diffMs / 86_400_000;
+
+  if (diffDays < 0) {
+    return 40;
+  }
+
+  if (diffDays <= 1) {
+    return 30;
+  }
+
+  if (diffDays <= 3) {
+    return 20;
+  }
+
+  return 10;
+}
+
+function projectSprintFromProject(
+  project: ProjectRow,
+): LifeModeProjectSprint | null {
+  const metadata = jsonObject(project.metadata);
+  const configuredMode =
+    typeof metadata.life_mode === "string"
+      ? parseLifeMode(metadata.life_mode)
+      : typeof metadata.mode === "string"
+        ? parseLifeMode(metadata.mode)
+        : null;
+  const configuredSprint =
+    metadata.project_sprint === true ||
+    metadata.projectSprint === true ||
+    metadata.sprint === true ||
+    configuredMode === "project_sprint";
+
+  if (!configuredSprint) {
+    return null;
+  }
+
+  const rawPriorityJson =
+    typeof metadata.priority_json === "object" && metadata.priority_json
+      ? (metadata.priority_json as Json)
+      : typeof metadata.priorityJson === "object" && metadata.priorityJson
+        ? (metadata.priorityJson as Json)
+        : null;
+
+  return {
+    id: project.id,
+    userId: project.user_id,
+    name: project.name,
+    startsOn: project.starts_on,
+    endsOn: project.due_on,
+    priorityJson: jsonNumberRecord(rawPriorityJson),
+  };
 }
 
 function workoutBody(summary: CurrentWorkoutSummary): string {
@@ -719,10 +1013,128 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     };
   }
 
+  async resolveCurrentMode(userId: string): Promise<LifeModeResolution> {
+    const now = new Date();
+    const today = now.toISOString().slice(0, 10);
+    const [
+      manualOverrides,
+      latestHealthDaily,
+      seasons,
+      sprintMode,
+      sprintProject,
+    ] = await Promise.all([
+      this.listActiveLifeModes({
+        userId,
+        source: "manual",
+        now: now.toISOString(),
+      }),
+      this.getLatestHealthDaily(userId),
+      this.listActiveLifeSeasons({ userId, today }),
+      this.getConfiguredSprintMode({ userId, now: now.toISOString() }),
+      this.getConfiguredProjectSprint({ userId, today }),
+    ]);
+
+    return resolveCoreCurrentMode(userId, {
+      now,
+      manualOverrides,
+      latestHealthDaily: latestHealthDaily
+        ? {
+            userId,
+            sleepMinutes: latestHealthDaily.sleep_minutes,
+            recoveryMode: latestHealthDaily.recovery_mode,
+            logDate: latestHealthDaily.log_date,
+          }
+        : null,
+      seasons,
+      projectSprint: sprintMode ?? sprintProject,
+    });
+  }
+
+  async setManualLifeMode(
+    input: SetManualLifeModeInput,
+  ): Promise<LifeModeResolution> {
+    const { error: clearError } = await this.client
+      .from("life_modes")
+      .update({ is_active: false })
+      .eq("user_id", input.userId)
+      .eq("source", "manual")
+      .eq("is_active", true);
+
+    if (clearError) {
+      throwSupabaseError(clearError, "Failed to clear active manual modes");
+    }
+
+    const { error } = await this.client.from("life_modes").insert({
+      user_id: input.userId,
+      mode: input.mode,
+      source: "manual",
+      reason: input.reason ?? "Manual override from LifeOS.",
+      active_until: input.activeUntil ?? null,
+      priority_json: (input.priorityJson ?? {}) as Json,
+    });
+
+    if (error) {
+      throwSupabaseError(error, "Failed to set manual mode");
+    }
+
+    return this.resolveCurrentMode(input.userId);
+  }
+
+  async clearManualLifeMode(userId: string): Promise<LifeModeResolution> {
+    const { error } = await this.client
+      .from("life_modes")
+      .update({ is_active: false })
+      .eq("user_id", userId)
+      .eq("source", "manual")
+      .eq("is_active", true);
+
+    if (error) {
+      throwSupabaseError(error, "Failed to clear manual modes");
+    }
+
+    return this.resolveCurrentMode(userId);
+  }
+
+  async listModeAwareFocusItems(input: {
+    userId: string;
+    mode: LifeMode;
+    limit?: number;
+  }): Promise<ModeAwareFocusItemRecord[]> {
+    const { data, error } = await this.client
+      .from("tasks")
+      .select("id, title, due_at, priority, metadata")
+      .eq("user_id", input.userId)
+      .not("status", "in", "(done,cancelled)")
+      .order("due_at", { ascending: true, nullsFirst: false })
+      .order("priority", { ascending: false })
+      .limit(Math.max(input.limit ?? 8, 20));
+
+    if (error) {
+      throwSupabaseError(error, "Failed to load focus items");
+    }
+
+    const items: FocusItemRecord[] = data.map((task) => ({
+      id: task.id,
+      sourceType: "task",
+      entityType: "task",
+      title: task.title,
+      dueAt: task.due_at,
+      priority: task.priority,
+      score: task.priority + dueDateScore(task.due_at),
+      metadata: jsonObject(task.metadata),
+    }));
+
+    return applyModeToFocusScoring(items, input.mode).slice(
+      0,
+      input.limit ?? 8,
+    );
+  }
+
   async getOrCreateCurrentWorkout(input: {
     userId: string;
     title?: string | null;
     now: string;
+    lifeMode?: LifeMode;
   }): Promise<WorkoutRecord> {
     const { data: existing, error: existingError } = await this.client
       .from("workouts")
@@ -738,7 +1150,11 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     }
 
     if (existing) {
-      await this.ensureDefaultWorkoutPlan(input.userId, existing.id);
+      await this.ensureDefaultWorkoutPlan(
+        input.userId,
+        existing.id,
+        input.lifeMode,
+      );
 
       return {
         id: existing.id,
@@ -752,12 +1168,18 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       .from("workouts")
       .insert({
         user_id: input.userId,
-        title: input.title ?? "Telegram workout",
-        workout_type: "strength",
+        title:
+          input.title ??
+          (input.lifeMode
+            ? defaultWorkoutTitle(input.lifeMode)
+            : "Telegram workout"),
+        workout_type: workoutTypeForMode(input.lifeMode),
+        intensity: workoutIntensityForMode(input.lifeMode),
         started_at: input.now,
         metadata: {
           source: "telegram",
-          template: "default_strength",
+          template: workoutTemplateForMode(input.lifeMode),
+          lifeMode: input.lifeMode ?? "trimester",
         },
       })
       .select("id, title, started_at")
@@ -767,7 +1189,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       throwSupabaseError(error, "Failed to create workout");
     }
 
-    await this.ensureDefaultWorkoutPlan(input.userId, data.id);
+    await this.ensureDefaultWorkoutPlan(input.userId, data.id, input.lifeMode);
 
     return {
       id: data.id,
@@ -940,7 +1362,8 @@ export class SupabaseLifeOSStore implements LifeOSStore {
   }
 
   async getTmaHomeSummary(user: TelegramUserRecord): Promise<TmaHomeSummary> {
-    const [health, focus, workout, obsidianStatus] = await Promise.all([
+    const [mode, health, focus, workout, obsidianStatus] = await Promise.all([
+      this.resolveCurrentMode(user.userId),
       this.getTmaHealthSummary(user.userId),
       this.getTmaFocusSummary(user.userId),
       this.getCurrentWorkout({ userId: user.userId }),
@@ -950,6 +1373,9 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     return {
       displayName: user.displayName ?? undefined,
       localDate: localDateFor(user.timezone),
+      mode: mode.mode,
+      modeLabel: mode.label,
+      modeReason: explainModeReason(mode),
       recoveryMode: health.recoveryMode,
       focusScore: focus.score,
       activeWorkout: workout
@@ -966,11 +1392,17 @@ export class SupabaseLifeOSStore implements LifeOSStore {
   }
 
   async getTmaHealthSummary(userId: string): Promise<TmaHealthSummary> {
-    const latest = await this.getLatestHealthDaily(userId);
+    const [mode, latest] = await Promise.all([
+      this.resolveCurrentMode(userId),
+      this.getLatestHealthDaily(userId),
+    ]);
 
     if (!latest) {
       return {
         date: new Date().toISOString().slice(0, 10),
+        lifeMode: mode.mode,
+        lifeModeLabel: mode.label,
+        recommendation: healthRecommendationForMode(mode.mode),
         recoveryMode: "baseline",
         dataCompletenessScore: 0,
         sleepMinutes: null,
@@ -991,6 +1423,9 @@ export class SupabaseLifeOSStore implements LifeOSStore {
 
     return {
       date: latest.log_date,
+      lifeMode: mode.mode,
+      lifeModeLabel: mode.label,
+      recommendation: healthRecommendationForMode(mode.mode),
       recoveryMode: latest.recovery_mode,
       dataCompletenessScore: Number(latest.data_completeness_score),
       sleepMinutes: latest.sleep_minutes,
@@ -1008,13 +1443,14 @@ export class SupabaseLifeOSStore implements LifeOSStore {
   }
 
   async getTmaFocusSummary(userId: string): Promise<TmaFocusSummary> {
-    const [health, openTaskCount] = await Promise.all([
+    const [mode, health, openTaskCount] = await Promise.all([
+      this.resolveCurrentMode(userId),
       this.getLatestHealthDaily(userId),
       this.getOpenTaskCount(userId),
     ]);
-    const mode = health?.recovery_mode ?? "baseline";
+    const healthMode = health?.recovery_mode ?? "baseline";
     const result = scoreFocus({
-      healthMode: mode,
+      healthMode: mode.mode === "recovery" ? "recovery" : healthMode,
       moodScore: health?.mood_score ?? undefined,
       energyScore: health?.energy_score ?? undefined,
       stressScore: health?.stress_score ?? undefined,
@@ -1023,19 +1459,30 @@ export class SupabaseLifeOSStore implements LifeOSStore {
         : undefined,
       openTaskCount,
     });
+    const topItems = await this.listModeAwareFocusItems({
+      userId,
+      mode: mode.mode,
+      limit: 5,
+    });
 
     return {
       score: result.score,
       band: result.band,
-      mode,
-      reasons: result.reasons,
+      mode: healthMode,
+      lifeMode: mode.mode,
+      lifeModeLabel: mode.label,
+      lifeModeReason: explainModeReason(mode),
+      reasons: [...new Set([...result.reasons, `life-mode:${mode.mode}`])],
       nextBestAction:
-        result.band === "low"
+        topItems.at(0)?.title ??
+        (result.band === "low"
           ? "Pick one small task and protect recovery."
           : result.band === "medium"
             ? "Work the next concrete task before adding inputs."
-            : "Use the strong window for deep work.",
+            : "Use the strong window for deep work."),
       openTaskCount,
+      topItems,
+      priorityWeights: mode.priorityWeights,
     };
   }
 
@@ -1263,9 +1710,106 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     };
   }
 
+  private async listActiveLifeModes(input: {
+    userId: string;
+    source: LifeModeRecord["source"];
+    now: string;
+  }): Promise<LifeModeRecord[]> {
+    const { data, error } = await this.client
+      .from("life_modes")
+      .select("*")
+      .eq("user_id", input.userId)
+      .eq("source", input.source)
+      .eq("is_active", true)
+      .lte("active_from", input.now)
+      .or(`active_until.is.null,active_until.gt.${input.now}`)
+      .order("active_from", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(10);
+
+    if (error) {
+      throwSupabaseError(error, "Failed to load active life modes");
+    }
+
+    return data.map(toLifeModeRecord);
+  }
+
+  private async listActiveLifeSeasons(input: {
+    userId: string;
+    today: string;
+  }): Promise<LifeSeasonRecord[]> {
+    const { data, error } = await this.client
+      .from("life_seasons")
+      .select("*")
+      .eq("user_id", input.userId)
+      .lte("starts_on", input.today)
+      .gte("ends_on", input.today)
+      .order("starts_on", { ascending: false })
+      .limit(10);
+
+    if (error) {
+      throwSupabaseError(error, "Failed to load active life seasons");
+    }
+
+    return data.map(toLifeSeasonRecord);
+  }
+
+  private async getConfiguredSprintMode(input: {
+    userId: string;
+    now: string;
+  }): Promise<LifeModeProjectSprint | null> {
+    const sprintModes = await this.listActiveLifeModes({
+      userId: input.userId,
+      source: "sprint",
+      now: input.now,
+    });
+    const sprint = sprintModes.at(0);
+
+    if (!sprint) {
+      return null;
+    }
+
+    return {
+      id: sprint.id,
+      userId: sprint.userId,
+      name: sprint.reason ?? getModeLabel("project_sprint"),
+      startsOn: sprint.activeFrom?.slice(0, 10) ?? null,
+      endsOn: sprint.activeUntil?.slice(0, 10) ?? null,
+      priorityJson: sprint.priorityJson,
+    };
+  }
+
+  private async getConfiguredProjectSprint(input: {
+    userId: string;
+    today: string;
+  }): Promise<LifeModeProjectSprint | null> {
+    const { data, error } = await this.client
+      .from("projects")
+      .select("*")
+      .eq("user_id", input.userId)
+      .eq("status", "active")
+      .or(`starts_on.is.null,starts_on.lte.${input.today}`)
+      .or(`due_on.is.null,due_on.gte.${input.today}`)
+      .order("starts_on", { ascending: false, nullsFirst: false })
+      .limit(20);
+
+    if (error) {
+      throwSupabaseError(error, "Failed to load project sprint");
+    }
+
+    return (
+      data
+        .map((project) => projectSprintFromProject(project))
+        .find((project): project is LifeModeProjectSprint =>
+          Boolean(project),
+        ) ?? null
+    );
+  }
+
   private async ensureDefaultWorkoutPlan(
     userId: string,
     workoutId: string,
+    mode?: LifeMode,
   ): Promise<void> {
     const { count, error: countError } = await this.client
       .from("workout_sets")
@@ -1281,7 +1825,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       return;
     }
 
-    for (const exercise of DEFAULT_WORKOUT_PLAN) {
+    for (const exercise of workoutPlanForMode(mode)) {
       const exerciseId = await this.getOrCreateExercise({
         userId,
         name: exercise.name,

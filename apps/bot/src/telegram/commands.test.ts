@@ -1,5 +1,9 @@
 import { readFile } from "node:fs/promises";
-import type { HealthIngestPayload } from "@lifeos/core";
+import type {
+  HealthIngestPayload,
+  LifeMode,
+  LifeModeResolution,
+} from "@lifeos/core";
 import type {
   CreateLifeCaptureInput,
   CreateLifeEntityInput,
@@ -32,9 +36,26 @@ class FakeStore implements LifeOSStore {
   readonly captures: CreateLifeCaptureInput[] = [];
   readonly entities: LifeEntityRecord[] = [];
   readonly syncEntityIds: string[] = [];
-  readonly syncJobs: Array<
-    Parameters<LifeOSStore["enqueueObsidianSync"]>[0]
-  > = [];
+  readonly syncJobs: Array<Parameters<LifeOSStore["enqueueObsidianSync"]>[0]> =
+    [];
+  readonly clearedModes: string[] = [];
+  readonly setModes: Array<{
+    mode: LifeMode;
+    activeUntil: string | null | undefined;
+  }> = [];
+  focusItems = [
+    {
+      id: "focus-study",
+      sourceType: "task" as const,
+      entityType: "task",
+      title: "Study for exam deadline",
+      dueAt: "2026-05-19T00:00:00.000Z",
+      metadata: { priorityKey: "study" },
+      modeScore: 110,
+      modePriorityDelta: 100,
+      modePriorityMatches: ["study"],
+    },
+  ];
 
   user: TelegramUserRecord | null = {
     userId: "user-1",
@@ -175,6 +196,54 @@ class FakeStore implements LifeOSStore {
     };
   }
 
+  async resolveCurrentMode(): Promise<LifeModeResolution> {
+    return {
+      userId: "user-1",
+      mode: "trimester",
+      label: "Trimester Mode",
+      source: "default",
+      reason:
+        "No manual override, recovery signal, season, or sprint is active.",
+      activeUntil: null,
+      priorityWeights: {
+        study: 70,
+        health: 40,
+        finance: 30,
+        projects: 30,
+      },
+      resolvedAt: "2026-05-18T12:00:00.000Z",
+    };
+  }
+
+  async setManualLifeMode(
+    input: Parameters<LifeOSStore["setManualLifeMode"]>[0],
+  ): Promise<LifeModeResolution> {
+    this.setModes.push({
+      mode: input.mode,
+      activeUntil: input.activeUntil,
+    });
+
+    return {
+      ...(await this.resolveCurrentMode()),
+      mode: input.mode,
+      label: input.mode === "summer" ? "Summer Mode" : "Recovery Mode",
+      source: "manual",
+      reason: input.reason ?? "Manual override.",
+      activeUntil: input.activeUntil ?? null,
+    };
+  }
+
+  async clearManualLifeMode(userId: string): Promise<LifeModeResolution> {
+    this.clearedModes.push(userId);
+    return this.resolveCurrentMode();
+  }
+
+  async listModeAwareFocusItems(): Promise<
+    Awaited<ReturnType<LifeOSStore["listModeAwareFocusItems"]>>
+  > {
+    return this.focusItems;
+  }
+
   async getOrCreateCurrentWorkout(): Promise<WorkoutRecord> {
     return this.workout;
   }
@@ -230,6 +299,9 @@ class FakeStore implements LifeOSStore {
     return {
       displayName: "User",
       localDate: "May 18, 2026",
+      mode: "trimester",
+      modeLabel: "Trimester Mode",
+      modeReason: "Trimester Mode is active from default.",
       recoveryMode: "baseline",
       focusScore: 80,
       activeWorkout: null,
@@ -241,6 +313,9 @@ class FakeStore implements LifeOSStore {
   async getTmaHealthSummary(): Promise<TmaHealthSummary> {
     return {
       date: "2026-05-17",
+      lifeMode: "trimester",
+      lifeModeLabel: "Trimester Mode",
+      recommendation: "Balance study blocks with health and finance basics.",
       recoveryMode: "baseline",
       dataCompletenessScore: 50,
       sleepMinutes: 480,
@@ -264,9 +339,14 @@ class FakeStore implements LifeOSStore {
       score: 80,
       band: "high",
       mode: "baseline",
+      lifeMode: "trimester",
+      lifeModeLabel: "Trimester Mode",
+      lifeModeReason: "Trimester Mode is active from default.",
       reasons: [],
       nextBestAction: "Deep work",
       openTaskCount: 2,
+      topItems: [],
+      priorityWeights: {},
     };
   }
 
@@ -482,6 +562,32 @@ describe("Telegram commands", () => {
     expect(context.sent.at(-1)?.text).toContain("Failed: <b>1</b>");
     expect(context.sent.at(-1)?.text).toContain("score=85");
     expect(context.sent.at(-1)?.text).toContain("missing=stress");
+  });
+
+  it("sets manual mode from /mode set", async () => {
+    const context = runtime();
+
+    await handleTelegramUpdate(update("/mode set summer"), context);
+
+    expect(context.store.setModes).toEqual([
+      {
+        mode: "summer",
+        activeUntil: null,
+      },
+    ]);
+    expect(context.sent.at(-1)?.text).toContain("Summer Mode");
+    expect(context.sent.at(-1)?.text).toContain("Source: <b>manual</b>");
+  });
+
+  it("clears manual mode from /mode auto", async () => {
+    const context = runtime();
+
+    await handleTelegramUpdate(update("/mode auto"), context);
+
+    expect(context.store.clearedModes).toEqual(["user-1"]);
+    expect(context.sent.at(-1)?.text).toContain(
+      "Manual mode override cleared.",
+    );
   });
 
   it("does not create records for unlinked Telegram users", async () => {

@@ -5,6 +5,8 @@ import type {
   FocusSummary,
   HealthSummary,
   HomeSummary,
+  ModeSummary,
+  SaveModeInput,
 } from "./types";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(
@@ -83,5 +85,19 @@ export const api = {
   },
   getFocus(): Promise<FocusSummary> {
     return request<FocusSummary>("/api/tma/focus");
+  },
+  getMode(): Promise<ModeSummary> {
+    return request<ModeSummary>("/api/tma/mode");
+  },
+  saveMode(input: SaveModeInput): Promise<ModeSummary> {
+    return request<ModeSummary>("/api/tma/mode", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  clearMode(): Promise<ModeSummary> {
+    return request<ModeSummary>("/api/tma/mode", {
+      method: "DELETE",
+    });
   },
 };

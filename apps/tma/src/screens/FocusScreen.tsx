@@ -1,6 +1,5 @@
 import { AlertCircle, CheckCircle2, Target } from "lucide-react";
 import { useFocusQuery } from "../api/hooks";
-import { recoveryModeLabels } from "../api/types";
 import { ErrorPanel, LoadingPanel } from "../components/AsyncState";
 import { MetricTile } from "../components/MetricTile";
 import { ProgressRing } from "../components/ProgressRing";
@@ -44,9 +43,7 @@ export function FocusScreen() {
             value={focus.score}
           />
           <div className="min-w-0 flex-1">
-            <p className="text-sm text-zinc-500">
-              {recoveryModeLabels[focus.mode]}
-            </p>
+            <p className="text-sm text-zinc-500">{focus.lifeModeLabel}</p>
             <h2 className="mt-1 text-[26px] font-semibold capitalize leading-tight tracking-tight text-white">
               {focus.band}
             </h2>
@@ -98,10 +95,32 @@ export function FocusScreen() {
       <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
         <Target className="h-5 w-5 text-cyan-400" />
         <div className="mt-3 text-sm text-zinc-500">Mode</div>
-        <div className="mt-1 text-xl font-semibold">
-          {recoveryModeLabels[focus.mode]}
-        </div>
+        <div className="mt-1 text-xl font-semibold">{focus.lifeModeLabel}</div>
       </section>
+
+      {focus.topItems?.length ? (
+        <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
+          <div className="flex items-center gap-2 text-sm font-semibold text-white">
+            <Target className="h-5 w-5 text-cyan-400" />
+            Queue
+          </div>
+          <div className="mt-3 space-y-2">
+            {focus.topItems.map((item) => (
+              <div
+                className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-lg bg-white/[0.03] px-3 py-2"
+                key={item.id}
+              >
+                <div className="min-w-0 truncate text-sm text-zinc-200">
+                  {item.title}
+                </div>
+                <div className="text-xs font-semibold tabular-nums text-cyan-300">
+                  {item.modeScore}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }

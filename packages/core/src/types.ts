@@ -7,6 +7,16 @@ export type Score10 = number;
 
 export type HealthMode = "recovery" | "maintenance" | "baseline" | "growth";
 
+export type LifeMode =
+  | "exam_war"
+  | "summer"
+  | "trimester"
+  | "recovery"
+  | "project_sprint"
+  | "maintenance";
+
+export type LifeModeSource = "manual" | "auto" | "health" | "season" | "sprint";
+
 export interface UserScopedEntity {
   id: string;
   userId: string;

@@ -1,4 +1,12 @@
-import { healthModeLabel, resolveHealthMode, scoreFocus } from "@lifeos/core";
+import {
+  explainModeReason,
+  healthModeLabel,
+  parseLifeMode,
+  resolveHealthMode,
+  scoreFocus,
+  type LifeMode,
+  type LifeModeResolution,
+} from "@lifeos/core";
 import type {
   CreateLifeEntityInput,
   Json,
@@ -36,7 +44,9 @@ const HELP_TEXT = [
   "/focus [sleep 7 mood 8 energy 7 stress 3]",
   "/health [sleep 7 mood 8 energy 7 stress 3 notes]",
   "/healthsync_status",
-  "/mode [sleep 7 mood 8 energy 7 stress 3]",
+  "/mode",
+  "/mode set <mode> [today|until:YYYY-MM-DD]",
+  "/mode auto",
   "/review review notes",
   "/spend 1200 KZT lunch",
   "/finance",
@@ -50,7 +60,6 @@ const CREATE_COMMANDS = new Set([
   "task",
   "deadline",
   "health",
-  "mode",
   "review",
   "spend",
   "workout",
@@ -251,6 +260,173 @@ function buildWorkoutUrl(tmaUrl: string, workoutId: string): string | null {
   } catch {
     return null;
   }
+}
+
+function modeUsage(): string {
+  return [
+    "Usage:",
+    "/mode",
+    "/mode set summer",
+    "/mode set recovery today",
+    "/mode set exam_war until:2026-06-05",
+    "/mode auto",
+  ].join("\n");
+}
+
+function formatSignedWeight(value: number): string {
+  return value > 0 ? `+${value}` : String(value);
+}
+
+function formatTopWeights(mode: LifeModeResolution): string {
+  return Object.entries(mode.priorityWeights)
+    .sort((left, right) => Math.abs(right[1]) - Math.abs(left[1]))
+    .slice(0, 6)
+    .map(([key, value]) => `${key} ${formatSignedWeight(value)}`)
+    .join(", ");
+}
+
+function formatModeResolution(mode: LifeModeResolution): string {
+  return [
+    `Mode: <b>${escapeHtml(mode.label)}</b>`,
+    `Source: <b>${escapeHtml(mode.source)}</b>`,
+    `Reason: ${escapeHtml(mode.reason)}`,
+    mode.source === "manual" && mode.activeUntil
+      ? `Active until: <code>${escapeHtml(mode.activeUntil)}</code>`
+      : "",
+    `Top weights: ${escapeHtml(formatTopWeights(mode))}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function timezoneOffsetMs(date: Date, timeZone: string): number {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).formatToParts(date);
+    const values = Object.fromEntries(
+      parts
+        .filter((part) => part.type !== "literal")
+        .map((part) => [part.type, Number(part.value)]),
+    );
+    const hour = values.hour === 24 ? 0 : values.hour;
+    const localAsUtc = Date.UTC(
+      values.year,
+      values.month - 1,
+      values.day,
+      hour,
+      values.minute,
+      values.second,
+    );
+
+    return localAsUtc - date.getTime();
+  } catch {
+    return 0;
+  }
+}
+
+function zonedMidnightUtc(date: Date, timeZone: string): Date {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(date);
+    const values = Object.fromEntries(
+      parts
+        .filter((part) => part.type !== "literal")
+        .map((part) => [part.type, Number(part.value)]),
+    );
+    const nextLocalMidnight = Date.UTC(
+      values.year,
+      values.month - 1,
+      values.day + 1,
+      0,
+      0,
+      0,
+      0,
+    );
+    let utcMs = nextLocalMidnight;
+
+    for (let index = 0; index < 3; index += 1) {
+      utcMs = nextLocalMidnight - timezoneOffsetMs(new Date(utcMs), timeZone);
+    }
+
+    return new Date(utcMs);
+  } catch {
+    const tomorrow = new Date(date);
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+    tomorrow.setUTCHours(0, 0, 0, 0);
+    return tomorrow;
+  }
+}
+
+function untilDateUtc(date: string, timeZone: string): string {
+  const [year, month, day] = date.split("-").map(Number);
+  const localMidnight = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+  let utcMs = localMidnight.getTime();
+
+  for (let index = 0; index < 3; index += 1) {
+    utcMs =
+      localMidnight.getTime() - timezoneOffsetMs(new Date(utcMs), timeZone);
+  }
+
+  return new Date(utcMs).toISOString();
+}
+
+function parseModeSetArgs(
+  args: string,
+  now: Date,
+  timezone: string,
+):
+  | { ok: true; mode: LifeMode; activeUntil: string | null }
+  | { ok: false; error: string } {
+  const parts = args.trim().split(/\s+/);
+  const mode = parseLifeMode(parts[1] ?? "");
+
+  if (!mode) {
+    return {
+      ok: false,
+      error: `Unknown mode.\n${modeUsage()}`,
+    };
+  }
+
+  const duration = parts[2];
+
+  if (!duration) {
+    return { ok: true, mode, activeUntil: null };
+  }
+
+  if (duration === "today") {
+    return {
+      ok: true,
+      mode,
+      activeUntil: zonedMidnightUtc(now, timezone).toISOString(),
+    };
+  }
+
+  const untilMatch = duration.match(/^until:(\d{4}-\d{2}-\d{2})$/);
+
+  if (untilMatch?.[1]) {
+    return {
+      ok: true,
+      mode,
+      activeUntil: untilDateUtc(untilMatch[1], timezone),
+    };
+  }
+
+  return {
+    ok: false,
+    error: `Unsupported duration.\n${modeUsage()}`,
+  };
 }
 
 function inboxLogTargetPath(now: Date): string {
@@ -580,25 +756,6 @@ async function handleCreateCommand(
     return;
   }
 
-  if (command === "mode") {
-    const signals = parseHealthSignalArgs(args);
-    const mode = resolveHealthMode(signals);
-    const entity = await createEntityAndQueueSync(runtime.store, message, {
-      userId: user.userId,
-      entityType: "mode",
-      title: `Mode: ${healthModeLabel(mode)}`,
-      body: args.trim() || null,
-      sourceCommand: "/mode",
-      metadata: metadata({ ...signals, mode }),
-    });
-
-    await runtime.telegram.sendMessage({
-      chatId: message.chat.id,
-      text: `${entitySummary(entity)}\nCurrent mode: <b>${healthModeLabel(mode)}</b>`,
-    });
-    return;
-  }
-
   if (command === "review") {
     const text = requireText(command, args, "review notes");
 
@@ -655,10 +812,12 @@ async function handleCreateCommand(
 
   if (command === "workout") {
     const now = runtime.now?.() ?? new Date();
+    const mode = await runtime.store.resolveCurrentMode(user.userId);
     const workout = await runtime.store.getOrCreateCurrentWorkout({
       userId: user.userId,
       title: args.trim() || null,
       now: now.toISOString(),
+      lifeMode: mode.mode,
     });
 
     if (workout.created) {
@@ -669,7 +828,7 @@ async function handleCreateCommand(
         sourceCommand: "/workout",
         linkedTable: "workouts",
         linkedId: workout.id,
-        metadata: metadata({ workoutId: workout.id }),
+        metadata: metadata({ workoutId: workout.id, lifeMode: mode.mode }),
       });
       void entity;
     }
@@ -682,6 +841,7 @@ async function handleCreateCommand(
       chatId: message.chat.id,
       text: [
         workout.created ? "Workout started." : "Current workout loaded.",
+        `Mode: <b>${escapeHtml(mode.label)}</b>`,
         `Workout id: <code>${workout.id}</code>`,
       ].join("\n"),
       replyMarkup: workoutUrl
@@ -740,40 +900,130 @@ async function handleReadCommand(
     return;
   }
 
+  if (command === "mode") {
+    const normalized = args.trim().toLowerCase();
+
+    if (!normalized) {
+      const mode = await runtime.store.resolveCurrentMode(user.userId);
+
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: formatModeResolution(mode),
+      });
+      return;
+    }
+
+    if (normalized === "auto" || normalized === "clear") {
+      const mode = await runtime.store.clearManualLifeMode(user.userId);
+
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: [
+          "Manual mode override cleared.",
+          formatModeResolution(mode),
+        ].join("\n\n"),
+      });
+      return;
+    }
+
+    if (normalized.startsWith("set ")) {
+      const parsed = parseModeSetArgs(
+        normalized,
+        runtime.now?.() ?? new Date(),
+        user.timezone,
+      );
+
+      if (!parsed.ok) {
+        await runtime.telegram.sendMessage({
+          chatId: message.chat.id,
+          text: parsed.error,
+        });
+        return;
+      }
+
+      const mode = await runtime.store.setManualLifeMode({
+        userId: user.userId,
+        mode: parsed.mode,
+        activeUntil: parsed.activeUntil,
+        reason: parsed.activeUntil
+          ? `Telegram override until ${parsed.activeUntil}`
+          : "Telegram override until cleared.",
+      });
+
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: formatModeResolution(mode),
+      });
+      return;
+    }
+
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: modeUsage(),
+    });
+    return;
+  }
+
   if (command === "today") {
     const bounds = utcDayBounds(runtime.now?.() ?? new Date());
-    const entities = await runtime.store.listTodayEntities({
-      userId: user.userId,
-      ...bounds,
-    });
+    const [mode, entities] = await Promise.all([
+      runtime.store.resolveCurrentMode(user.userId),
+      runtime.store.listTodayEntities({
+        userId: user.userId,
+        ...bounds,
+      }),
+    ]);
     const lines = entities.map((entity, index) => {
       return `${index + 1}. ${entity.entityType}: ${escapeHtml(entity.title)}`;
     });
 
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
-      text: lines.length
-        ? `Today:\n${lines.join("\n")}`
-        : "No LifeOS entries captured today yet.",
+      text: [
+        `Mode: <b>${escapeHtml(mode.label)}</b>`,
+        lines.length
+          ? `Today:\n${lines.join("\n")}`
+          : "No LifeOS entries captured today yet.",
+      ].join("\n\n"),
     });
     return;
   }
 
   if (command === "focus") {
-    const signals = args.trim()
-      ? parseHealthSignalArgs(args)
-      : await runtime.store.getLatestDailyLog(user.userId).then((log) => ({
-          moodScore: log?.moodScore ?? undefined,
-          energyScore: log?.energyScore ?? undefined,
-        }));
-    const result = scoreFocus(signals);
+    const [mode, signals] = await Promise.all([
+      runtime.store.resolveCurrentMode(user.userId),
+      args.trim()
+        ? Promise.resolve(parseHealthSignalArgs(args))
+        : runtime.store.getLatestDailyLog(user.userId).then((log) => ({
+            moodScore: log?.moodScore ?? undefined,
+            energyScore: log?.energyScore ?? undefined,
+          })),
+    ]);
+    const result = scoreFocus({
+      ...signals,
+      healthMode: mode.mode === "recovery" ? "recovery" : undefined,
+    });
+    const topItems = await runtime.store.listModeAwareFocusItems({
+      userId: user.userId,
+      mode: mode.mode,
+      limit: 5,
+    });
+    const itemLines = topItems.map((item, index) => {
+      const matches = item.modePriorityMatches.length
+        ? ` (${item.modePriorityMatches.join(", ")})`
+        : "";
+      return `${index + 1}. ${escapeHtml(item.title)} ${formatSignedWeight(item.modePriorityDelta)}${escapeHtml(matches)}`;
+    });
 
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
       text: [
         `Focus score: <b>${result.score}</b>`,
         `Band: <b>${result.band}</b>`,
+        `Mode: <b>${escapeHtml(mode.label)}</b>`,
+        `Why: ${escapeHtml(explainModeReason(mode))}`,
         result.reasons.length ? `Reasons: ${result.reasons.join(", ")}` : "",
+        itemLines.length ? `Top focus:\n${itemLines.join("\n")}` : "",
       ]
         .filter(Boolean)
         .join("\n"),
@@ -840,20 +1090,6 @@ async function handleReadCommand(
           ? "Captured total: unavailable"
           : `Captured total: <b>${summary.capturedSpendTotal}</b>`,
       ].join("\n"),
-    });
-    return;
-  }
-
-  if (command === "mode") {
-    const log = await runtime.store.getLatestDailyLog(user.userId);
-    const mode = resolveHealthMode({
-      moodScore: log?.moodScore ?? undefined,
-      energyScore: log?.energyScore ?? undefined,
-    });
-
-    await runtime.telegram.sendMessage({
-      chatId: message.chat.id,
-      text: `Current mode: <b>${healthModeLabel(mode)}</b>`,
     });
     return;
   }

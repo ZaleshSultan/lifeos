@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   CircleDollarSign,
   Clock,
+  Settings2,
 } from "lucide-react";
 import { MetricCard } from "@/components/MetricCard";
 import { PageHeader } from "@/components/PageHeader";
@@ -42,6 +43,13 @@ export default function TodayPage() {
           icon={Activity}
           label="Focus"
           value="Signal"
+        />
+        <MetricCard
+          detail="LifeOS Mode now biases focus, workouts, and the TMA home without changing capture flow."
+          icon={Settings2}
+          label="Mode"
+          tone="violet"
+          value="Aware"
         />
         <MetricCard
           detail="Deadlines created by Telegram will surface here with due windows."

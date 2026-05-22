@@ -7,6 +7,7 @@ export const queryKeys = {
   workout: ["workout", "current"] as const,
   health: ["health"] as const,
   focus: ["focus"] as const,
+  mode: ["mode"] as const,
 };
 
 export function useHomeQuery() {
@@ -34,6 +35,43 @@ export function useFocusQuery() {
   return useQuery({
     queryKey: queryKeys.focus,
     queryFn: api.getFocus,
+  });
+}
+
+export function useModeQuery() {
+  return useQuery({
+    queryKey: queryKeys.mode,
+    queryFn: api.getMode,
+  });
+}
+
+export function useSaveModeMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: api.saveMode,
+    onSuccess(data) {
+      telegram.hapticImpact("medium");
+      queryClient.setQueryData(queryKeys.mode, data);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.home });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.focus });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.workout });
+    },
+  });
+}
+
+export function useClearModeMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: api.clearMode,
+    onSuccess(data) {
+      telegram.hapticImpact("light");
+      queryClient.setQueryData(queryKeys.mode, data);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.home });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.focus });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.workout });
+    },
   });
 }
 

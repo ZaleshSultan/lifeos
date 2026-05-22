@@ -5,7 +5,11 @@ import {
   type ServerResponse,
 } from "node:http";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { parseHealthIngestPayload } from "@lifeos/core";
+import {
+  parseHealthIngestPayload,
+  parseLifeMode,
+  type LifeMode,
+} from "@lifeos/core";
 import type { LifeOSStore, TelegramUserRecord } from "@lifeos/db";
 import type { BotConfig } from "./config.js";
 import { handleTelegramUpdate } from "./telegram/commands.js";
@@ -76,7 +80,7 @@ function writeJson(
   response.writeHead(statusCode, {
     "content-type": "application/json; charset=utf-8",
     "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-methods": "GET,POST,DELETE,OPTIONS",
     "access-control-allow-headers":
       "content-type,x-telegram-init-data,x-lifeos-ingest-secret,x-telegram-bot-api-secret-token",
   });
@@ -86,7 +90,7 @@ function writeJson(
 function writeNoContent(response: ServerResponse): void {
   response.writeHead(204, {
     "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-methods": "GET,POST,DELETE,OPTIONS",
     "access-control-allow-headers":
       "content-type,x-telegram-init-data,x-lifeos-ingest-secret,x-telegram-bot-api-secret-token",
   });
@@ -271,6 +275,71 @@ async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   return raw ? JSON.parse(raw) : {};
 }
 
+function tmaModeActiveUntil(
+  body: Record<string, unknown>,
+  now = new Date(),
+): string | null {
+  if (typeof body.activeUntil === "string") {
+    return body.activeUntil;
+  }
+
+  const duration = body.duration;
+
+  if (duration === "permanent" || duration === undefined) {
+    return null;
+  }
+
+  if (duration === "today") {
+    const tomorrow = new Date(now);
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+    tomorrow.setUTCHours(0, 0, 0, 0);
+    return tomorrow.toISOString();
+  }
+
+  if (duration === "7_days") {
+    return new Date(now.getTime() + 7 * 86_400_000).toISOString();
+  }
+
+  if (duration === "until_date" && typeof body.untilDate === "string") {
+    return `${body.untilDate}T00:00:00.000Z`;
+  }
+
+  throw new Error("invalid_mode_duration");
+}
+
+function parseTmaModeBody(
+  body: unknown,
+):
+  | { ok: true; mode: LifeMode | "auto"; activeUntil: string | null }
+  | { ok: false; error: string } {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return { ok: false, error: "invalid_mode_payload" };
+  }
+
+  const record = body as Record<string, unknown>;
+  const rawMode = typeof record.mode === "string" ? record.mode : "";
+
+  if (rawMode === "auto") {
+    return { ok: true, mode: "auto", activeUntil: null };
+  }
+
+  const mode = parseLifeMode(rawMode);
+
+  if (!mode) {
+    return { ok: false, error: "invalid_mode" };
+  }
+
+  try {
+    return {
+      ok: true,
+      mode,
+      activeUntil: tmaModeActiveUntil(record),
+    };
+  } catch {
+    return { ok: false, error: "invalid_mode_duration" };
+  }
+}
+
 async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
@@ -310,6 +379,53 @@ async function handleRequest(
       return;
     }
 
+    if (request.method === "GET" && requestUrl.pathname === "/api/tma/mode") {
+      writeJson(
+        response,
+        200,
+        tmaData(await store.resolveCurrentMode(auth.user.userId)),
+      );
+      return;
+    }
+
+    if (request.method === "POST" && requestUrl.pathname === "/api/tma/mode") {
+      const body = parseTmaModeBody(await readJsonBody(request));
+
+      if (!body.ok) {
+        writeJson(response, 400, {
+          error: body.error,
+        });
+        return;
+      }
+
+      const mode =
+        body.mode === "auto"
+          ? await store.clearManualLifeMode(auth.user.userId)
+          : await store.setManualLifeMode({
+              userId: auth.user.userId,
+              mode: body.mode,
+              activeUntil: body.activeUntil,
+              reason: body.activeUntil
+                ? `TMA override until ${body.activeUntil}`
+                : "TMA override until cleared.",
+            });
+
+      writeJson(response, 200, tmaData(mode));
+      return;
+    }
+
+    if (
+      request.method === "DELETE" &&
+      requestUrl.pathname === "/api/tma/mode"
+    ) {
+      writeJson(
+        response,
+        200,
+        tmaData(await store.clearManualLifeMode(auth.user.userId)),
+      );
+      return;
+    }
+
     if (request.method === "GET" && requestUrl.pathname === "/api/tma/home") {
       writeJson(
         response,
@@ -323,9 +439,11 @@ async function handleRequest(
       request.method === "GET" &&
       requestUrl.pathname === "/api/tma/workout/current"
     ) {
+      const mode = await store.resolveCurrentMode(auth.user.userId);
       await store.getOrCreateCurrentWorkout({
         userId: auth.user.userId,
         now: new Date().toISOString(),
+        lifeMode: mode.mode,
       });
       const workout = await store.getCurrentWorkout({
         userId: auth.user.userId,

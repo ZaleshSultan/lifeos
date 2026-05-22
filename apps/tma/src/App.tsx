@@ -3,6 +3,7 @@ import { AppShell } from "./components/AppShell";
 import { FocusScreen } from "./screens/FocusScreen";
 import { HealthScreen } from "./screens/HealthScreen";
 import { HomeScreen } from "./screens/HomeScreen";
+import { ModeScreen } from "./screens/ModeScreen";
 import { WorkoutScreen } from "./screens/WorkoutScreen";
 import type { ScreenId } from "./types";
 
@@ -17,6 +18,7 @@ export default function App() {
       {screen === "workout" ? <WorkoutScreen /> : null}
       {screen === "health" ? <HealthScreen /> : null}
       {screen === "focus" ? <FocusScreen /> : null}
+      {screen === "mode" ? <ModeScreen /> : null}
     </AppShell>
   );
 }

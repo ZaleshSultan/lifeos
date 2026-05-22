@@ -49,7 +49,7 @@ export function HomeScreen({ onOpenWorkout }: HomeScreenProps) {
               {home.displayName ? `Hi, ${home.displayName}` : "LifeOS ready"}
             </h2>
             <div className="mt-3 inline-flex rounded-full border border-cyan-400/20 bg-cyan-400/[0.08] px-2.5 py-1 text-xs font-medium text-cyan-300">
-              {recoveryModeLabels[home.recoveryMode]}
+              {home.modeLabel}
             </div>
           </div>
         </div>

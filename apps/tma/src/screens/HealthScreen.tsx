@@ -1,6 +1,5 @@
 import { Footprints, HeartPulse, Moon, Zap } from "lucide-react";
 import { useHealthQuery } from "../api/hooks";
-import { recoveryModeLabels } from "../api/types";
 import { ErrorPanel, LoadingPanel } from "../components/AsyncState";
 import { MetricTile } from "../components/MetricTile";
 import { ProgressRing } from "../components/ProgressRing";
@@ -46,10 +45,10 @@ export function HealthScreen() {
           <div className="min-w-0 flex-1">
             <p className="text-sm text-zinc-500">{health.date}</p>
             <h2 className="mt-1 text-[26px] font-semibold leading-tight tracking-tight text-white">
-              {recoveryModeLabels[health.recoveryMode]}
+              {health.lifeModeLabel}
             </h2>
             <p className="mt-2 text-sm text-zinc-500">
-              {health.samplesCount ?? 0} samples
+              {health.recommendation}
             </p>
           </div>
         </div>

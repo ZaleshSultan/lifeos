@@ -1,6 +1,10 @@
 import type { AddressInfo } from "node:net";
 import { createHmac } from "node:crypto";
-import type { HealthIngestPayload } from "@lifeos/core";
+import type {
+  HealthIngestPayload,
+  LifeMode,
+  LifeModeResolution,
+} from "@lifeos/core";
 import type {
   CurrentWorkoutSummary,
   HealthIngestResult,
@@ -71,6 +75,24 @@ function workoutSummary(overrides: Partial<CurrentWorkoutSummary> = {}) {
 }
 
 function tmaStore(events: string[] = []): LifeOSStore {
+  let mode: LifeMode = "trimester";
+  const modeResolution = (): LifeModeResolution => ({
+    userId: "user-1",
+    mode,
+    label: mode === "summer" ? "Summer Mode" : "Trimester Mode",
+    source: mode === "trimester" ? "default" : "manual",
+    reason:
+      mode === "trimester"
+        ? "No manual override, recovery signal, season, or sprint is active."
+        : "TMA override until cleared.",
+    activeUntil: null,
+    priorityWeights:
+      mode === "summer"
+        ? { projects: 90, cybersecurity: 80, health: 70 }
+        : { study: 70, health: 40, finance: 30, projects: 30 },
+    resolvedAt: "2026-05-18T10:00:00.000Z",
+  });
+
   return {
     async resolveTelegramUser() {
       return null;
@@ -103,6 +125,23 @@ function tmaStore(events: string[] = []): LifeOSStore {
     },
     async getHealthSyncStatus() {
       return { counts: {}, runs: [], latestRun: null };
+    },
+    async resolveCurrentMode() {
+      events.push("resolveCurrentMode");
+      return modeResolution();
+    },
+    async setManualLifeMode(input) {
+      events.push("setManualLifeMode");
+      mode = input.mode;
+      return modeResolution();
+    },
+    async clearManualLifeMode() {
+      events.push("clearManualLifeMode");
+      mode = "trimester";
+      return modeResolution();
+    },
+    async listModeAwareFocusItems() {
+      return [];
     },
     async getOrCreateCurrentWorkout() {
       events.push("getOrCreateCurrentWorkout");
@@ -157,6 +196,9 @@ function tmaStore(events: string[] = []): LifeOSStore {
       return {
         displayName: "Dev user",
         localDate: "May 18, 2026",
+        mode: "trimester",
+        modeLabel: "Trimester Mode",
+        modeReason: "Trimester Mode is active from default.",
         recoveryMode: "baseline",
         focusScore: 80,
         activeWorkout: {
@@ -172,6 +214,9 @@ function tmaStore(events: string[] = []): LifeOSStore {
     async getTmaHealthSummary() {
       return {
         date: "2026-05-17",
+        lifeMode: "trimester",
+        lifeModeLabel: "Trimester Mode",
+        recommendation: "Balance study blocks with health and finance basics.",
         recoveryMode: "baseline",
         dataCompletenessScore: 50,
         sleepMinutes: 480,
@@ -192,9 +237,14 @@ function tmaStore(events: string[] = []): LifeOSStore {
         score: 80,
         band: "high",
         mode: "baseline",
+        lifeMode: "trimester",
+        lifeModeLabel: "Trimester Mode",
+        lifeModeReason: "Trimester Mode is active from default.",
         reasons: [],
         nextBestAction: "Deep work",
         openTaskCount: 2,
+        topItems: [],
+        priorityWeights: {},
       };
     },
     async getFinanceSummary() {
@@ -503,6 +553,47 @@ describe("bot server", () => {
     });
   });
 
+  it("serves and updates mode through TMA routes", async () => {
+    const events: string[] = [];
+    const server = createBotServer({
+      config: {
+        lifeosDefaultUserId: "user-1",
+        allowUnsafeTmaDevAuth: true,
+      },
+      store: tmaStore(events),
+    });
+    servers.push(server);
+
+    const port = await listen(server);
+    const getResponse = await fetch(`http://127.0.0.1:${port}/api/tma/mode`);
+    const setResponse = await fetch(`http://127.0.0.1:${port}/api/tma/mode`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        mode: "summer",
+        duration: "permanent",
+      }),
+    });
+    const clearResponse = await fetch(`http://127.0.0.1:${port}/api/tma/mode`, {
+      method: "DELETE",
+    });
+
+    expect(getResponse.status).toBe(200);
+    await expect(setResponse.json()).resolves.toMatchObject({
+      data: {
+        mode: "summer",
+      },
+    });
+    expect(clearResponse.status).toBe(200);
+    expect(events).toEqual([
+      "resolveCurrentMode",
+      "setManualLifeMode",
+      "clearManualLifeMode",
+    ]);
+  });
+
   it("serves current workout through the dev-only TMA fallback", async () => {
     const events: string[] = [];
     const server = createBotServer({
@@ -535,7 +626,11 @@ describe("bot server", () => {
         ],
       },
     });
-    expect(events).toEqual(["getOrCreateCurrentWorkout", "getCurrentWorkout"]);
+    expect(events).toEqual([
+      "resolveCurrentMode",
+      "getOrCreateCurrentWorkout",
+      "getCurrentWorkout",
+    ]);
   });
 
   it("completes and undoes workout sets through TMA routes", async () => {

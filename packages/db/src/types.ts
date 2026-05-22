@@ -1,4 +1,9 @@
-import type { HealthMode, HealthSyncReason } from "@lifeos/core";
+import type {
+  HealthMode,
+  HealthSyncReason,
+  LifeMode,
+  LifeModeSource,
+} from "@lifeos/core";
 
 export type Json =
   | boolean
@@ -194,6 +199,54 @@ export interface Database {
           metadata?: Json;
           created_at?: string;
           updated_at?: string;
+        }
+      >;
+      life_modes: TableDefinition<
+        {
+          id: string;
+          user_id: string;
+          mode: LifeMode;
+          source: LifeModeSource;
+          reason: string | null;
+          active_from: string;
+          active_until: string | null;
+          is_active: boolean;
+          priority_json: Json;
+          created_at: string;
+        },
+        {
+          id?: string;
+          user_id: string;
+          mode: LifeMode;
+          source?: LifeModeSource;
+          reason?: string | null;
+          active_from?: string;
+          active_until?: string | null;
+          is_active?: boolean;
+          priority_json?: Json;
+          created_at?: string;
+        }
+      >;
+      life_seasons: TableDefinition<
+        {
+          id: string;
+          user_id: string;
+          name: string;
+          mode: LifeMode;
+          starts_on: string;
+          ends_on: string;
+          priority_json: Json;
+          created_at: string;
+        },
+        {
+          id?: string;
+          user_id: string;
+          name: string;
+          mode: LifeMode;
+          starts_on: string;
+          ends_on: string;
+          priority_json?: Json;
+          created_at?: string;
         }
       >;
       tasks: TableDefinition<
