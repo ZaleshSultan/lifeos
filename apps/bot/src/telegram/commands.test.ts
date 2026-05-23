@@ -196,6 +196,24 @@ class FakeStore implements LifeOSStore {
     };
   }
 
+  async getActiveManualMode() {
+    return null;
+  }
+
+  async getActiveSeason() {
+    return null;
+  }
+
+  async getActiveStudyCourse() {
+    return null;
+  }
+
+  updateStudyCourseProgress(): ReturnType<
+    LifeOSStore["updateStudyCourseProgress"]
+  > {
+    return Promise.reject(new Error("not used"));
+  }
+
   async resolveCurrentMode(): Promise<LifeModeResolution> {
     return {
       userId: "user-1",
@@ -213,6 +231,16 @@ class FakeStore implements LifeOSStore {
       },
       resolvedAt: "2026-05-18T12:00:00.000Z",
     };
+  }
+
+  async setManualMode(
+    input: Parameters<LifeOSStore["setManualMode"]>[0],
+  ): Promise<LifeModeResolution> {
+    return this.setManualLifeMode(input);
+  }
+
+  async clearManualMode(userId: string): Promise<LifeModeResolution> {
+    return this.clearManualLifeMode(userId);
   }
 
   async setManualLifeMode(

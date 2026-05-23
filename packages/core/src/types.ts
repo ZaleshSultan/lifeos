@@ -9,6 +9,9 @@ export type HealthMode = "recovery" | "maintenance" | "baseline" | "growth";
 
 export type LifeMode =
   | "exam_war"
+  | "practice"
+  | "recovery_setup"
+  | "summer_term"
   | "summer"
   | "trimester"
   | "recovery"

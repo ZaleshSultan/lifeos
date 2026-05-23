@@ -25,6 +25,7 @@ import type {
   Json,
   LifeEntityType,
   ObsidianSyncStatus,
+  StudyCourseStatus,
   WorkoutIntensity,
 } from "./types.js";
 
@@ -37,6 +38,7 @@ type HealthDailyRow = Database["public"]["Tables"]["health_daily"]["Row"];
 type LifeModeRow = Database["public"]["Tables"]["life_modes"]["Row"];
 type LifeSeasonRow = Database["public"]["Tables"]["life_seasons"]["Row"];
 type ProjectRow = Database["public"]["Tables"]["projects"]["Row"];
+type StudyCourseRow = Database["public"]["Tables"]["study_courses"]["Row"];
 
 export interface TelegramUserRecord {
   userId: string;
@@ -142,12 +144,45 @@ export interface WorkoutRecord {
   created: boolean;
 }
 
-export interface SetManualLifeModeInput {
+export interface SetManualModeInput {
   userId: string;
   mode: LifeMode;
   reason?: string | null;
+  activeFrom?: string | null;
   activeUntil?: string | null;
   priorityJson?: Record<string, number>;
+}
+
+export type SetManualLifeModeInput = SetManualModeInput;
+
+export interface StudyCourseRecord {
+  id: string;
+  userId: string;
+  code: string;
+  title: string;
+  term: string | null;
+  startsOn: string | null;
+  endsOn: string | null;
+  status: StudyCourseStatus;
+  progressPercent: number;
+  completedUnits: number;
+  totalUnits: number | null;
+  lastStudiedOn: string | null;
+  metadata: Json;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpdateStudyCourseProgressInput {
+  userId: string;
+  courseId?: string;
+  code?: string;
+  progressPercent: number;
+  completedUnits?: number | null;
+  totalUnits?: number | null;
+  lastStudiedOn?: string | null;
+  status?: StudyCourseStatus;
+  metadata?: Json;
 }
 
 export interface FocusItemRecord extends FocusScoringItem {
@@ -311,7 +346,24 @@ export interface LifeOSStore {
   getLatestDailyLog(userId: string): Promise<DailyLogRecord | null>;
   getObsidianSyncStatus(userId: string): Promise<ObsidianSyncStatusSummary>;
   getHealthSyncStatus(userId: string): Promise<HealthSyncStatusSummary>;
+  getActiveManualMode(
+    userId: string,
+    now?: Date | string,
+  ): Promise<LifeModeRecord | null>;
+  getActiveSeason(
+    userId: string,
+    today?: Date | string,
+  ): Promise<LifeSeasonRecord | null>;
+  getActiveStudyCourse(
+    userId: string,
+    today?: Date | string,
+  ): Promise<StudyCourseRecord | null>;
+  updateStudyCourseProgress(
+    input: UpdateStudyCourseProgressInput,
+  ): Promise<StudyCourseRecord>;
   resolveCurrentMode(userId: string): Promise<LifeModeResolution>;
+  setManualMode(input: SetManualModeInput): Promise<LifeModeResolution>;
+  clearManualMode(userId: string): Promise<LifeModeResolution>;
   setManualLifeMode(input: SetManualLifeModeInput): Promise<LifeModeResolution>;
   clearManualLifeMode(userId: string): Promise<LifeModeResolution>;
   listModeAwareFocusItems(input: {
@@ -491,6 +543,26 @@ function toLifeSeasonRecord(row: LifeSeasonRow): LifeSeasonRecord {
   };
 }
 
+function toStudyCourseRecord(row: StudyCourseRow): StudyCourseRecord {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    code: row.code,
+    title: row.title,
+    term: row.term,
+    startsOn: row.starts_on,
+    endsOn: row.ends_on,
+    status: row.status,
+    progressPercent: Number(row.progress_percent),
+    completedUnits: row.completed_units,
+    totalUnits: row.total_units,
+    lastStudiedOn: row.last_studied_on,
+    metadata: row.metadata,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 function throwSupabaseError(error: unknown, context: string): never {
   const message =
     typeof error === "object" && error !== null && "message" in error
@@ -559,6 +631,30 @@ function addSeconds(timestamp: string, seconds: number): string {
   return new Date(new Date(timestamp).getTime() + seconds * 1000).toISOString();
 }
 
+function isoDateTimeFromInput(value: Date | string | undefined): string {
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  if (typeof value === "string") {
+    return value;
+  }
+
+  return new Date().toISOString();
+}
+
+function isoDateFromInput(value: Date | string | undefined): string {
+  if (value instanceof Date) {
+    return value.toISOString().slice(0, 10);
+  }
+
+  if (typeof value === "string") {
+    return value.includes("T") ? value.slice(0, 10) : value;
+  }
+
+  return new Date().toISOString().slice(0, 10);
+}
+
 function defaultWorkoutTitle(mode: LifeMode): string {
   switch (mode) {
     case "recovery":
@@ -617,6 +713,12 @@ function healthRecommendationForMode(mode: LifeMode): string {
       return "Protect sleep, reduce load, and keep movement easy.";
     case "exam_war":
       return "Keep workouts short and preserve sleep for study retention.";
+    case "practice":
+      return "Bias the day toward timed practice, review, and steady recovery.";
+    case "recovery_setup":
+      return "Use the reset window for sleep, admin, and light planning.";
+    case "summer_term":
+      return "Protect course work blocks while keeping health anchors stable.";
     case "summer":
       return "Use the wider runway for fitness, recovery, and consistency.";
     case "project_sprint":
@@ -1013,30 +1115,121 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     };
   }
 
+  async getActiveManualMode(
+    userId: string,
+    now: Date | string = new Date(),
+  ): Promise<LifeModeRecord | null> {
+    const modes = await this.listActiveLifeModes({
+      userId,
+      source: "manual",
+      now: isoDateTimeFromInput(now),
+    });
+
+    return modes.at(0) ?? null;
+  }
+
+  async getActiveSeason(
+    userId: string,
+    today: Date | string = new Date(),
+  ): Promise<LifeSeasonRecord | null> {
+    const seasons = await this.listActiveLifeSeasons({
+      userId,
+      today: isoDateFromInput(today),
+    });
+
+    return seasons.at(0) ?? null;
+  }
+
+  async getActiveStudyCourse(
+    userId: string,
+    today: Date | string = new Date(),
+  ): Promise<StudyCourseRecord | null> {
+    const activeDate = isoDateFromInput(today);
+    const { data, error } = await this.client
+      .from("study_courses")
+      .select("*")
+      .eq("user_id", userId)
+      .in("status", ["planned", "active"])
+      .or(`starts_on.is.null,starts_on.lte.${activeDate}`)
+      .or(`ends_on.is.null,ends_on.gte.${activeDate}`)
+      .order("starts_on", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to load active study course");
+    }
+
+    return data ? toStudyCourseRecord(data) : null;
+  }
+
+  async updateStudyCourseProgress(
+    input: UpdateStudyCourseProgressInput,
+  ): Promise<StudyCourseRecord> {
+    if (!input.courseId && !input.code) {
+      throw new Error("Study course id or code is required");
+    }
+
+    if (input.progressPercent < 0 || input.progressPercent > 100) {
+      throw new Error("Study course progress must be between 0 and 100");
+    }
+
+    const update: Database["public"]["Tables"]["study_courses"]["Update"] = {
+      progress_percent: input.progressPercent,
+    };
+
+    if (input.completedUnits !== undefined) {
+      update.completed_units = input.completedUnits ?? 0;
+    }
+
+    if (input.totalUnits !== undefined) {
+      update.total_units = input.totalUnits;
+    }
+
+    if (input.lastStudiedOn !== undefined) {
+      update.last_studied_on = input.lastStudiedOn;
+    }
+
+    if (input.status !== undefined) {
+      update.status = input.status;
+    }
+
+    if (input.metadata !== undefined) {
+      update.metadata = input.metadata;
+    }
+
+    const query = this.client
+      .from("study_courses")
+      .update(update)
+      .eq("user_id", input.userId);
+    const scopedQuery = input.courseId
+      ? query.eq("id", input.courseId)
+      : query.eq("code", input.code as string);
+    const { data, error } = await scopedQuery.select("*").single();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to update study course progress");
+    }
+
+    return toStudyCourseRecord(data);
+  }
+
   async resolveCurrentMode(userId: string): Promise<LifeModeResolution> {
     const now = new Date();
     const today = now.toISOString().slice(0, 10);
-    const [
-      manualOverrides,
-      latestHealthDaily,
-      seasons,
-      sprintMode,
-      sprintProject,
-    ] = await Promise.all([
-      this.listActiveLifeModes({
-        userId,
-        source: "manual",
-        now: now.toISOString(),
-      }),
-      this.getLatestHealthDaily(userId),
-      this.listActiveLifeSeasons({ userId, today }),
-      this.getConfiguredSprintMode({ userId, now: now.toISOString() }),
-      this.getConfiguredProjectSprint({ userId, today }),
-    ]);
+    const [manualMode, latestHealthDaily, season, sprintMode, sprintProject] =
+      await Promise.all([
+        this.getActiveManualMode(userId, now),
+        this.getLatestHealthDaily(userId),
+        this.getActiveSeason(userId, today),
+        this.getConfiguredSprintMode({ userId, now: now.toISOString() }),
+        this.getConfiguredProjectSprint({ userId, today }),
+      ]);
 
     return resolveCoreCurrentMode(userId, {
       now,
-      manualOverrides,
+      manualOverrides: manualMode ? [manualMode] : [],
       latestHealthDaily: latestHealthDaily
         ? {
             userId,
@@ -1045,14 +1238,12 @@ export class SupabaseLifeOSStore implements LifeOSStore {
             logDate: latestHealthDaily.log_date,
           }
         : null,
-      seasons,
+      seasons: season ? [season] : [],
       projectSprint: sprintMode ?? sprintProject,
     });
   }
 
-  async setManualLifeMode(
-    input: SetManualLifeModeInput,
-  ): Promise<LifeModeResolution> {
+  async setManualMode(input: SetManualModeInput): Promise<LifeModeResolution> {
     const { error: clearError } = await this.client
       .from("life_modes")
       .update({ is_active: false })
@@ -1064,14 +1255,23 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       throwSupabaseError(clearError, "Failed to clear active manual modes");
     }
 
-    const { error } = await this.client.from("life_modes").insert({
-      user_id: input.userId,
-      mode: input.mode,
-      source: "manual",
-      reason: input.reason ?? "Manual override from LifeOS.",
-      active_until: input.activeUntil ?? null,
-      priority_json: (input.priorityJson ?? {}) as Json,
-    });
+    const manualModeInsert: Database["public"]["Tables"]["life_modes"]["Insert"] =
+      {
+        user_id: input.userId,
+        mode: input.mode,
+        source: "manual",
+        reason: input.reason ?? "Manual override from LifeOS.",
+        active_until: input.activeUntil ?? null,
+        priority_json: (input.priorityJson ?? {}) as Json,
+      };
+
+    if (input.activeFrom) {
+      manualModeInsert.active_from = input.activeFrom;
+    }
+
+    const { error } = await this.client
+      .from("life_modes")
+      .insert(manualModeInsert);
 
     if (error) {
       throwSupabaseError(error, "Failed to set manual mode");
@@ -1080,7 +1280,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     return this.resolveCurrentMode(input.userId);
   }
 
-  async clearManualLifeMode(userId: string): Promise<LifeModeResolution> {
+  async clearManualMode(userId: string): Promise<LifeModeResolution> {
     const { error } = await this.client
       .from("life_modes")
       .update({ is_active: false })
@@ -1093,6 +1293,16 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     }
 
     return this.resolveCurrentMode(userId);
+  }
+
+  async setManualLifeMode(
+    input: SetManualLifeModeInput,
+  ): Promise<LifeModeResolution> {
+    return this.setManualMode(input);
+  }
+
+  async clearManualLifeMode(userId: string): Promise<LifeModeResolution> {
+    return this.clearManualMode(userId);
   }
 
   async listModeAwareFocusItems(input: {

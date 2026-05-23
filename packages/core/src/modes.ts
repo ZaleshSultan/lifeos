@@ -2,6 +2,9 @@ import type { HealthMode, LifeMode, LifeModeSource } from "./types.js";
 
 export const LIFE_MODES: readonly LifeMode[] = [
   "exam_war",
+  "practice",
+  "recovery_setup",
+  "summer_term",
   "summer",
   "trimester",
   "recovery",
@@ -11,11 +14,24 @@ export const LIFE_MODES: readonly LifeMode[] = [
 
 export const LIFE_MODE_LABELS: Record<LifeMode, string> = {
   exam_war: "Exam War Mode",
+  practice: "Practice Mode",
+  recovery_setup: "Recovery / Setup Mode",
+  summer_term: "Summer Term Mode",
   summer: "Summer Mode",
   trimester: "Trimester Mode",
   recovery: "Recovery Mode",
   project_sprint: "Project Sprint",
   maintenance: "Maintenance Mode",
+};
+
+const LIFE_MODE_ALIASES: Record<string, LifeMode> = {
+  exam: "exam_war",
+  exams: "exam_war",
+  exam_mode: "exam_war",
+  setup: "recovery_setup",
+  recovery_setup_mode: "recovery_setup",
+  summer_course: "summer_term",
+  summer_term_mode: "summer_term",
 };
 
 export const DEFAULT_LIFE_MODE_PRIORITY_WEIGHTS: Record<
@@ -25,10 +41,35 @@ export const DEFAULT_LIFE_MODE_PRIORITY_WEIGHTS: Record<
   exam_war: {
     study: 100,
     deadline: 100,
+    practice: 90,
     health: 20,
     fitness: 10,
     projects: -30,
     finance: 20,
+  },
+  practice: {
+    practice: 100,
+    problem_sets: 90,
+    study: 80,
+    deadline: 65,
+    health: 35,
+    projects: -10,
+  },
+  recovery_setup: {
+    health: 100,
+    sleep: 100,
+    setup: 90,
+    admin: 70,
+    study: 10,
+    heavy_fitness: -80,
+  },
+  summer_term: {
+    discrete_math: 100,
+    coursework: 90,
+    study: 90,
+    practice: 70,
+    health: 50,
+    projects: 40,
   },
   summer: {
     projects: 90,
@@ -147,7 +188,13 @@ export function isLifeMode(value: string): value is LifeMode {
 }
 
 export function parseLifeMode(value: string): LifeMode | null {
-  const normalized = value.trim().toLowerCase().replaceAll("-", "_");
+  const normalized = normalizeModeInput(value).replace(/_mode$/, "");
+  const alias = LIFE_MODE_ALIASES[normalized];
+
+  if (alias) {
+    return alias;
+  }
+
   return isLifeMode(normalized) ? normalized : null;
 }
 
@@ -440,6 +487,15 @@ function metadataArray(value: unknown): string[] {
     : [];
 }
 
+function normalizeModeInput(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/['’]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
 function normalizeKey(value: string): string {
   return value.trim().toLowerCase().replaceAll("-", "_").replaceAll(" ", "_");
 }
@@ -466,16 +522,42 @@ function addSynonyms(matches: Set<string>, value: string): void {
   if (["security", "cyber", "cybersecurity", "ctf"].includes(value)) {
     matches.add("cybersecurity");
   }
+
+  if (
+    ["practice", "drill", "drills", "problem", "problem_sets"].includes(value)
+  ) {
+    matches.add("practice");
+    matches.add("problem_sets");
+  }
+
+  if (["course", "coursework", "class"].includes(value)) {
+    matches.add("coursework");
+    matches.add("study");
+  }
+
+  if (["discrete", "discrete_math", "math", "mathematics"].includes(value)) {
+    matches.add("discrete_math");
+    matches.add("study");
+  }
+
+  if (["setup", "admin", "planning"].includes(value)) {
+    matches.add("setup");
+    matches.add("admin");
+  }
 }
 
 function addTitleMatches(matches: Set<string>, title: string): void {
   const titleMatchers: Array<[string, RegExp]> = [
     ["study", /\b(study|exam|course|lecture|reading|assignment|homework)\b/i],
     ["deadline", /\b(deadline|due|submit|exam)\b/i],
+    ["practice", /\b(practice|drill|problem set|problems)\b/i],
+    ["coursework", /\b(course|coursework|class)\b/i],
+    ["discrete_math", /\b(discrete math|discrete mathematics|math)\b/i],
     ["projects", /\b(project|build|ship|launch)\b/i],
     ["cybersecurity", /\b(cyber|security|ctf|hack)\b/i],
     ["health", /\b(health|doctor|meds|medicine|therapy)\b/i],
     ["sleep", /\b(sleep|nap|rest)\b/i],
+    ["setup", /\b(setup|configure|organize|admin|planning)\b/i],
     ["fitness", /\b(workout|gym|run|lift|cardio)\b/i],
     ["finance", /\b(finance|budget|pay|invoice|tax|spend)\b/i],
     ["critical", /\b(critical|blocker|incident)\b/i],

@@ -126,8 +126,30 @@ function tmaStore(events: string[] = []): LifeOSStore {
     async getHealthSyncStatus() {
       return { counts: {}, runs: [], latestRun: null };
     },
+    async getActiveManualMode() {
+      return null;
+    },
+    async getActiveSeason() {
+      return null;
+    },
+    async getActiveStudyCourse() {
+      return null;
+    },
+    updateStudyCourseProgress() {
+      return Promise.reject(new Error("not used"));
+    },
     async resolveCurrentMode() {
       events.push("resolveCurrentMode");
+      return modeResolution();
+    },
+    async setManualMode(input) {
+      events.push("setManualMode");
+      mode = input.mode;
+      return modeResolution();
+    },
+    async clearManualMode() {
+      events.push("clearManualMode");
+      mode = "trimester";
       return modeResolution();
     },
     async setManualLifeMode(input) {

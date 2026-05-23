@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   applyModeToFocusScoring,
   getModeLabel,
+  getModePriorityWeights,
+  parseLifeMode,
   resolveCurrentMode,
 } from "./modes.js";
 
@@ -94,6 +96,37 @@ describe("life mode resolution", () => {
 
   it("returns configured labels", () => {
     expect(getModeLabel("exam_war")).toBe("Exam War Mode");
+    expect(getModeLabel("recovery_setup")).toBe("Recovery / Setup Mode");
+    expect(getModeLabel("summer_term")).toBe("Summer Term Mode");
+  });
+
+  it("parses phase 1 mode names", () => {
+    expect(parseLifeMode("Practice Mode")).toBe("practice");
+    expect(parseLifeMode("Recovery / Setup Mode")).toBe("recovery_setup");
+    expect(parseLifeMode("summer-term")).toBe("summer_term");
+  });
+
+  it("resolves the phase 1 summer term season", () => {
+    const result = resolveCurrentMode("user-1", {
+      now: "2026-07-10T10:00:00.000Z",
+      seasons: [
+        {
+          userId: "user-1",
+          name: "Summer Term Mode",
+          mode: "summer_term",
+          startsOn: "2026-07-06",
+          endsOn: "2026-08-15",
+        },
+      ],
+    });
+
+    expect(result.mode).toBe("summer_term");
+    expect(result.label).toBe("Summer Term Mode");
+  });
+
+  it("has weights for phase 1 course work", () => {
+    expect(getModePriorityWeights("practice").practice).toBe(100);
+    expect(getModePriorityWeights("summer_term").discrete_math).toBe(100);
   });
 });
 

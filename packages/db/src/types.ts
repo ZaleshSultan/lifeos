@@ -55,6 +55,13 @@ export type LifeOSTaskStatus =
   | "done"
   | "cancelled";
 
+export type StudyCourseStatus =
+  | "planned"
+  | "active"
+  | "paused"
+  | "completed"
+  | "archived";
+
 export type HealthEntrySource = "manual" | "telegram" | "import" | "automation";
 
 export type MedicationLogStatus = "planned" | "taken" | "skipped";
@@ -247,6 +254,42 @@ export interface Database {
           ends_on: string;
           priority_json?: Json;
           created_at?: string;
+        }
+      >;
+      study_courses: TableDefinition<
+        {
+          id: string;
+          user_id: string;
+          code: string;
+          title: string;
+          term: string | null;
+          starts_on: string | null;
+          ends_on: string | null;
+          status: StudyCourseStatus;
+          progress_percent: number;
+          completed_units: number;
+          total_units: number | null;
+          last_studied_on: string | null;
+          metadata: Json;
+          created_at: string;
+          updated_at: string;
+        },
+        {
+          id?: string;
+          user_id: string;
+          code: string;
+          title: string;
+          term?: string | null;
+          starts_on?: string | null;
+          ends_on?: string | null;
+          status?: StudyCourseStatus;
+          progress_percent?: number;
+          completed_units?: number;
+          total_units?: number | null;
+          last_studied_on?: string | null;
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
         }
       >;
       tasks: TableDefinition<
