@@ -6,13 +6,16 @@ import type {
   LifeModeResolution,
 } from "@lifeos/core";
 import type {
+  CreateLifeCaptureInput,
+  CreateLifeEntityInput,
   CurrentWorkoutSummary,
   HealthIngestResult,
+  LifeEntityRecord,
   LifeOSStore,
   StudyCourseRecord,
 } from "@lifeos/db";
-import { afterEach, describe, expect, it } from "vitest";
-import { createBotServer } from "./server.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createBotServer, type BotServerOptions } from "./server.js";
 import type { SendMessageInput, TelegramClient } from "./telegram/types.js";
 
 const servers: ReturnType<typeof createBotServer>[] = [];
@@ -337,6 +340,154 @@ function signedInitData(botToken: string, telegramUserId: number): string {
   return params.toString();
 }
 
+async function startWebhookServer(
+  options: {
+    config?: BotServerOptions["config"];
+    store?: LifeOSStore;
+    telegram?: TelegramClient;
+  } = {},
+): Promise<{ port: number; sent: SendMessageInput[] }> {
+  const sent: SendMessageInput[] = [];
+  const server = createBotServer({
+    config: {
+      telegramWebhookPath: "/telegram/webhook",
+      telegramWebhookSecret: "secret",
+      ...options.config,
+    },
+    store: options.store,
+    telegram:
+      options.telegram ??
+      ({
+        async sendMessage(input) {
+          sent.push(input);
+        },
+      } satisfies TelegramClient),
+    dependencies: {
+      telegramConfigured: true,
+    },
+  });
+  servers.push(server);
+
+  return {
+    port: await listen(server),
+    sent,
+  };
+}
+
+async function postTelegramWebhook(
+  port: number,
+  body: unknown,
+): Promise<Response> {
+  return fetch(`http://127.0.0.1:${port}/telegram/webhook`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-telegram-bot-api-secret-token": "secret",
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+function telegramMessageUpdate(text: string): unknown {
+  return {
+    update_id: 1,
+    message: {
+      message_id: 10,
+      text,
+      chat: {
+        id: 20,
+        type: "private",
+      },
+      from: {
+        id: 30,
+        first_name: "Test",
+      },
+    },
+  };
+}
+
+function webhookCommandStore(overrides: Partial<LifeOSStore> = {}): {
+  store: LifeOSStore;
+  captures: CreateLifeCaptureInput[];
+  entities: LifeEntityRecord[];
+  syncJobs: Array<Parameters<LifeOSStore["enqueueObsidianSync"]>[0]>;
+} {
+  const captures: CreateLifeCaptureInput[] = [];
+  const entities: LifeEntityRecord[] = [];
+  const syncJobs: Array<Parameters<LifeOSStore["enqueueObsidianSync"]>[0]> = [];
+  const store = {
+    async resolveTelegramUser() {
+      return {
+        userId: "user-1",
+        displayName: "User",
+        timezone: "UTC",
+      };
+    },
+    async createLifeCapture(input: CreateLifeCaptureInput) {
+      captures.push(input);
+      return {
+        id: `capture-${captures.length}`,
+        userId: input.userId,
+        text: input.text,
+        source: input.source ?? "telegram",
+        status: input.status ?? "inbox",
+        chatId: input.chatId ?? null,
+        createdAt: "2026-05-18T00:00:00.000Z",
+      };
+    },
+    async createLifeEntity(input: CreateLifeEntityInput) {
+      const entity: LifeEntityRecord = {
+        id: `entity-${entities.length + 1}`,
+        userId: input.userId,
+        entityType: input.entityType,
+        domain: input.domain ?? "personal",
+        status: input.status ?? "inbox",
+        title: input.title,
+        description: input.description ?? null,
+        body: input.body ?? null,
+        source: input.source ?? "telegram",
+        sourceCommand: input.sourceCommand ?? null,
+        telegramChatId: input.telegramChatId ?? null,
+        telegramMessageId: input.telegramMessageId ?? null,
+        dueAt: input.dueAt ?? null,
+        linkedTable: input.linkedTable ?? null,
+        linkedId: input.linkedId ?? null,
+        metadata: input.metadata ?? {},
+        rawPayloadJson: input.rawPayloadJson ?? {},
+        createdAt: "2026-05-18T00:00:00.000Z",
+      };
+      entities.push(entity);
+      return entity;
+    },
+    async enqueueObsidianSync(
+      input: Parameters<LifeOSStore["enqueueObsidianSync"]>[0],
+    ) {
+      syncJobs.push(input);
+    },
+    async resolveCurrentMode() {
+      return {
+        userId: "user-1",
+        mode: "trimester" as const,
+        label: "Trimester Mode",
+        source: "default" as const,
+        reason:
+          "No manual override, recovery signal, season, or sprint is active.",
+        activeUntil: null,
+        priorityWeights: {
+          study: 70,
+          health: 40,
+          finance: 30,
+          projects: 30,
+        },
+        resolvedAt: "2026-05-18T12:00:00.000Z",
+      };
+    },
+    ...overrides,
+  } as unknown as LifeOSStore;
+
+  return { store, captures, entities, syncJobs };
+}
+
 afterEach(async () => {
   await Promise.all(
     servers.splice(0).map(
@@ -353,6 +504,7 @@ afterEach(async () => {
         }),
     ),
   );
+  vi.restoreAllMocks();
 });
 
 describe("bot server", () => {
@@ -425,6 +577,205 @@ describe("bot server", () => {
 
     expect(response.status).toBe(200);
     expect(sent.at(0)?.text).toContain("LifeOS bot is online");
+  });
+
+  it.each([
+    [
+      "my_chat_member",
+      {
+        update_id: 101,
+        my_chat_member: {
+          chat: {
+            id: 20,
+            type: "private",
+          },
+          from: {
+            id: 30,
+            first_name: "Test",
+          },
+          date: 1_779_120_000,
+          old_chat_member: {
+            status: "member",
+          },
+          new_chat_member: {
+            status: "kicked",
+          },
+        },
+      },
+    ],
+    [
+      "edited_message without text",
+      {
+        update_id: 102,
+        edited_message: {
+          message_id: 10,
+          chat: {
+            id: 20,
+            type: "private",
+          },
+          date: 1_779_120_000,
+        },
+      },
+    ],
+    [
+      "message without text",
+      {
+        update_id: 103,
+        message: {
+          message_id: 10,
+          chat: {
+            id: 20,
+            type: "private",
+          },
+          photo: [],
+        },
+      },
+    ],
+    [
+      "callback_query",
+      {
+        update_id: 104,
+        callback_query: {
+          id: "callback-1",
+          from: {
+            id: 30,
+            first_name: "Test",
+          },
+          data: "noop",
+        },
+      },
+    ],
+    [
+      "web_app_data",
+      {
+        update_id: 105,
+        message: {
+          message_id: 10,
+          chat: {
+            id: 20,
+            type: "private",
+          },
+          from: {
+            id: 30,
+            first_name: "Test",
+          },
+          web_app_data: {
+            data: "{}",
+            button_text: "Save",
+          },
+        },
+      },
+    ],
+    [
+      "unknown update shape",
+      {
+        update_id: 106,
+        poll: {
+          id: "poll-1",
+        },
+      },
+    ],
+  ])("ignores %s and returns 200", async (_name, body) => {
+    const { port, sent } = await startWebhookServer();
+
+    const response = await postTelegramWebhook(port, body);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true });
+    expect(sent).toHaveLength(0);
+  });
+
+  it("keeps /mode replying through the Telegram webhook", async () => {
+    const { store } = webhookCommandStore();
+    const { port, sent } = await startWebhookServer({ store });
+
+    const response = await postTelegramWebhook(
+      port,
+      telegramMessageUpdate("/mode"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(sent.at(-1)?.text).toContain("Mode: <b>Trimester Mode</b>");
+  });
+
+  it("keeps /status replying through the Telegram webhook", async () => {
+    const { port, sent } = await startWebhookServer();
+
+    const response = await postTelegramWebhook(
+      port,
+      telegramMessageUpdate("/status"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(sent.at(-1)?.text).toContain("LifeOS bot status");
+  });
+
+  it("keeps /log creating capture, entity, and queue rows through the webhook", async () => {
+    const { store, captures, entities, syncJobs } = webhookCommandStore();
+    const { port, sent } = await startWebhookServer({ store });
+
+    const response = await postTelegramWebhook(
+      port,
+      telegramMessageUpdate("/log Проверить inbox pipeline"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(sent.at(-1)?.text).toBe("✅ Добавил в Inbox.");
+    expect(captures).toHaveLength(1);
+    expect(entities).toHaveLength(1);
+    expect(syncJobs).toHaveLength(1);
+    expect(syncJobs.at(0)?.targetPath).toMatch(/\.md$/);
+  });
+
+  it("returns 200 and replies with the /log failure message when DB writes fail", async () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    const { store } = webhookCommandStore({
+      async createLifeCapture() {
+        throw new Error("insert failed secret bot-token");
+      },
+    });
+    const { port, sent } = await startWebhookServer({
+      config: {
+        telegramBotToken: "bot-token",
+      },
+      store,
+    });
+
+    const response = await postTelegramWebhook(
+      port,
+      telegramMessageUpdate("/log Сломанный insert"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(sent.at(-1)?.text).toBe("❌ Не смог добавить в Inbox.");
+    const logged = JSON.stringify(consoleError.mock.calls);
+    expect(logged).toContain("telegram_webhook_error");
+    expect(logged).toContain('"update_id":1');
+    expect(logged).toContain('"update_type":"message"');
+    expect(logged).toContain('"command":"/log"');
+    expect(logged).toContain("[redacted]");
+    expect(logged).not.toContain("bot-token");
+    expect(logged).not.toContain("secret");
+  });
+
+  it("returns 200 and replies with a generic command error when command processing throws", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { store } = webhookCommandStore({
+      async resolveCurrentMode() {
+        throw new Error("mode resolver failed");
+      },
+    });
+    const { port, sent } = await startWebhookServer({ store });
+
+    const response = await postTelegramWebhook(
+      port,
+      telegramMessageUpdate("/mode"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(sent.at(-1)?.text).toBe("❌ Ошибка обработки команды.");
   });
 
   it("rejects Telegram webhook updates with the wrong secret", async () => {

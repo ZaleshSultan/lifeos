@@ -72,6 +72,20 @@ interface ResolvedBotServerOptions {
   telegram?: TelegramClient;
 }
 
+type TelegramUpdateType =
+  | "message"
+  | "edited_message"
+  | "callback_query"
+  | "my_chat_member"
+  | "web_app_data"
+  | "unknown";
+
+interface TelegramWebhookLogContext {
+  updateId?: number;
+  updateType: TelegramUpdateType;
+  command?: string;
+}
+
 function writeJson(
   response: ServerResponse,
   statusCode: number,
@@ -273,6 +287,223 @@ async function readJsonBody(request: IncomingMessage): Promise<unknown> {
 
   const raw = Buffer.concat(chunks).toString("utf8");
   return raw ? JSON.parse(raw) : {};
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function recordField(
+  value: unknown,
+  key: string,
+): Record<string, unknown> | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const field = value[key];
+  return isRecord(field) ? field : undefined;
+}
+
+function telegramMessageRecord(
+  update: unknown,
+): Record<string, unknown> | undefined {
+  return recordField(update, "message");
+}
+
+function detectTelegramUpdateType(update: unknown): TelegramUpdateType {
+  if (!isRecord(update)) {
+    return "unknown";
+  }
+
+  const message = recordField(update, "message");
+
+  if (message?.web_app_data !== undefined) {
+    return "web_app_data";
+  }
+
+  if (message) {
+    return "message";
+  }
+
+  if (recordField(update, "edited_message")) {
+    return "edited_message";
+  }
+
+  if (recordField(update, "callback_query")) {
+    return "callback_query";
+  }
+
+  if (recordField(update, "my_chat_member")) {
+    return "my_chat_member";
+  }
+
+  return "unknown";
+}
+
+function telegramUpdateId(update: unknown): number | undefined {
+  if (!isRecord(update)) {
+    return undefined;
+  }
+
+  return typeof update.update_id === "number" ? update.update_id : undefined;
+}
+
+function telegramMessageText(update: unknown): string | undefined {
+  const message = telegramMessageRecord(update);
+  return typeof message?.text === "string" && message.text.trim()
+    ? message.text
+    : undefined;
+}
+
+function telegramMessageChatId(update: unknown): number | undefined {
+  const chat = recordField(telegramMessageRecord(update), "chat");
+  return typeof chat?.id === "number" ? chat.id : undefined;
+}
+
+function telegramCommand(update: unknown): string | undefined {
+  const text = telegramMessageText(update);
+
+  if (!text) {
+    return undefined;
+  }
+
+  const head = text.trim().split(/\s+/)[0];
+
+  if (!head?.startsWith("/")) {
+    return undefined;
+  }
+
+  const command = head.slice(1).split("@")[0]?.toLowerCase();
+  return command ? `/${command}` : undefined;
+}
+
+function sensitiveLogValues(options: ResolvedBotServerOptions): string[] {
+  return [
+    options.telegramBotToken,
+    options.webhookSecret,
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
+    process.env.SUPABASE_SERVICE_KEY,
+  ].filter((value): value is string => Boolean(value));
+}
+
+function sanitizeErrorMessage(
+  error: unknown,
+  options: ResolvedBotServerOptions,
+): string {
+  let message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : "Unknown error";
+
+  for (const value of sensitiveLogValues(options)) {
+    if (value.length >= 4) {
+      message = message.replaceAll(value, "[redacted]");
+    }
+  }
+
+  return message.split(/\r?\n/)[0]?.slice(0, 240) || "Unknown error";
+}
+
+function logTelegramWebhookError(
+  error: unknown,
+  options: ResolvedBotServerOptions,
+  context: TelegramWebhookLogContext,
+): void {
+  console.error("telegram_webhook_error", {
+    update_id: context.updateId ?? null,
+    update_type: context.updateType,
+    command: context.command ?? null,
+    error: sanitizeErrorMessage(error, options),
+  });
+}
+
+function telegramOk(response: ServerResponse): void {
+  writeJson(response, 200, {
+    ok: true,
+  });
+}
+
+async function sendTelegramCommandError(
+  update: unknown,
+  options: ResolvedBotServerOptions,
+  text: string,
+): Promise<void> {
+  const chatId = telegramMessageChatId(update);
+
+  if (!chatId || !options.telegram) {
+    return;
+  }
+
+  await options.telegram.sendMessage({
+    chatId,
+    text,
+  });
+}
+
+async function handleTelegramWebhook(
+  request: IncomingMessage,
+  response: ServerResponse,
+  options: ResolvedBotServerOptions,
+): Promise<void> {
+  const telegram = options.telegram;
+
+  if (!telegram) {
+    writeJson(response, 503, {
+      error: "telegram_not_configured",
+    });
+    return;
+  }
+
+  let update: unknown;
+  const context: TelegramWebhookLogContext = {
+    updateType: "unknown",
+  };
+
+  try {
+    update = await readJsonBody(request);
+    context.updateId = telegramUpdateId(update);
+    context.updateType = detectTelegramUpdateType(update);
+    context.command = telegramCommand(update);
+
+    if (!telegramMessageText(update)) {
+      telegramOk(response);
+      return;
+    }
+
+    if (context.updateType !== "message") {
+      telegramOk(response);
+      return;
+    }
+
+    await handleTelegramUpdate(update as TelegramUpdate, {
+      telegram,
+      store: options.store,
+      tmaUrl: options.tmaUrl,
+      defaultUserId: options.defaultUserId,
+      defaultTelegramUserId: options.defaultTelegramUserId,
+    });
+
+    telegramOk(response);
+  } catch (error) {
+    logTelegramWebhookError(error, options, context);
+
+    try {
+      await sendTelegramCommandError(
+        update,
+        options,
+        context.command === "/log"
+          ? "❌ Не смог добавить в Inbox."
+          : "❌ Ошибка обработки команды.",
+      );
+    } catch (sendError) {
+      logTelegramWebhookError(sendError, options, context);
+    }
+
+    telegramOk(response);
+  }
 }
 
 function tmaModeActiveUntil(
@@ -688,19 +919,7 @@ async function handleRequest(
       return;
     }
 
-    const update = (await readJsonBody(request)) as TelegramUpdate;
-
-    await handleTelegramUpdate(update, {
-      telegram: options.telegram,
-      store: options.store,
-      tmaUrl: options.tmaUrl,
-      defaultUserId: options.defaultUserId,
-      defaultTelegramUserId: options.defaultTelegramUserId,
-    });
-
-    writeJson(response, 200, {
-      ok: true,
-    });
+    await handleTelegramWebhook(request, response, options);
     return;
   }
 

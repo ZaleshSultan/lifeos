@@ -18,11 +18,23 @@ export interface TelegramMessage {
   chat: TelegramChat;
   date?: number;
   text?: string;
+  web_app_data?: {
+    data: string;
+    button_text?: string;
+  };
 }
 
 export interface TelegramUpdate {
   update_id: number;
   message?: TelegramMessage;
+  edited_message?: TelegramMessage;
+  callback_query?: {
+    id?: string;
+    from?: TelegramUser;
+    message?: TelegramMessage;
+    data?: string;
+  };
+  my_chat_member?: Record<string, unknown>;
 }
 
 export interface TelegramInlineKeyboardButton {
