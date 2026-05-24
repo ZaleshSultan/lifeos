@@ -7,6 +7,8 @@ import type {
   HomeSummary,
   ModeSummary,
   SaveModeInput,
+  StudyCourse,
+  UpdateCourseProgressInput,
 } from "./types";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(
@@ -99,5 +101,21 @@ export const api = {
     return request<ModeSummary>("/api/tma/mode", {
       method: "DELETE",
     });
+  },
+  getDiscreteMathCourse(): Promise<StudyCourse | null> {
+    return request<StudyCourse | null>(
+      "/api/tma/course/discrete-math-summer-term",
+    );
+  },
+  updateDiscreteMathCourseProgress(
+    input: UpdateCourseProgressInput,
+  ): Promise<StudyCourse> {
+    return request<StudyCourse>(
+      "/api/tma/course/discrete-math-summer-term/progress",
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      },
+    );
   },
 };

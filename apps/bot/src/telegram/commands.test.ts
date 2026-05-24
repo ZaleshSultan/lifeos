@@ -16,6 +16,7 @@ import type {
   LifeEntityRecord,
   LifeOSStore,
   ObsidianSyncStatusSummary,
+  StudyCourseRecord,
   TaskRecord,
   TelegramUserRecord,
   TmaFocusSummary,
@@ -43,6 +44,9 @@ class FakeStore implements LifeOSStore {
     mode: LifeMode;
     activeUntil: string | null | undefined;
   }> = [];
+  readonly courseProgressUpdates: Array<
+    Parameters<LifeOSStore["updateStudyCourseProgress"]>[0]
+  > = [];
   focusItems = [
     {
       id: "focus-study",
@@ -68,6 +72,24 @@ class FakeStore implements LifeOSStore {
     title: "Push day",
     startedAt: "2026-05-18T00:00:00.000Z",
     created: true,
+  };
+
+  course: StudyCourseRecord | null = {
+    id: "course-1",
+    userId: "user-1",
+    code: "DISCRETE-MATH-SUMMER-2026",
+    title: "Discrete Mathematics",
+    term: "Summer 2026",
+    startsOn: "2026-07-06",
+    endsOn: "2026-08-15",
+    status: "active",
+    progressPercent: 0,
+    completedUnits: 0,
+    totalUnits: null,
+    lastStudiedOn: null,
+    metadata: {},
+    createdAt: "2026-05-18T00:00:00.000Z",
+    updatedAt: "2026-05-18T00:00:00.000Z",
   };
 
   async resolveTelegramUser(): Promise<TelegramUserRecord | null> {
@@ -205,13 +227,33 @@ class FakeStore implements LifeOSStore {
   }
 
   async getActiveStudyCourse() {
-    return null;
+    return this.course;
   }
 
-  updateStudyCourseProgress(): ReturnType<
-    LifeOSStore["updateStudyCourseProgress"]
-  > {
-    return Promise.reject(new Error("not used"));
+  async updateStudyCourseProgress(
+    input: Parameters<LifeOSStore["updateStudyCourseProgress"]>[0],
+  ): Promise<StudyCourseRecord> {
+    this.courseProgressUpdates.push(input);
+
+    if (!this.course) {
+      throw new Error("not used");
+    }
+
+    this.course = {
+      ...this.course,
+      progressPercent: input.progressPercent,
+      completedUnits: input.completedUnits ?? this.course.completedUnits,
+      totalUnits:
+        input.totalUnits === undefined
+          ? this.course.totalUnits
+          : input.totalUnits,
+      lastStudiedOn: input.lastStudiedOn ?? this.course.lastStudiedOn,
+      status: input.status ?? this.course.status,
+      metadata: input.metadata ?? this.course.metadata,
+      updatedAt: "2026-05-18T12:00:00.000Z",
+    };
+
+    return this.course;
   }
 
   async resolveCurrentMode(): Promise<LifeModeResolution> {
@@ -607,6 +649,35 @@ describe("Telegram commands", () => {
     expect(context.sent.at(-1)?.text).toContain("Source: <b>manual</b>");
   });
 
+  it("sets manual mode for today", async () => {
+    const context = runtime();
+
+    await handleTelegramUpdate(update("/mode set practice today"), context);
+
+    expect(context.store.setModes).toEqual([
+      {
+        mode: "practice",
+        activeUntil: "2026-05-19T00:00:00.000Z",
+      },
+    ]);
+  });
+
+  it("sets manual mode until a date", async () => {
+    const context = runtime();
+
+    await handleTelegramUpdate(
+      update("/mode set summer_term until:2026-08-15"),
+      context,
+    );
+
+    expect(context.store.setModes).toEqual([
+      {
+        mode: "summer_term",
+        activeUntil: "2026-08-15T00:00:00.000Z",
+      },
+    ]);
+  });
+
   it("clears manual mode from /mode auto", async () => {
     const context = runtime();
 
@@ -616,6 +687,71 @@ describe("Telegram commands", () => {
     expect(context.sent.at(-1)?.text).toContain(
       "Manual mode override cleared.",
     );
+  });
+
+  it("clears manual mode from /mode clear", async () => {
+    const context = runtime();
+
+    await handleTelegramUpdate(update("/mode clear"), context);
+
+    expect(context.store.clearedModes).toEqual(["user-1"]);
+    expect(context.sent.at(-1)?.text).toContain(
+      "Manual mode override cleared.",
+    );
+  });
+
+  it("shows the active study course", async () => {
+    const context = runtime();
+
+    await handleTelegramUpdate(update("/course"), context);
+
+    expect(context.sent.at(-1)?.text).toContain("Discrete Mathematics");
+    expect(context.sent.at(-1)?.text).toContain("DISCRETE-MATH-SUMMER-2026");
+    expect(context.sent.at(-1)?.text).toContain("Progress: <b>0%</b>");
+  });
+
+  it("updates active study course progress", async () => {
+    const context = runtime();
+
+    await handleTelegramUpdate(update("/course progress 42"), context);
+
+    expect(context.store.courseProgressUpdates).toMatchObject([
+      {
+        userId: "user-1",
+        courseId: "course-1",
+        progressPercent: 42,
+        lastStudiedOn: "2026-05-18",
+      },
+    ]);
+    expect(context.sent.at(-1)?.text).toContain("Course progress updated.");
+    expect(context.sent.at(-1)?.text).toContain("Progress: <b>42%</b>");
+  });
+
+  it("records an active study course topic", async () => {
+    const context = runtime();
+
+    await handleTelegramUpdate(update("/course topic Graph coloring"), context);
+
+    expect(context.store.entities).toMatchObject([
+      {
+        entityType: "review",
+        domain: "study",
+        status: "inbox",
+        title: "Discrete Mathematics: Graph coloring",
+        body: "Graph coloring",
+        sourceCommand: "/course topic",
+        linkedTable: "study_courses",
+        linkedId: "course-1",
+        metadata: {
+          courseId: "course-1",
+          courseCode: "DISCRETE-MATH-SUMMER-2026",
+          priorityKey: "coursework",
+          topic: "Graph coloring",
+        },
+      },
+    ]);
+    expect(context.store.syncEntityIds).toEqual(["entity-1"]);
+    expect(context.sent.at(-1)?.text).toContain("Course topic saved.");
   });
 
   it("does not create records for unlinked Telegram users", async () => {

@@ -9,6 +9,7 @@ import type {
   CurrentWorkoutSummary,
   HealthIngestResult,
   LifeOSStore,
+  StudyCourseRecord,
 } from "@lifeos/db";
 import { afterEach, describe, expect, it } from "vitest";
 import { createBotServer } from "./server.js";
@@ -76,6 +77,23 @@ function workoutSummary(overrides: Partial<CurrentWorkoutSummary> = {}) {
 
 function tmaStore(events: string[] = []): LifeOSStore {
   let mode: LifeMode = "trimester";
+  let course: StudyCourseRecord = {
+    id: "course-1",
+    userId: "user-1",
+    code: "DISCRETE-MATH-SUMMER-2026",
+    title: "Discrete Mathematics",
+    term: "Summer 2026",
+    startsOn: "2026-07-06",
+    endsOn: "2026-08-15",
+    status: "active",
+    progressPercent: 0,
+    completedUnits: 0,
+    totalUnits: null,
+    lastStudiedOn: null,
+    metadata: {},
+    createdAt: "2026-05-18T10:00:00.000Z",
+    updatedAt: "2026-05-18T10:00:00.000Z",
+  };
   const modeResolution = (): LifeModeResolution => ({
     userId: "user-1",
     mode,
@@ -133,10 +151,18 @@ function tmaStore(events: string[] = []): LifeOSStore {
       return null;
     },
     async getActiveStudyCourse() {
-      return null;
+      events.push("getActiveStudyCourse");
+      return course;
     },
-    updateStudyCourseProgress() {
-      return Promise.reject(new Error("not used"));
+    async updateStudyCourseProgress(input) {
+      events.push("updateStudyCourseProgress");
+      course = {
+        ...course,
+        progressPercent: input.progressPercent,
+        lastStudiedOn: input.lastStudiedOn ?? course.lastStudiedOn,
+        updatedAt: "2026-05-18T10:05:00.000Z",
+      };
+      return course;
     },
     async resolveCurrentMode() {
       events.push("resolveCurrentMode");
@@ -613,6 +639,54 @@ describe("bot server", () => {
       "resolveCurrentMode",
       "setManualLifeMode",
       "clearManualLifeMode",
+    ]);
+  });
+
+  it("serves and updates the discrete mathematics course through TMA routes", async () => {
+    const events: string[] = [];
+    const server = createBotServer({
+      config: {
+        lifeosDefaultUserId: "user-1",
+        allowUnsafeTmaDevAuth: true,
+      },
+      store: tmaStore(events),
+    });
+    servers.push(server);
+
+    const port = await listen(server);
+    const getResponse = await fetch(
+      `http://127.0.0.1:${port}/api/tma/course/discrete-math-summer-term`,
+    );
+    const updateResponse = await fetch(
+      `http://127.0.0.1:${port}/api/tma/course/discrete-math-summer-term/progress`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          progressPercent: 37,
+        }),
+      },
+    );
+
+    expect(getResponse.status).toBe(200);
+    await expect(getResponse.json()).resolves.toMatchObject({
+      data: {
+        title: "Discrete Mathematics",
+        progressPercent: 0,
+      },
+    });
+    expect(updateResponse.status).toBe(200);
+    await expect(updateResponse.json()).resolves.toMatchObject({
+      data: {
+        code: "DISCRETE-MATH-SUMMER-2026",
+        progressPercent: 37,
+      },
+    });
+    expect(events).toEqual([
+      "getActiveStudyCourse",
+      "updateStudyCourseProgress",
     ]);
   });
 

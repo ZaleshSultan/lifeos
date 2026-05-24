@@ -2,6 +2,9 @@ export type RecoveryMode = "recovery" | "maintenance" | "baseline" | "growth";
 
 export type LifeMode =
   | "exam_war"
+  | "practice"
+  | "recovery_setup"
+  | "summer_term"
   | "summer"
   | "trimester"
   | "recovery"
@@ -122,6 +125,35 @@ export interface ModeSummary {
   activeUntil: string | null;
   priorityWeights: Record<string, number>;
   resolvedAt: string;
+}
+
+export type StudyCourseStatus =
+  | "planned"
+  | "active"
+  | "paused"
+  | "completed"
+  | "archived";
+
+export interface StudyCourse {
+  id: string;
+  userId: string;
+  code: string;
+  title: string;
+  term: string | null;
+  startsOn: string | null;
+  endsOn: string | null;
+  status: StudyCourseStatus;
+  progressPercent: number;
+  completedUnits: number;
+  totalUnits: number | null;
+  lastStudiedOn: string | null;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpdateCourseProgressInput {
+  progressPercent: number;
 }
 
 export interface SaveModeInput {

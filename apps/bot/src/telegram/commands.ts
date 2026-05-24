@@ -12,6 +12,7 @@ import type {
   Json,
   LifeEntityRecord,
   LifeOSStore,
+  StudyCourseRecord,
   TelegramUserRecord,
 } from "@lifeos/db";
 import type {
@@ -47,6 +48,10 @@ const HELP_TEXT = [
   "/mode",
   "/mode set <mode> [today|until:YYYY-MM-DD]",
   "/mode auto",
+  "/mode clear",
+  "/course",
+  "/course progress <number>",
+  "/course topic <text>",
   "/review review notes",
   "/spend 1200 KZT lunch",
   "/finance",
@@ -266,10 +271,20 @@ function modeUsage(): string {
   return [
     "Usage:",
     "/mode",
-    "/mode set summer",
-    "/mode set recovery today",
-    "/mode set exam_war until:2026-06-05",
+    "/mode set exam_war",
+    "/mode set practice today",
+    "/mode set summer_term until:2026-08-15",
     "/mode auto",
+    "/mode clear",
+  ].join("\n");
+}
+
+function courseUsage(): string {
+  return [
+    "Usage:",
+    "/course",
+    "/course progress <number>",
+    "/course topic <text>",
   ].join("\n");
 }
 
@@ -297,6 +312,70 @@ function formatModeResolution(mode: LifeModeResolution): string {
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function formatCourseProgress(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+function formatStudyCourse(course: StudyCourseRecord): string {
+  const units =
+    course.totalUnits === null
+      ? ""
+      : `Units: <b>${course.completedUnits}/${course.totalUnits}</b>`;
+
+  return [
+    `Course: <b>${escapeHtml(course.title)}</b>`,
+    `Code: <code>${escapeHtml(course.code)}</code>`,
+    course.term ? `Term: ${escapeHtml(course.term)}` : "",
+    course.startsOn && course.endsOn
+      ? `Dates: <code>${escapeHtml(course.startsOn)}</code> to <code>${escapeHtml(course.endsOn)}</code>`
+      : "",
+    `Status: <b>${escapeHtml(course.status)}</b>`,
+    `Progress: <b>${formatCourseProgress(course.progressPercent)}%</b>`,
+    units,
+    course.lastStudiedOn
+      ? `Last studied: <code>${escapeHtml(course.lastStudiedOn)}</code>`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function localDateString(date: Date, timeZone: string): string {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(date);
+    const values = Object.fromEntries(
+      parts
+        .filter((part) => part.type !== "literal")
+        .map((part) => [part.type, part.value]),
+    );
+
+    return `${values.year}-${values.month}-${values.day}`;
+  } catch {
+    return date.toISOString().slice(0, 10);
+  }
+}
+
+function parseCourseProgress(value: string): number | null {
+  const match = value.trim().match(/^progress\s+(\d+(?:\.\d+)?)%?$/i);
+
+  if (!match?.[1]) {
+    return null;
+  }
+
+  const progress = Number(match[1]);
+
+  if (!Number.isFinite(progress) || progress < 0 || progress > 100) {
+    return null;
+  }
+
+  return progress;
 }
 
 function timezoneOffsetMs(date: Date, timeZone: string): number {
@@ -914,7 +993,7 @@ async function handleReadCommand(
     }
 
     if (normalized === "auto" || normalized === "clear") {
-      const mode = await runtime.store.clearManualLifeMode(user.userId);
+      const mode = await runtime.store.clearManualMode(user.userId);
 
       await runtime.telegram.sendMessage({
         chatId: message.chat.id,
@@ -941,7 +1020,7 @@ async function handleReadCommand(
         return;
       }
 
-      const mode = await runtime.store.setManualLifeMode({
+      const mode = await runtime.store.setManualMode({
         userId: user.userId,
         mode: parsed.mode,
         activeUntil: parsed.activeUntil,
@@ -960,6 +1039,121 @@ async function handleReadCommand(
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
       text: modeUsage(),
+    });
+    return;
+  }
+
+  if (command === "course") {
+    const now = runtime.now?.() ?? new Date();
+    const today = localDateString(now, user.timezone);
+    const trimmed = args.trim();
+
+    if (!trimmed) {
+      const course = await runtime.store.getActiveStudyCourse(
+        user.userId,
+        today,
+      );
+
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: course
+          ? formatStudyCourse(course)
+          : `No active study course for <code>${escapeHtml(today)}</code>.`,
+      });
+      return;
+    }
+
+    const progress = parseCourseProgress(trimmed);
+
+    if (progress !== null) {
+      const course = await runtime.store.getActiveStudyCourse(
+        user.userId,
+        today,
+      );
+
+      if (!course) {
+        await runtime.telegram.sendMessage({
+          chatId: message.chat.id,
+          text: `No active study course for <code>${escapeHtml(today)}</code>.`,
+        });
+        return;
+      }
+
+      const updated = await runtime.store.updateStudyCourseProgress({
+        userId: user.userId,
+        courseId: course.id,
+        progressPercent: progress,
+        lastStudiedOn: today,
+      });
+
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: ["Course progress updated.", formatStudyCourse(updated)].join(
+          "\n\n",
+        ),
+      });
+      return;
+    }
+
+    if (trimmed.toLowerCase().startsWith("topic ")) {
+      const topic = trimmed.slice("topic ".length).trim();
+
+      if (!topic) {
+        await runtime.telegram.sendMessage({
+          chatId: message.chat.id,
+          text: courseUsage(),
+        });
+        return;
+      }
+
+      const course = await runtime.store.getActiveStudyCourse(
+        user.userId,
+        today,
+      );
+
+      if (!course) {
+        await runtime.telegram.sendMessage({
+          chatId: message.chat.id,
+          text: `No active study course for <code>${escapeHtml(today)}</code>.`,
+        });
+        return;
+      }
+
+      const entity = await createEntityAndQueueSync(runtime.store, message, {
+        userId: user.userId,
+        entityType: "review",
+        domain: "study",
+        status: "inbox",
+        title: `${course.title}: ${topic}`.slice(0, 120),
+        body: topic,
+        sourceCommand: "/course topic",
+        linkedTable: "study_courses",
+        linkedId: course.id,
+        metadata: metadata({
+          courseId: course.id,
+          courseCode: course.code,
+          courseTitle: course.title,
+          priorityKey: "coursework",
+          tags: ["study", "course"],
+          topic,
+        }),
+      });
+
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: [
+          "Course topic saved.",
+          `Course: <b>${escapeHtml(course.title)}</b>`,
+          `Topic: ${escapeHtml(topic)}`,
+          `Entity id: <code>${escapeHtml(entity.id)}</code>`,
+        ].join("\n"),
+      });
+      return;
+    }
+
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: courseUsage(),
     });
     return;
   }

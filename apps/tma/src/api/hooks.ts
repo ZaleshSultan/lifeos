@@ -8,6 +8,7 @@ export const queryKeys = {
   health: ["health"] as const,
   focus: ["focus"] as const,
   mode: ["mode"] as const,
+  discreteMathCourse: ["course", "discrete-math-summer-term"] as const,
 };
 
 export function useHomeQuery() {
@@ -45,6 +46,13 @@ export function useModeQuery() {
   });
 }
 
+export function useDiscreteMathCourseQuery() {
+  return useQuery({
+    queryKey: queryKeys.discreteMathCourse,
+    queryFn: api.getDiscreteMathCourse,
+  });
+}
+
 export function useSaveModeMutation() {
   const queryClient = useQueryClient();
 
@@ -71,6 +79,20 @@ export function useClearModeMutation() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.home });
       void queryClient.invalidateQueries({ queryKey: queryKeys.focus });
       void queryClient.invalidateQueries({ queryKey: queryKeys.workout });
+    },
+  });
+}
+
+export function useUpdateDiscreteMathCourseProgressMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: api.updateDiscreteMathCourseProgress,
+    onSuccess(data) {
+      telegram.hapticImpact("light");
+      queryClient.setQueryData(queryKeys.discreteMathCourse, data);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.focus });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.home });
     },
   });
 }

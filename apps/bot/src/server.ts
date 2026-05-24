@@ -340,6 +340,53 @@ function parseTmaModeBody(
   }
 }
 
+function parseTmaCourseProgressBody(
+  body: unknown,
+): { ok: true; progressPercent: number } | { ok: false; error: string } {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return { ok: false, error: "invalid_course_progress_payload" };
+  }
+
+  const record = body as Record<string, unknown>;
+  const rawProgress = record.progressPercent;
+  const progressPercent =
+    typeof rawProgress === "number"
+      ? rawProgress
+      : typeof rawProgress === "string"
+        ? Number(rawProgress)
+        : Number.NaN;
+
+  if (
+    !Number.isFinite(progressPercent) ||
+    progressPercent < 0 ||
+    progressPercent > 100
+  ) {
+    return { ok: false, error: "invalid_course_progress" };
+  }
+
+  return { ok: true, progressPercent };
+}
+
+function todayForTimezone(timezone: string): string {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date());
+    const values = Object.fromEntries(
+      parts
+        .filter((part) => part.type !== "literal")
+        .map((part) => [part.type, part.value]),
+    );
+
+    return `${values.year}-${values.month}-${values.day}`;
+  } catch {
+    return new Date().toISOString().slice(0, 10);
+  }
+}
+
 async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
@@ -422,6 +469,49 @@ async function handleRequest(
         response,
         200,
         tmaData(await store.clearManualLifeMode(auth.user.userId)),
+      );
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      requestUrl.pathname === "/api/tma/course/discrete-math-summer-term"
+    ) {
+      writeJson(
+        response,
+        200,
+        tmaData(
+          await store.getActiveStudyCourse(auth.user.userId, "2026-07-06"),
+        ),
+      );
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname ===
+        "/api/tma/course/discrete-math-summer-term/progress"
+    ) {
+      const body = parseTmaCourseProgressBody(await readJsonBody(request));
+
+      if (!body.ok) {
+        writeJson(response, 400, {
+          error: body.error,
+        });
+        return;
+      }
+
+      writeJson(
+        response,
+        200,
+        tmaData(
+          await store.updateStudyCourseProgress({
+            userId: auth.user.userId,
+            code: "DISCRETE-MATH-SUMMER-2026",
+            progressPercent: body.progressPercent,
+            lastStudiedOn: todayForTimezone(auth.user.timezone),
+          }),
+        ),
       );
       return;
     }
