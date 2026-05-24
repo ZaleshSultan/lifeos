@@ -76,6 +76,118 @@ export interface CurrentWorkout {
   exercises: WorkoutExercise[];
 }
 
+export interface SourceRecord {
+  id: string;
+  userId: string;
+  sourceKey: string;
+  sourceType: string;
+  displayName: string;
+  status: "disabled" | "connected" | "error";
+  configJson?: Record<string, unknown>;
+  lastSyncAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SourceEventRecord {
+  id: string;
+  userId: string;
+  sourceKey: string;
+  externalId: string | null;
+  eventType: string;
+  title: string | null;
+  description: string | null;
+  location: string | null;
+  startsAt: string | null;
+  endsAt: string | null;
+  dueAt: string | null;
+  status: string;
+  rawJson?: Record<string, unknown>;
+  normalizedEntityId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ReminderRecord {
+  id: string;
+  userId: string;
+  lifeEntityId: string | null;
+  sourceEventId: string | null;
+  channel: string;
+  remindAt: string;
+  status: "pending" | "sent" | "cancelled" | "failed";
+  message: string;
+  metadataJson?: Record<string, unknown>;
+  sentAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SyncRunRecord {
+  id: string;
+  userId: string;
+  sourceId: string | null;
+  sourceKey: string;
+  status: "running" | "success" | "partial" | "failed";
+  startedAt: string;
+  finishedAt: string | null;
+  recordsSeen: number;
+  recordsCreated: number;
+  recordsUpdated: number;
+  errorMessage: string | null;
+  metadataJson?: Record<string, unknown>;
+}
+
+export interface SourcesSummary {
+  sources: SourceRecord[];
+  sourceEvents: SourceEventRecord[];
+  reminders: ReminderRecord[];
+  syncRuns: SyncRunRecord[];
+}
+
+export interface AcademicRecord {
+  id: string;
+  userId: string;
+  sourceEventId: string | null;
+  courseTitle: string;
+  recordType: string;
+  title: string;
+  valueText: string | null;
+  score: number | null;
+  maxScore: number | null;
+  percentage: number | null;
+  occursAt: string | null;
+  dueAt: string | null;
+  rawJson?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AcademicSummary {
+  currentMode: ModeSummary;
+  nextAcademicEvent: SourceEventRecord | null;
+  finals: SourceEventRecord[];
+  examfx: SourceEventRecord[];
+  activeCourse: StudyCourse | null;
+  summerCourse: StudyCourse | null;
+  nextTransition: {
+    id?: string;
+    userId: string;
+    name: string;
+    mode: LifeMode;
+    startsOn: string;
+    endsOn: string;
+    priorityJson?: Record<string, number>;
+    createdAt?: string | null;
+  } | null;
+  academicRecords: AcademicRecord[];
+}
+
+export interface CreateReminderInput {
+  message: string;
+  remindAt: string;
+}
+
 export interface HealthSummary {
   date: string;
   lifeMode: LifeMode;

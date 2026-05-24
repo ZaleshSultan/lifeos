@@ -1,5 +1,12 @@
-import { Activity, Dumbbell, HeartPulse, RefreshCw } from "lucide-react";
-import { useHomeQuery } from "../api/hooks";
+import {
+  Activity,
+  CalendarClock,
+  Dumbbell,
+  GraduationCap,
+  HeartPulse,
+  RefreshCw,
+} from "lucide-react";
+import { useAcademicQuery, useHomeQuery } from "../api/hooks";
 import { recoveryModeLabels } from "../api/types";
 import { ErrorPanel, LoadingPanel } from "../components/AsyncState";
 import { MetricTile } from "../components/MetricTile";
@@ -12,6 +19,7 @@ interface HomeScreenProps {
 
 export function HomeScreen({ onOpenWorkout }: HomeScreenProps) {
   const query = useHomeQuery();
+  const academicQuery = useAcademicQuery();
 
   if (query.isLoading) {
     return <LoadingPanel title="Loading home" />;
@@ -37,6 +45,9 @@ export function HomeScreen({ onOpenWorkout }: HomeScreenProps) {
   }
 
   const home = query.data;
+  const academic = academicQuery.data;
+  const nextAcademicEvent = academic?.nextAcademicEvent;
+  const activeCourse = academic?.activeCourse;
 
   return (
     <div className="space-y-4">
@@ -72,6 +83,61 @@ export function HomeScreen({ onOpenWorkout }: HomeScreenProps) {
           tone={home.pendingSyncCount ? "amber" : "mint"}
           value={home.pendingSyncCount ?? 0}
         />
+      </section>
+
+      <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
+        <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
+          <GraduationCap className="h-5 w-5 text-cyan-400" />
+          Academic
+        </div>
+        {academicQuery.isLoading ? (
+          <p className="text-sm text-zinc-500">Loading academic data.</p>
+        ) : academicQuery.isError ? (
+          <p className="text-sm text-rose-300">
+            Academic unavailable: {academicQuery.error.message}
+          </p>
+        ) : academic ? (
+          <div className="space-y-3">
+            <div className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2">
+              <div className="text-xs text-zinc-500">Current mode</div>
+              <div className="mt-1 text-sm font-semibold text-white">
+                {academic.currentMode.label}
+              </div>
+            </div>
+            {nextAcademicEvent ? (
+              <div className="rounded-lg border border-cyan-400/20 bg-cyan-400/[0.08] px-3 py-2">
+                <div className="flex items-center gap-2 text-xs font-semibold uppercase text-cyan-300">
+                  <CalendarClock className="h-3.5 w-3.5" />
+                  Next event
+                </div>
+                <div className="mt-1 text-sm font-semibold text-white">
+                  {nextAcademicEvent.title ?? nextAcademicEvent.eventType}
+                </div>
+                <div className="mt-0.5 text-xs text-zinc-400">
+                  {nextAcademicEvent.startsAt
+                    ? formatDateTime(nextAcademicEvent.startsAt)
+                    : nextAcademicEvent.dueAt
+                      ? formatDateTime(nextAcademicEvent.dueAt)
+                      : "Time pending"}
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-zinc-500">
+                No upcoming academic events.
+              </p>
+            )}
+            {activeCourse ? (
+              <div className="rounded-lg border border-emerald-400/20 bg-emerald-400/[0.08] px-3 py-2">
+                <div className="text-xs text-emerald-300">Active course</div>
+                <div className="mt-1 text-sm font-semibold text-white">
+                  {activeCourse.title}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <p className="text-sm text-zinc-500">Academic data is empty.</p>
+        )}
       </section>
 
       {home.activeWorkout ? (

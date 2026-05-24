@@ -4,4 +4,5 @@ export * from "./health.js";
 export * from "./health-ingest.js";
 export * from "./modes.js";
 export * from "./parsers.js";
+export * from "./source-events.js";
 export * from "./types.js";

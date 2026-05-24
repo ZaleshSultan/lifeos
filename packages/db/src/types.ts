@@ -26,6 +26,8 @@ export type LifeEntityType =
   | "deadline"
   | "health"
   | "health_daily"
+  | "external_event"
+  | "reminder"
   | "mode"
   | "review"
   | "finance"
@@ -40,6 +42,12 @@ export type ObsidianSyncStatus =
   | "cancelled";
 
 export type HealthSyncRunStatus = "success" | "failed";
+
+export type ExternalSourceStatus = "disabled" | "connected" | "error";
+
+export type SyncRunStatus = "running" | "success" | "partial" | "failed";
+
+export type ReminderStatus = "pending" | "sent" | "cancelled" | "failed";
 
 export type LifeOSProjectStatus =
   | "active"
@@ -992,6 +1000,166 @@ export interface Database {
           description?: string | null;
           active?: boolean;
           metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        }
+      >;
+      external_sources: TableDefinition<
+        {
+          id: string;
+          user_id: string;
+          source_key: string;
+          source_type: string;
+          display_name: string;
+          status: ExternalSourceStatus;
+          config_json: Json;
+          last_sync_at: string | null;
+          created_at: string;
+          updated_at: string;
+        },
+        {
+          id?: string;
+          user_id: string;
+          source_key: string;
+          source_type: string;
+          display_name: string;
+          status?: ExternalSourceStatus;
+          config_json?: Json;
+          last_sync_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        }
+      >;
+      sync_runs: TableDefinition<
+        {
+          id: string;
+          user_id: string;
+          source_id: string | null;
+          source_key: string;
+          status: SyncRunStatus;
+          started_at: string;
+          finished_at: string | null;
+          records_seen: number;
+          records_created: number;
+          records_updated: number;
+          error_message: string | null;
+          metadata_json: Json;
+        },
+        {
+          id?: string;
+          user_id: string;
+          source_id?: string | null;
+          source_key: string;
+          status?: SyncRunStatus;
+          started_at?: string;
+          finished_at?: string | null;
+          records_seen?: number;
+          records_created?: number;
+          records_updated?: number;
+          error_message?: string | null;
+          metadata_json?: Json;
+        }
+      >;
+      source_events: TableDefinition<
+        {
+          id: string;
+          user_id: string;
+          source_key: string;
+          external_id: string | null;
+          event_type: string;
+          title: string | null;
+          description: string | null;
+          location: string | null;
+          starts_at: string | null;
+          ends_at: string | null;
+          due_at: string | null;
+          status: string;
+          raw_json: Json;
+          normalized_entity_id: string | null;
+          created_at: string;
+          updated_at: string;
+        },
+        {
+          id?: string;
+          user_id: string;
+          source_key: string;
+          external_id?: string | null;
+          event_type: string;
+          title?: string | null;
+          description?: string | null;
+          location?: string | null;
+          starts_at?: string | null;
+          ends_at?: string | null;
+          due_at?: string | null;
+          status?: string;
+          raw_json?: Json;
+          normalized_entity_id?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        }
+      >;
+      reminders: TableDefinition<
+        {
+          id: string;
+          user_id: string;
+          life_entity_id: string | null;
+          source_event_id: string | null;
+          channel: string;
+          remind_at: string;
+          status: ReminderStatus;
+          message: string;
+          metadata_json: Json;
+          sent_at: string | null;
+          created_at: string;
+          updated_at: string;
+        },
+        {
+          id?: string;
+          user_id: string;
+          life_entity_id?: string | null;
+          source_event_id?: string | null;
+          channel?: string;
+          remind_at: string;
+          status?: ReminderStatus;
+          message: string;
+          metadata_json?: Json;
+          sent_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        }
+      >;
+      academic_records: TableDefinition<
+        {
+          id: string;
+          user_id: string;
+          source_event_id: string | null;
+          course_title: string;
+          record_type: string;
+          title: string;
+          value_text: string | null;
+          score: number | null;
+          max_score: number | null;
+          percentage: number | null;
+          occurs_at: string | null;
+          due_at: string | null;
+          raw_json: Json;
+          created_at: string;
+          updated_at: string;
+        },
+        {
+          id?: string;
+          user_id: string;
+          source_event_id?: string | null;
+          course_title: string;
+          record_type: string;
+          title: string;
+          value_text?: string | null;
+          score?: number | null;
+          max_score?: number | null;
+          percentage?: number | null;
+          occurs_at?: string | null;
+          due_at?: string | null;
+          raw_json?: Json;
           created_at?: string;
           updated_at?: string;
         }

@@ -12,7 +12,13 @@ import type {
   HealthIngestResult,
   LifeEntityRecord,
   LifeOSStore,
+  ReminderRecord,
+  SourceEventRecord,
+  SourceRecord,
   StudyCourseRecord,
+  SyncRunRecord,
+  TmaAcademicSummary,
+  TmaSourcesSummary,
 } from "@lifeos/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createBotServer, type BotServerOptions } from "./server.js";
@@ -80,6 +86,57 @@ function workoutSummary(overrides: Partial<CurrentWorkoutSummary> = {}) {
 
 function tmaStore(events: string[] = []): LifeOSStore {
   let mode: LifeMode = "trimester";
+  let reminders: ReminderRecord[] = [];
+  const sources: SourceRecord[] = [
+    {
+      id: "source-manual",
+      userId: "user-1",
+      sourceKey: "manual",
+      sourceType: "manual",
+      displayName: "Manual",
+      status: "connected",
+      configJson: {},
+      lastSyncAt: null,
+      createdAt: "2026-05-18T10:00:00.000Z",
+      updatedAt: "2026-05-18T10:00:00.000Z",
+    },
+  ];
+  const sourceEvents: SourceEventRecord[] = [
+    {
+      id: "source-event-1",
+      userId: "user-1",
+      sourceKey: "manual",
+      externalId: "academic:final:test",
+      eventType: "academic_event",
+      title: "Calculus 2 final",
+      description: "Final exam.",
+      location: null,
+      startsAt: "2026-05-26T09:00:00.000Z",
+      endsAt: null,
+      dueAt: null,
+      status: "active",
+      rawJson: {},
+      normalizedEntityId: null,
+      createdAt: "2026-05-18T10:00:00.000Z",
+      updatedAt: "2026-05-18T10:00:00.000Z",
+    },
+  ];
+  const syncRuns: SyncRunRecord[] = [
+    {
+      id: "sync-run-1",
+      userId: "user-1",
+      sourceId: "source-manual",
+      sourceKey: "manual",
+      status: "success",
+      startedAt: "2026-05-18T10:00:00.000Z",
+      finishedAt: "2026-05-18T10:01:00.000Z",
+      recordsSeen: 1,
+      recordsCreated: 1,
+      recordsUpdated: 0,
+      errorMessage: null,
+      metadataJson: {},
+    },
+  ];
   let course: StudyCourseRecord = {
     id: "course-1",
     userId: "user-1",
@@ -296,6 +353,166 @@ function tmaStore(events: string[] = []): LifeOSStore {
         openTaskCount: 2,
         topItems: [],
         priorityWeights: {},
+      };
+    },
+    async getTmaSourcesSummary() {
+      events.push("getTmaSourcesSummary");
+      return {
+        sources,
+        sourceEvents,
+        reminders,
+        syncRuns: [],
+      } satisfies TmaSourcesSummary;
+    },
+    async getTmaAcademicSummary() {
+      return {
+        currentMode: modeResolution(),
+        nextAcademicEvent: sourceEvents[0] ?? null,
+        finals: sourceEvents,
+        examfx: [],
+        activeCourse: course,
+        summerCourse: course,
+        nextTransition: null,
+        academicRecords: [],
+      } satisfies TmaAcademicSummary;
+    },
+    async upsertExternalSource(userId, source) {
+      return {
+        id: `source-${source.sourceKey}`,
+        userId,
+        sourceKey: source.sourceKey,
+        sourceType: source.sourceType,
+        displayName: source.displayName,
+        status: source.status ?? "disabled",
+        configJson: source.configJson ?? {},
+        lastSyncAt: source.lastSyncAt ?? null,
+        createdAt: "2026-05-18T10:00:00.000Z",
+        updatedAt: "2026-05-18T10:00:00.000Z",
+      };
+    },
+    async listExternalSources() {
+      return sources;
+    },
+    async createSyncRun(userId, sourceKey) {
+      return {
+        id: "sync-run-created",
+        userId,
+        sourceId: null,
+        sourceKey,
+        status: "running",
+        startedAt: "2026-05-18T10:00:00.000Z",
+        finishedAt: null,
+        recordsSeen: 0,
+        recordsCreated: 0,
+        recordsUpdated: 0,
+        errorMessage: null,
+        metadataJson: {},
+      };
+    },
+    async finishSyncRun(syncRunId, status) {
+      return {
+        ...syncRuns[0],
+        id: syncRunId,
+        status,
+        finishedAt: "2026-05-18T10:01:00.000Z",
+      };
+    },
+    async upsertSourceEvent(input) {
+      return {
+        id: "source-event-created",
+        userId: input.userId,
+        sourceKey: input.sourceKey,
+        externalId: input.externalId ?? null,
+        eventType: input.eventType,
+        title: input.title ?? null,
+        description: input.description ?? null,
+        location: input.location ?? null,
+        startsAt: input.startsAt ?? null,
+        endsAt: input.endsAt ?? null,
+        dueAt: input.dueAt ?? null,
+        status: input.status ?? "active",
+        rawJson: input.rawJson ?? {},
+        normalizedEntityId: input.normalizedEntityId ?? null,
+        createdAt: "2026-05-18T10:00:00.000Z",
+        updatedAt: "2026-05-18T10:00:00.000Z",
+      };
+    },
+    async listSourceEvents() {
+      return sourceEvents;
+    },
+    async normalizeSourceEvent() {
+      throw new Error("not used");
+    },
+    async createReminder(input) {
+      events.push("createReminder");
+      const reminder = {
+        id: `reminder-${reminders.length + 1}`,
+        userId: input.userId,
+        lifeEntityId: input.lifeEntityId ?? null,
+        sourceEventId: input.sourceEventId ?? null,
+        channel: input.channel ?? "telegram",
+        remindAt: input.remindAt,
+        status: "pending",
+        message: input.message,
+        metadataJson: input.metadataJson ?? {},
+        sentAt: null,
+        createdAt: "2026-05-18T10:00:00.000Z",
+        updatedAt: "2026-05-18T10:00:00.000Z",
+      } satisfies ReminderRecord;
+      reminders = [...reminders, reminder];
+      return reminder;
+    },
+    async listPendingReminders() {
+      return reminders;
+    },
+    async listUpcomingReminders() {
+      return reminders;
+    },
+    async markReminderSent(reminderId) {
+      const reminder = reminders.find((item) => item.id === reminderId);
+
+      if (!reminder) {
+        throw new Error("not found");
+      }
+
+      return {
+        ...reminder,
+        status: "sent",
+        sentAt: "2026-05-18T10:01:00.000Z",
+      };
+    },
+    async cancelReminder(_userId, reminderId) {
+      const reminder = reminders.find((item) => item.id === reminderId);
+
+      if (!reminder) {
+        throw new Error("not found");
+      }
+
+      return {
+        ...reminder,
+        status: "cancelled",
+      };
+    },
+    async listAcademicRecords() {
+      return [];
+    },
+    async upsertAcademicRecord(input) {
+      return {
+        id: "academic-record-1",
+        userId: input.userId,
+        sourceEventId: input.sourceEventId ?? null,
+        courseTitle: input.courseTitle,
+        recordType: input.recordType,
+        title: input.title,
+        valueText: input.valueText ?? null,
+        score: input.score ?? null,
+        maxScore: input.maxScore ?? null,
+        percentage: input.percentage ?? null,
+        occursAt: input.occursAt ?? null,
+        dueAt: input.dueAt ?? null,
+        rawJson: input.rawJson ?? {},
+        createdAt: "2026-05-18T10:00:00.000Z",
+        updatedAt: "2026-05-18T10:00:00.000Z",
       };
     },
     async getFinanceSummary() {
@@ -632,6 +849,20 @@ describe("bot server", () => {
       },
     ],
     [
+      "message text without chat",
+      {
+        update_id: 107,
+        message: {
+          message_id: 10,
+          text: "/status",
+          from: {
+            id: 30,
+            first_name: "Test",
+          },
+        },
+      },
+    ],
+    [
       "callback_query",
       {
         update_id: 104,
@@ -679,6 +910,24 @@ describe("bot server", () => {
     const { port, sent } = await startWebhookServer();
 
     const response = await postTelegramWebhook(port, body);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true });
+    expect(sent).toHaveLength(0);
+  });
+
+  it("returns 200 for malformed Telegram webhook JSON", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { port, sent } = await startWebhookServer();
+
+    const response = await fetch(`http://127.0.0.1:${port}/telegram/webhook`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-telegram-bot-api-secret-token": "secret",
+      },
+      body: "{not-json",
+    });
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true });
@@ -1037,7 +1286,70 @@ describe("bot server", () => {
     });
     expect(events).toEqual([
       "getActiveStudyCourse",
+      "getActiveStudyCourse",
       "updateStudyCourseProgress",
+    ]);
+  });
+
+  it("serves sources and creates reminders through TMA routes", async () => {
+    const events: string[] = [];
+    const server = createBotServer({
+      config: {
+        lifeosDefaultUserId: "user-1",
+        allowUnsafeTmaDevAuth: true,
+      },
+      store: tmaStore(events),
+    });
+    servers.push(server);
+
+    const port = await listen(server);
+    const getResponse = await fetch(`http://127.0.0.1:${port}/api/tma/sources`);
+    const createResponse = await fetch(
+      `http://127.0.0.1:${port}/api/tma/reminders`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          message: "Review graph theory",
+          remindAt: "2026-07-06T02:00:00.000Z",
+        }),
+      },
+    );
+
+    expect(getResponse.status).toBe(200);
+    await expect(getResponse.json()).resolves.toMatchObject({
+      data: {
+        sources: [
+          {
+            sourceKey: "manual",
+            status: "connected",
+          },
+        ],
+        sourceEvents: [
+          {
+            title: "Calculus 2 final",
+          },
+        ],
+        reminders: [],
+      },
+    });
+    expect(createResponse.status).toBe(200);
+    await expect(createResponse.json()).resolves.toMatchObject({
+      data: {
+        reminders: [
+          {
+            message: "Review graph theory",
+            remindAt: "2026-07-06T02:00:00.000Z",
+          },
+        ],
+      },
+    });
+    expect(events).toEqual([
+      "getTmaSourcesSummary",
+      "createReminder",
+      "getTmaSourcesSummary",
     ]);
   });
 
@@ -1071,6 +1383,78 @@ describe("bot server", () => {
             ],
           },
         ],
+      },
+    });
+    expect(events).toEqual(["getCurrentWorkout"]);
+  });
+
+  it("returns empty current workout without creating one", async () => {
+    const events: string[] = [];
+    const store = {
+      ...tmaStore(events),
+      async getCurrentWorkout() {
+        events.push("getCurrentWorkout");
+        return null;
+      },
+    } as LifeOSStore;
+    const server = createBotServer({
+      config: {
+        lifeosDefaultUserId: "user-1",
+        allowUnsafeTmaDevAuth: true,
+      },
+      store,
+    });
+    servers.push(server);
+
+    const port = await listen(server);
+    const response = await fetch(
+      `http://127.0.0.1:${port}/api/tma/workout/current`,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ data: null });
+    expect(events).toEqual(["getCurrentWorkout"]);
+  });
+
+  it("starts a workout only from the start endpoint", async () => {
+    const events: string[] = [];
+    let currentWorkout: CurrentWorkoutSummary | null = null;
+    const store = {
+      ...tmaStore(events),
+      async getOrCreateCurrentWorkout() {
+        events.push("getOrCreateCurrentWorkout");
+        currentWorkout = workoutSummary();
+        return {
+          id: "workout-1",
+          title: "Push day",
+          startedAt: "2026-05-18T10:00:00.000Z",
+          created: true,
+        };
+      },
+      async getCurrentWorkout() {
+        events.push("getCurrentWorkout");
+        return currentWorkout;
+      },
+    } as LifeOSStore;
+    const server = createBotServer({
+      config: {
+        lifeosDefaultUserId: "user-1",
+        allowUnsafeTmaDevAuth: true,
+      },
+      store,
+    });
+    servers.push(server);
+
+    const port = await listen(server);
+    const response = await fetch(
+      `http://127.0.0.1:${port}/api/tma/workout/start`,
+      { method: "POST" },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        id: "workout-1",
       },
     });
     expect(events).toEqual([

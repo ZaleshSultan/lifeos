@@ -5,6 +5,7 @@ import {
   getModeLabel,
   healthModeLabel,
   parseLifeMode,
+  normalizeSourceEventToLifeEntity,
   resolveHealthMode,
   resolveCurrentMode as resolveCoreCurrentMode,
   scoreFocus,
@@ -17,14 +18,18 @@ import {
   type LifeModeResolution,
   type LifeSeasonRecord,
   type ModeAwareFocusItem,
+  type SourceEventLike,
 } from "@lifeos/core";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   Database,
+  ExternalSourceStatus,
   HealthSyncRunStatus,
   Json,
   LifeEntityType,
   ObsidianSyncStatus,
+  ReminderStatus,
+  SyncRunStatus,
   StudyCourseStatus,
   WorkoutIntensity,
 } from "./types.js";
@@ -39,6 +44,13 @@ type LifeModeRow = Database["public"]["Tables"]["life_modes"]["Row"];
 type LifeSeasonRow = Database["public"]["Tables"]["life_seasons"]["Row"];
 type ProjectRow = Database["public"]["Tables"]["projects"]["Row"];
 type StudyCourseRow = Database["public"]["Tables"]["study_courses"]["Row"];
+type ExternalSourceRow =
+  Database["public"]["Tables"]["external_sources"]["Row"];
+type SourceEventRow = Database["public"]["Tables"]["source_events"]["Row"];
+type ReminderRow = Database["public"]["Tables"]["reminders"]["Row"];
+type SyncRunRow = Database["public"]["Tables"]["sync_runs"]["Row"];
+type AcademicRecordRow =
+  Database["public"]["Tables"]["academic_records"]["Row"];
 
 export interface TelegramUserRecord {
   userId: string;
@@ -185,6 +197,145 @@ export interface UpdateStudyCourseProgressInput {
   metadata?: Json;
 }
 
+export interface SourceRecord {
+  id: string;
+  userId: string;
+  sourceKey: string;
+  sourceType: string;
+  displayName: string;
+  status: ExternalSourceStatus;
+  configJson: Json;
+  lastSyncAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpsertExternalSourceInput {
+  sourceKey: string;
+  sourceType: string;
+  displayName: string;
+  status?: ExternalSourceStatus;
+  configJson?: Json;
+  lastSyncAt?: string | null;
+}
+
+export interface SourceEventRecord {
+  id: string;
+  userId: string;
+  sourceKey: string;
+  externalId: string | null;
+  eventType: string;
+  title: string | null;
+  description: string | null;
+  location: string | null;
+  startsAt: string | null;
+  endsAt: string | null;
+  dueAt: string | null;
+  status: string;
+  rawJson: Json;
+  normalizedEntityId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpsertSourceEventInput {
+  userId: string;
+  sourceKey: string;
+  externalId?: string | null;
+  eventType: string;
+  title?: string | null;
+  description?: string | null;
+  location?: string | null;
+  startsAt?: string | null;
+  endsAt?: string | null;
+  dueAt?: string | null;
+  status?: string;
+  rawJson?: Json;
+  normalizedEntityId?: string | null;
+}
+
+export interface ListSourceEventsFilters {
+  sourceKey?: string;
+  status?: string;
+  eventType?: string;
+  before?: string;
+  after?: string;
+  limit?: number;
+}
+
+export interface CreateReminderInput {
+  userId: string;
+  lifeEntityId?: string | null;
+  sourceEventId?: string | null;
+  channel?: string;
+  remindAt: string;
+  message: string;
+  metadataJson?: Json;
+}
+
+export interface ReminderRecord {
+  id: string;
+  userId: string;
+  lifeEntityId: string | null;
+  sourceEventId: string | null;
+  channel: string;
+  remindAt: string;
+  status: ReminderStatus;
+  message: string;
+  metadataJson: Json;
+  sentAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SyncRunRecord {
+  id: string;
+  userId: string;
+  sourceId: string | null;
+  sourceKey: string;
+  status: SyncRunStatus;
+  startedAt: string;
+  finishedAt: string | null;
+  recordsSeen: number;
+  recordsCreated: number;
+  recordsUpdated: number;
+  errorMessage: string | null;
+  metadataJson: Json;
+}
+
+export interface AcademicRecord {
+  id: string;
+  userId: string;
+  sourceEventId: string | null;
+  courseTitle: string;
+  recordType: string;
+  title: string;
+  valueText: string | null;
+  score: number | null;
+  maxScore: number | null;
+  percentage: number | null;
+  occursAt: string | null;
+  dueAt: string | null;
+  rawJson: Json;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpsertAcademicRecordInput {
+  userId: string;
+  sourceEventId?: string | null;
+  courseTitle: string;
+  recordType: string;
+  title: string;
+  valueText?: string | null;
+  score?: number | null;
+  maxScore?: number | null;
+  percentage?: number | null;
+  occursAt?: string | null;
+  dueAt?: string | null;
+  rawJson?: Json;
+}
+
 export interface FocusItemRecord extends FocusScoringItem {
   id: string;
   sourceType: "task" | "life_entity";
@@ -319,6 +470,24 @@ export interface TmaFocusSummary {
   priorityWeights: Record<string, number>;
 }
 
+export interface TmaSourcesSummary {
+  sources: SourceRecord[];
+  sourceEvents: SourceEventRecord[];
+  reminders: ReminderRecord[];
+  syncRuns: SyncRunRecord[];
+}
+
+export interface TmaAcademicSummary {
+  currentMode: LifeModeResolution;
+  nextAcademicEvent: SourceEventRecord | null;
+  finals: SourceEventRecord[];
+  examfx: SourceEventRecord[];
+  activeCourse: StudyCourseRecord | null;
+  summerCourse: StudyCourseRecord | null;
+  nextTransition: LifeSeasonRecord | null;
+  academicRecords: AcademicRecord[];
+}
+
 export interface LifeOSStore {
   resolveTelegramUser(
     telegramUserId: number,
@@ -398,6 +567,49 @@ export interface LifeOSStore {
   getTmaHomeSummary(user: TelegramUserRecord): Promise<TmaHomeSummary>;
   getTmaHealthSummary(userId: string): Promise<TmaHealthSummary>;
   getTmaFocusSummary(userId: string): Promise<TmaFocusSummary>;
+  getTmaSourcesSummary(userId: string): Promise<TmaSourcesSummary>;
+  getTmaAcademicSummary(userId: string): Promise<TmaAcademicSummary>;
+  upsertExternalSource(
+    userId: string,
+    source: UpsertExternalSourceInput,
+  ): Promise<SourceRecord>;
+  listExternalSources(userId: string): Promise<SourceRecord[]>;
+  createSyncRun(userId: string, sourceKey: string): Promise<SyncRunRecord>;
+  finishSyncRun(
+    syncRunId: string,
+    status: SyncRunStatus,
+    stats?: {
+      recordsSeen?: number;
+      recordsCreated?: number;
+      recordsUpdated?: number;
+      errorMessage?: string | null;
+      metadataJson?: Json;
+    },
+  ): Promise<SyncRunRecord>;
+  upsertSourceEvent(input: UpsertSourceEventInput): Promise<SourceEventRecord>;
+  listSourceEvents(
+    userId: string,
+    filters?: ListSourceEventsFilters,
+  ): Promise<SourceEventRecord[]>;
+  normalizeSourceEvent(
+    userId: string,
+    sourceEventId: string,
+  ): Promise<LifeEntityRecord>;
+  createReminder(input: CreateReminderInput): Promise<ReminderRecord>;
+  listPendingReminders(
+    userId: string,
+    before: string,
+  ): Promise<ReminderRecord[]>;
+  listUpcomingReminders(
+    userId: string,
+    limit?: number,
+  ): Promise<ReminderRecord[]>;
+  markReminderSent(reminderId: string): Promise<ReminderRecord>;
+  cancelReminder(userId: string, reminderId: string): Promise<ReminderRecord>;
+  listAcademicRecords(userId: string): Promise<AcademicRecord[]>;
+  upsertAcademicRecord(
+    input: UpsertAcademicRecordInput,
+  ): Promise<AcademicRecord>;
   getFinanceSummary(input: {
     userId: string;
     since: string;
@@ -560,6 +772,114 @@ function toStudyCourseRecord(row: StudyCourseRow): StudyCourseRecord {
     metadata: row.metadata,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+function toSourceRecord(row: ExternalSourceRow): SourceRecord {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    sourceKey: row.source_key,
+    sourceType: row.source_type,
+    displayName: row.display_name,
+    status: row.status,
+    configJson: row.config_json,
+    lastSyncAt: row.last_sync_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toSourceEventRecord(row: SourceEventRow): SourceEventRecord {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    sourceKey: row.source_key,
+    externalId: row.external_id,
+    eventType: row.event_type,
+    title: row.title,
+    description: row.description,
+    location: row.location,
+    startsAt: row.starts_at,
+    endsAt: row.ends_at,
+    dueAt: row.due_at,
+    status: row.status,
+    rawJson: row.raw_json,
+    normalizedEntityId: row.normalized_entity_id,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toReminderRecord(row: ReminderRow): ReminderRecord {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    lifeEntityId: row.life_entity_id,
+    sourceEventId: row.source_event_id,
+    channel: row.channel,
+    remindAt: row.remind_at,
+    status: row.status,
+    message: row.message,
+    metadataJson: row.metadata_json,
+    sentAt: row.sent_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toSyncRunRecord(row: SyncRunRow): SyncRunRecord {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    sourceId: row.source_id,
+    sourceKey: row.source_key,
+    status: row.status,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
+    recordsSeen: row.records_seen,
+    recordsCreated: row.records_created,
+    recordsUpdated: row.records_updated,
+    errorMessage: row.error_message,
+    metadataJson: row.metadata_json,
+  };
+}
+
+function toAcademicRecord(row: AcademicRecordRow): AcademicRecord {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    sourceEventId: row.source_event_id,
+    courseTitle: row.course_title,
+    recordType: row.record_type,
+    title: row.title,
+    valueText: row.value_text,
+    score: numberOrNull(row.score),
+    maxScore: numberOrNull(row.max_score),
+    percentage: numberOrNull(row.percentage),
+    occursAt: row.occurs_at,
+    dueAt: row.due_at,
+    rawJson: row.raw_json,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function sourceEventToCore(row: SourceEventRow): SourceEventLike {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    sourceKey: row.source_key,
+    externalId: row.external_id,
+    eventType: row.event_type,
+    title: row.title,
+    description: row.description,
+    location: row.location,
+    startsAt: row.starts_at,
+    endsAt: row.ends_at,
+    dueAt: row.due_at,
+    status: row.status,
+    rawJson: row.raw_json,
   };
 }
 
@@ -1696,6 +2016,465 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     };
   }
 
+  async getTmaSourcesSummary(userId: string): Promise<TmaSourcesSummary> {
+    const now = new Date().toISOString();
+
+    return {
+      sources: await this.listExternalSources(userId),
+      sourceEvents: await this.listSourceEvents(userId, {
+        after: now,
+        limit: 8,
+      }),
+      reminders: await this.listUpcomingReminders(userId, 8),
+      syncRuns: await this.listRecentSyncRuns(userId, 5),
+    };
+  }
+
+  async getTmaAcademicSummary(userId: string): Promise<TmaAcademicSummary> {
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const today = nowIso.slice(0, 10);
+    const [
+      currentMode,
+      sourceEvents,
+      activeCourse,
+      summerCourse,
+      nextTransition,
+      records,
+    ] = await Promise.all([
+      this.resolveCurrentMode(userId),
+      this.listSourceEvents(userId, {
+        eventType: "academic_event",
+        limit: 80,
+      }),
+      this.getActiveStudyCourse(userId, today),
+      this.getStudyCourseByCode(userId, "DISCRETE-MATH-SUMMER-2026"),
+      this.getNextSeasonTransition(userId, today),
+      this.listAcademicRecords(userId),
+    ]);
+    const academicEvents = sourceEvents.filter(
+      (event) => event.eventType === "academic_event",
+    );
+    const upcomingAcademicEvents = academicEvents.filter((event) => {
+      const timestamp = event.startsAt ?? event.dueAt;
+      return timestamp ? timestamp >= nowIso : false;
+    });
+    const finals = academicEvents.filter((event) =>
+      `${event.title ?? ""} ${event.description ?? ""}`.match(/\bfinal\b/i),
+    );
+    const examfx = academicEvents.filter((event) =>
+      `${event.title ?? ""} ${event.description ?? ""}`.match(/\bexamfx\b/i),
+    );
+
+    return {
+      currentMode,
+      nextAcademicEvent: upcomingAcademicEvents.at(0) ?? null,
+      finals,
+      examfx,
+      activeCourse,
+      summerCourse,
+      nextTransition,
+      academicRecords: records,
+    };
+  }
+
+  async upsertExternalSource(
+    userId: string,
+    source: UpsertExternalSourceInput,
+  ): Promise<SourceRecord> {
+    const { data, error } = await this.client
+      .from("external_sources")
+      .upsert(
+        {
+          user_id: userId,
+          source_key: source.sourceKey,
+          source_type: source.sourceType,
+          display_name: source.displayName,
+          status: source.status ?? "disabled",
+          config_json: source.configJson ?? {},
+          last_sync_at: source.lastSyncAt ?? null,
+        },
+        {
+          onConflict: "user_id,source_key",
+        },
+      )
+      .select("*")
+      .single();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to upsert external source");
+    }
+
+    return toSourceRecord(data);
+  }
+
+  async listExternalSources(userId: string): Promise<SourceRecord[]> {
+    const { data, error } = await this.client
+      .from("external_sources")
+      .select("*")
+      .eq("user_id", userId)
+      .order("display_name", { ascending: true });
+
+    if (error) {
+      throwSupabaseError(error, "Failed to list external sources");
+    }
+
+    return data.map(toSourceRecord);
+  }
+
+  async createSyncRun(
+    userId: string,
+    sourceKey: string,
+  ): Promise<SyncRunRecord> {
+    const source = await this.findExternalSource(userId, sourceKey);
+    const { data, error } = await this.client
+      .from("sync_runs")
+      .insert({
+        user_id: userId,
+        source_id: source?.id ?? null,
+        source_key: sourceKey,
+      })
+      .select("*")
+      .single();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to create sync run");
+    }
+
+    return toSyncRunRecord(data);
+  }
+
+  async finishSyncRun(
+    syncRunId: string,
+    status: SyncRunStatus,
+    stats: {
+      recordsSeen?: number;
+      recordsCreated?: number;
+      recordsUpdated?: number;
+      errorMessage?: string | null;
+      metadataJson?: Json;
+    } = {},
+  ): Promise<SyncRunRecord> {
+    const { data, error } = await this.client
+      .from("sync_runs")
+      .update({
+        status,
+        finished_at: new Date().toISOString(),
+        records_seen: stats.recordsSeen ?? 0,
+        records_created: stats.recordsCreated ?? 0,
+        records_updated: stats.recordsUpdated ?? 0,
+        error_message: stats.errorMessage ?? null,
+        metadata_json: stats.metadataJson ?? {},
+      })
+      .eq("id", syncRunId)
+      .select("*")
+      .single();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to finish sync run");
+    }
+
+    return toSyncRunRecord(data);
+  }
+
+  async upsertSourceEvent(
+    input: UpsertSourceEventInput,
+  ): Promise<SourceEventRecord> {
+    const row = {
+      user_id: input.userId,
+      source_key: input.sourceKey,
+      external_id: input.externalId ?? null,
+      event_type: input.eventType,
+      title: input.title ?? null,
+      description: input.description ?? null,
+      location: input.location ?? null,
+      starts_at: input.startsAt ?? null,
+      ends_at: input.endsAt ?? null,
+      due_at: input.dueAt ?? null,
+      status: input.status ?? "active",
+      raw_json: input.rawJson ?? {},
+      normalized_entity_id: input.normalizedEntityId ?? null,
+    };
+    const query = input.externalId
+      ? this.client
+          .from("source_events")
+          .upsert(row, { onConflict: "user_id,source_key,external_id" })
+      : this.client.from("source_events").insert(row);
+    const { data, error } = await query.select("*").single();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to upsert source event");
+    }
+
+    return toSourceEventRecord(data);
+  }
+
+  async listSourceEvents(
+    userId: string,
+    filters: ListSourceEventsFilters = {},
+  ): Promise<SourceEventRecord[]> {
+    let query = this.client
+      .from("source_events")
+      .select("*")
+      .eq("user_id", userId);
+
+    if (filters.sourceKey) {
+      query = query.eq("source_key", filters.sourceKey);
+    }
+
+    if (filters.status) {
+      query = query.eq("status", filters.status);
+    }
+
+    if (filters.eventType) {
+      query = query.eq("event_type", filters.eventType);
+    }
+
+    if (filters.after) {
+      query = query.or(
+        `starts_at.gte.${filters.after},due_at.gte.${filters.after}`,
+      );
+    }
+
+    if (filters.before) {
+      query = query.or(
+        `starts_at.lte.${filters.before},due_at.lte.${filters.before}`,
+      );
+    }
+
+    const { data, error } = await query
+      .order("starts_at", { ascending: true, nullsFirst: false })
+      .order("due_at", { ascending: true, nullsFirst: false })
+      .order("created_at", { ascending: false })
+      .limit(filters.limit ?? 25);
+
+    if (error) {
+      throwSupabaseError(error, "Failed to list source events");
+    }
+
+    return data.map(toSourceEventRecord);
+  }
+
+  async normalizeSourceEvent(
+    userId: string,
+    sourceEventId: string,
+  ): Promise<LifeEntityRecord> {
+    const { data: sourceEvent, error: sourceEventError } = await this.client
+      .from("source_events")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("id", sourceEventId)
+      .single();
+
+    if (sourceEventError) {
+      throwSupabaseError(sourceEventError, "Failed to load source event");
+    }
+
+    if (sourceEvent.normalized_entity_id) {
+      const { data: existing, error: existingError } = await this.client
+        .from("life_entities")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("id", sourceEvent.normalized_entity_id)
+        .single();
+
+      if (existingError) {
+        throwSupabaseError(existingError, "Failed to load normalized entity");
+      }
+
+      return toLifeEntityRecord(existing);
+    }
+
+    const normalized = normalizeSourceEventToLifeEntity(
+      sourceEventToCore(sourceEvent),
+    );
+    const entity = await this.createLifeEntity({
+      userId,
+      entityType: normalized.entityType,
+      domain: normalized.domain,
+      status: normalized.status,
+      title: normalized.title,
+      description: normalized.description,
+      body: normalized.body,
+      dueAt: normalized.dueAt,
+      source: normalized.source,
+      sourceCommand: normalized.sourceCommand,
+      linkedTable: normalized.linkedTable,
+      linkedId: sourceEvent.id,
+      metadata: normalized.metadata as Json,
+      rawPayloadJson: normalized.rawPayloadJson as Json,
+    });
+    const { error: updateError } = await this.client
+      .from("source_events")
+      .update({ normalized_entity_id: entity.id })
+      .eq("id", sourceEvent.id);
+
+    if (updateError) {
+      throwSupabaseError(updateError, "Failed to mark source event normalized");
+    }
+
+    return entity;
+  }
+
+  async createReminder(input: CreateReminderInput): Promise<ReminderRecord> {
+    const message = input.message.trim();
+
+    if (!message) {
+      throw new Error("Reminder message is required");
+    }
+
+    const remindAt = new Date(input.remindAt);
+
+    if (Number.isNaN(remindAt.getTime())) {
+      throw new Error("Reminder time is invalid");
+    }
+
+    const { data, error } = await this.client
+      .from("reminders")
+      .insert({
+        user_id: input.userId,
+        life_entity_id: input.lifeEntityId ?? null,
+        source_event_id: input.sourceEventId ?? null,
+        channel: input.channel ?? "telegram",
+        remind_at: remindAt.toISOString(),
+        message,
+        metadata_json: input.metadataJson ?? {},
+      })
+      .select("*")
+      .single();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to create reminder");
+    }
+
+    return toReminderRecord(data);
+  }
+
+  async listPendingReminders(
+    userId: string,
+    before: string,
+  ): Promise<ReminderRecord[]> {
+    const { data, error } = await this.client
+      .from("reminders")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("status", "pending")
+      .lte("remind_at", before)
+      .order("remind_at", { ascending: true });
+
+    if (error) {
+      throwSupabaseError(error, "Failed to list pending reminders");
+    }
+
+    return data.map(toReminderRecord);
+  }
+
+  async listUpcomingReminders(
+    userId: string,
+    limit = 8,
+  ): Promise<ReminderRecord[]> {
+    const { data, error } = await this.client
+      .from("reminders")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("status", "pending")
+      .gte("remind_at", new Date().toISOString())
+      .order("remind_at", { ascending: true })
+      .limit(limit);
+
+    if (error) {
+      throwSupabaseError(error, "Failed to list upcoming reminders");
+    }
+
+    return data.map(toReminderRecord);
+  }
+
+  async markReminderSent(reminderId: string): Promise<ReminderRecord> {
+    const { data, error } = await this.client
+      .from("reminders")
+      .update({
+        status: "sent",
+        sent_at: new Date().toISOString(),
+      })
+      .eq("id", reminderId)
+      .select("*")
+      .single();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to mark reminder sent");
+    }
+
+    return toReminderRecord(data);
+  }
+
+  async cancelReminder(
+    userId: string,
+    reminderId: string,
+  ): Promise<ReminderRecord> {
+    const { data, error } = await this.client
+      .from("reminders")
+      .update({ status: "cancelled" })
+      .eq("user_id", userId)
+      .eq("id", reminderId)
+      .select("*")
+      .single();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to cancel reminder");
+    }
+
+    return toReminderRecord(data);
+  }
+
+  async listAcademicRecords(userId: string): Promise<AcademicRecord[]> {
+    const { data, error } = await this.client
+      .from("academic_records")
+      .select("*")
+      .eq("user_id", userId)
+      .order("occurs_at", { ascending: true, nullsFirst: false })
+      .order("due_at", { ascending: true, nullsFirst: false })
+      .limit(50);
+
+    if (error) {
+      throwSupabaseError(error, "Failed to list academic records");
+    }
+
+    return data.map(toAcademicRecord);
+  }
+
+  async upsertAcademicRecord(
+    input: UpsertAcademicRecordInput,
+  ): Promise<AcademicRecord> {
+    const existing =
+      input.sourceEventId === null || input.sourceEventId === undefined
+        ? null
+        : await this.findAcademicRecordBySourceEvent(input);
+    const row = {
+      user_id: input.userId,
+      source_event_id: input.sourceEventId ?? null,
+      course_title: input.courseTitle,
+      record_type: input.recordType,
+      title: input.title,
+      value_text: input.valueText ?? null,
+      score: input.score ?? null,
+      max_score: input.maxScore ?? null,
+      percentage: input.percentage ?? null,
+      occurs_at: input.occursAt ?? null,
+      due_at: input.dueAt ?? null,
+      raw_json: input.rawJson ?? {},
+    };
+    const query = existing
+      ? this.client.from("academic_records").update(row).eq("id", existing.id)
+      : this.client.from("academic_records").insert(row);
+    const { data, error } = await query.select("*").single();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to upsert academic record");
+    }
+
+    return toAcademicRecord(data);
+  }
+
   async getFinanceSummary(input: {
     userId: string;
     since: string;
@@ -1918,6 +2697,103 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       workoutsUpserted: payload.workouts.length,
       samplesInserted: payload.samples.length,
     };
+  }
+
+  private async findExternalSource(
+    userId: string,
+    sourceKey: string,
+  ): Promise<SourceRecord | null> {
+    const { data, error } = await this.client
+      .from("external_sources")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("source_key", sourceKey)
+      .maybeSingle();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to load external source");
+    }
+
+    return data ? toSourceRecord(data) : null;
+  }
+
+  private async listRecentSyncRuns(
+    userId: string,
+    limit: number,
+  ): Promise<SyncRunRecord[]> {
+    const { data, error } = await this.client
+      .from("sync_runs")
+      .select("*")
+      .eq("user_id", userId)
+      .order("started_at", { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      throwSupabaseError(error, "Failed to list sync runs");
+    }
+
+    return data.map(toSyncRunRecord);
+  }
+
+  private async getNextSeasonTransition(
+    userId: string,
+    today: string,
+  ): Promise<LifeSeasonRecord | null> {
+    const { data, error } = await this.client
+      .from("life_seasons")
+      .select("*")
+      .eq("user_id", userId)
+      .gt("starts_on", today)
+      .order("starts_on", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to load next life season");
+    }
+
+    return data ? toLifeSeasonRecord(data) : null;
+  }
+
+  private async getStudyCourseByCode(
+    userId: string,
+    code: string,
+  ): Promise<StudyCourseRecord | null> {
+    const { data, error } = await this.client
+      .from("study_courses")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("code", code)
+      .maybeSingle();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to load study course");
+    }
+
+    return data ? toStudyCourseRecord(data) : null;
+  }
+
+  private async findAcademicRecordBySourceEvent(
+    input: UpsertAcademicRecordInput,
+  ): Promise<AcademicRecord | null> {
+    if (!input.sourceEventId) {
+      return null;
+    }
+
+    const { data, error } = await this.client
+      .from("academic_records")
+      .select("*")
+      .eq("user_id", input.userId)
+      .eq("source_event_id", input.sourceEventId)
+      .eq("record_type", input.recordType)
+      .eq("title", input.title)
+      .maybeSingle();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to load academic record");
+    }
+
+    return data ? toAcademicRecord(data) : null;
   }
 
   private async listActiveLifeModes(input: {

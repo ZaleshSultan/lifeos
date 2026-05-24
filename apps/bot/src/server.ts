@@ -478,6 +478,11 @@ async function handleTelegramWebhook(
       return;
     }
 
+    if (!telegramMessageChatId(update)) {
+      telegramOk(response);
+      return;
+    }
+
     await handleTelegramUpdate(update as TelegramUpdate, {
       telegram,
       store: options.store,
@@ -598,6 +603,46 @@ function parseTmaCourseProgressBody(
   return { ok: true, progressPercent };
 }
 
+function parseTmaReminderBody(body: unknown):
+  | {
+      ok: true;
+      message: string;
+      remindAt: string;
+    }
+  | { ok: false; error: string } {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return { ok: false, error: "invalid_reminder_payload" };
+  }
+
+  const record = body as Record<string, unknown>;
+  const message =
+    typeof record.message === "string"
+      ? record.message.trim()
+      : typeof record.title === "string"
+        ? record.title.trim()
+        : "";
+  const remindAt =
+    typeof record.remindAt === "string"
+      ? record.remindAt
+      : typeof record.reminderAt === "string"
+        ? record.reminderAt
+        : "";
+
+  if (!message) {
+    return { ok: false, error: "invalid_reminder_message" };
+  }
+
+  if (!remindAt || Number.isNaN(new Date(remindAt).getTime())) {
+    return { ok: false, error: "invalid_remind_at" };
+  }
+
+  return {
+    ok: true,
+    message,
+    remindAt,
+  };
+}
+
 function todayForTimezone(timezone: string): string {
   try {
     const parts = new Intl.DateTimeFormat("en-US", {
@@ -706,22 +751,24 @@ async function handleRequest(
 
     if (
       request.method === "GET" &&
-      requestUrl.pathname === "/api/tma/course/discrete-math-summer-term"
+      (requestUrl.pathname === "/api/tma/course/active" ||
+        requestUrl.pathname === "/api/tma/course/discrete-math-summer-term")
     ) {
+      const today = todayForTimezone(auth.user.timezone);
+
       writeJson(
         response,
         200,
-        tmaData(
-          await store.getActiveStudyCourse(auth.user.userId, "2026-07-06"),
-        ),
+        tmaData(await store.getActiveStudyCourse(auth.user.userId, today)),
       );
       return;
     }
 
     if (
       request.method === "POST" &&
-      requestUrl.pathname ===
-        "/api/tma/course/discrete-math-summer-term/progress"
+      (requestUrl.pathname === "/api/tma/course/active/progress" ||
+        requestUrl.pathname ===
+          "/api/tma/course/discrete-math-summer-term/progress")
     ) {
       const body = parseTmaCourseProgressBody(await readJsonBody(request));
 
@@ -732,17 +779,82 @@ async function handleRequest(
         return;
       }
 
+      const today = todayForTimezone(auth.user.timezone);
+      const course = await store.getActiveStudyCourse(auth.user.userId, today);
+
+      if (!course) {
+        writeJson(response, 404, {
+          error: "course_not_found",
+        });
+        return;
+      }
+
       writeJson(
         response,
         200,
         tmaData(
           await store.updateStudyCourseProgress({
             userId: auth.user.userId,
-            code: "DISCRETE-MATH-SUMMER-2026",
+            courseId: course.id,
             progressPercent: body.progressPercent,
-            lastStudiedOn: todayForTimezone(auth.user.timezone),
+            lastStudiedOn: today,
           }),
         ),
+      );
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      requestUrl.pathname === "/api/tma/sources"
+    ) {
+      writeJson(
+        response,
+        200,
+        tmaData(await store.getTmaSourcesSummary(auth.user.userId)),
+      );
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname === "/api/tma/reminders"
+    ) {
+      const body = parseTmaReminderBody(await readJsonBody(request));
+
+      if (!body.ok) {
+        writeJson(response, 400, {
+          error: body.error,
+        });
+        return;
+      }
+
+      await store.createReminder({
+        userId: auth.user.userId,
+        message: body.message,
+        remindAt: body.remindAt,
+        channel: "telegram",
+        metadataJson: {
+          source: "tma",
+        },
+      });
+
+      writeJson(
+        response,
+        200,
+        tmaData(await store.getTmaSourcesSummary(auth.user.userId)),
+      );
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      requestUrl.pathname === "/api/tma/academic"
+    ) {
+      writeJson(
+        response,
+        200,
+        tmaData(await store.getTmaAcademicSummary(auth.user.userId)),
       );
       return;
     }
@@ -760,6 +872,18 @@ async function handleRequest(
       request.method === "GET" &&
       requestUrl.pathname === "/api/tma/workout/current"
     ) {
+      const workout = await store.getCurrentWorkout({
+        userId: auth.user.userId,
+      });
+
+      writeJson(response, 200, tmaData(workout));
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname === "/api/tma/workout/start"
+    ) {
       const mode = await store.resolveCurrentMode(auth.user.userId);
       await store.getOrCreateCurrentWorkout({
         userId: auth.user.userId,
@@ -771,8 +895,8 @@ async function handleRequest(
       });
 
       if (!workout) {
-        writeJson(response, 404, {
-          error: "workout_not_found",
+        writeJson(response, 500, {
+          error: "workout_start_failed",
         });
         return;
       }

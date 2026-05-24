@@ -1,12 +1,15 @@
 import { telegram } from "../telegram";
 import type {
   ApiEnvelope,
+  AcademicSummary,
+  CreateReminderInput,
   CurrentWorkout,
   FocusSummary,
   HealthSummary,
   HomeSummary,
   ModeSummary,
   SaveModeInput,
+  SourcesSummary,
   StudyCourse,
   UpdateCourseProgressInput,
 } from "./types";
@@ -61,8 +64,13 @@ export const api = {
   getHome(): Promise<HomeSummary> {
     return request<HomeSummary>("/api/tma/home");
   },
-  getCurrentWorkout(): Promise<CurrentWorkout> {
-    return request<CurrentWorkout>("/api/tma/workout/current");
+  getCurrentWorkout(): Promise<CurrentWorkout | null> {
+    return request<CurrentWorkout | null>("/api/tma/workout/current");
+  },
+  startWorkout(): Promise<CurrentWorkout> {
+    return request<CurrentWorkout>("/api/tma/workout/start", {
+      method: "POST",
+    });
   },
   completeSet(setId: string): Promise<CurrentWorkout> {
     return request<CurrentWorkout>(
@@ -88,6 +96,18 @@ export const api = {
   getFocus(): Promise<FocusSummary> {
     return request<FocusSummary>("/api/tma/focus");
   },
+  getSources(): Promise<SourcesSummary> {
+    return request<SourcesSummary>("/api/tma/sources");
+  },
+  getAcademic(): Promise<AcademicSummary> {
+    return request<AcademicSummary>("/api/tma/academic");
+  },
+  createReminder(input: CreateReminderInput): Promise<SourcesSummary> {
+    return request<SourcesSummary>("/api/tma/reminders", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
   getMode(): Promise<ModeSummary> {
     return request<ModeSummary>("/api/tma/mode");
   },
@@ -102,20 +122,15 @@ export const api = {
       method: "DELETE",
     });
   },
-  getDiscreteMathCourse(): Promise<StudyCourse | null> {
-    return request<StudyCourse | null>(
-      "/api/tma/course/discrete-math-summer-term",
-    );
+  getActiveCourse(): Promise<StudyCourse | null> {
+    return request<StudyCourse | null>("/api/tma/course/active");
   },
-  updateDiscreteMathCourseProgress(
+  updateActiveCourseProgress(
     input: UpdateCourseProgressInput,
   ): Promise<StudyCourse> {
-    return request<StudyCourse>(
-      "/api/tma/course/discrete-math-summer-term/progress",
-      {
-        method: "POST",
-        body: JSON.stringify(input),
-      },
-    );
+    return request<StudyCourse>("/api/tma/course/active/progress", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
   },
 };

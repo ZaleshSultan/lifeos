@@ -7,8 +7,10 @@ export const queryKeys = {
   workout: ["workout", "current"] as const,
   health: ["health"] as const,
   focus: ["focus"] as const,
+  sources: ["sources"] as const,
+  academic: ["academic"] as const,
   mode: ["mode"] as const,
-  discreteMathCourse: ["course", "discrete-math-summer-term"] as const,
+  activeCourse: ["course", "active"] as const,
 };
 
 export function useHomeQuery() {
@@ -39,6 +41,20 @@ export function useFocusQuery() {
   });
 }
 
+export function useSourcesQuery() {
+  return useQuery({
+    queryKey: queryKeys.sources,
+    queryFn: api.getSources,
+  });
+}
+
+export function useAcademicQuery() {
+  return useQuery({
+    queryKey: queryKeys.academic,
+    queryFn: api.getAcademic,
+  });
+}
+
 export function useModeQuery() {
   return useQuery({
     queryKey: queryKeys.mode,
@@ -46,10 +62,10 @@ export function useModeQuery() {
   });
 }
 
-export function useDiscreteMathCourseQuery() {
+export function useActiveCourseQuery() {
   return useQuery({
-    queryKey: queryKeys.discreteMathCourse,
-    queryFn: api.getDiscreteMathCourse,
+    queryKey: queryKeys.activeCourse,
+    queryFn: api.getActiveCourse,
   });
 }
 
@@ -83,15 +99,41 @@ export function useClearModeMutation() {
   });
 }
 
-export function useUpdateDiscreteMathCourseProgressMutation() {
+export function useUpdateActiveCourseProgressMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: api.updateDiscreteMathCourseProgress,
+    mutationFn: api.updateActiveCourseProgress,
     onSuccess(data) {
       telegram.hapticImpact("light");
-      queryClient.setQueryData(queryKeys.discreteMathCourse, data);
+      queryClient.setQueryData(queryKeys.activeCourse, data);
       void queryClient.invalidateQueries({ queryKey: queryKeys.focus });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.home });
+    },
+  });
+}
+
+export function useCreateReminderMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: api.createReminder,
+    onSuccess(data) {
+      telegram.hapticImpact("light");
+      queryClient.setQueryData(queryKeys.sources, data);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.home });
+    },
+  });
+}
+
+export function useStartWorkoutMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: api.startWorkout,
+    onSuccess(data) {
+      telegram.hapticImpact("medium");
+      queryClient.setQueryData(queryKeys.workout, data);
       void queryClient.invalidateQueries({ queryKey: queryKeys.home });
     },
   });
@@ -128,9 +170,9 @@ export function useCompleteWorkoutMutation() {
 
   return useMutation({
     mutationFn: api.completeWorkout,
-    onSuccess(data) {
+    onSuccess() {
       telegram.hapticImpact("medium");
-      queryClient.setQueryData(queryKeys.workout, data);
+      queryClient.setQueryData(queryKeys.workout, null);
       void queryClient.invalidateQueries({ queryKey: queryKeys.home });
     },
   });

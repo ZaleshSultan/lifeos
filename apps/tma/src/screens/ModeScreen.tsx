@@ -14,12 +14,18 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import {
   useClearModeMutation,
-  useDiscreteMathCourseQuery,
+  useActiveCourseQuery,
+  useAcademicQuery,
   useModeQuery,
   useSaveModeMutation,
-  useUpdateDiscreteMathCourseProgressMutation,
+  useUpdateActiveCourseProgressMutation,
 } from "../api/hooks";
-import type { LifeMode, SaveModeInput } from "../api/types";
+import type {
+  LifeMode,
+  SaveModeInput,
+  SourceEventRecord,
+  StudyCourse,
+} from "../api/types";
 import { ErrorPanel, LoadingPanel } from "../components/AsyncState";
 import { formatDateTime } from "../lib/format";
 import { cx } from "../lib/styles";
@@ -50,6 +56,76 @@ const durationOptions: Array<{
 
 const COURSE_PROGRESS_MIN = 0;
 const COURSE_PROGRESS_MAX = 100;
+
+const modeExplanations: Record<
+  LifeMode,
+  {
+    label: string;
+    explanation: string;
+    activates: string;
+    priorities: string[];
+    avoid?: string[];
+  }
+> = {
+  exam_war: {
+    label: "Exam War",
+    explanation: "Finals and urgent study first. Projects are reduced.",
+    activates: "2026-05-25 to 2026-06-06, or manual override",
+    priorities: ["finals", "deadlines", "study"],
+    avoid: ["random projects", "heavy distractions"],
+  },
+  practice: {
+    label: "Practice",
+    explanation: "Internship/practice and report work.",
+    activates: "2026-06-08 to 2026-06-20, or manual override",
+    priorities: ["practice", "reports", "light study"],
+  },
+  recovery_setup: {
+    label: "Recovery / Setup",
+    explanation: "Low energy / reset period. Protect sleep and health.",
+    activates: "2026-06-22 to 2026-07-05, or manual override",
+    priorities: ["sleep", "health", "critical tasks only"],
+    avoid: ["heavy workouts", "overload"],
+  },
+  summer_term: {
+    label: "Summer Term",
+    explanation: "Summer course mode focused on Discrete Mathematics.",
+    activates: "2026-07-06 to 2026-08-15, or manual override",
+    priorities: ["Discrete Math", "health", "light projects"],
+    avoid: ["random distractions"],
+  },
+  summer: {
+    label: "Summer",
+    explanation: "Projects, cybersecurity practice, health, and portfolio.",
+    activates: "2026-08-16 to 2026-08-31, or manual override",
+    priorities: ["LifeOS", "Cyber Uyut", "CTF", "fitness", "finance"],
+  },
+  trimester: {
+    label: "Trimester",
+    explanation: "Normal university mode.",
+    activates: "Normal academic term, or manual override",
+    priorities: ["study", "deadlines", "health", "projects"],
+  },
+  recovery: {
+    label: "Recovery",
+    explanation: "Low energy / reset period. Protect sleep and health.",
+    activates: "Health/focus recovery signal, or manual override",
+    priorities: ["sleep", "health", "critical tasks only"],
+    avoid: ["heavy workouts", "overload"],
+  },
+  project_sprint: {
+    label: "Project Sprint",
+    explanation: "One main project gets most deep work.",
+    activates: "Manual sprint mode or project-heavy period",
+    priorities: ["current project", "focus blocks"],
+  },
+  maintenance: {
+    label: "Maintenance",
+    explanation: "Minimum viable life system.",
+    activates: "Low bandwidth period, or manual override",
+    priorities: ["health", "urgent tasks", "finance basics"],
+  },
+};
 
 function clampPercent(value: number): number {
   if (!Number.isFinite(value)) {
@@ -94,12 +170,70 @@ function formatProgressInput(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
+function eventTime(event: SourceEventRecord): string | null {
+  return event.startsAt ?? event.dueAt;
+}
+
+function AcademicEventRow({ event }: { event: SourceEventRecord }) {
+  const time = eventTime(event);
+
+  return (
+    <div className="border-t border-white/[0.06] py-3 first:border-t-0">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="break-words text-sm font-semibold text-white">
+            {event.title ?? event.eventType}
+          </div>
+          <div className="mt-1 flex flex-wrap gap-2">
+            <span className="rounded-full border border-white/[0.08] bg-white/[0.04] px-2 py-0.5 text-xs text-zinc-400">
+              {event.sourceKey}
+            </span>
+            <span className="rounded-full border border-white/[0.08] bg-white/[0.04] px-2 py-0.5 text-xs text-zinc-400">
+              {event.status}
+            </span>
+          </div>
+        </div>
+        {time ? (
+          <span className="shrink-0 text-xs font-medium text-zinc-500">
+            {formatDateTime(time)}
+          </span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function SummerCourseCard({ course }: { course: StudyCourse | null }) {
+  if (!course) {
+    return (
+      <p className="mt-3 text-sm text-zinc-500">
+        Discrete Mathematics summer term is not configured.
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-3 rounded-lg border border-emerald-400/20 bg-emerald-400/[0.08] px-3 py-3">
+      <div className="text-xs font-medium text-emerald-300">
+        Summer term course
+      </div>
+      <div className="mt-1 text-sm font-semibold text-white">
+        {course.title}
+      </div>
+      <div className="mt-1 text-xs text-zinc-400">
+        {formatCourseWindow(course.startsOn, course.endsOn)}
+      </div>
+    </div>
+  );
+}
+
 export function ModeScreen() {
   const query = useModeQuery();
-  const courseQuery = useDiscreteMathCourseQuery();
+  const courseQuery = useActiveCourseQuery();
+  const academicQuery = useAcademicQuery();
   const saveMode = useSaveModeMutation();
   const clearMode = useClearModeMutation();
-  const updateCourseProgress = useUpdateDiscreteMathCourseProgressMutation();
+  const updateCourseProgress = useUpdateActiveCourseProgressMutation();
   const [selectedMode, setSelectedMode] = useState<LifeMode | "auto">("auto");
   const [duration, setDuration] =
     useState<NonNullable<SaveModeInput["duration"]>>("permanent");
@@ -153,6 +287,8 @@ export function ModeScreen() {
 
   const current = query.data;
   const course = courseQuery.data;
+  const academic = academicQuery.data;
+  const currentModeExplanation = modeExplanations[current.mode];
   const currentCourseProgress = clampPercent(course?.progressPercent ?? 0);
   const parsedCourseProgress =
     courseProgress.trim() === "" ? Number.NaN : Number(courseProgress);
@@ -231,6 +367,38 @@ export function ModeScreen() {
 
       <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
         <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
+          <BookOpenCheck className="h-5 w-5 text-cyan-400" />
+          Mode explanation
+        </div>
+        <p className="text-sm leading-relaxed text-zinc-300">
+          {currentModeExplanation.explanation}
+        </p>
+        <div className="mt-3 grid gap-2">
+          <div className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2">
+            <div className="text-xs text-zinc-500">Activates</div>
+            <div className="mt-1 text-sm font-semibold text-zinc-100">
+              {currentModeExplanation.activates}
+            </div>
+          </div>
+          <div className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2">
+            <div className="text-xs text-zinc-500">Priorities</div>
+            <div className="mt-1 text-sm font-semibold text-zinc-100">
+              {currentModeExplanation.priorities.join(", ")}
+            </div>
+          </div>
+          {currentModeExplanation.avoid?.length ? (
+            <div className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2">
+              <div className="text-xs text-zinc-500">Reduces</div>
+              <div className="mt-1 text-sm font-semibold text-zinc-100">
+                {currentModeExplanation.avoid.join(", ")}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
+        <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
           <SlidersHorizontal className="h-5 w-5 text-cyan-400" />
           Mode selector
         </div>
@@ -254,6 +422,118 @@ export function ModeScreen() {
               </button>
             );
           })}
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
+        <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
+          <CalendarDays className="h-5 w-5 text-cyan-400" />
+          Academic timeline
+        </div>
+        {academicQuery.isLoading ? (
+          <p className="text-sm text-zinc-500">Loading academic schedule.</p>
+        ) : academicQuery.isError ? (
+          <p className="text-sm text-rose-300">
+            Academic unavailable: {academicQuery.error.message}
+          </p>
+        ) : academic ? (
+          <>
+            {academic.nextAcademicEvent ? (
+              <div className="rounded-lg border border-cyan-400/20 bg-cyan-400/[0.08] px-3 py-3">
+                <div className="text-xs font-medium text-cyan-300">
+                  Next exam or deadline
+                </div>
+                <div className="mt-1 text-sm font-semibold text-white">
+                  {academic.nextAcademicEvent.title ??
+                    academic.nextAcademicEvent.eventType}
+                </div>
+                {eventTime(academic.nextAcademicEvent) ? (
+                  <div className="mt-1 text-xs text-zinc-400">
+                    {formatDateTime(
+                      eventTime(academic.nextAcademicEvent) ?? "",
+                    )}
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <p className="text-sm text-zinc-500">
+                No upcoming academic events.
+              </p>
+            )}
+
+            <SummerCourseCard course={academic.summerCourse} />
+
+            <div className="mt-4">
+              <div className="mb-1 text-xs font-semibold uppercase text-zinc-500">
+                Finals
+              </div>
+              {academic.finals.length ? (
+                academic.finals.map((event) => (
+                  <AcademicEventRow event={event} key={event.id} />
+                ))
+              ) : (
+                <p className="text-sm text-zinc-500">No finals returned.</p>
+              )}
+            </div>
+
+            <div className="mt-4">
+              <div className="mb-1 text-xs font-semibold uppercase text-zinc-500">
+                ExamFX
+              </div>
+              {academic.examfx.length ? (
+                academic.examfx.map((event) => (
+                  <AcademicEventRow event={event} key={event.id} />
+                ))
+              ) : (
+                <p className="text-sm text-zinc-500">
+                  No ExamFX rows returned.
+                </p>
+              )}
+            </div>
+          </>
+        ) : (
+          <p className="text-sm text-zinc-500">Academic data is empty.</p>
+        )}
+      </section>
+
+      <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
+        <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
+          <SlidersHorizontal className="h-5 w-5 text-cyan-400" />
+          Mode map
+        </div>
+        <div className="space-y-2">
+          {modeOptions
+            .filter((option): option is { value: LifeMode; label: string } => {
+              return option.value !== "auto";
+            })
+            .map((option) => {
+              const explanation = modeExplanations[option.value];
+
+              return (
+                <div
+                  className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-3"
+                  key={option.value}
+                >
+                  <div className="text-sm font-semibold text-white">
+                    {explanation.label}
+                  </div>
+                  <p className="mt-1 text-sm leading-relaxed text-zinc-400">
+                    {explanation.explanation}
+                  </p>
+                  <div className="mt-2 text-xs text-zinc-500">
+                    Activates: {explanation.activates}
+                  </div>
+                  <div className="mt-1 text-xs text-zinc-500">
+                    Priorities: {explanation.priorities.join(", ")}
+                  </div>
+                  {explanation.avoid?.length ? (
+                    <div className="mt-1 text-xs text-zinc-500">
+                      Reduces: {explanation.avoid.join(", ")}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
         </div>
       </section>
 
@@ -310,7 +590,9 @@ export function ModeScreen() {
         </button>
         <button
           className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 text-xs font-semibold text-zinc-200 active:scale-[0.99] disabled:pointer-events-none disabled:opacity-60"
-          disabled={clearMode.isPending || saveMode.isPending || !hasManualOverride}
+          disabled={
+            clearMode.isPending || saveMode.isPending || !hasManualOverride
+          }
           onClick={() => clearMode.mutate()}
           type="button"
         >
@@ -332,18 +614,22 @@ export function ModeScreen() {
             <GraduationCap className="h-5 w-5" />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-sm font-medium text-zinc-500">Summer Term</div>
+            <div className="text-sm font-medium text-zinc-500">
+              {course?.term ?? "Course"}
+            </div>
             <h3 className="mt-1 break-words text-xl font-semibold leading-tight text-white">
-              {course?.title ?? "Discrete Mathematics"}
+              {course?.title ?? "No active course"}
             </h3>
             <div className="mt-3 flex flex-wrap gap-2">
-              <span className="rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-1 text-xs font-medium text-zinc-300">
-                {course?.term ?? "Summer 2026"}
-              </span>
+              {course?.term ? (
+                <span className="rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-1 text-xs font-medium text-zinc-300">
+                  {course.term}
+                </span>
+              ) : null}
               <span className="rounded-full border border-emerald-400/20 bg-emerald-400/[0.08] px-2.5 py-1 text-xs font-medium text-emerald-300">
                 {courseQuery.isLoading
                   ? "loading"
-                  : course?.status ?? "not found"}
+                  : (course?.status ?? "not found")}
               </span>
             </div>
           </div>

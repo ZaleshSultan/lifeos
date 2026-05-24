@@ -3,14 +3,17 @@ import {
   CheckCircle2,
   Clock3,
   Dumbbell,
+  Pause,
+  Play,
   RotateCcw,
   TimerReset,
   Trophy,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import {
   useCompleteSetMutation,
   useCompleteWorkoutMutation,
+  useStartWorkoutMutation,
   useUndoSetMutation,
   useWorkoutQuery,
 } from "../api/hooks";
@@ -20,23 +23,92 @@ import { ProgressRing } from "../components/ProgressRing";
 import { formatCountdown, formatDateTime } from "../lib/format";
 import { cx } from "../lib/styles";
 
-function useRestSeconds(endsAt?: string | null) {
-  const [now, setNow] = useState(() => Date.now());
+function secondsUntil(endsAt: string): number {
+  return Math.max(
+    0,
+    Math.ceil((new Date(endsAt).getTime() - Date.now()) / 1000),
+  );
+}
+
+function useRestTimer(endsAt?: string | null, stopped = false) {
+  const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
+  const [running, setRunning] = useState(false);
 
   useEffect(() => {
-    if (!endsAt) {
+    if (!endsAt || stopped) {
+      setRemainingSeconds(null);
+      setRunning(false);
       return;
     }
 
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    const nextRemaining = secondsUntil(endsAt);
+    setRemainingSeconds(nextRemaining);
+    setRunning(nextRemaining > 0);
+  }, [endsAt, stopped]);
+
+  useEffect(() => {
+    if (!running || remainingSeconds === null || remainingSeconds <= 0) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      setRemainingSeconds((current) => {
+        if (current === null || current <= 1) {
+          setRunning(false);
+          return 0;
+        }
+
+        return current - 1;
+      });
+    }, 1000);
+
     return () => window.clearInterval(timer);
-  }, [endsAt]);
+  }, [remainingSeconds, running]);
 
-  if (!endsAt) {
-    return null;
-  }
+  return {
+    remainingSeconds,
+    running,
+    pause() {
+      setRunning(false);
+    },
+    reset() {
+      if (!endsAt || stopped) {
+        setRemainingSeconds(null);
+        setRunning(false);
+        return;
+      }
 
-  return Math.max(0, Math.ceil((new Date(endsAt).getTime() - now) / 1000));
+      const nextRemaining = secondsUntil(endsAt);
+      setRemainingSeconds(nextRemaining);
+      setRunning(nextRemaining > 0);
+    },
+    resume() {
+      if ((remainingSeconds ?? 0) > 0) {
+        setRunning(true);
+      }
+    },
+  };
+}
+
+function TimerButton({
+  children,
+  disabled,
+  onClick,
+}: {
+  children: ReactNode;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 text-xs font-semibold text-zinc-200 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50"
+      disabled={disabled}
+      onClick={onClick}
+      type="button"
+    >
+      {children}
+    </button>
+  );
 }
 
 function targetText(set: WorkoutSet): string {
@@ -168,8 +240,10 @@ export function WorkoutScreen() {
   const completeSet = useCompleteSetMutation();
   const undoSet = useUndoSetMutation();
   const completeWorkout = useCompleteWorkoutMutation();
+  const startWorkout = useStartWorkoutMutation();
   const workout = query.data;
-  const restSeconds = useRestSeconds(workout?.restTimerEndsAt);
+  const completed = workout?.mode === "completed";
+  const restTimer = useRestTimer(workout?.restTimerEndsAt, completed);
   const pendingSetId = useMemo(() => {
     return completeSet.variables ?? undoSet.variables ?? null;
   }, [completeSet.variables, undoSet.variables]);
@@ -190,15 +264,41 @@ export function WorkoutScreen() {
 
   if (!workout) {
     return (
-      <ErrorPanel
-        onRetry={() => void query.refetch()}
-        title="Workout returned no data"
-      />
+      <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 text-sm text-zinc-400 shadow-panel">
+        <div className="flex items-start gap-3">
+          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-cyan-400/20 bg-cyan-400/[0.08] text-cyan-300">
+            <Dumbbell className="h-5 w-5" />
+          </div>
+          <div className="min-w-0">
+            <h2 className="text-lg font-semibold text-white">
+              No active workout
+            </h2>
+            <p className="mt-1 leading-relaxed">
+              Start a session here or send /workout in Telegram when you are
+              ready to train.
+            </p>
+          </div>
+        </div>
+        <button
+          className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-cyan-300 px-4 text-sm font-semibold text-graphite-950 active:scale-[0.99] disabled:pointer-events-none disabled:opacity-60"
+          disabled={startWorkout.isPending}
+          onClick={() => startWorkout.mutate()}
+          type="button"
+        >
+          <Dumbbell className="h-4 w-4" />
+          Start workout
+        </button>
+        {startWorkout.isError ? (
+          <p className="mt-3 text-sm text-rose-300">
+            {startWorkout.error.message}
+          </p>
+        ) : null}
+      </section>
     );
   }
 
+  const restSeconds = restTimer.remainingSeconds;
   const restActive = restSeconds !== null && restSeconds > 0;
-  const completed = workout.mode === "completed";
 
   return (
     <div className="space-y-4">
@@ -258,13 +358,35 @@ export function WorkoutScreen() {
               : "Ready for the next set."}
           </p>
         </div>
-        <div
-          className={cx(
-            "rounded-lg px-3 py-2 text-2xl font-semibold tabular-nums",
-            restActive ? "text-amber-200" : "text-emerald-200",
-          )}
-        >
-          {restSeconds === null ? "0:00" : formatCountdown(restSeconds)}
+        <div className="text-right">
+          <div
+            className={cx(
+              "rounded-lg px-3 py-2 text-2xl font-semibold tabular-nums",
+              restActive ? "text-amber-200" : "text-emerald-200",
+            )}
+          >
+            {restSeconds === null ? "0:00" : formatCountdown(restSeconds)}
+          </div>
+          <div className="mt-2 flex justify-end gap-2">
+            {restTimer.running ? (
+              <TimerButton onClick={restTimer.pause} disabled={!restActive}>
+                <Pause className="h-3.5 w-3.5" />
+                Pause
+              </TimerButton>
+            ) : (
+              <TimerButton onClick={restTimer.resume} disabled={!restActive}>
+                <Play className="h-3.5 w-3.5" />
+                Resume
+              </TimerButton>
+            )}
+            <TimerButton
+              disabled={restSeconds === null}
+              onClick={restTimer.reset}
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              Reset
+            </TimerButton>
+          </div>
         </div>
       </section>
 

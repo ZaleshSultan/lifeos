@@ -1,1 +1,7 @@
-export type ScreenId = "home" | "workout" | "health" | "focus" | "mode";
+export type ScreenId =
+  | "home"
+  | "workout"
+  | "health"
+  | "focus"
+  | "sources"
+  | "mode";

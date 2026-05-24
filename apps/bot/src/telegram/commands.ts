@@ -12,7 +12,10 @@ import type {
   Json,
   LifeEntityRecord,
   LifeOSStore,
+  ReminderRecord,
+  SourceRecord,
   StudyCourseRecord,
+  SyncRunRecord,
   TelegramUserRecord,
 } from "@lifeos/db";
 import type {
@@ -45,6 +48,10 @@ const HELP_TEXT = [
   "/focus [sleep 7 mood 8 energy 7 stress 3]",
   "/health [sleep 7 mood 8 energy 7 stress 3 notes]",
   "/healthsync_status",
+  "/sources",
+  "/sync [health|obsidian]",
+  "/reminders",
+  "/remind review notes at:2026-07-06 08:00",
   "/mode",
   "/mode set <mode> [today|until:YYYY-MM-DD]",
   "/mode auto",
@@ -57,6 +64,7 @@ const HELP_TEXT = [
   "/finance",
   "/workout [title]",
   "/status",
+  "/healthz",
 ].join("\n");
 
 const CREATE_COMMANDS = new Set([
@@ -68,7 +76,66 @@ const CREATE_COMMANDS = new Set([
   "review",
   "spend",
   "workout",
+  "remind",
 ]);
+
+const SOURCE_CATALOG: Array<{
+  sourceKey: string;
+  displayName: string;
+  sourceType: string;
+  note: string;
+  implemented: boolean;
+}> = [
+  {
+    sourceKey: "obsidian_config",
+    displayName: "Obsidian Config",
+    sourceType: "obsidian",
+    note: "Planned for local Arch worker config reads.",
+    implemented: false,
+  },
+  {
+    sourceKey: "google_calendar",
+    displayName: "Google Calendar",
+    sourceType: "google",
+    note: "Planned; OAuth is not implemented yet.",
+    implemented: false,
+  },
+  {
+    sourceKey: "google_tasks",
+    displayName: "Google Tasks",
+    sourceType: "google",
+    note: "Planned; OAuth is not implemented yet.",
+    implemented: false,
+  },
+  {
+    sourceKey: "health_connect",
+    displayName: "Health Connect",
+    sourceType: "android",
+    note: "Existing health ingest status is reported separately.",
+    implemented: true,
+  },
+  {
+    sourceKey: "university_ics",
+    displayName: "University ICS",
+    sourceType: "university",
+    note: "Planned import surface for academic calendar data.",
+    implemented: false,
+  },
+  {
+    sourceKey: "university_platform",
+    displayName: "University Platform",
+    sourceType: "university",
+    note: "Planned server-side connector; no scraping here.",
+    implemented: false,
+  },
+  {
+    sourceKey: "manual",
+    displayName: "Manual",
+    sourceType: "manual",
+    note: "Manual Telegram and TMA inputs.",
+    implemented: true,
+  },
+];
 
 function escapeHtml(value: string): string {
   return value
@@ -288,6 +355,15 @@ function courseUsage(): string {
   ].join("\n");
 }
 
+function remindUsage(): string {
+  return [
+    "Usage:",
+    "/remind Review graph theory at:2026-07-06 08:00",
+    "/remind Review graph theory tomorrow 09:00",
+    "/remind Review graph theory in:30m",
+  ].join("\n");
+}
+
 function formatSignedWeight(value: number): string {
   return value > 0 ? `+${value}` : String(value);
 }
@@ -339,6 +415,61 @@ function formatStudyCourse(course: StudyCourseRecord): string {
       : "",
   ]
     .filter(Boolean)
+    .join("\n");
+}
+
+function formatNullableDateTime(value?: string | null): string {
+  return value ? value : "never";
+}
+
+function catalogWithSources(sources: SourceRecord[]) {
+  const byKey = new Map(sources.map((source) => [source.sourceKey, source]));
+
+  return SOURCE_CATALOG.map((catalog) => ({
+    catalog,
+    source: byKey.get(catalog.sourceKey),
+  }));
+}
+
+function formatSources(sources: SourceRecord[]): string {
+  const lines = catalogWithSources(sources).map(({ catalog, source }) => {
+    const status = source?.status ?? "disabled";
+    const lastSync = formatNullableDateTime(source?.lastSyncAt);
+    const suffix = catalog.implemented ? "" : " (coming soon)";
+
+    return [
+      `<b>${escapeHtml(catalog.displayName)}</b>${suffix}`,
+      `status: <code>${escapeHtml(status)}</code>`,
+      `last sync: <code>${escapeHtml(lastSync)}</code>`,
+      escapeHtml(catalog.note),
+    ].join("\n");
+  });
+
+  return ["Data sources:", ...lines].join("\n\n");
+}
+
+function formatHealthSyncRuns(runs: SyncRunRecord[]): string {
+  if (runs.length === 0) {
+    return "No dynamic sync runs recorded yet.";
+  }
+
+  return runs
+    .map((run, index) => {
+      const finished = run.finishedAt ? ` finished=${run.finishedAt}` : "";
+      return `${index + 1}. ${escapeHtml(run.sourceKey)} ${escapeHtml(run.status)} seen=${run.recordsSeen} created=${run.recordsCreated} updated=${run.recordsUpdated}${escapeHtml(finished)}`;
+    })
+    .join("\n");
+}
+
+function formatUpcomingReminders(reminders: ReminderRecord[]): string {
+  if (reminders.length === 0) {
+    return "No upcoming reminders.";
+  }
+
+  return reminders
+    .map((reminder, index) => {
+      return `${index + 1}. ${escapeHtml(reminder.message)}\n   <code>${escapeHtml(reminder.remindAt)}</code>`;
+    })
     .join("\n");
 }
 
@@ -459,6 +590,113 @@ function untilDateUtc(date: string, timeZone: string): string {
   }
 
   return new Date(utcMs).toISOString();
+}
+
+function localDateTimeUtc(
+  date: string,
+  time: string,
+  timeZone: string,
+): string {
+  const [year, month, day] = date.split("-").map(Number);
+  const [hour, minute] = time.split(":").map(Number);
+  const localDateTime = new Date(
+    Date.UTC(year, month - 1, day, hour, minute, 0, 0),
+  );
+  let utcMs = localDateTime.getTime();
+
+  for (let index = 0; index < 3; index += 1) {
+    utcMs =
+      localDateTime.getTime() - timezoneOffsetMs(new Date(utcMs), timeZone);
+  }
+
+  return new Date(utcMs).toISOString();
+}
+
+function parseReminderArgs(
+  args: string,
+  now: Date,
+  timezone: string,
+):
+  | { ok: true; message: string; remindAt: string }
+  | { ok: false; error: string } {
+  const trimmed = args.trim();
+
+  if (!trimmed) {
+    return {
+      ok: false,
+      error: remindUsage(),
+    };
+  }
+
+  const relativeMatch = trimmed.match(/^(.*?)\s+in:(\d+)(m|h)$/i);
+
+  if (relativeMatch?.[1] && relativeMatch[2] && relativeMatch[3]) {
+    const amount = Number(relativeMatch[2]);
+    const multiplier = relativeMatch[3].toLowerCase() === "h" ? 60 : 1;
+
+    if (amount <= 0) {
+      return { ok: false, error: remindUsage() };
+    }
+
+    return {
+      ok: true,
+      message: relativeMatch[1].trim(),
+      remindAt: new Date(
+        now.getTime() + amount * multiplier * 60_000,
+      ).toISOString(),
+    };
+  }
+
+  const explicitMatch = trimmed.match(
+    /^(.*?)\s+at:(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2})$/i,
+  );
+  const relativeDayMatch = trimmed.match(
+    /^(.*?)\s+(today|tomorrow)\s+(\d{1,2}:\d{2})$/i,
+  );
+  const message = (explicitMatch?.[1] ?? relativeDayMatch?.[1] ?? "").trim();
+  const rawDate =
+    explicitMatch?.[2] ?? relativeDayMatch?.[2]?.toLowerCase() ?? "";
+  const time = explicitMatch?.[3] ?? relativeDayMatch?.[3] ?? "";
+
+  if (!message || !rawDate || !time) {
+    return { ok: false, error: remindUsage() };
+  }
+
+  const timeMatch = time.match(/^(\d{1,2}):(\d{2})$/);
+
+  if (!timeMatch?.[1] || !timeMatch[2]) {
+    return {
+      ok: false,
+      error: remindUsage(),
+    };
+  }
+
+  const hour = Number(timeMatch[1]);
+  const minute = Number(timeMatch[2]);
+
+  if (hour > 23 || minute > 59) {
+    return {
+      ok: false,
+      error: remindUsage(),
+    };
+  }
+
+  const date =
+    rawDate === "today"
+      ? localDateString(now, timezone)
+      : rawDate === "tomorrow"
+        ? localDateString(new Date(now.getTime() + 86_400_000), timezone)
+        : rawDate;
+
+  return {
+    ok: true,
+    message,
+    remindAt: localDateTimeUtc(
+      date,
+      `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`,
+      timezone,
+    ),
+  };
 }
 
 function parseModeSetArgs(
@@ -889,6 +1127,46 @@ async function handleCreateCommand(
     return;
   }
 
+  if (command === "remind") {
+    const parsed = parseReminderArgs(
+      args,
+      runtime.now?.() ?? new Date(),
+      user.timezone,
+    );
+
+    if (!parsed.ok) {
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: parsed.error,
+      });
+      return;
+    }
+
+    const reminder = await runtime.store.createReminder({
+      userId: user.userId,
+      message: parsed.message,
+      remindAt: parsed.remindAt,
+      channel: "telegram",
+      metadataJson: metadata({
+        source: "telegram",
+        command: "/remind",
+        telegram_user_id: message.from?.id ?? null,
+        chat_id: message.chat.id,
+        message_id: message.message_id,
+      }),
+    });
+
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: [
+        "Reminder scheduled.",
+        `When: <code>${escapeHtml(reminder.remindAt)}</code>`,
+        `Message: ${escapeHtml(reminder.message)}`,
+      ].join("\n"),
+    });
+    return;
+  }
+
   if (command === "workout") {
     const now = runtime.now?.() ?? new Date();
     const mode = await runtime.store.resolveCurrentMode(user.userId);
@@ -952,7 +1230,7 @@ async function handleReadCommand(
     return;
   }
 
-  if (command === "help") {
+  if (command === "help" || command === "hepl") {
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
       text: HELP_TEXT,
@@ -968,6 +1246,17 @@ async function handleReadCommand(
         `Database: <b>${runtime.store ? "configured" : "missing"}</b>`,
         `TMA_URL: <b>${runtime.tmaUrl ? "configured" : "missing"}</b>`,
         "Polling: <b>disabled</b>",
+      ].join("\n"),
+    });
+    return;
+  }
+
+  if (command === "healthz") {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: [
+        "healthz is an HTTP endpoint. Use /status in Telegram.",
+        "Backend: https://lifeosbot-production.up.railway.app/healthz",
       ].join("\n"),
     });
     return;
@@ -1154,6 +1443,87 @@ async function handleReadCommand(
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
       text: courseUsage(),
+    });
+    return;
+  }
+
+  if (command === "sources") {
+    const sources = await runtime.store.listExternalSources(user.userId);
+
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: formatSources(sources),
+    });
+    return;
+  }
+
+  if (command === "sync") {
+    const normalized = args.trim().toLowerCase();
+
+    if (!normalized) {
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: [
+          "Sync commands:",
+          "/sync health — latest Health Connect ingest status",
+          "/sync obsidian — Obsidian config sync status",
+          "",
+          "Google Calendar, Google Tasks, University ICS, and University Platform sync are planned.",
+        ].join("\n"),
+      });
+      return;
+    }
+
+    if (normalized === "obsidian") {
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: "Obsidian config sync is planned for local Arch worker.",
+      });
+      return;
+    }
+
+    if (normalized === "health") {
+      const [healthStatus, sourcesSummary] = await Promise.all([
+        runtime.store.getHealthSyncStatus(user.userId),
+        runtime.store.getTmaSourcesSummary(user.userId),
+      ]);
+      const latest = healthStatus.latestRun;
+
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: [
+          "Health sync:",
+          latest
+            ? `Latest health bridge run: <b>${escapeHtml(latest.status)}</b> on <code>${escapeHtml(latest.syncDate)}</code>`
+            : "No health bridge runs yet.",
+          formatHealthSyncRuns(
+            sourcesSummary.syncRuns.filter(
+              (run) => run.sourceKey === "health_connect",
+            ),
+          ),
+        ].join("\n"),
+      });
+      return;
+    }
+
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "Unknown sync target. Try /sync, /sync health, or /sync obsidian.",
+    });
+    return;
+  }
+
+  if (command === "reminders") {
+    const reminders = await runtime.store.listUpcomingReminders(
+      user.userId,
+      10,
+    );
+
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: ["Upcoming reminders:", formatUpcomingReminders(reminders)].join(
+        "\n",
+      ),
     });
     return;
   }

@@ -20,6 +20,10 @@ Current migration set:
 - `20260518020600_health_ingest_api.sql`
 - `20260518020700_vertical_slice_stabilization.sql`
 - `20260518020800_health_contract_metrics.sql`
+- `20260520000100_telegram_log_inbox.sql`
+- `20260521000100_life_modes.sql`
+- `20260523000100_life_modes_phase1_study_courses.sql`
+- `20260524000100_dynamic_sources_mvp.sql`
 
 ## Kernel Tables
 
@@ -39,6 +43,18 @@ Current migration set:
 ## Fitness And Finance Tables
 
 The fitness and finance migrations establish layer tables and indexes for future structured workflows. Telegram spend capture currently writes finance-flavored `life_entities` and stores parsed amount metadata.
+
+## Dynamic Sources MVP
+
+Dynamic source state is stored in:
+
+- `external_sources`
+- `source_events`
+- `sync_runs`
+- `reminders`
+- `academic_records`
+
+These tables prepare integrations without implementing Google OAuth, Google sync, university scraping, or mobile bridge changes. The Phase 1 seed can populate source catalog rows, finals, ExamFX, the Discrete Mathematics summer course, academic records/topics, and starter reminders as Supabase data.
 
 ## RLS
 

@@ -11,17 +11,23 @@ import type {
   CurrentWorkoutSummary,
   DailyLogRecord,
   FinanceSummary,
-  HealthSyncStatusSummary,
   HealthIngestResult,
+  HealthSyncStatusSummary,
   LifeEntityRecord,
   LifeOSStore,
   ObsidianSyncStatusSummary,
+  ReminderRecord,
+  SourceEventRecord,
+  SourceRecord,
   StudyCourseRecord,
+  SyncRunRecord,
   TaskRecord,
   TelegramUserRecord,
+  TmaAcademicSummary,
   TmaFocusSummary,
   TmaHealthSummary,
   TmaHomeSummary,
+  TmaSourcesSummary,
   WorkoutRecord,
 } from "@lifeos/db";
 import { describe, expect, it } from "vitest";
@@ -39,6 +45,57 @@ class FakeStore implements LifeOSStore {
   readonly syncEntityIds: string[] = [];
   readonly syncJobs: Array<Parameters<LifeOSStore["enqueueObsidianSync"]>[0]> =
     [];
+  readonly reminders: ReminderRecord[] = [];
+  readonly sources: SourceRecord[] = [
+    {
+      id: "source-manual",
+      userId: "user-1",
+      sourceKey: "manual",
+      sourceType: "manual",
+      displayName: "Manual",
+      status: "connected",
+      configJson: {},
+      lastSyncAt: null,
+      createdAt: "2026-05-18T00:00:00.000Z",
+      updatedAt: "2026-05-18T00:00:00.000Z",
+    },
+  ];
+  readonly sourceEvents: SourceEventRecord[] = [
+    {
+      id: "source-event-1",
+      userId: "user-1",
+      sourceKey: "manual",
+      externalId: "academic:final:test",
+      eventType: "academic_event",
+      title: "Calculus 2 final",
+      description: "Final exam.",
+      location: null,
+      startsAt: "2026-05-26T09:00:00.000Z",
+      endsAt: null,
+      dueAt: null,
+      status: "active",
+      rawJson: {},
+      normalizedEntityId: null,
+      createdAt: "2026-05-18T00:00:00.000Z",
+      updatedAt: "2026-05-18T00:00:00.000Z",
+    },
+  ];
+  readonly syncRuns: SyncRunRecord[] = [
+    {
+      id: "sync-run-1",
+      userId: "user-1",
+      sourceId: "source-manual",
+      sourceKey: "manual",
+      status: "success",
+      startedAt: "2026-05-18T00:00:00.000Z",
+      finishedAt: "2026-05-18T00:01:00.000Z",
+      recordsSeen: 1,
+      recordsCreated: 1,
+      recordsUpdated: 0,
+      errorMessage: null,
+      metadataJson: {},
+    },
+  ];
   readonly clearedModes: string[] = [];
   readonly setModes: Array<{
     mode: LifeMode;
@@ -420,6 +477,198 @@ class FakeStore implements LifeOSStore {
     };
   }
 
+  async getTmaSourcesSummary(): Promise<TmaSourcesSummary> {
+    return {
+      sources: this.sources,
+      sourceEvents: this.sourceEvents,
+      reminders: this.reminders,
+      syncRuns: this.syncRuns,
+    };
+  }
+
+  async getTmaAcademicSummary(): Promise<TmaAcademicSummary> {
+    return {
+      currentMode: await this.resolveCurrentMode(),
+      nextAcademicEvent: this.sourceEvents[0] ?? null,
+      finals: this.sourceEvents,
+      examfx: [],
+      activeCourse: this.course,
+      summerCourse: this.course,
+      nextTransition: null,
+      academicRecords: [],
+    };
+  }
+
+  async upsertExternalSource(
+    userId: string,
+    source: Parameters<LifeOSStore["upsertExternalSource"]>[1],
+  ): Promise<SourceRecord> {
+    return {
+      id: `source-${source.sourceKey}`,
+      userId,
+      sourceKey: source.sourceKey,
+      sourceType: source.sourceType,
+      displayName: source.displayName,
+      status: source.status ?? "disabled",
+      configJson: source.configJson ?? {},
+      lastSyncAt: source.lastSyncAt ?? null,
+      createdAt: "2026-05-18T00:00:00.000Z",
+      updatedAt: "2026-05-18T00:00:00.000Z",
+    };
+  }
+
+  async listExternalSources(): Promise<SourceRecord[]> {
+    return this.sources;
+  }
+
+  async createSyncRun(
+    userId: string,
+    sourceKey: string,
+  ): Promise<SyncRunRecord> {
+    return {
+      id: "sync-run-created",
+      userId,
+      sourceId: null,
+      sourceKey,
+      status: "running",
+      startedAt: "2026-05-18T00:00:00.000Z",
+      finishedAt: null,
+      recordsSeen: 0,
+      recordsCreated: 0,
+      recordsUpdated: 0,
+      errorMessage: null,
+      metadataJson: {},
+    };
+  }
+
+  async finishSyncRun(
+    syncRunId: string,
+    status: Parameters<LifeOSStore["finishSyncRun"]>[1],
+  ): Promise<SyncRunRecord> {
+    return {
+      ...this.syncRuns[0],
+      id: syncRunId,
+      status,
+      finishedAt: "2026-05-18T00:01:00.000Z",
+    };
+  }
+
+  async upsertSourceEvent(
+    input: Parameters<LifeOSStore["upsertSourceEvent"]>[0],
+  ): Promise<SourceEventRecord> {
+    return {
+      id: "source-event-created",
+      userId: input.userId,
+      sourceKey: input.sourceKey,
+      externalId: input.externalId ?? null,
+      eventType: input.eventType,
+      title: input.title ?? null,
+      description: input.description ?? null,
+      location: input.location ?? null,
+      startsAt: input.startsAt ?? null,
+      endsAt: input.endsAt ?? null,
+      dueAt: input.dueAt ?? null,
+      status: input.status ?? "active",
+      rawJson: input.rawJson ?? {},
+      normalizedEntityId: input.normalizedEntityId ?? null,
+      createdAt: "2026-05-18T00:00:00.000Z",
+      updatedAt: "2026-05-18T00:00:00.000Z",
+    };
+  }
+
+  async listSourceEvents(): Promise<SourceEventRecord[]> {
+    return this.sourceEvents;
+  }
+
+  async normalizeSourceEvent(): Promise<LifeEntityRecord> {
+    throw new Error("not used");
+  }
+
+  async createReminder(
+    input: Parameters<LifeOSStore["createReminder"]>[0],
+  ): Promise<ReminderRecord> {
+    const reminder: ReminderRecord = {
+      id: `reminder-${this.reminders.length + 1}`,
+      userId: input.userId,
+      lifeEntityId: input.lifeEntityId ?? null,
+      sourceEventId: input.sourceEventId ?? null,
+      channel: input.channel ?? "telegram",
+      remindAt: input.remindAt,
+      status: "pending",
+      message: input.message,
+      metadataJson: input.metadataJson ?? {},
+      sentAt: null,
+      createdAt: "2026-05-18T00:00:00.000Z",
+      updatedAt: "2026-05-18T00:00:00.000Z",
+    };
+    this.reminders.push(reminder);
+    return reminder;
+  }
+
+  async listPendingReminders(): Promise<ReminderRecord[]> {
+    return this.reminders;
+  }
+
+  async listUpcomingReminders(): Promise<ReminderRecord[]> {
+    return this.reminders;
+  }
+
+  async markReminderSent(reminderId: string): Promise<ReminderRecord> {
+    const reminder = this.reminders.find((item) => item.id === reminderId);
+
+    if (!reminder) {
+      throw new Error("not found");
+    }
+
+    return {
+      ...reminder,
+      status: "sent",
+      sentAt: "2026-05-18T00:00:00.000Z",
+    };
+  }
+
+  async cancelReminder(
+    _userId: string,
+    reminderId: string,
+  ): Promise<ReminderRecord> {
+    const reminder = this.reminders.find((item) => item.id === reminderId);
+
+    if (!reminder) {
+      throw new Error("not found");
+    }
+
+    return {
+      ...reminder,
+      status: "cancelled",
+    };
+  }
+
+  async listAcademicRecords(): Promise<[]> {
+    return [];
+  }
+
+  async upsertAcademicRecord(
+    input: Parameters<LifeOSStore["upsertAcademicRecord"]>[0],
+  ): Promise<Awaited<ReturnType<LifeOSStore["upsertAcademicRecord"]>>> {
+    return {
+      id: "academic-record-1",
+      userId: input.userId,
+      sourceEventId: input.sourceEventId ?? null,
+      courseTitle: input.courseTitle,
+      recordType: input.recordType,
+      title: input.title,
+      valueText: input.valueText ?? null,
+      score: input.score ?? null,
+      maxScore: input.maxScore ?? null,
+      percentage: input.percentage ?? null,
+      occursAt: input.occursAt ?? null,
+      dueAt: input.dueAt ?? null,
+      rawJson: input.rawJson ?? {},
+      createdAt: "2026-05-18T00:00:00.000Z",
+      updatedAt: "2026-05-18T00:00:00.000Z",
+    };
+  }
+
   async getFinanceSummary(): Promise<FinanceSummary> {
     return {
       capturedSpendCount: 2,
@@ -492,6 +741,34 @@ describe("Telegram commands", () => {
     expect(context.store.captures).toHaveLength(0);
     expect(context.store.entities).toHaveLength(0);
     expect(context.store.syncJobs).toHaveLength(0);
+  });
+
+  it("aliases /hepl to /help", async () => {
+    const context = runtime();
+
+    await handleTelegramUpdate(update("/hepl"), context);
+
+    expect(context.sent.at(-1)?.text).toContain("LifeOS bot commands");
+    expect(context.sent.at(-1)?.text).toContain("/remind");
+  });
+
+  it("replies to /help", async () => {
+    const context = runtime();
+
+    await handleTelegramUpdate(update("/help"), context);
+
+    expect(context.sent.at(-1)?.text).toContain("LifeOS bot commands");
+    expect(context.sent.at(-1)?.text).toContain("/sources");
+  });
+
+  it("reports bot health from /healthz without requiring user data", async () => {
+    const context = runtime();
+    context.store.user = null;
+
+    await handleTelegramUpdate(update("/healthz"), context);
+
+    expect(context.sent.at(-1)?.text).toContain("healthz is an HTTP endpoint");
+    expect(context.sent.at(-1)?.text).toContain("/status");
   });
 
   it("creates capture, entity, and Obsidian queue rows for /log", async () => {
@@ -632,6 +909,75 @@ describe("Telegram commands", () => {
     expect(context.sent.at(-1)?.text).toContain("Failed: <b>1</b>");
     expect(context.sent.at(-1)?.text).toContain("score=85");
     expect(context.sent.at(-1)?.text).toContain("missing=stress");
+  });
+
+  it("creates a reminder and queues notification metadata", async () => {
+    const context = runtime();
+
+    await handleTelegramUpdate(
+      update("/remind Review graph theory at:2026-07-06 08:00"),
+      context,
+    );
+
+    expect(context.store.reminders).toMatchObject([
+      {
+        userId: "user-1",
+        message: "Review graph theory",
+        remindAt: "2026-07-06T08:00:00.000Z",
+        channel: "telegram",
+        status: "pending",
+        metadataJson: {
+          source: "telegram",
+          command: "/remind",
+          telegram_user_id: 30,
+          chat_id: 20,
+          message_id: 10,
+        },
+      },
+    ]);
+    expect(context.sent.at(-1)?.text).toContain("Reminder scheduled.");
+  });
+
+  it("rejects invalid reminder syntax with examples", async () => {
+    const context = runtime();
+
+    await handleTelegramUpdate(update("/remind someday maybe"), context);
+
+    expect(context.sent.at(-1)?.text).toContain("Usage:");
+    expect(context.sent.at(-1)?.text).toContain("in:30m");
+  });
+
+  it("shows sources and upcoming reminders", async () => {
+    const context = runtime();
+    await handleTelegramUpdate(
+      update("/remind Review graph theory in:30m"),
+      context,
+    );
+
+    await handleTelegramUpdate(update("/sources"), context);
+    expect(context.sent.at(-1)?.text).toContain("Obsidian Config");
+    expect(context.sent.at(-1)?.text).toContain("Manual");
+    expect(context.sent.at(-1)?.text).toContain("connected");
+
+    await handleTelegramUpdate(update("/reminders"), context);
+    expect(context.sent.at(-1)?.text).toContain("Upcoming reminders");
+    expect(context.sent.at(-1)?.text).toContain("Review graph theory");
+  });
+
+  it("shows sync help and health sync status", async () => {
+    const context = runtime();
+
+    await handleTelegramUpdate(update("/sync"), context);
+    expect(context.sent.at(-1)?.text).toContain("/sync health");
+
+    await handleTelegramUpdate(update("/sync obsidian"), context);
+    expect(context.sent.at(-1)?.text).toBe(
+      "Obsidian config sync is planned for local Arch worker.",
+    );
+
+    await handleTelegramUpdate(update("/sync health"), context);
+    expect(context.sent.at(-1)?.text).toContain("Health sync:");
+    expect(context.sent.at(-1)?.text).toContain("Latest health bridge run");
   });
 
   it("sets manual mode from /mode set", async () => {
