@@ -947,6 +947,38 @@ describe("Telegram commands", () => {
     expect(context.sent.at(-1)?.text).toContain("in:30m");
   });
 
+  it("parses relative reminder shortcuts", async () => {
+    const context = runtime();
+
+    await handleTelegramUpdate(
+      update("/remind Review graph theory in:30m"),
+      context,
+    );
+    await handleTelegramUpdate(update("/remind Stretch in:2h"), context);
+
+    expect(
+      context.store.reminders.map((reminder) => reminder.remindAt),
+    ).toEqual(["2026-05-18T12:30:00.000Z", "2026-05-18T14:00:00.000Z"]);
+  });
+
+  it("parses explicit reminder times in Asia/Qyzylorda", async () => {
+    const context = runtime();
+    context.store.user = {
+      userId: "user-1",
+      displayName: "User",
+      timezone: "Asia/Qyzylorda",
+    };
+
+    await handleTelegramUpdate(
+      update("/remind Review graph theory at:2026-07-06 08:00"),
+      context,
+    );
+
+    expect(context.store.reminders.at(-1)?.remindAt).toBe(
+      "2026-07-06T03:00:00.000Z",
+    );
+  });
+
   it("shows sources and upcoming reminders", async () => {
     const context = runtime();
     await handleTelegramUpdate(

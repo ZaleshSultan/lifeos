@@ -137,6 +137,8 @@ const SOURCE_CATALOG: Array<{
   },
 ];
 
+const LOCAL_TIMEZONE = "Asia/Qyzylorda";
+
 function escapeHtml(value: string): string {
   return value
     .replaceAll("&", "&amp;")
@@ -359,8 +361,9 @@ function remindUsage(): string {
   return [
     "Usage:",
     "/remind Review graph theory at:2026-07-06 08:00",
-    "/remind Review graph theory tomorrow 09:00",
     "/remind Review graph theory in:30m",
+    "/remind Review graph theory in:2h",
+    "/remind Review graph theory tomorrow 19:00",
   ].join("\n");
 }
 
@@ -461,14 +464,33 @@ function formatHealthSyncRuns(runs: SyncRunRecord[]): string {
     .join("\n");
 }
 
-function formatUpcomingReminders(reminders: ReminderRecord[]): string {
+function formatReminderDateTime(value: string, timezone: string): string {
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone || LOCAL_TIMEZONE,
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZoneName: "short",
+    }).format(new Date(value));
+  } catch {
+    return value;
+  }
+}
+
+function formatUpcomingReminders(
+  reminders: ReminderRecord[],
+  timezone: string,
+): string {
   if (reminders.length === 0) {
     return "No upcoming reminders.";
   }
 
   return reminders
     .map((reminder, index) => {
-      return `${index + 1}. ${escapeHtml(reminder.message)}\n   <code>${escapeHtml(reminder.remindAt)}</code>`;
+      return `${index + 1}. ${escapeHtml(reminder.message)}\n   <code>${escapeHtml(formatReminderDateTime(reminder.remindAt, timezone))}</code>`;
     })
     .join("\n");
 }
@@ -764,7 +786,7 @@ function metadata(value: Record<string, unknown>): Json {
 function bootstrapProfileSql(userId: string, telegramUserId: number): string {
   return [
     "insert into public.profiles (user_id, telegram_user_id, display_name, timezone, locale)",
-    `values ('${userId}', ${telegramUserId}, 'LifeOS User', 'UTC', 'en')`,
+    `values ('${userId}', ${telegramUserId}, 'LifeOS User', '${LOCAL_TIMEZONE}', 'en')`,
     "on conflict (user_id) do update set",
     "  telegram_user_id = excluded.telegram_user_id,",
     "  display_name = coalesce(public.profiles.display_name, excluded.display_name),",
@@ -1160,7 +1182,7 @@ async function handleCreateCommand(
       chatId: message.chat.id,
       text: [
         "Reminder scheduled.",
-        `When: <code>${escapeHtml(reminder.remindAt)}</code>`,
+        `When: <code>${escapeHtml(formatReminderDateTime(reminder.remindAt, user.timezone || LOCAL_TIMEZONE))}</code>`,
         `Message: ${escapeHtml(reminder.message)}`,
       ].join("\n"),
     });
@@ -1521,9 +1543,10 @@ async function handleReadCommand(
 
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
-      text: ["Upcoming reminders:", formatUpcomingReminders(reminders)].join(
-        "\n",
-      ),
+      text: [
+        `Upcoming reminders (${escapeHtml(user.timezone || LOCAL_TIMEZONE)}):`,
+        formatUpcomingReminders(reminders, user.timezone || LOCAL_TIMEZONE),
+      ].join("\n"),
     });
     return;
   }

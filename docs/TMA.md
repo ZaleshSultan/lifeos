@@ -50,6 +50,7 @@ Implemented backend routes:
 - `GET /api/tma/course/active`
 - `POST /api/tma/course/active/progress`
 - `GET /api/tma/sources`
+- `GET /api/tma/reminders`
 - `POST /api/tma/reminders`
 
 `GET /api/tma/workout/current` only returns an existing active workout. It does not create a default workout. Starting a workout is explicit through Telegram `/workout` or `POST /api/tma/workout/start`.

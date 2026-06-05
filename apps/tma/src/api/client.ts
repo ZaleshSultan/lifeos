@@ -8,6 +8,7 @@ import type {
   HealthSummary,
   HomeSummary,
   ModeSummary,
+  RemindersResponse,
   SaveModeInput,
   SourcesSummary,
   StudyCourse,
@@ -98,6 +99,9 @@ export const api = {
   },
   getSources(): Promise<SourcesSummary> {
     return request<SourcesSummary>("/api/tma/sources");
+  },
+  getReminders(): Promise<RemindersResponse> {
+    return request<RemindersResponse>("/api/tma/reminders");
   },
   getAcademic(): Promise<AcademicSummary> {
     return request<AcademicSummary>("/api/tma/academic");

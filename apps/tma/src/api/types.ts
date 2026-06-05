@@ -145,6 +145,18 @@ export interface SourcesSummary {
   syncRuns: SyncRunRecord[];
 }
 
+export interface ReminderListItem {
+  id: string;
+  message: string;
+  remind_at: string;
+  status: ReminderRecord["status"];
+  channel: string;
+}
+
+export interface RemindersResponse {
+  reminders: ReminderListItem[];
+}
+
 export interface AcademicRecord {
   id: string;
   userId: string;

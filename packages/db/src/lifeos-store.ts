@@ -1183,7 +1183,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
         {
           user_id: input.userId,
           display_name: input.displayName ?? null,
-          timezone: input.timezone ?? "UTC",
+          timezone: input.timezone ?? "Asia/Qyzylorda",
           locale: input.locale ?? "en",
           telegram_user_id: input.telegramUserId,
           metadata: {
@@ -2390,11 +2390,13 @@ export class SupabaseLifeOSStore implements LifeOSStore {
   }
 
   async markReminderSent(reminderId: string): Promise<ReminderRecord> {
+    const now = new Date().toISOString();
     const { data, error } = await this.client
       .from("reminders")
       .update({
         status: "sent",
-        sent_at: new Date().toISOString(),
+        sent_at: now,
+        updated_at: now,
       })
       .eq("id", reminderId)
       .select("*")

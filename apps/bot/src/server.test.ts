@@ -466,6 +466,7 @@ function tmaStore(events: string[] = []): LifeOSStore {
       return reminders;
     },
     async listUpcomingReminders() {
+      events.push("listUpcomingReminders");
       return reminders;
     },
     async markReminderSent(reminderId) {
@@ -1317,6 +1318,9 @@ describe("bot server", () => {
         }),
       },
     );
+    const listResponse = await fetch(
+      `http://127.0.0.1:${port}/api/tma/reminders`,
+    );
 
     expect(getResponse.status).toBe(200);
     await expect(getResponse.json()).resolves.toMatchObject({
@@ -1346,10 +1350,22 @@ describe("bot server", () => {
         ],
       },
     });
+    expect(listResponse.status).toBe(200);
+    await expect(listResponse.json()).resolves.toMatchObject({
+      reminders: [
+        {
+          message: "Review graph theory",
+          remind_at: "2026-07-06T02:00:00.000Z",
+          status: "pending",
+          channel: "telegram",
+        },
+      ],
+    });
     expect(events).toEqual([
       "getTmaSourcesSummary",
       "createReminder",
       "getTmaSourcesSummary",
+      "listUpcomingReminders",
     ]);
   });
 

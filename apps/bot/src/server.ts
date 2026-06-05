@@ -249,7 +249,7 @@ async function resolveTmaUser(
       user: {
         userId: options.defaultUserId,
         displayName: "Dev user",
-        timezone: "UTC",
+        timezone: "Asia/Qyzylorda",
       },
     };
   }
@@ -813,6 +813,24 @@ async function handleRequest(
         200,
         tmaData(await store.getTmaSourcesSummary(auth.user.userId)),
       );
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      requestUrl.pathname === "/api/tma/reminders"
+    ) {
+      const reminders = await store.listUpcomingReminders(auth.user.userId, 20);
+
+      writeJson(response, 200, {
+        reminders: reminders.map((reminder) => ({
+          id: reminder.id,
+          message: reminder.message,
+          remind_at: reminder.remindAt,
+          status: reminder.status,
+          channel: reminder.channel,
+        })),
+      });
       return;
     }
 

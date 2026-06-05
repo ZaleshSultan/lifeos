@@ -14,7 +14,7 @@ values (
   '00000000-0000-0000-0000-000000000000',
   123456789,
   'LifeOS User',
-  'UTC',
+  'Asia/Qyzylorda',
   'en'
 )
 on conflict (user_id) do update set

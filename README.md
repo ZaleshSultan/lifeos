@@ -11,6 +11,7 @@ Personal LifeOS monorepo for automation, knowledge workflows, and user-facing in
 - `packages/db` - Database package boundary
 - `packages/obsidian` - Obsidian integration package boundary
 - `workers/obsidian-mirror` - Supabase to Obsidian Markdown mirror
+- `workers/reminder-worker` - Supabase reminders to Telegram worker
 - `apps/health-bridge` - Android Health Connect bridge scaffold
 - `docs` - architecture, contracts, deployment, and operations docs
 - `deploy` - platform deployment assets
@@ -52,6 +53,18 @@ Run the TMA:
 cp apps/tma/.env.example apps/tma/.env.local
 corepack pnpm --filter @lifeos/tma dev
 ```
+
+Run the reminder worker locally:
+
+```bash
+cd workers/reminder-worker
+python -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+cp .env.example .env
+.venv/bin/python reminder_worker.py status
+```
+
+See `docs/REMINDER_WORKER.md` for Arch/systemd setup.
 
 ## Single-User Bootstrap
 

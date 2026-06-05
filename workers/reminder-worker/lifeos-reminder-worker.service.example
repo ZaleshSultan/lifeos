@@ -1,0 +1,16 @@
+[Unit]
+Description=LifeOS Reminder Worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=zalewko
+WorkingDirectory=/home/zalewko/lifeos/workers/reminder-worker
+EnvironmentFile=/home/zalewko/lifeos/workers/reminder-worker/.env
+ExecStart=/home/zalewko/lifeos/workers/reminder-worker/.venv/bin/python -u /home/zalewko/lifeos/workers/reminder-worker/reminder_worker.py run-loop
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
