@@ -5,6 +5,9 @@ import {
   type ServerResponse,
 } from "node:http";
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { realpathSync, statSync } from "node:fs";
+import { readFile, realpath, stat } from "node:fs/promises";
+import { extname, isAbsolute, relative, resolve, sep } from "node:path";
 import {
   parseHealthIngestPayload,
   parseLifeMode,
@@ -25,6 +28,7 @@ export interface BotServerOptions {
       | "telegramWebhookSecret"
       | "telegramBotToken"
       | "tmaUrl"
+      | "tmaStaticDir"
       | "lifeosIngestSecret"
       | "lifeosDefaultUserId"
       | "lifeosDefaultTelegramUserId"
@@ -65,6 +69,7 @@ interface ResolvedBotServerOptions {
   telegramBotToken?: string;
   ingestSecret?: string;
   tmaUrl?: string;
+  tmaStaticDir?: string;
   defaultUserId?: string;
   defaultTelegramUserId?: number;
   allowUnsafeTmaDevAuth: boolean;
@@ -85,6 +90,19 @@ interface TelegramWebhookLogContext {
   updateType: TelegramUpdateType;
   command?: string;
 }
+
+const TMA_MIME_TYPES: Record<string, string> = {
+  ".html": "text/html",
+  ".js": "application/javascript",
+  ".css": "text/css",
+  ".json": "application/json",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".ico": "image/x-icon",
+};
 
 function writeJson(
   response: ServerResponse,
@@ -109,6 +127,180 @@ function writeNoContent(response: ServerResponse): void {
       "content-type,x-telegram-init-data,x-lifeos-ingest-secret,x-telegram-bot-api-secret-token",
   });
   response.end();
+}
+
+function resolveStaticDirectory(
+  directory: string | undefined,
+): string | undefined {
+  if (!directory) {
+    return undefined;
+  }
+
+  try {
+    const resolved = realpathSync(directory);
+    return statSync(resolved).isDirectory() ? resolved : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function pathIsWithin(directory: string, filePath: string): boolean {
+  const relativePath = relative(directory, filePath);
+  return (
+    relativePath === "" ||
+    (!isAbsolute(relativePath) &&
+      relativePath !== ".." &&
+      !relativePath.startsWith(`..${sep}`))
+  );
+}
+
+function hasTmaPathTraversal(requestUrl: string | undefined): boolean {
+  const rawPath = (requestUrl ?? "/").split(/[?#]/, 1)[0] ?? "/";
+  let decodedPath = rawPath;
+
+  try {
+    for (let count = 0; count < 3; count += 1) {
+      const decoded = decodeURIComponent(decodedPath);
+
+      if (decoded === decodedPath) {
+        break;
+      }
+
+      decodedPath = decoded;
+    }
+  } catch {
+    return rawPath.startsWith("/tma");
+  }
+
+  const isTmaPath =
+    decodedPath === "/tma" ||
+    decodedPath.startsWith("/tma/") ||
+    decodedPath.startsWith("/tma\\");
+
+  return (
+    isTmaPath &&
+    (decodedPath.includes("\0") || decodedPath.split(/[\\/]+/).includes(".."))
+  );
+}
+
+async function resolveTmaStaticFile(
+  staticDirectory: string,
+  relativePath: string,
+): Promise<string | undefined> {
+  const candidate = resolve(staticDirectory, relativePath);
+
+  if (!pathIsWithin(staticDirectory, candidate)) {
+    return undefined;
+  }
+
+  try {
+    const realPath = await realpath(candidate);
+
+    if (!pathIsWithin(staticDirectory, realPath)) {
+      return undefined;
+    }
+
+    return (await stat(realPath)).isFile() ? realPath : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function writeStaticFile(
+  request: IncomingMessage,
+  response: ServerResponse,
+  filePath: string,
+  immutable: boolean,
+): Promise<void> {
+  const body = await readFile(filePath);
+  const extension = extname(filePath).toLowerCase();
+  const headers: Record<string, string | number> = {
+    "content-type": TMA_MIME_TYPES[extension] ?? "application/octet-stream",
+    "content-length": body.byteLength,
+  };
+
+  if (extension === ".html") {
+    headers["cache-control"] = "no-cache";
+  } else if (immutable) {
+    headers["cache-control"] = "public, max-age=31536000, immutable";
+  }
+
+  response.writeHead(200, headers);
+  response.end(request.method === "HEAD" ? undefined : body);
+}
+
+async function handleTmaStaticRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  requestUrl: URL,
+  options: ResolvedBotServerOptions,
+): Promise<boolean> {
+  if (
+    !options.tmaStaticDir ||
+    (request.method !== "GET" && request.method !== "HEAD")
+  ) {
+    return false;
+  }
+
+  if (requestUrl.pathname === "/tma") {
+    response.writeHead(308, {
+      location: `/tma/${requestUrl.search}`,
+      "cache-control": "no-cache",
+    });
+    response.end();
+    return true;
+  }
+
+  if (!requestUrl.pathname.startsWith("/tma/")) {
+    return false;
+  }
+
+  let relativePath: string;
+
+  try {
+    relativePath = decodeURIComponent(
+      requestUrl.pathname.slice("/tma/".length),
+    );
+  } catch {
+    writeJson(response, 400, {
+      error: "invalid_tma_path",
+    });
+    return true;
+  }
+
+  const requestedPath = relativePath || "index.html";
+
+  if (
+    !pathIsWithin(
+      options.tmaStaticDir,
+      resolve(options.tmaStaticDir, requestedPath),
+    )
+  ) {
+    writeJson(response, 400, {
+      error: "invalid_tma_path",
+    });
+    return true;
+  }
+
+  const requestedFile = await resolveTmaStaticFile(
+    options.tmaStaticDir,
+    requestedPath,
+  );
+  const filePath =
+    requestedFile ??
+    (await resolveTmaStaticFile(options.tmaStaticDir, "index.html"));
+
+  if (!filePath) {
+    return false;
+  }
+
+  await writeStaticFile(
+    request,
+    response,
+    filePath,
+    Boolean(requestedFile) && requestUrl.pathname.startsWith("/tma/assets/"),
+  );
+  return true;
 }
 
 function healthResponse(options: ResolvedBotServerOptions): HealthResponse {
@@ -668,6 +860,13 @@ async function handleRequest(
   response: ServerResponse,
   options: ResolvedBotServerOptions,
 ): Promise<void> {
+  if (hasTmaPathTraversal(request.url)) {
+    writeJson(response, 400, {
+      error: "invalid_tma_path",
+    });
+    return;
+  }
+
   const requestUrl = new URL(
     request.url ?? "/",
     `http://${request.headers.host ?? "localhost"}`,
@@ -680,6 +879,10 @@ async function handleRequest(
 
   if (request.method === "OPTIONS" && requestUrl.pathname.startsWith("/api/")) {
     writeNoContent(response);
+    return;
+  }
+
+  if (await handleTmaStaticRequest(request, response, requestUrl, options)) {
     return;
   }
 
@@ -1084,6 +1287,7 @@ export function createBotServer(options: BotServerOptions = {}): Server {
     telegramBotToken: options.config?.telegramBotToken,
     ingestSecret: options.config?.lifeosIngestSecret,
     tmaUrl: options.config?.tmaUrl,
+    tmaStaticDir: resolveStaticDirectory(options.config?.tmaStaticDir),
     defaultUserId: options.config?.lifeosDefaultUserId,
     defaultTelegramUserId: options.config?.lifeosDefaultTelegramUserId,
     allowUnsafeTmaDevAuth: options.config?.allowUnsafeTmaDevAuth ?? false,

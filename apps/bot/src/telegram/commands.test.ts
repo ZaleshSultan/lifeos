@@ -899,6 +899,16 @@ describe("Telegram commands", () => {
     expect(button?.web_app?.url).not.toContain("Push");
   });
 
+  it("opens mode settings from TMA_URL", async () => {
+    const context = runtime();
+
+    await handleTelegramUpdate(update("/mode"), context);
+
+    const button = context.sent.at(-1)?.replyMarkup?.inline_keyboard[0]?.[0];
+
+    expect(button?.web_app?.url).toBe("https://lifeos.example/tma?screen=mode");
+  });
+
   it("reports health sync status", async () => {
     const context = runtime();
 

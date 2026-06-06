@@ -8,8 +8,28 @@ import { SourcesScreen } from "./screens/SourcesScreen";
 import { WorkoutScreen } from "./screens/WorkoutScreen";
 import type { ScreenId } from "./types";
 
+const SCREENS: ScreenId[] = [
+  "home",
+  "workout",
+  "health",
+  "focus",
+  "sources",
+  "mode",
+];
+
+function initialScreen(): ScreenId {
+  const params = new URLSearchParams(window.location.search);
+  const requestedScreen = params.get("screen");
+
+  if (requestedScreen && SCREENS.includes(requestedScreen as ScreenId)) {
+    return requestedScreen as ScreenId;
+  }
+
+  return params.has("workoutId") ? "workout" : "home";
+}
+
 export default function App() {
-  const [screen, setScreen] = useState<ScreenId>("home");
+  const [screen, setScreen] = useState<ScreenId>(initialScreen);
 
   return (
     <AppShell onScreenChange={setScreen} screen={screen}>

@@ -336,6 +336,16 @@ function buildWorkoutUrl(tmaUrl: string, workoutId: string): string | null {
   }
 }
 
+function buildModeUrl(tmaUrl: string): string | null {
+  try {
+    const url = new URL(tmaUrl);
+    url.searchParams.set("screen", "mode");
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 function modeUsage(): string {
   return [
     "Usage:",
@@ -1295,10 +1305,25 @@ async function handleReadCommand(
 
     if (!normalized) {
       const mode = await runtime.store.resolveCurrentMode(user.userId);
+      const modeUrl = runtime.tmaUrl ? buildModeUrl(runtime.tmaUrl) : null;
 
       await runtime.telegram.sendMessage({
         chatId: message.chat.id,
         text: formatModeResolution(mode),
+        replyMarkup: modeUrl
+          ? {
+              inline_keyboard: [
+                [
+                  {
+                    text: "Open mode settings",
+                    web_app: {
+                      url: modeUrl,
+                    },
+                  },
+                ],
+              ],
+            }
+          : undefined,
       });
       return;
     }

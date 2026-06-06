@@ -9,6 +9,7 @@ export interface BotConfig {
   telegramWebhookSecret?: string;
   telegramWebAppUrl?: string;
   tmaUrl?: string;
+  tmaStaticDir?: string;
   lifeosIngestSecret?: string;
   lifeosDefaultUserId?: string;
   lifeosDefaultTelegramUserId?: number;
@@ -44,6 +45,7 @@ export function loadBotConfig(source: EnvSource = process.env): BotConfig {
       optionalEnv(source, "TMA_URL") ??
       optionalEnv(source, "TMA_APP_URL") ??
       optionalEnv(source, "TELEGRAM_WEBAPP_URL"),
+    tmaStaticDir: optionalEnv(source, "TMA_STATIC_DIR"),
     lifeosIngestSecret: optionalEnv(source, "LIFEOS_INGEST_SECRET"),
     lifeosDefaultUserId: optionalEnv(source, "LIFEOS_DEFAULT_USER_ID"),
     lifeosDefaultTelegramUserId: optionalEnv(

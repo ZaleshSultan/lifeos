@@ -1,5 +1,9 @@
 import type { AddressInfo } from "node:net";
 import { createHmac } from "node:crypto";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { request as httpRequest } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type {
   HealthIngestPayload,
   LifeMode,
@@ -25,12 +29,55 @@ import { createBotServer, type BotServerOptions } from "./server.js";
 import type { SendMessageInput, TelegramClient } from "./telegram/types.js";
 
 const servers: ReturnType<typeof createBotServer>[] = [];
+const tempDirectories: string[] = [];
 
 async function listen(
   server: ReturnType<typeof createBotServer>,
 ): Promise<number> {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   return (server.address() as AddressInfo).port;
+}
+
+async function createTmaStaticDirectory(): Promise<string> {
+  const directory = await mkdtemp(join(tmpdir(), "lifeos-tma-"));
+  tempDirectories.push(directory);
+  await mkdir(join(directory, "assets"));
+  await writeFile(
+    join(directory, "index.html"),
+    '<!doctype html><script type="module" src="/tma/assets/app.js"></script>',
+  );
+  await writeFile(join(directory, "assets", "app.js"), "window.lifeos = true;");
+  return directory;
+}
+
+async function rawGet(
+  port: number,
+  path: string,
+): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const request = httpRequest(
+      {
+        host: "127.0.0.1",
+        port,
+        path,
+        method: "GET",
+      },
+      (response) => {
+        const chunks: Buffer[] = [];
+
+        response.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+        response.on("end", () => {
+          resolve({
+            status: response.statusCode ?? 0,
+            body: Buffer.concat(chunks).toString("utf8"),
+          });
+        });
+      },
+    );
+
+    request.on("error", reject);
+    request.end();
+  });
 }
 
 function healthIngestStore(
@@ -722,6 +769,11 @@ afterEach(async () => {
         }),
     ),
   );
+  await Promise.all(
+    tempDirectories
+      .splice(0)
+      .map((directory) => rm(directory, { recursive: true, force: true })),
+  );
   vi.restoreAllMocks();
 });
 
@@ -748,6 +800,69 @@ describe("bot server", () => {
         supabaseConfigured: true,
       },
     });
+  });
+
+  it("serves the TMA index, assets, and SPA fallback", async () => {
+    const tmaStaticDir = await createTmaStaticDirectory();
+    const server = createBotServer({
+      config: {
+        tmaStaticDir,
+      },
+    });
+    servers.push(server);
+
+    const port = await listen(server);
+    const indexResponse = await fetch(`http://127.0.0.1:${port}/tma/`);
+    const assetResponse = await fetch(
+      `http://127.0.0.1:${port}/tma/assets/app.js`,
+    );
+    const fallbackResponse = await fetch(
+      `http://127.0.0.1:${port}/tma/mode/settings`,
+    );
+
+    expect(indexResponse.status).toBe(200);
+    expect(indexResponse.headers.get("content-type")).toBe("text/html");
+    expect(indexResponse.headers.get("cache-control")).toBe("no-cache");
+    await expect(indexResponse.text()).resolves.toContain("/tma/assets/app.js");
+
+    expect(assetResponse.status).toBe(200);
+    expect(assetResponse.headers.get("content-type")).toBe(
+      "application/javascript",
+    );
+    expect(assetResponse.headers.get("cache-control")).toBe(
+      "public, max-age=31536000, immutable",
+    );
+    await expect(assetResponse.text()).resolves.toBe("window.lifeos = true;");
+
+    expect(fallbackResponse.status).toBe(200);
+    expect(fallbackResponse.headers.get("content-type")).toBe("text/html");
+    await expect(fallbackResponse.text()).resolves.toContain(
+      "/tma/assets/app.js",
+    );
+  });
+
+  it("blocks TMA path traversal", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "lifeos-tma-parent-"));
+    tempDirectories.push(parentDirectory);
+    const tmaStaticDir = join(parentDirectory, "dist");
+    await mkdir(tmaStaticDir);
+    await writeFile(join(tmaStaticDir, "index.html"), "<!doctype html>");
+    await writeFile(join(parentDirectory, "secret.txt"), "do-not-serve");
+
+    const server = createBotServer({
+      config: {
+        tmaStaticDir,
+      },
+    });
+    servers.push(server);
+
+    const port = await listen(server);
+    for (const path of ["/tma/%2e%2e/secret.txt", "/tma/%2fetc%2fpasswd"]) {
+      const response = await rawGet(port, path);
+
+      expect(response.status).toBe(400);
+      expect(response.body).not.toContain("do-not-serve");
+    }
   });
 
   it("accepts Telegram webhook updates when the secret matches", async () => {
