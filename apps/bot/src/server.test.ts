@@ -133,6 +133,7 @@ function workoutSummary(overrides: Partial<CurrentWorkoutSummary> = {}) {
 
 function tmaStore(events: string[] = []): LifeOSStore {
   let mode: LifeMode = "trimester";
+  let reminderMode: "chill" | "normal" | "duolingo" | "war" = "normal";
   let reminders: ReminderRecord[] = [];
   const sources: SourceRecord[] = [
     {
@@ -540,6 +541,21 @@ function tmaStore(events: string[] = []): LifeOSStore {
         ...reminder,
         status: "cancelled",
       };
+    },
+    async snoozeReminder(_userId, reminderId, remindAt) {
+      const reminder = reminders.find((item) => item.id === reminderId);
+      if (!reminder) {
+        throw new Error("not found");
+      }
+      reminder.remindAt = remindAt;
+      return reminder;
+    },
+    async getReminderMode() {
+      return reminderMode;
+    },
+    async setReminderMode(_userId, nextMode) {
+      reminderMode = nextMode;
+      return reminderMode;
     },
     async listAcademicRecords() {
       return [];

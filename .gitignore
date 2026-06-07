@@ -33,3 +33,7 @@ yarn-error.log*
 Thumbs.db
 .idea/
 .vscode/
+
+# Python cache
+__pycache__/
+*.py[cod]

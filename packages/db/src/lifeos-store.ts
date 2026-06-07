@@ -273,6 +273,8 @@ export interface CreateReminderInput {
   metadataJson?: Json;
 }
 
+export type ReminderMode = "chill" | "normal" | "duolingo" | "war";
+
 export interface ReminderRecord {
   id: string;
   userId: string;
@@ -606,6 +608,13 @@ export interface LifeOSStore {
   ): Promise<ReminderRecord[]>;
   markReminderSent(reminderId: string): Promise<ReminderRecord>;
   cancelReminder(userId: string, reminderId: string): Promise<ReminderRecord>;
+  snoozeReminder(
+    userId: string,
+    reminderId: string,
+    remindAt: string,
+  ): Promise<ReminderRecord>;
+  getReminderMode(userId: string): Promise<ReminderMode>;
+  setReminderMode(userId: string, mode: ReminderMode): Promise<ReminderMode>;
   listAcademicRecords(userId: string): Promise<AcademicRecord[]>;
   upsertAcademicRecord(
     input: UpsertAcademicRecordInput,
@@ -2426,6 +2435,90 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     }
 
     return toReminderRecord(data);
+  }
+
+  async snoozeReminder(
+    userId: string,
+    reminderId: string,
+    remindAt: string,
+  ): Promise<ReminderRecord> {
+    const parsed = new Date(remindAt);
+
+    if (Number.isNaN(parsed.getTime())) {
+      throw new Error("Reminder snooze time is invalid");
+    }
+
+    const { data, error } = await this.client
+      .from("reminders")
+      .update({
+        status: "pending",
+        remind_at: parsed.toISOString(),
+        claimed_at: null,
+      })
+      .eq("user_id", userId)
+      .eq("id", reminderId)
+      .eq("status", "pending")
+      .select("*")
+      .single();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to snooze reminder");
+    }
+
+    return toReminderRecord(data);
+  }
+
+  async getReminderMode(userId: string): Promise<ReminderMode> {
+    const { data, error } = await this.client
+      .from("user_settings")
+      .select("settings")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to load reminder mode");
+    }
+
+    const mode = jsonObject(data?.settings).reminder_mode;
+    return mode === "chill" ||
+      mode === "duolingo" ||
+      mode === "war" ||
+      mode === "normal"
+      ? mode
+      : "normal";
+  }
+
+  async setReminderMode(
+    userId: string,
+    mode: ReminderMode,
+  ): Promise<ReminderMode> {
+    const { data: current, error: loadError } = await this.client
+      .from("user_settings")
+      .select("settings")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (loadError) {
+      throwSupabaseError(loadError, "Failed to load reminder settings");
+    }
+
+    const settings = {
+      ...jsonObject(current?.settings),
+      reminder_mode: mode,
+    } satisfies Json;
+    const { error } = await this.client.from("user_settings").upsert(
+      {
+        user_id: userId,
+        settings,
+      },
+      { onConflict: "user_id" },
+    );
+
+    if (error) {
+      throwSupabaseError(error, "Failed to set reminder mode");
+    }
+
+    return mode;
   }
 
   async listAcademicRecords(userId: string): Promise<AcademicRecord[]> {

@@ -115,7 +115,7 @@ export interface ReminderRecord {
   sourceEventId: string | null;
   channel: string;
   remindAt: string;
-  status: "pending" | "sent" | "cancelled" | "failed";
+  status: "pending" | "processing" | "sent" | "cancelled" | "failed";
   message: string;
   metadataJson?: Record<string, unknown>;
   sentAt: string | null;

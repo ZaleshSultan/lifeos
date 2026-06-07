@@ -47,7 +47,12 @@ export type ExternalSourceStatus = "disabled" | "connected" | "error";
 
 export type SyncRunStatus = "running" | "success" | "partial" | "failed";
 
-export type ReminderStatus = "pending" | "sent" | "cancelled" | "failed";
+export type ReminderStatus =
+  | "pending"
+  | "processing"
+  | "sent"
+  | "cancelled"
+  | "failed";
 
 export type LifeOSProjectStatus =
   | "active"
@@ -1076,6 +1081,12 @@ export interface Database {
           status: string;
           raw_json: Json;
           normalized_entity_id: string | null;
+          provider: string | null;
+          external_updated_at: string | null;
+          source_url: string | null;
+          reminder_policy_key: string | null;
+          checksum: string | null;
+          last_synced_at: string | null;
           created_at: string;
           updated_at: string;
         },
@@ -1094,6 +1105,12 @@ export interface Database {
           status?: string;
           raw_json?: Json;
           normalized_entity_id?: string | null;
+          provider?: string | null;
+          external_updated_at?: string | null;
+          source_url?: string | null;
+          reminder_policy_key?: string | null;
+          checksum?: string | null;
+          last_synced_at?: string | null;
           created_at?: string;
           updated_at?: string;
         }
@@ -1109,6 +1126,9 @@ export interface Database {
           status: ReminderStatus;
           message: string;
           metadata_json: Json;
+          dedup_key: string | null;
+          reminder_policy_key: string | null;
+          claimed_at: string | null;
           sent_at: string | null;
           created_at: string;
           updated_at: string;
@@ -1123,6 +1143,9 @@ export interface Database {
           status?: ReminderStatus;
           message: string;
           metadata_json?: Json;
+          dedup_key?: string | null;
+          reminder_policy_key?: string | null;
+          claimed_at?: string | null;
           sent_at?: string | null;
           created_at?: string;
           updated_at?: string;

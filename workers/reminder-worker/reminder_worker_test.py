@@ -48,12 +48,29 @@ class FakeSupabase:
     def list_due_reminders(self, _before: str, _limit: int) -> list[dict[str, Any]]:
         return self.reminders
 
+    def claim_reminder(self, reminder_id: str) -> dict[str, Any] | None:
+        reminder = self.reminders[0]
+        if reminder["id"] != reminder_id or reminder["status"] != "pending":
+            return None
+        reminder["status"] = "processing"
+        return reminder
+
     def mark_reminder_sent(self, reminder_id: str) -> dict[str, Any] | None:
         reminder = self.reminders[0]
         reminder["id"] = reminder_id
         reminder["status"] = "sent"
         reminder["sent_at"] = "2026-05-18T12:01:00Z"
         return reminder
+
+    def defer_reminder(self, reminder_id: str, remind_at: str) -> dict[str, Any] | None:
+        reminder = self.reminders[0]
+        reminder["id"] = reminder_id
+        reminder["status"] = "pending"
+        reminder["remind_at"] = remind_at
+        return reminder
+
+    def release_stale_claims(self, _before: str) -> None:
+        return None
 
     def record_send_failure(
         self,
@@ -110,7 +127,7 @@ class ReminderWorkerTest(unittest.TestCase):
         self.assertEqual(method, "PATCH")
         self.assertEqual(table, "reminders")
         self.assertEqual(query["id"], "eq.reminder-1")
-        self.assertEqual(query["status"], "eq.pending")
+        self.assertEqual(query["status"], "eq.processing")
         self.assertEqual(body["status"], "sent")
         self.assertIn("sent_at", body)
         self.assertIn("updated_at", body)
@@ -139,6 +156,39 @@ class ReminderWorkerTest(unittest.TestCase):
         self.assertEqual(
             supabase.reminders[0]["metadata_json"]["reminder_worker"]["attempts"],
             1,
+        )
+
+    def test_quiet_hours_defer_duolingo_nudge(self) -> None:
+        reminder = {
+            "remind_at": "2026-05-18T18:30:00Z",
+            "metadata_json": {
+                "reminder_mode": "duolingo",
+                "event_at": "2026-05-19T12:00:00Z",
+            },
+        }
+        settings = reminder_worker.Settings(
+            supabase_url="https://example.supabase.co",
+            service_role_key="service-role",
+            telegram_bot_token="bot-token",
+            telegram_user_id="123",
+            poll_seconds=30,
+            batch_size=20,
+            local_timezone="Asia/Qyzylorda",
+        )
+
+        original_datetime = reminder_worker.datetime
+        self.addCleanup(setattr, reminder_worker, "datetime", original_datetime)
+
+        class FixedDateTime(original_datetime):
+            @classmethod
+            def now(cls, tz=None):
+                value = cls(2026, 5, 18, 18, 30, tzinfo=reminder_worker.timezone.utc)
+                return value if tz else value.replace(tzinfo=None)
+
+        reminder_worker.datetime = FixedDateTime
+        self.assertEqual(
+            reminder_worker.quiet_hour_deferral(reminder, settings),
+            "2026-05-19T03:00:00Z",
         )
 
 

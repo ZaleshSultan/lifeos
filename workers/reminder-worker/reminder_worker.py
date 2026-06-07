@@ -13,7 +13,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, time as datetime_time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Protocol
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -33,11 +33,17 @@ class WorkerError(RuntimeError):
 class SupabaseClientProtocol(Protocol):
     def list_due_reminders(self, before: str, limit: int) -> list[JsonObject]: ...
 
+    def claim_reminder(self, reminder_id: str) -> JsonObject | None: ...
+
     def mark_reminder_sent(self, reminder_id: str) -> JsonObject | None: ...
 
     def record_send_failure(self, reminder: JsonObject, error: str) -> JsonObject | None: ...
 
     def fetch_reminder_context(self, reminder: JsonObject) -> JsonObject: ...
+
+    def defer_reminder(self, reminder_id: str, remind_at: str) -> JsonObject | None: ...
+
+    def release_stale_claims(self, before: str) -> None: ...
 
 
 class TelegramClientProtocol(Protocol):
@@ -53,6 +59,9 @@ class Settings:
     poll_seconds: int
     batch_size: int
     local_timezone: str = LOCAL_TIMEZONE
+    quiet_hours_start: str = "23:00"
+    quiet_hours_end: str = "08:00"
+    claim_timeout_minutes: int = 5
 
 
 @dataclass
@@ -124,6 +133,17 @@ def load_settings(env_file: Path | None = None) -> Settings:
         telegram_user_id=getenv_required("LIFEOS_DEFAULT_TELEGRAM_USER_ID"),
         poll_seconds=getenv_int("REMINDER_WORKER_POLL_SECONDS", 30),
         batch_size=getenv_int("REMINDER_WORKER_BATCH_SIZE", 20),
+        local_timezone=os.environ.get("APP_TIMEZONE", LOCAL_TIMEZONE).strip()
+        or LOCAL_TIMEZONE,
+        quiet_hours_start=os.environ.get(
+            "DUOLINGO_NUDGE_QUIET_HOURS_START", "23:00"
+        ).strip()
+        or "23:00",
+        quiet_hours_end=os.environ.get(
+            "DUOLINGO_NUDGE_QUIET_HOURS_END", "08:00"
+        ).strip()
+        or "08:00",
+        claim_timeout_minutes=getenv_int("REMINDER_WORKER_CLAIM_TIMEOUT_MINUTES", 5),
     )
 
 
@@ -273,8 +293,7 @@ class SupabaseRestClient:
         )
         return rows or []
 
-    def mark_reminder_sent(self, reminder_id: str) -> JsonObject | None:
-        now = utc_now()
+    def claim_reminder(self, reminder_id: str) -> JsonObject | None:
         rows = self.request(
             "PATCH",
             "reminders",
@@ -284,8 +303,27 @@ class SupabaseRestClient:
                 "select": "*",
             },
             {
+                "status": "processing",
+                "claimed_at": utc_now(),
+            },
+            prefer="return=representation",
+        )
+        return rows[0] if rows else None
+
+    def mark_reminder_sent(self, reminder_id: str) -> JsonObject | None:
+        now = utc_now()
+        rows = self.request(
+            "PATCH",
+            "reminders",
+            {
+                "id": f"eq.{reminder_id}",
+                "status": "eq.processing",
+                "select": "*",
+            },
+            {
                 "status": "sent",
                 "sent_at": now,
+                "claimed_at": None,
                 "updated_at": now,
             },
             prefer="return=representation",
@@ -306,12 +344,13 @@ class SupabaseRestClient:
             "reminders",
             {
                 "id": f"eq.{reminder_id}",
-                "status": "eq.pending",
+                "status": "eq.processing",
                 "select": "*",
             },
             {
                 "status": status,
                 "metadata_json": metadata,
+                "claimed_at": None,
                 "updated_at": now,
             },
             prefer="return=representation",
@@ -321,6 +360,40 @@ class SupabaseRestClient:
             rows[0]["_reminder_worker_attempts"] = attempts
 
         return rows[0] if rows else None
+
+    def defer_reminder(self, reminder_id: str, remind_at: str) -> JsonObject | None:
+        rows = self.request(
+            "PATCH",
+            "reminders",
+            {
+                "id": f"eq.{reminder_id}",
+                "status": "eq.processing",
+                "select": "*",
+            },
+            {
+                "status": "pending",
+                "remind_at": remind_at,
+                "claimed_at": None,
+                "updated_at": utc_now(),
+            },
+            prefer="return=representation",
+        )
+        return rows[0] if rows else None
+
+    def release_stale_claims(self, before: str) -> None:
+        self.request(
+            "PATCH",
+            "reminders",
+            {
+                "status": "eq.processing",
+                "claimed_at": f"lt.{before}",
+            },
+            {
+                "status": "pending",
+                "claimed_at": None,
+                "updated_at": utc_now(),
+            },
+        )
 
     def fetch_one(self, table: str, row_id: str, select: str) -> JsonObject | None:
         rows = self.request(
@@ -437,20 +510,102 @@ def format_context_line(context: JsonObject) -> list[str]:
     return lines
 
 
+def reminder_metadata(reminder: JsonObject) -> JsonObject:
+    metadata = reminder.get("metadata_json")
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def is_quiet_time(value: datetime, settings: Settings) -> bool:
+    try:
+        local = value.astimezone(ZoneInfo(settings.local_timezone))
+    except ZoneInfoNotFoundError:
+        local = value.astimezone(timezone.utc)
+    current = local.time().replace(tzinfo=None)
+    start = datetime_time.fromisoformat(settings.quiet_hours_start)
+    end = datetime_time.fromisoformat(settings.quiet_hours_end)
+    if start < end:
+        return start <= current < end
+    return current >= start or current < end
+
+
+def next_quiet_end(value: datetime, settings: Settings) -> datetime:
+    try:
+        local = value.astimezone(ZoneInfo(settings.local_timezone))
+    except ZoneInfoNotFoundError:
+        local = value.astimezone(timezone.utc)
+    end = datetime_time.fromisoformat(settings.quiet_hours_end)
+    target_day = local.date()
+    if local.time().replace(tzinfo=None) >= datetime_time.fromisoformat(
+        settings.quiet_hours_start
+    ):
+        target_day += timedelta(days=1)
+    return datetime.combine(target_day, end, local.tzinfo).astimezone(timezone.utc)
+
+
+def quiet_hour_deferral(reminder: JsonObject, settings: Settings) -> str | None:
+    metadata = reminder_metadata(reminder)
+    mode = str(metadata.get("reminder_mode") or "normal")
+    if mode not in {"duolingo", "war"}:
+        return None
+    now = datetime.now(timezone.utc)
+    if not is_quiet_time(now, settings):
+        return None
+    try:
+        event_at = parse_datetime(
+            str(metadata.get("event_at") or reminder.get("remind_at") or "")
+        )
+    except ValueError:
+        return None
+    if event_at - now <= timedelta(hours=1):
+        return None
+    return next_quiet_end(now, settings).isoformat().replace("+00:00", "Z")
+
+
 def format_telegram_message(
     reminder: JsonObject,
     context: JsonObject,
     timezone_name: str = LOCAL_TIMEZONE,
 ) -> str:
-    message = str(reminder.get("message") or "").strip() or "Reminder"
+    metadata = reminder_metadata(reminder)
+    message = str(metadata.get("title") or reminder.get("message") or "").strip() or "Reminder"
     remind_at = str(reminder.get("remind_at") or "").strip()
+    event_at = str(metadata.get("event_at") or remind_at).strip()
+    source_label = str(metadata.get("source_label") or "Manual")
+    priority = str(metadata.get("priority") or "normal")
+    notification_kind = str(metadata.get("notification_kind") or "reminder")
+    if notification_kind == "deadline":
+        try:
+            remaining = parse_datetime(event_at) - datetime.now(timezone.utc)
+            remaining_label = str(remaining).split(".", 1)[0]
+        except (TypeError, ValueError):
+            remaining_label = "soon"
+        return "\n".join(
+            [
+                "🚨 Deadline / Exam",
+                message,
+                f"Осталось: {remaining_label}",
+                "Минимум: открой материалы прямо сейчас.",
+                f"Source: {source_label}",
+            ]
+        )
+    if notification_kind == "overdue":
+        return "\n".join(
+            [
+                "🔥 Overdue",
+                message,
+                "Ты уже это откладываешь. Закрой хотя бы 5 минут.",
+                f"Source: {source_label}",
+            ]
+        )
     lines = [
         "🔔 Reminder",
         "",
         message,
         "",
         *format_context_line(context),
-        f"Time: {local_time_label(remind_at, timezone_name)}",
+        f"When: {local_time_label(event_at, timezone_name)}",
+        f"Source: {source_label}",
+        f"Priority: {priority}",
     ]
 
     return "\n".join(lines)
@@ -474,6 +629,20 @@ def process_due_reminders(
         reminder_id = str(reminder.get("id") or "unknown")
 
         try:
+            claimed = supabase.claim_reminder(reminder_id)
+            if not claimed:
+                logging.info("reminder id=%s status=claim_skipped", reminder_id)
+                continue
+            reminder = claimed
+            defer_until = quiet_hour_deferral(reminder, settings)
+            if defer_until:
+                supabase.defer_reminder(reminder_id, defer_until)
+                logging.info(
+                    "reminder id=%s status=quiet_hours_deferred until=%s",
+                    reminder_id,
+                    defer_until,
+                )
+                continue
             context = supabase.fetch_reminder_context(reminder)
             telegram.send_message(
                 settings.telegram_user_id,
@@ -526,6 +695,10 @@ def process_due_reminders(
 
 def run_once(settings: Settings) -> ProcessSummary:
     supabase = SupabaseRestClient(settings.supabase_url, settings.service_role_key)
+    stale_before = (
+        datetime.now(timezone.utc) - timedelta(minutes=settings.claim_timeout_minutes)
+    ).isoformat().replace("+00:00", "Z")
+    supabase.release_stale_claims(stale_before)
     telegram = TelegramApiClient(settings.telegram_bot_token)
     return process_due_reminders(settings, supabase, telegram)
 

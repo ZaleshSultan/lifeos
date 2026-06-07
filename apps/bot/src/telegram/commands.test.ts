@@ -46,6 +46,7 @@ class FakeStore implements LifeOSStore {
   readonly syncJobs: Array<Parameters<LifeOSStore["enqueueObsidianSync"]>[0]> =
     [];
   readonly reminders: ReminderRecord[] = [];
+  reminderMode: "chill" | "normal" | "duolingo" | "war" = "normal";
   readonly sources: SourceRecord[] = [
     {
       id: "source-manual",
@@ -643,6 +644,31 @@ class FakeStore implements LifeOSStore {
     };
   }
 
+  async snoozeReminder(
+    _userId: string,
+    reminderId: string,
+    remindAt: string,
+  ): Promise<ReminderRecord> {
+    const reminder = this.reminders.find((item) => item.id === reminderId);
+    if (!reminder) {
+      throw new Error("not found");
+    }
+    reminder.remindAt = remindAt;
+    return reminder;
+  }
+
+  async getReminderMode(): Promise<"chill" | "normal" | "duolingo" | "war"> {
+    return this.reminderMode;
+  }
+
+  async setReminderMode(
+    _userId: string,
+    mode: "chill" | "normal" | "duolingo" | "war",
+  ): Promise<"chill" | "normal" | "duolingo" | "war"> {
+    this.reminderMode = mode;
+    return mode;
+  }
+
   async listAcademicRecords(): Promise<[]> {
     return [];
   }
@@ -1004,6 +1030,67 @@ describe("Telegram commands", () => {
     await handleTelegramUpdate(update("/reminders"), context);
     expect(context.sent.at(-1)?.text).toContain("Upcoming reminders");
     expect(context.sent.at(-1)?.text).toContain("Review graph theory");
+  });
+
+  it("sets reminder mode with /reminder_mode", async () => {
+    const context = runtime();
+
+    await handleTelegramUpdate(update("/reminder_mode duolingo"), context);
+    expect(context.store.reminderMode).toBe("duolingo");
+    expect(context.sent.at(-1)?.text).toContain("Reminder mode set");
+
+    await handleTelegramUpdate(update("/reminder_mode"), context);
+    expect(context.sent.at(-1)?.text).toContain("duolingo");
+  });
+
+  it("cancels and snoozes reminders by short id", async () => {
+    const context = runtime();
+
+    await handleTelegramUpdate(update("/remind Review graph theory in:30m"), context);
+    const shortId = context.store.reminders[0]!.id.slice(0, 8);
+
+    await handleTelegramUpdate(update(`/reminder snooze ${shortId} 10m`), context);
+    expect(context.store.reminders[0]!.remindAt).toBe("2026-05-18T12:10:00.000Z");
+    expect(context.sent.at(-1)?.text).toContain("Snoozed reminder");
+
+    await handleTelegramUpdate(update(`/reminder cancel ${shortId}`), context);
+    expect(context.sent.at(-1)?.text).toContain("Cancelled reminder");
+  });
+
+  it("shows Google and ICS sync source statuses", async () => {
+    const context = runtime();
+    context.store.sources.push(
+      {
+        id: "source-google-calendar",
+        userId: "user-1",
+        sourceKey: "google_calendar",
+        sourceType: "google",
+        displayName: "Google Calendar",
+        status: "connected",
+        configJson: {},
+        lastSyncAt: "2026-05-18T12:00:00.000Z",
+        createdAt: "2026-05-18T00:00:00.000Z",
+        updatedAt: "2026-05-18T00:00:00.000Z",
+      },
+      {
+        id: "source-moodle",
+        userId: "user-1",
+        sourceKey: "moodle_ics",
+        sourceType: "ics",
+        displayName: "Moodle ICS",
+        status: "connected",
+        configJson: {},
+        lastSyncAt: "2026-05-18T12:05:00.000Z",
+        createdAt: "2026-05-18T00:00:00.000Z",
+        updatedAt: "2026-05-18T00:00:00.000Z",
+      },
+    );
+
+    await handleTelegramUpdate(update("/google_sync"), context);
+    expect(context.sent.at(-1)?.text).toContain("Google Calendar");
+
+    await handleTelegramUpdate(update("/ics_sync"), context);
+    expect(context.sent.at(-1)?.text).toContain("Moodle ICS");
   });
 
   it("shows sync help and health sync status", async () => {

@@ -13,6 +13,7 @@ import type {
   LifeEntityRecord,
   LifeOSStore,
   ReminderRecord,
+  ReminderMode,
   SourceRecord,
   StudyCourseRecord,
   SyncRunRecord,
@@ -52,6 +53,11 @@ const HELP_TEXT = [
   "/sync [health|obsidian]",
   "/reminders",
   "/remind review notes at:2026-07-06 08:00",
+  "/reminder cancel <short_id>",
+  "/reminder snooze <short_id> 10m",
+  "/reminder_mode [chill|normal|duolingo|war]",
+  "/google_sync",
+  "/ics_sync",
   "/mode",
   "/mode set <mode> [today|until:YYYY-MM-DD]",
   "/mode auto",
@@ -97,15 +103,15 @@ const SOURCE_CATALOG: Array<{
     sourceKey: "google_calendar",
     displayName: "Google Calendar",
     sourceType: "google",
-    note: "Planned; OAuth is not implemented yet.",
-    implemented: false,
+    note: "Read-only local OAuth worker.",
+    implemented: true,
   },
   {
     sourceKey: "google_tasks",
     displayName: "Google Tasks",
     sourceType: "google",
-    note: "Planned; OAuth is not implemented yet.",
-    implemented: false,
+    note: "Read-only local OAuth worker.",
+    implemented: true,
   },
   {
     sourceKey: "health_connect",
@@ -115,11 +121,18 @@ const SOURCE_CATALOG: Array<{
     implemented: true,
   },
   {
-    sourceKey: "university_ics",
-    displayName: "University ICS",
-    sourceType: "university",
-    note: "Planned import surface for academic calendar data.",
-    implemented: false,
+    sourceKey: "moodle_ics",
+    displayName: "Moodle ICS",
+    sourceType: "ics",
+    note: "Official Moodle calendar export via local worker.",
+    implemented: true,
+  },
+  {
+    sourceKey: "personal_ics",
+    displayName: "Personal ICS",
+    sourceType: "ics",
+    note: "Optional personal calendar feed via local worker.",
+    implemented: true,
   },
   {
     sourceKey: "university_platform",
@@ -377,6 +390,22 @@ function remindUsage(): string {
   ].join("\n");
 }
 
+function reminderModeUsage(): string {
+  return [
+    "Reminder mode:",
+    "/reminder_mode",
+    "/reminder_mode chill|normal|duolingo|war",
+  ].join("\n");
+}
+
+function reminderActionUsage(): string {
+  return [
+    "Reminder actions:",
+    "/reminder cancel <short_id>",
+    "/reminder snooze <short_id> 10m",
+  ].join("\n");
+}
+
 function formatSignedWeight(value: number): string {
   return value > 0 ? `+${value}` : String(value);
 }
@@ -500,9 +529,54 @@ function formatUpcomingReminders(
 
   return reminders
     .map((reminder, index) => {
-      return `${index + 1}. ${escapeHtml(reminder.message)}\n   <code>${escapeHtml(formatReminderDateTime(reminder.remindAt, timezone))}</code>`;
+      return `${index + 1}. <code>${escapeHtml(reminder.id.slice(0, 8))}</code> ${escapeHtml(reminder.message)}\n   <code>${escapeHtml(formatReminderDateTime(reminder.remindAt, timezone))}</code>`;
     })
     .join("\n");
+}
+
+function parseReminderMode(value: string): ReminderMode | null {
+  const normalized = value.trim().toLowerCase();
+  return normalized === "chill" ||
+    normalized === "normal" ||
+    normalized === "duolingo" ||
+    normalized === "war"
+    ? normalized
+    : null;
+}
+
+function findReminderByShortId(
+  reminders: ReminderRecord[],
+  shortId: string,
+): ReminderRecord | null {
+  const matches = reminders.filter(
+    (reminder) => reminder.id === shortId || reminder.id.startsWith(shortId),
+  );
+  return matches.length === 1 ? matches[0]! : null;
+}
+
+function parseSnoozeMinutes(value: string): number | null {
+  const match = value.trim().match(/^(\d+)(m|h)$/i);
+  if (!match?.[1] || !match[2]) {
+    return null;
+  }
+  const amount = Number(match[1]);
+  return amount > 0 ? amount * (match[2].toLowerCase() === "h" ? 60 : 1) : null;
+}
+
+function formatSyncSourceStatus(
+  sources: SourceRecord[],
+  sourceKeys: string[],
+): string {
+  const rows = sources.filter((source) => sourceKeys.includes(source.sourceKey));
+  if (!rows.length) {
+    return "No source status recorded yet. Run the local sync worker once.";
+  }
+  return rows
+    .map(
+      (source) =>
+        `${escapeHtml(source.displayName)}: <b>${escapeHtml(source.status)}</b>\nlast sync: <code>${escapeHtml(source.lastSyncAt ?? "never")}</code>`,
+    )
+    .join("\n\n");
 }
 
 function localDateString(date: Date, timeZone: string): string {
@@ -1379,6 +1453,77 @@ async function handleReadCommand(
     return;
   }
 
+  if (command === "reminder_mode") {
+    const requested = args.trim();
+    if (!requested) {
+      const mode = await runtime.store.getReminderMode(user.userId);
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: `Reminder mode: <b>${escapeHtml(mode)}</b>`,
+      });
+      return;
+    }
+    const mode = parseReminderMode(requested);
+    if (!mode) {
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: reminderModeUsage(),
+      });
+      return;
+    }
+    await runtime.store.setReminderMode(user.userId, mode);
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: `Reminder mode set to <b>${escapeHtml(mode)}</b>. Future provider syncs will use this policy.`,
+    });
+    return;
+  }
+
+  if (command === "reminder") {
+    const [action = "", shortId = "", duration = ""] = args.trim().split(/\s+/);
+    const reminders = await runtime.store.listUpcomingReminders(user.userId, 100);
+    const reminder = findReminderByShortId(reminders, shortId);
+    if (!reminder || !shortId) {
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: reminderActionUsage(),
+      });
+      return;
+    }
+    if (action === "cancel") {
+      await runtime.store.cancelReminder(user.userId, reminder.id);
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: `Cancelled reminder <code>${escapeHtml(reminder.id.slice(0, 8))}</code>.`,
+      });
+      return;
+    }
+    if (action === "snooze") {
+      const minutes = parseSnoozeMinutes(duration);
+      if (!minutes) {
+        await runtime.telegram.sendMessage({
+          chatId: message.chat.id,
+          text: reminderActionUsage(),
+        });
+        return;
+      }
+      const remindAt = new Date(
+        (runtime.now?.() ?? new Date()).getTime() + minutes * 60_000,
+      ).toISOString();
+      await runtime.store.snoozeReminder(user.userId, reminder.id, remindAt);
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: `Snoozed reminder <code>${escapeHtml(reminder.id.slice(0, 8))}</code> until <code>${escapeHtml(formatReminderDateTime(remindAt, user.timezone))}</code>.`,
+      });
+      return;
+    }
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: reminderActionUsage(),
+    });
+    return;
+  }
+
   if (command === "course") {
     const now = runtime.now?.() ?? new Date();
     const today = localDateString(now, user.timezone);
@@ -1504,6 +1649,19 @@ async function handleReadCommand(
     return;
   }
 
+  if (command === "google_sync" || command === "ics_sync") {
+    const sources = await runtime.store.listExternalSources(user.userId);
+    const keys =
+      command === "google_sync"
+        ? ["google_calendar", "google_tasks"]
+        : ["moodle_ics", "personal_ics"];
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: formatSyncSourceStatus(sources, keys),
+    });
+    return;
+  }
+
   if (command === "sync") {
     const normalized = args.trim().toLowerCase();
 
@@ -1515,7 +1673,7 @@ async function handleReadCommand(
           "/sync health — latest Health Connect ingest status",
           "/sync obsidian — Obsidian config sync status",
           "",
-          "Google Calendar, Google Tasks, University ICS, and University Platform sync are planned.",
+          "Google Calendar, Google Tasks, Moodle ICS, and Personal ICS run as local Arch workers.",
         ].join("\n"),
       });
       return;
