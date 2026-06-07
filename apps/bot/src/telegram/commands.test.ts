@@ -1015,6 +1015,36 @@ describe("Telegram commands", () => {
     );
   });
 
+  it("parses tomorrow reminder times in Asia/Qyzylorda", async () => {
+    const context = runtime();
+    context.store.user = {
+      userId: "user-1",
+      displayName: "User",
+      timezone: "Asia/Qyzylorda",
+    };
+
+    await handleTelegramUpdate(
+      update("/remind Review graph theory tomorrow 19:00"),
+      context,
+    );
+
+    expect(context.store.reminders.at(-1)?.remindAt).toBe(
+      "2026-05-19T14:00:00.000Z",
+    );
+  });
+
+  it("rejects reminder times in the past", async () => {
+    const context = runtime();
+
+    await handleTelegramUpdate(
+      update("/remind Review graph theory at:2026-05-17 08:00"),
+      context,
+    );
+
+    expect(context.store.reminders).toHaveLength(0);
+    expect(context.sent.at(-1)?.text).toContain("must be in the future");
+  });
+
   it("shows sources and upcoming reminders", async () => {
     const context = runtime();
     await handleTelegramUpdate(
@@ -1046,11 +1076,19 @@ describe("Telegram commands", () => {
   it("cancels and snoozes reminders by short id", async () => {
     const context = runtime();
 
-    await handleTelegramUpdate(update("/remind Review graph theory in:30m"), context);
+    await handleTelegramUpdate(
+      update("/remind Review graph theory in:30m"),
+      context,
+    );
     const shortId = context.store.reminders[0]!.id.slice(0, 8);
 
-    await handleTelegramUpdate(update(`/reminder snooze ${shortId} 10m`), context);
-    expect(context.store.reminders[0]!.remindAt).toBe("2026-05-18T12:10:00.000Z");
+    await handleTelegramUpdate(
+      update(`/reminder snooze ${shortId} 10m`),
+      context,
+    );
+    expect(context.store.reminders[0]!.remindAt).toBe(
+      "2026-05-18T12:10:00.000Z",
+    );
     expect(context.sent.at(-1)?.text).toContain("Snoozed reminder");
 
     await handleTelegramUpdate(update(`/reminder cancel ${shortId}`), context);

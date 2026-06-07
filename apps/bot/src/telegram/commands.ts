@@ -406,6 +406,13 @@ function reminderActionUsage(): string {
   ].join("\n");
 }
 
+function reminderNotFound(shortId: string): string {
+  return [
+    `No upcoming reminder matches <code>${escapeHtml(shortId)}</code>.`,
+    "Use /reminders to copy a current short ID.",
+  ].join("\n");
+}
+
 function formatSignedWeight(value: number): string {
   return value > 0 ? `+${value}` : String(value);
 }
@@ -544,16 +551,6 @@ function parseReminderMode(value: string): ReminderMode | null {
     : null;
 }
 
-function findReminderByShortId(
-  reminders: ReminderRecord[],
-  shortId: string,
-): ReminderRecord | null {
-  const matches = reminders.filter(
-    (reminder) => reminder.id === shortId || reminder.id.startsWith(shortId),
-  );
-  return matches.length === 1 ? matches[0]! : null;
-}
-
 function parseSnoozeMinutes(value: string): number | null {
   const match = value.trim().match(/^(\d+)(m|h)$/i);
   if (!match?.[1] || !match[2]) {
@@ -567,7 +564,9 @@ function formatSyncSourceStatus(
   sources: SourceRecord[],
   sourceKeys: string[],
 ): string {
-  const rows = sources.filter((source) => sourceKeys.includes(source.sourceKey));
+  const rows = sources.filter((source) =>
+    sourceKeys.includes(source.sourceKey),
+  );
   if (!rows.length) {
     return "No source status recorded yet. Run the local sync worker once.";
   }
@@ -1234,16 +1233,25 @@ async function handleCreateCommand(
   }
 
   if (command === "remind") {
+    const now = runtime.now?.() ?? new Date();
     const parsed = parseReminderArgs(
       args,
-      runtime.now?.() ?? new Date(),
-      user.timezone,
+      now,
+      user.timezone || LOCAL_TIMEZONE,
     );
 
     if (!parsed.ok) {
       await runtime.telegram.sendMessage({
         chatId: message.chat.id,
         text: parsed.error,
+      });
+      return;
+    }
+
+    if (new Date(parsed.remindAt).getTime() <= now.getTime()) {
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: `Reminder time must be in the future.\n${remindUsage()}`,
       });
       return;
     }
@@ -1481,15 +1489,40 @@ async function handleReadCommand(
 
   if (command === "reminder") {
     const [action = "", shortId = "", duration = ""] = args.trim().split(/\s+/);
-    const reminders = await runtime.store.listUpcomingReminders(user.userId, 100);
-    const reminder = findReminderByShortId(reminders, shortId);
-    if (!reminder || !shortId) {
+
+    if (!["cancel", "snooze"].includes(action) || !shortId) {
       await runtime.telegram.sendMessage({
         chatId: message.chat.id,
         text: reminderActionUsage(),
       });
       return;
     }
+
+    const reminders = await runtime.store.listUpcomingReminders(
+      user.userId,
+      100,
+    );
+    const matches = reminders.filter(
+      (reminder) => reminder.id === shortId || reminder.id.startsWith(shortId),
+    );
+
+    if (matches.length === 0) {
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: reminderNotFound(shortId),
+      });
+      return;
+    }
+
+    if (matches.length > 1) {
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: `Short ID <code>${escapeHtml(shortId)}</code> is ambiguous. Use /reminders and provide more characters.`,
+      });
+      return;
+    }
+
+    const reminder = matches[0]!;
     if (action === "cancel") {
       await runtime.store.cancelReminder(user.userId, reminder.id);
       await runtime.telegram.sendMessage({

@@ -4,6 +4,7 @@ import { FocusScreen } from "./screens/FocusScreen";
 import { HealthScreen } from "./screens/HealthScreen";
 import { HomeScreen } from "./screens/HomeScreen";
 import { ModeScreen } from "./screens/ModeScreen";
+import { RemindersScreen } from "./screens/RemindersScreen";
 import { SourcesScreen } from "./screens/SourcesScreen";
 import { WorkoutScreen } from "./screens/WorkoutScreen";
 import type { ScreenId } from "./types";
@@ -14,6 +15,7 @@ const SCREENS: ScreenId[] = [
   "health",
   "focus",
   "sources",
+  "reminders",
   "mode",
 ];
 
@@ -40,6 +42,7 @@ export default function App() {
       {screen === "health" ? <HealthScreen /> : null}
       {screen === "focus" ? <FocusScreen /> : null}
       {screen === "sources" ? <SourcesScreen /> : null}
+      {screen === "reminders" ? <RemindersScreen /> : null}
       {screen === "mode" ? <ModeScreen /> : null}
     </AppShell>
   );

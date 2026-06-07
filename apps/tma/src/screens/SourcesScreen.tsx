@@ -1,18 +1,13 @@
 import {
-  Bell,
   CalendarClock,
   CheckCircle2,
-  CircleAlert,
   Clock3,
   PlugZap,
   RefreshCw,
   Send,
-  Timer,
 } from "lucide-react";
-import { type FormEvent, useState } from "react";
-import { useCreateReminderMutation, useSourcesQuery } from "../api/hooks";
+import { useSourcesQuery } from "../api/hooks";
 import type {
-  ReminderRecord,
   SourceRecord,
   SourceEventRecord,
   SyncRunRecord,
@@ -20,12 +15,6 @@ import type {
 import { ErrorPanel, LoadingPanel } from "../components/AsyncState";
 import { formatDateTime } from "../lib/format";
 import { cx } from "../lib/styles";
-
-function defaultReminderDateTime(): string {
-  const date = new Date(Date.now() + 60 * 60 * 1000);
-  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
-  return date.toISOString().slice(0, 16);
-}
 
 const SOURCE_CATALOG: Array<{
   sourceKey: string;
@@ -35,11 +24,11 @@ const SOURCE_CATALOG: Array<{
   implemented: boolean;
 }> = [
   {
-    sourceKey: "obsidian_config",
-    displayName: "Obsidian Config",
+    sourceKey: "obsidian_mirror",
+    displayName: "Obsidian Mirror",
     sourceType: "obsidian",
-    note: "Local config sync is planned for the Arch worker.",
-    implemented: false,
+    note: "Worker status is shown when a source heartbeat is available.",
+    implemented: true,
   },
   {
     sourceKey: "google_calendar",
@@ -63,17 +52,24 @@ const SOURCE_CATALOG: Array<{
     implemented: true,
   },
   {
+    sourceKey: "reminder_worker",
+    displayName: "Reminder Worker",
+    sourceType: "worker",
+    note: "Worker status is shown when a source heartbeat is available.",
+    implemented: true,
+  },
+  {
     sourceKey: "moodle_ics",
     displayName: "Moodle ICS",
     sourceType: "ics",
-    note: "Official Moodle calendar export via local worker.",
+    note: "Placeholder until MOODLE_ICS_URL is configured.",
     implemented: true,
   },
   {
     sourceKey: "personal_ics",
     displayName: "Personal ICS",
     sourceType: "ics",
-    note: "Optional personal schedule feed via local worker.",
+    note: "Placeholder until PERSONAL_ICS_URL is configured.",
     implemented: true,
   },
   {
@@ -128,15 +124,21 @@ function SourceRow({
   implemented,
   note,
   source,
+  sourceKey,
   sourceType,
 }: {
   displayName: string;
   implemented: boolean;
   note: string;
   source?: SourceRecord;
+  sourceKey: string;
   sourceType: string;
 }) {
-  const status = source?.status ?? "disabled";
+  const status =
+    source?.status ??
+    (sourceKey === "google_calendar" || sourceKey === "google_tasks"
+      ? "disconnected"
+      : "disabled");
 
   return (
     <div className="grid grid-cols-[auto_1fr] gap-3 border-t border-white/[0.06] py-3 first:border-t-0">
@@ -205,32 +207,6 @@ function EventRow({ event }: { event: SourceEventRecord }) {
   );
 }
 
-function ReminderRow({ reminder }: { reminder: ReminderRecord }) {
-  return (
-    <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3 border-t border-white/[0.06] py-3 first:border-t-0">
-      <div className="grid h-10 w-10 place-items-center rounded-lg border border-amber-400/20 bg-amber-400/[0.08] text-amber-300">
-        <Bell className="h-4 w-4" />
-      </div>
-      <div className="min-w-0">
-        <div className="truncate text-sm font-semibold text-white">
-          {reminder.message}
-        </div>
-        <div className="mt-0.5 truncate text-xs text-zinc-500">
-          {formatDateTime(reminder.remindAt)}
-        </div>
-      </div>
-      <span
-        className={cx(
-          "rounded-full border px-2.5 py-1 text-xs font-medium",
-          statusClass(reminder.status),
-        )}
-      >
-        {reminder.status}
-      </span>
-    </div>
-  );
-}
-
 function SyncRunRow({ run }: { run: SyncRunRecord }) {
   return (
     <div className="grid grid-cols-[1fr_auto] gap-3 rounded-lg bg-white/[0.03] px-3 py-2">
@@ -256,9 +232,6 @@ function SyncRunRow({ run }: { run: SyncRunRecord }) {
 
 export function SourcesScreen() {
   const query = useSourcesQuery();
-  const createReminder = useCreateReminderMutation();
-  const [message, setMessage] = useState("");
-  const [reminderAt, setReminderAt] = useState(defaultReminderDateTime);
 
   if (query.isLoading) {
     return <LoadingPanel title="Loading sources" />;
@@ -284,29 +257,6 @@ export function SourcesScreen() {
   }
 
   const summary = query.data;
-  const reminderDisabled =
-    createReminder.isPending || !message.trim() || !reminderAt;
-
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (reminderDisabled) {
-      return;
-    }
-
-    createReminder.mutate(
-      {
-        message: message.trim(),
-        remindAt: new Date(reminderAt).toISOString(),
-      },
-      {
-        onSuccess() {
-          setMessage("");
-          setReminderAt(defaultReminderDateTime());
-        },
-      },
-    );
-  }
 
   return (
     <div className="space-y-4">
@@ -346,6 +296,7 @@ export function SourcesScreen() {
             key={source.sourceKey}
             note={source.note}
             source={source.source}
+            sourceKey={source.sourceKey}
             sourceType={source.sourceType}
           />
         ))}
@@ -363,52 +314,6 @@ export function SourcesScreen() {
         ) : (
           <p className="mt-3 text-sm text-zinc-500">No upcoming events.</p>
         )}
-      </section>
-
-      <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
-        <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
-          <Timer className="h-5 w-5 text-amber-400" />
-          Reminders
-        </div>
-        <form className="space-y-3" onSubmit={onSubmit}>
-          <input
-            className="min-h-12 w-full rounded-lg border border-white/[0.08] bg-black/20 px-3 text-sm font-semibold text-white"
-            onChange={(event) => setMessage(event.target.value)}
-            placeholder="Message"
-            value={message}
-          />
-          <input
-            className="min-h-12 w-full rounded-lg border border-white/[0.08] bg-black/20 px-3 text-sm font-semibold text-white"
-            onChange={(event) => setReminderAt(event.target.value)}
-            type="datetime-local"
-            value={reminderAt}
-          />
-          <button
-            className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-amber-300 px-4 text-sm font-semibold text-graphite-950 active:scale-[0.99] disabled:pointer-events-none disabled:opacity-60"
-            disabled={reminderDisabled}
-            type="submit"
-          >
-            <Bell className="h-4 w-4" />
-            Add Reminder
-          </button>
-        </form>
-
-        {createReminder.isError ? (
-          <div className="mt-3 flex gap-2 text-sm text-rose-300">
-            <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>{createReminder.error.message}</span>
-          </div>
-        ) : null}
-
-        <div className="mt-4">
-          {summary.reminders.length ? (
-            summary.reminders.map((reminder) => (
-              <ReminderRow key={reminder.id} reminder={reminder} />
-            ))
-          ) : (
-            <p className="text-sm text-zinc-500">No scheduled reminders.</p>
-          )}
-        </div>
       </section>
 
       <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">

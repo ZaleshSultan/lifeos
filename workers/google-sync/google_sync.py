@@ -246,13 +246,27 @@ def sync_source(
         seen: set[str] = set()
         for row in rows:
             seen.add(str(row["external_id"]))
-            event, created = client.upsert_event(row, mode)
+            event, created, reminder_stats = client.upsert_event(row, mode)
             stats.created += int(created)
             stats.updated += int(not created)
+            stats.reminders_created += reminder_stats.created
+            stats.reminders_updated += reminder_stats.updated
+            stats.reminders_cancelled += reminder_stats.cancelled
             if event.get("status") in {"done", "cancelled"}:
-                client.cancel_future_reminders(str(event["id"]))
+                stats.reminders_cancelled += client.cancel_future_reminders(str(event["id"]))
         stats.missing = client.mark_missing(source_key, seen)
         client.finish_sync_run(run_id, "success", stats)
+        logging.info(
+            "%s seen=%d created=%d updated=%d missing=%d reminders_created=%d reminders_updated=%d reminders_cancelled=%d",
+            "tasks" if source_key == "google_tasks" else "events",
+            stats.seen,
+            stats.created,
+            stats.updated,
+            stats.missing,
+            stats.reminders_created,
+            stats.reminders_updated,
+            stats.reminders_cancelled,
+        )
         return stats
     except Exception as exc:
         client.finish_sync_run(run_id, "failed", stats, str(exc))
@@ -326,4 +340,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

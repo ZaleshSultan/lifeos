@@ -2424,9 +2424,14 @@ export class SupabaseLifeOSStore implements LifeOSStore {
   ): Promise<ReminderRecord> {
     const { data, error } = await this.client
       .from("reminders")
-      .update({ status: "cancelled" })
+      .update({
+        status: "cancelled",
+        claimed_at: null,
+        updated_at: new Date().toISOString(),
+      })
       .eq("user_id", userId)
       .eq("id", reminderId)
+      .eq("status", "pending")
       .select("*")
       .single();
 

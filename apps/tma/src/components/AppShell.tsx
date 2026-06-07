@@ -1,5 +1,6 @@
 import {
   Activity,
+  Bell,
   Dumbbell,
   HeartPulse,
   Home,
@@ -23,6 +24,7 @@ const tabs: Array<{ id: ScreenId; label: string; icon: LucideIcon }> = [
   { id: "health", label: "Health", icon: HeartPulse },
   { id: "focus", label: "Focus", icon: Activity },
   { id: "sources", label: "Sources", icon: PlugZap },
+  { id: "reminders", label: "Reminders", icon: Bell },
   { id: "mode", label: "Mode", icon: Settings2 },
 ];
 
@@ -53,7 +55,7 @@ export function AppShell({ screen, onScreenChange, children }: AppShellProps) {
       <main className="flex-1 px-4 pb-28 pt-4">{children}</main>
 
       <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-white/[0.06] bg-graphite-950/95 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-md">
-        <div className="mx-auto grid max-w-md grid-cols-6">
+        <div className="mx-auto grid max-w-md grid-cols-7">
           {tabs.map((tab) => {
             const Icon = tab.icon;
             const active = screen === tab.id;

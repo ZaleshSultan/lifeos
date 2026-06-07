@@ -531,6 +531,7 @@ function tmaStore(events: string[] = []): LifeOSStore {
       };
     },
     async cancelReminder(_userId, reminderId) {
+      events.push("cancelReminder");
       const reminder = reminders.find((item) => item.id === reminderId);
 
       if (!reminder) {
@@ -1452,6 +1453,12 @@ describe("bot server", () => {
     const listResponse = await fetch(
       `http://127.0.0.1:${port}/api/tma/reminders`,
     );
+    const cancelResponse = await fetch(
+      `http://127.0.0.1:${port}/api/tma/reminders/reminder-1`,
+      {
+        method: "DELETE",
+      },
+    );
 
     expect(getResponse.status).toBe(200);
     await expect(getResponse.json()).resolves.toMatchObject({
@@ -1483,20 +1490,30 @@ describe("bot server", () => {
     });
     expect(listResponse.status).toBe(200);
     await expect(listResponse.json()).resolves.toMatchObject({
-      reminders: [
-        {
-          message: "Review graph theory",
-          remind_at: "2026-07-06T02:00:00.000Z",
-          status: "pending",
-          channel: "telegram",
-        },
-      ],
+      data: {
+        reminders: [
+          {
+            message: "Review graph theory",
+            remindAt: "2026-07-06T02:00:00.000Z",
+            status: "pending",
+            channel: "telegram",
+          },
+        ],
+      },
+    });
+    expect(cancelResponse.status).toBe(200);
+    await expect(cancelResponse.json()).resolves.toMatchObject({
+      data: {
+        id: "reminder-1",
+        status: "cancelled",
+      },
     });
     expect(events).toEqual([
       "getTmaSourcesSummary",
       "createReminder",
       "getTmaSourcesSummary",
       "listUpcomingReminders",
+      "cancelReminder",
     ]);
   });
 

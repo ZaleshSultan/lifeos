@@ -164,11 +164,14 @@ def sync_feed(
         seen: set[str] = set()
         for row in rows:
             seen.add(str(row["external_id"]))
-            event, created = client.upsert_event(row, mode)
+            event, created, reminder_stats = client.upsert_event(row, mode)
             stats.created += int(created)
             stats.updated += int(not created)
+            stats.reminders_created += reminder_stats.created
+            stats.reminders_updated += reminder_stats.updated
+            stats.reminders_cancelled += reminder_stats.cancelled
             if event.get("status") == "cancelled":
-                client.cancel_future_reminders(str(event["id"]))
+                stats.reminders_cancelled += client.cancel_future_reminders(str(event["id"]))
         stats.missing = client.mark_missing(source_key, seen)
         client.finish_sync_run(run_id, "success", stats)
         return stats
@@ -237,4 +240,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

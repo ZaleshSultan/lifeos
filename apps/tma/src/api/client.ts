@@ -103,6 +103,12 @@ export const api = {
   getReminders(): Promise<RemindersResponse> {
     return request<RemindersResponse>("/api/tma/reminders");
   },
+  cancelReminder(reminderId: string): Promise<void> {
+    return request<void>(
+      `/api/tma/reminders/${encodeURIComponent(reminderId)}`,
+      { method: "DELETE" },
+    );
+  },
   getAcademic(): Promise<AcademicSummary> {
     return request<AcademicSummary>("/api/tma/academic");
   },

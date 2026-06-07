@@ -1023,17 +1023,9 @@ async function handleRequest(
       request.method === "GET" &&
       requestUrl.pathname === "/api/tma/reminders"
     ) {
-      const reminders = await store.listUpcomingReminders(auth.user.userId, 20);
+      const reminders = await store.listUpcomingReminders(auth.user.userId, 10);
 
-      writeJson(response, 200, {
-        reminders: reminders.map((reminder) => ({
-          id: reminder.id,
-          message: reminder.message,
-          remind_at: reminder.remindAt,
-          status: reminder.status,
-          channel: reminder.channel,
-        })),
-      });
+      writeJson(response, 200, tmaData({ reminders }));
       return;
     }
 
@@ -1065,6 +1057,18 @@ async function handleRequest(
         200,
         tmaData(await store.getTmaSourcesSummary(auth.user.userId)),
       );
+      return;
+    }
+
+    const reminderRoute = requestUrl.pathname.match(
+      /^\/api\/tma\/reminders\/([^/]+)$/,
+    );
+
+    if (request.method === "DELETE" && reminderRoute?.[1]) {
+      const reminderId = decodeURIComponent(reminderRoute[1]);
+      const reminder = await store.cancelReminder(auth.user.userId, reminderId);
+
+      writeJson(response, 200, tmaData(reminder));
       return;
     }
 

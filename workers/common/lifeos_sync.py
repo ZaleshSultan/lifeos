@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import urllib.error
 import urllib.parse
@@ -81,6 +82,16 @@ class SyncStats:
     created: int = 0
     updated: int = 0
     missing: int = 0
+    reminders_created: int = 0
+    reminders_updated: int = 0
+    reminders_cancelled: int = 0
+
+
+@dataclass
+class ReminderSyncStats:
+    created: int = 0
+    updated: int = 0
+    cancelled: int = 0
 
 
 def load_dotenv(path: Path) -> None:
@@ -182,6 +193,18 @@ def reminder_mode(value: Any) -> str:
     return normalized if normalized in REMINDER_MODES else "normal"
 
 
+def effective_reminder_mode(mode: str, high_priority: bool) -> str:
+    mode = reminder_mode(mode)
+    if not high_priority:
+        return mode
+    return {
+        "chill": "normal",
+        "normal": "duolingo",
+        "duolingo": "war",
+        "war": "war",
+    }[mode]
+
+
 def in_quiet_hours(value: datetime, start: str, end: str, timezone_name: str) -> bool:
     local = value.astimezone(timezone_for(timezone_name))
     current = local.time().replace(tzinfo=None)
@@ -217,7 +240,7 @@ def reminder_policy_keys(
     mode: str,
     high_priority: bool,
 ) -> list[str]:
-    mode = reminder_mode(mode)
+    mode = effective_reminder_mode(mode, high_priority)
     if mode == "war" and not high_priority:
         return []
     offsets = TASK_OFFSETS[mode] if event_type == "task" else EVENT_OFFSETS[mode]
@@ -243,7 +266,7 @@ def build_reminder_schedule(
     )
     if not target or str(event.get("status") or "active") != "active":
         return []
-    mode = reminder_mode(mode)
+    mode = effective_reminder_mode(mode, high_priority)
     if mode == "war" and not high_priority:
         return []
 
@@ -393,7 +416,12 @@ class SupabaseRestClient:
                 "records_created": stats.created,
                 "records_updated": stats.updated,
                 "error_message": error[:2000] if error else None,
-                "metadata_json": {"missing": stats.missing},
+                "metadata_json": {
+                    "missing": stats.missing,
+                    "reminders_created": stats.reminders_created,
+                    "reminders_updated": stats.reminders_updated,
+                    "reminders_cancelled": stats.reminders_cancelled,
+                },
             },
         )
 
@@ -406,7 +434,9 @@ class SupabaseRestClient:
         settings = rows[0].get("settings") if rows else {}
         return reminder_mode(settings.get("reminder_mode") if isinstance(settings, dict) else None)
 
-    def upsert_event(self, event: JsonObject, mode: str) -> tuple[JsonObject, bool]:
+    def upsert_event(
+        self, event: JsonObject, mode: str
+    ) -> tuple[JsonObject, bool, ReminderSyncStats]:
         source_key = str(event["source_key"])
         external_id = str(event["external_id"])
         existing = self.request(
@@ -450,8 +480,8 @@ class SupabaseRestClient:
         )
         synced = rows[0]
         self._sync_life_entity(synced)
-        self._sync_reminders(synced, mode)
-        return synced, not bool(existing)
+        reminder_stats = self._sync_reminders(synced, mode)
+        return synced, not bool(existing), reminder_stats
 
     def _sync_life_entity(self, event: JsonObject) -> None:
         event_id = str(event["id"])
@@ -492,10 +522,11 @@ class SupabaseRestClient:
         )
         event["normalized_entity_id"] = rows[0]["id"]
 
-    def _sync_reminders(self, event: JsonObject, mode: str) -> None:
+    def _sync_reminders(self, event: JsonObject, mode: str) -> ReminderSyncStats:
         event_id = str(event["id"])
         desired = build_reminder_schedule(event, mode, self.settings.timezone_name)
         desired_keys = {str(item["dedup_key"]) for item in desired}
+        stats = ReminderSyncStats()
         existing = self.request(
             "GET",
             "reminders",
@@ -514,12 +545,13 @@ class SupabaseRestClient:
                     {"id": f"eq.{reminder['id']}", "status": "eq.pending"},
                     {"status": "cancelled"},
                 )
+                stats.cancelled += 1
         for item in desired:
             rows = self.request(
                 "GET",
                 "reminders",
                 {
-                    "select": "id,status",
+                    "select": "*",
                     "user_id": f"eq.{self.settings.user_id}",
                     "dedup_key": f"eq.{item['dedup_key']}",
                     "limit": "1",
@@ -533,10 +565,28 @@ class SupabaseRestClient:
                 "channel": "telegram",
             }
             if rows:
-                if rows[0].get("status") == "pending":
+                if rows[0].get("status") == "pending" and self._reminder_changed(
+                    rows[0], payload
+                ):
                     self.request("PATCH", "reminders", {"id": f"eq.{rows[0]['id']}"}, payload)
+                    stats.updated += 1
             else:
                 self.request("POST", "reminders", body=payload)
+                stats.created += 1
+        if stats.created or stats.updated or stats.cancelled:
+            logging.info(
+                "reminder sync source=%s external_id=%s created=%d updated=%d cancelled=%d",
+                event.get("source_key"),
+                event.get("external_id"),
+                stats.created,
+                stats.updated,
+                stats.cancelled,
+            )
+        return stats
+
+    @staticmethod
+    def _reminder_changed(existing: JsonObject, desired: JsonObject) -> bool:
+        return any(existing.get(key) != value for key, value in desired.items())
 
     def mark_missing(self, source_key: str, seen_external_ids: set[str]) -> int:
         rows = self.request(
@@ -560,8 +610,8 @@ class SupabaseRestClient:
             self.cancel_future_reminders(str(row["id"]))
         return len(missing)
 
-    def cancel_future_reminders(self, source_event_id: str) -> None:
-        self.request(
+    def cancel_future_reminders(self, source_event_id: str) -> int:
+        rows = self.request(
             "PATCH",
             "reminders",
             {
@@ -570,7 +620,16 @@ class SupabaseRestClient:
                 "remind_at": f"gte.{utc_now()}",
             },
             {"status": "cancelled"},
+            "return=representation",
         )
+        cancelled = len(rows or [])
+        if cancelled:
+            logging.info(
+                "reminder sync source_event_id=%s cancelled=%d",
+                source_event_id,
+                cancelled,
+            )
+        return cancelled
 
     def source_status(self, source_keys: list[str]) -> list[JsonObject]:
         return self.request(

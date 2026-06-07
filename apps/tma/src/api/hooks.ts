@@ -8,6 +8,7 @@ export const queryKeys = {
   health: ["health"] as const,
   focus: ["focus"] as const,
   sources: ["sources"] as const,
+  reminders: ["reminders"] as const,
   academic: ["academic"] as const,
   mode: ["mode"] as const,
   activeCourse: ["course", "active"] as const,
@@ -45,6 +46,13 @@ export function useSourcesQuery() {
   return useQuery({
     queryKey: queryKeys.sources,
     queryFn: api.getSources,
+  });
+}
+
+export function useRemindersQuery() {
+  return useQuery({
+    queryKey: queryKeys.reminders,
+    queryFn: api.getReminders,
   });
 }
 
@@ -122,6 +130,20 @@ export function useCreateReminderMutation() {
       telegram.hapticImpact("light");
       queryClient.setQueryData(queryKeys.sources, data);
       void queryClient.invalidateQueries({ queryKey: queryKeys.home });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.reminders });
+    },
+  });
+}
+
+export function useCancelReminderMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: api.cancelReminder,
+    onSuccess() {
+      telegram.hapticImpact("light");
+      void queryClient.invalidateQueries({ queryKey: queryKeys.reminders });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sources });
     },
   });
 }

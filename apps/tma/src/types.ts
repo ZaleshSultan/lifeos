@@ -4,4 +4,5 @@ export type ScreenId =
   | "health"
   | "focus"
   | "sources"
+  | "reminders"
   | "mode";

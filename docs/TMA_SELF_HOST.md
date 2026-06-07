@@ -7,14 +7,10 @@ Cloudflare.
 
 ## Build The TMA
 
-From `/home/zalewko/lifeos`, build with the public API origin and `/tma/` asset
-base:
+From `/home/zalewko/lifeos`, use the checked self-host build:
 
 ```bash
-VITE_API_BASE_URL=https://archlinux.tail2492c9.ts.net \
-VITE_ALLOW_MOCK_DATA=false \
-VITE_BASE_PATH=/tma/ \
-pnpm --filter @lifeos/tma build
+pnpm selfhost:build-tma
 ```
 
 The build is written to `/home/zalewko/lifeos/apps/tma/dist`. With
@@ -46,12 +42,11 @@ buttons. `/workout` opens the workout screen and `/mode` opens mode settings.
 
 ## Restart
 
-Rebuild the TMA after every frontend change, then restart only the existing bot
-service:
+Rebuild the TMA after every frontend change, then restart the existing bot
+service and run HTTP checks:
 
 ```bash
-sudo systemctl restart lifeos-bot.service
-sudo systemctl status --no-pager lifeos-bot.service
+pnpm selfhost:deploy
 ```
 
 No Vite production process is needed.
