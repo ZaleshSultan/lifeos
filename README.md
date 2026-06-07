@@ -12,7 +12,8 @@ Personal LifeOS monorepo for automation, knowledge workflows, and user-facing in
 - `packages/obsidian` - Obsidian integration package boundary
 - `workers/obsidian-mirror` - Supabase to Obsidian Markdown mirror
 - `workers/reminder-worker` - Supabase reminders to Telegram worker
-- `apps/health-bridge` - Android Health Connect bridge scaffold
+- `apps/android-health-bridge` - installable manual Android Health Connect bridge
+- `apps/health-bridge` - legacy Android Health Connect bridge scaffold
 - `docs` - architecture, contracts, deployment, and operations docs
 - `deploy` - platform deployment assets
 
