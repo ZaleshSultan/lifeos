@@ -70,6 +70,55 @@ export interface HealthIngestComputedDaily {
   dataCompletenessScore: number;
 }
 
+export const HEALTH_METRIC_TYPES = [
+  "steps",
+  "sleep_minutes",
+  "sleep_score",
+  "resting_heart_rate",
+  "average_heart_rate",
+  "active_energy_kcal",
+  "total_energy_kcal",
+  "workout_minutes",
+  "distance_m",
+  "weight_kg",
+  "spo2_percent",
+  "stress_score",
+  "mood_score",
+  "energy_score",
+] as const;
+
+export type HealthMetricType = (typeof HEALTH_METRIC_TYPES)[number];
+
+export const HEALTH_METRIC_SOURCES = [
+  "manual",
+  "telegram",
+  "tma",
+  "xiaomi_health_connect",
+  "import_json",
+  "import_csv",
+  "api",
+] as const;
+
+export type HealthMetricSource = (typeof HEALTH_METRIC_SOURCES)[number];
+
+export interface HealthMetricInput {
+  type: HealthMetricType;
+  value: number;
+  unit?: string | null;
+  confidence?: number | null;
+  rawJson?: Record<string, unknown>;
+}
+
+export interface HealthMetricsIngestPayload {
+  userId: string;
+  date: string;
+  source: HealthMetricSource;
+  device?: string | null;
+  timezone?: string | null;
+  metrics: HealthMetricInput[];
+  raw?: Record<string, unknown>;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -140,6 +189,16 @@ function assertDateTimeString(value: string, field: string): string {
 
 export function isHealthSyncReason(value: string): value is HealthSyncReason {
   return HEALTH_SYNC_REASONS.includes(value as HealthSyncReason);
+}
+
+export function isHealthMetricType(value: string): value is HealthMetricType {
+  return HEALTH_METRIC_TYPES.includes(value as HealthMetricType);
+}
+
+export function isHealthMetricSource(
+  value: string,
+): value is HealthMetricSource {
+  return HEALTH_METRIC_SOURCES.includes(value as HealthMetricSource);
 }
 
 export function parseHealthIngestPayload(input: unknown): HealthIngestPayload {
@@ -316,6 +375,80 @@ export function parseHealthIngestPayload(input: unknown): HealthIngestPayload {
       };
     }),
     missing: booleanRecord(missingRecord),
+    raw: optionalMetadata(input.raw),
+  };
+}
+
+export function parseHealthMetricsIngestPayload(
+  input: unknown,
+  defaultUserId?: string,
+): HealthMetricsIngestPayload {
+  if (!isRecord(input)) {
+    throw new Error("Health metrics ingest payload must be an object");
+  }
+
+  const userId =
+    stringField(input, "user_id") ??
+    stringField(input, "userId") ??
+    defaultUserId;
+  const date = stringField(input, "date");
+  const source = stringField(input, "source") ?? "api";
+
+  if (!userId) {
+    throw new Error("user_id is required");
+  }
+
+  if (!date) {
+    throw new Error("date is required");
+  }
+
+  if (!isHealthMetricSource(source)) {
+    throw new Error(
+      `source must be one of: ${HEALTH_METRIC_SOURCES.join(", ")}`,
+    );
+  }
+
+  if (!Array.isArray(input.metrics) || input.metrics.length === 0) {
+    throw new Error("metrics must be a non-empty array");
+  }
+
+  return {
+    userId,
+    date: assertDateString(date, "date"),
+    source,
+    device: stringField(input, "device") ?? null,
+    timezone: stringField(input, "timezone") ?? null,
+    metrics: input.metrics.map((item, index) => {
+      if (!isRecord(item)) {
+        throw new Error(`metrics[${index}] must be an object`);
+      }
+
+      const type = stringField(item, "type");
+      const value = numberField(item, "value");
+
+      if (!type || !isHealthMetricType(type)) {
+        throw new Error(
+          `metrics[${index}].type must be one of: ${HEALTH_METRIC_TYPES.join(", ")}`,
+        );
+      }
+
+      if (value === undefined) {
+        throw new Error(`metrics[${index}].value is required`);
+      }
+
+      const confidence = numberField(item, "confidence");
+
+      return {
+        type,
+        value,
+        unit: stringField(item, "unit") ?? null,
+        confidence: confidence ?? null,
+        rawJson:
+          optionalMetadata(item.raw_json) ??
+          optionalMetadata(item.rawJson) ??
+          undefined,
+      };
+    }),
     raw: optionalMetadata(input.raw),
   };
 }

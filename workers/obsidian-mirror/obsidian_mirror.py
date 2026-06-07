@@ -591,7 +591,22 @@ def render_health_daily(entity: JsonObject, detail: JsonObject | None) -> Render
     title = f"Health Daily {log_date}"
     markdown = "\n\n".join(
         [
-            frontmatter(entity, {"kind": "health_daily", "log_date": log_date}),
+            frontmatter(
+                entity,
+                {
+                    "kind": "health_daily",
+                    "log_date": log_date,
+                    "sleep_minutes": (detail or {}).get("sleep_minutes"),
+                    "resting_heart_rate": (detail or {}).get("resting_heart_rate"),
+                    "steps": (detail or {}).get("steps"),
+                    "active_energy_kcal": (detail or {}).get("active_energy_kcal"),
+                    "workout_minutes": (detail or {}).get("workout_minutes"),
+                    "mood_score": (detail or {}).get("mood_score"),
+                    "energy_score": (detail or {}).get("energy_score"),
+                    "stress_score": (detail or {}).get("stress_score"),
+                    "missing_metrics": missing_names,
+                },
+            ),
             f"# {title}",
             md_table(
                 [
@@ -703,10 +718,32 @@ SORT created_at DESC
 """,
     "Health.md": """# Health
 
+Xiaomi Watch 4 data flows through Mi Fitness and Android Health Connect. Manual
+entries use `/health_log`; no Samsung Health integration is required.
+
+## Today
+
 ```dataview
-TABLE log_date, recovery_mode, data_completeness_score
-FROM "Health"
+TABLE steps, sleep_minutes, resting_heart_rate, active_energy_kcal, workout_minutes, source, missing_metrics
+FROM "Health/Daily"
 SORT log_date DESC
+LIMIT 1
+```
+
+## 7-Day Averages
+
+```dataviewjs
+const pages = dv.pages('"Health/Daily"')
+  .where(p => p.log_date && dv.date(p.log_date) >= dv.date("today") - dv.duration("6 days"));
+const avg = values => values.length ? Math.round(values.reduce((a, b) => a + b, 0) / values.length) : "n/a";
+const values = key => pages.array().map(p => Number(p[key])).filter(Number.isFinite);
+dv.table(["Avg steps", "Avg sleep minutes", "Avg resting HR", "Workout minutes", "Missing days"], [[
+  avg(values("steps")),
+  avg(values("sleep_minutes")),
+  avg(values("resting_heart_rate")),
+  values("workout_minutes").reduce((a, b) => a + b, 0),
+  Math.max(0, 7 - pages.length),
+]]);
 ```
 """,
     "Workouts.md": """# Workouts

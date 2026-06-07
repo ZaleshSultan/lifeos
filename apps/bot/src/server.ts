@@ -9,6 +9,7 @@ import { realpathSync, statSync } from "node:fs";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { extname, isAbsolute, relative, resolve, sep } from "node:path";
 import {
+  parseHealthMetricsIngestPayload,
   parseHealthIngestPayload,
   parseLifeMode,
   type LifeMode,
@@ -114,7 +115,7 @@ function writeJson(
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "GET,POST,DELETE,OPTIONS",
     "access-control-allow-headers":
-      "content-type,x-telegram-init-data,x-lifeos-ingest-secret,x-telegram-bot-api-secret-token",
+      "content-type,x-telegram-init-data,x-lifeos-health-secret,x-lifeos-ingest-secret,x-telegram-bot-api-secret-token",
   });
   response.end(JSON.stringify(body));
 }
@@ -124,7 +125,7 @@ function writeNoContent(response: ServerResponse): void {
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "GET,POST,DELETE,OPTIONS",
     "access-control-allow-headers":
-      "content-type,x-telegram-init-data,x-lifeos-ingest-secret,x-telegram-bot-api-secret-token",
+      "content-type,x-telegram-init-data,x-lifeos-health-secret,x-lifeos-ingest-secret,x-telegram-bot-api-secret-token",
   });
   response.end();
 }
@@ -1195,7 +1196,11 @@ async function handleRequest(
     return;
   }
 
-  if (request.method === "POST" && requestUrl.pathname === "/health/ingest") {
+  if (
+    request.method === "POST" &&
+    (requestUrl.pathname === "/health/ingest" ||
+      requestUrl.pathname === "/api/health/ingest")
+  ) {
     if (!options.ingestSecret) {
       writeJson(response, 503, {
         error: "health_ingest_not_configured",
@@ -1203,9 +1208,9 @@ async function handleRequest(
       return;
     }
 
-    const providedSecretValue = headerValue(
-      request.headers["x-lifeos-ingest-secret"],
-    );
+    const providedSecretValue =
+      headerValue(request.headers["x-lifeos-health-secret"]) ??
+      headerValue(request.headers["x-lifeos-ingest-secret"]);
 
     if (
       !providedSecretValue ||
@@ -1224,10 +1229,49 @@ async function handleRequest(
       return;
     }
 
+    let body;
+
+    try {
+      body = await readJsonBody(request);
+    } catch (error) {
+      writeJson(response, 400, {
+        error: "invalid_health_ingest_payload",
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+      return;
+    }
+
+    if (
+      typeof body === "object" &&
+      body !== null &&
+      !Array.isArray(body) &&
+      Array.isArray((body as Record<string, unknown>).metrics)
+    ) {
+      let payload;
+
+      try {
+        payload = parseHealthMetricsIngestPayload(body, options.defaultUserId);
+      } catch (error) {
+        writeJson(response, 400, {
+          error: "invalid_health_metrics_payload",
+          message: error instanceof Error ? error.message : "Unknown error",
+        });
+        return;
+      }
+
+      const result = await options.store.upsertHealthMetrics(payload);
+
+      writeJson(response, 200, {
+        ok: true,
+        result,
+      });
+      return;
+    }
+
     let payload;
 
     try {
-      payload = parseHealthIngestPayload(await readJsonBody(request));
+      payload = parseHealthIngestPayload(body);
     } catch (error) {
       writeJson(response, 400, {
         error: "invalid_health_ingest_payload",

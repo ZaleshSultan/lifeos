@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
   HealthIngestPayload,
+  HealthMetricsIngestPayload,
   LifeMode,
   LifeModeResolution,
 } from "@lifeos/core";
@@ -14,6 +15,7 @@ import type {
   CreateLifeEntityInput,
   CurrentWorkoutSummary,
   HealthIngestResult,
+  Json,
   LifeEntityRecord,
   LifeOSStore,
   ReminderRecord,
@@ -22,6 +24,7 @@ import type {
   StudyCourseRecord,
   SyncRunRecord,
   TmaAcademicSummary,
+  TmaHealthSummary,
   TmaSourcesSummary,
 } from "@lifeos/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -96,6 +99,51 @@ function healthIngestStore(
         workoutsUpserted: payload.workouts.length,
         samplesInserted: payload.samples.length,
       } satisfies HealthIngestResult;
+    },
+  };
+}
+
+function healthMetricsStore(
+  seen: HealthMetricsIngestPayload[],
+): Pick<LifeOSStore, "upsertHealthMetrics"> {
+  const existing = new Set<string>();
+
+  return {
+    async upsertHealthMetrics(payload) {
+      seen.push(payload);
+      let created = 0;
+      let updated = 0;
+
+      for (const metric of payload.metrics) {
+        const key = `${payload.userId}:${payload.date}:${metric.type}:${payload.source}`;
+
+        if (existing.has(key)) {
+          updated += 1;
+        } else {
+          existing.add(key);
+          created += 1;
+        }
+      }
+
+      return {
+        date: payload.date,
+        source: payload.source,
+        created,
+        updated,
+        metrics: payload.metrics.map((metric, index) => ({
+          id: `metric-${index + 1}`,
+          userId: payload.userId,
+          metricDate: payload.date,
+          metricType: metric.type,
+          value: metric.value,
+          unit: metric.unit ?? null,
+          source: payload.source,
+          confidence: metric.confidence ?? null,
+          rawJson: (metric.rawJson ?? {}) as Json,
+          createdAt: "2026-06-07T00:00:00.000Z",
+          updatedAt: "2026-06-07T00:00:00.000Z",
+        })),
+      };
     },
   };
 }
@@ -386,6 +434,29 @@ function tmaStore(events: string[] = []): LifeOSStore {
         activeEnergyKcal: 600,
         missingMetrics: {},
         samplesCount: 4,
+        hasMetrics: true,
+        sourceLabel: "Xiaomi Watch / Health Connect",
+        latestSource: "xiaomi_health_connect",
+        averageHeartRate: null,
+        totalEnergyKcal: null,
+        workoutMinutes: 45,
+        distanceM: null,
+        weightKg: null,
+        sleepScore: null,
+        stressScore: null,
+        moodScore: null,
+        energyScore: null,
+        weekly: {
+          startDate: "2026-05-11",
+          endDate: "2026-05-17",
+          avgSteps: 9000,
+          avgSleepMinutes: 480,
+          avgRestingHeartRate: 58,
+          totalWorkoutMinutes: 45,
+          missingDays: [],
+        },
+        trends: [],
+        sources: [],
       };
     },
     async getTmaFocusSummary() {
@@ -597,6 +668,41 @@ function tmaStore(events: string[] = []): LifeOSStore {
         workoutsUpserted: payload.workouts.length,
         samplesInserted: payload.samples.length,
       };
+    },
+    async upsertHealthMetrics(payload) {
+      return {
+        date: payload.date,
+        source: payload.source,
+        created: payload.metrics.length,
+        updated: 0,
+        metrics: [],
+      };
+    },
+    async getHealthMetricDay() {
+      return {
+        date: "2026-05-17",
+        metrics: {},
+        sources: [],
+        sourceLabel: null,
+        latestSource: null,
+        missingMetrics: {},
+        records: [],
+      };
+    },
+    async getHealthMetricWeek() {
+      return {
+        startDate: "2026-05-11",
+        endDate: "2026-05-17",
+        avgSteps: 9000,
+        avgSleepMinutes: 480,
+        avgRestingHeartRate: 58,
+        totalWorkoutMinutes: 45,
+        missingDays: [],
+        trends: [],
+      };
+    },
+    async getHealthMetricSources() {
+      return [];
     },
   };
 }
@@ -1205,6 +1311,119 @@ describe("bot server", () => {
     });
 
     expect(response.status).toBe(401);
+  });
+
+  it("rejects health metric ingest requests with missing secret", async () => {
+    const server = createBotServer({
+      config: {
+        lifeosIngestSecret: "ingest-secret",
+        lifeosDefaultUserId: "user-1",
+      },
+      store: healthMetricsStore([]) as LifeOSStore,
+    });
+    servers.push(server);
+
+    const port = await listen(server);
+    const response = await fetch(`http://127.0.0.1:${port}/api/health/ingest`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        date: "2026-06-07",
+        source: "xiaomi_health_connect",
+        metrics: [{ type: "steps", value: 8200, unit: "steps" }],
+      }),
+    });
+
+    expect(response.status).toBe(401);
+  });
+
+  it("accepts health metric ingest payloads with health secret", async () => {
+    const seen: HealthMetricsIngestPayload[] = [];
+    const server = createBotServer({
+      config: {
+        lifeosIngestSecret: "ingest-secret",
+        lifeosDefaultUserId: "user-1",
+      },
+      store: healthMetricsStore(seen) as LifeOSStore,
+    });
+    servers.push(server);
+
+    const port = await listen(server);
+    const response = await fetch(`http://127.0.0.1:${port}/api/health/ingest`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-lifeos-health-secret": "ingest-secret",
+      },
+      body: JSON.stringify({
+        date: "2026-06-07",
+        source: "xiaomi_health_connect",
+        device: "Xiaomi Watch 4",
+        metrics: [
+          { type: "steps", value: 8200, unit: "steps" },
+          { type: "sleep_minutes", value: 420, unit: "min" },
+        ],
+        raw: {},
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      result: {
+        created: 2,
+        updated: 0,
+        source: "xiaomi_health_connect",
+      },
+    });
+    expect(seen.at(0)?.userId).toBe("user-1");
+    expect(seen.at(0)?.metrics).toHaveLength(2);
+  });
+
+  it("reports idempotent health metric upserts", async () => {
+    const seen: HealthMetricsIngestPayload[] = [];
+    const store = healthMetricsStore(seen) as LifeOSStore;
+    const server = createBotServer({
+      config: {
+        lifeosIngestSecret: "ingest-secret",
+        lifeosDefaultUserId: "user-1",
+      },
+      store,
+    });
+    servers.push(server);
+
+    const port = await listen(server);
+    const body = {
+      date: "2026-06-07",
+      source: "xiaomi_health_connect",
+      metrics: [{ type: "steps", value: 8200, unit: "steps" }],
+    };
+
+    await fetch(`http://127.0.0.1:${port}/api/health/ingest`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-lifeos-health-secret": "ingest-secret",
+      },
+      body: JSON.stringify(body),
+    });
+    const response = await fetch(`http://127.0.0.1:${port}/api/health/ingest`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-lifeos-health-secret": "ingest-secret",
+      },
+      body: JSON.stringify(body),
+    });
+
+    await expect(response.json()).resolves.toMatchObject({
+      result: {
+        created: 0,
+        updated: 1,
+      },
+    });
   });
 
   it("accepts previous-day health ingest payloads", async () => {

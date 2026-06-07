@@ -43,16 +43,20 @@ data class HealthSample(
 )
 
 @Serializable
-data class HealthIngestRequest(
+data class HealthMetricValue(
+    val type: String,
+    val value: Double,
+    val unit: String,
+)
+
+@Serializable
+data class HealthMetricsIngestRequest(
     @SerialName("user_id") val userId: String,
     val date: String,
-    @SerialName("sync_reason") val syncReason: String,
-    val source: String = "health_connect_android",
+    val source: String = "xiaomi_health_connect",
+    val device: String = "Xiaomi Watch 4",
     val timezone: String,
-    val metrics: HealthMetrics,
-    val workouts: List<HealthWorkout>,
-    val samples: List<HealthSample>,
-    val missing: Map<String, Boolean> = emptyMap(),
+    val metrics: List<HealthMetricValue>,
     val raw: Map<String, String> = emptyMap(),
 )
 

@@ -210,6 +210,40 @@ export interface HealthSummary {
   activeEnergyKcal?: number | null;
   missingMetrics?: Record<string, boolean>;
   samplesCount?: number;
+  hasMetrics?: boolean;
+  sourceLabel?: string | null;
+  latestSource?: string | null;
+  averageHeartRate?: number | null;
+  totalEnergyKcal?: number | null;
+  workoutMinutes?: number | null;
+  distanceM?: number | null;
+  weightKg?: number | null;
+  sleepScore?: number | null;
+  stressScore?: number | null;
+  moodScore?: number | null;
+  energyScore?: number | null;
+  weekly?: {
+    startDate: string;
+    endDate: string;
+    avgSteps: number | null;
+    avgSleepMinutes: number | null;
+    avgRestingHeartRate: number | null;
+    totalWorkoutMinutes: number;
+    missingDays: string[];
+  };
+  trends?: Array<{
+    date: string;
+    steps: number | null;
+    sleepMinutes: number | null;
+    restingHeartRate: number | null;
+    activeEnergyKcal: number | null;
+    workoutMinutes: number | null;
+  }>;
+  sources?: Array<{
+    source: string;
+    label: string;
+    latestMetricAt: string | null;
+  }>;
 }
 
 export interface FocusSummary {

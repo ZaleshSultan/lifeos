@@ -4,6 +4,7 @@ import {
   parseLifeMode,
   resolveHealthMode,
   scoreFocus,
+  type HealthMetricType,
   type LifeMode,
   type LifeModeResolution,
 } from "@lifeos/core";
@@ -18,6 +19,7 @@ import type {
   StudyCourseRecord,
   SyncRunRecord,
   TelegramUserRecord,
+  TmaHealthSummary,
 } from "@lifeos/db";
 import type {
   TelegramBotRuntime,
@@ -37,6 +39,12 @@ interface HealthSignalArgs {
   stressScore?: number;
 }
 
+type ParsedHealthLogMetric = {
+  type: HealthMetricType;
+  value: number;
+  unit: string;
+};
+
 const HELP_TEXT = [
   "LifeOS bot commands:",
   "",
@@ -47,7 +55,11 @@ const HELP_TEXT = [
   "/deadline 2026-05-20 task title",
   "/today",
   "/focus [sleep 7 mood 8 energy 7 stress 3]",
-  "/health [sleep 7 mood 8 energy 7 stress 3 notes]",
+  "/health",
+  "/health_log steps:8000 sleep:7h rhr:62 weight:70.5 mood:7 energy:6",
+  "/health_week",
+  "/health_import",
+  "/health_sources",
   "/healthsync_status",
   "/sources",
   "/sync [health|obsidian]",
@@ -78,7 +90,7 @@ const CREATE_COMMANDS = new Set([
   "log",
   "task",
   "deadline",
-  "health",
+  "health_log",
   "review",
   "spend",
   "workout",
@@ -272,6 +284,86 @@ function parseHealthSignalArgs(args: string): HealthSignalArgs {
   }
 
   return signals;
+}
+
+function parseDurationMinutes(value: string): number | null {
+  const match = value.trim().match(/^(\d+(?:\.\d+)?)(h|m)?$/i);
+
+  if (!match?.[1]) {
+    return null;
+  }
+
+  const amount = Number(match[1]);
+
+  if (!Number.isFinite(amount) || amount < 0) {
+    return null;
+  }
+
+  return match[2]?.toLowerCase() === "m" ? amount : Math.round(amount * 60);
+}
+
+function parseHealthLogArgs(args: string): ParsedHealthLogMetric[] | null {
+  const metrics: ParsedHealthLogMetric[] = [];
+  const aliases: Record<string, { type: HealthMetricType; unit: string }> = {
+    steps: { type: "steps", unit: "steps" },
+    sleep: { type: "sleep_minutes", unit: "min" },
+    sleep_minutes: { type: "sleep_minutes", unit: "min" },
+    sleep_score: { type: "sleep_score", unit: "score" },
+    rhr: { type: "resting_heart_rate", unit: "bpm" },
+    resting_heart_rate: { type: "resting_heart_rate", unit: "bpm" },
+    avg_hr: { type: "average_heart_rate", unit: "bpm" },
+    active_kcal: { type: "active_energy_kcal", unit: "kcal" },
+    kcal: { type: "active_energy_kcal", unit: "kcal" },
+    total_kcal: { type: "total_energy_kcal", unit: "kcal" },
+    workout: { type: "workout_minutes", unit: "min" },
+    workout_minutes: { type: "workout_minutes", unit: "min" },
+    distance: { type: "distance_m", unit: "m" },
+    weight: { type: "weight_kg", unit: "kg" },
+    weight_kg: { type: "weight_kg", unit: "kg" },
+    spo2: { type: "spo2_percent", unit: "%" },
+    stress: { type: "stress_score", unit: "score" },
+    mood: { type: "mood_score", unit: "score" },
+    energy: { type: "energy_score", unit: "score" },
+  };
+
+  for (const token of args.trim().split(/\s+/).filter(Boolean)) {
+    const match = token.match(/^([a-zA-Z_]+):(.+)$/);
+
+    if (!match?.[1] || !match[2]) {
+      return null;
+    }
+
+    const alias = aliases[match[1].toLowerCase()];
+
+    if (!alias) {
+      return null;
+    }
+
+    const value =
+      alias.type === "sleep_minutes" || alias.type === "workout_minutes"
+        ? parseDurationMinutes(match[2])
+        : Number(match[2]);
+
+    if (value === null || !Number.isFinite(value)) {
+      return null;
+    }
+
+    metrics.push({
+      type: alias.type,
+      value,
+      unit: alias.unit,
+    });
+  }
+
+  return metrics.length ? metrics : null;
+}
+
+function healthLogUsage(): string {
+  return [
+    "Usage:",
+    "/health_log steps:8000 sleep:7h rhr:62 weight:70.5 mood:7 energy:6",
+    "Optional keys: active_kcal, workout, stress, spo2, distance.",
+  ].join("\n");
 }
 
 function parseSpendArgs(args: string): {
@@ -524,6 +616,88 @@ function formatReminderDateTime(value: string, timezone: string): string {
   } catch {
     return value;
   }
+}
+
+function formatMinutesValue(value: number | null | undefined): string {
+  if (value === null || value === undefined) {
+    return "n/a";
+  }
+
+  const hours = Math.floor(value / 60);
+  const minutes = Math.round(value % 60);
+  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+}
+
+function formatNumberValue(
+  value: number | null | undefined,
+  unit = "",
+): string {
+  if (value === null || value === undefined) {
+    return "n/a";
+  }
+
+  const formatted = Number.isInteger(value) ? String(value) : value.toFixed(1);
+  return unit ? `${formatted} ${unit}` : formatted;
+}
+
+function formatHealthToday(health: TmaHealthSummary): string {
+  if (!health.hasMetrics) {
+    return [
+      "No Xiaomi Watch data yet.",
+      "Connect Mi Fitness → Health Connect or use /health_log.",
+    ].join("\n");
+  }
+
+  return [
+    `Health today: <b>${escapeHtml(health.date)}</b>`,
+    health.sourceLabel
+      ? `Source: <b>${escapeHtml(health.sourceLabel)}</b>`
+      : "",
+    `Steps: <b>${escapeHtml(formatNumberValue(health.steps, "steps"))}</b>`,
+    `Sleep: <b>${escapeHtml(formatMinutesValue(health.sleepMinutes))}</b>`,
+    `Resting HR: <b>${escapeHtml(formatNumberValue(health.restingHeartRate, "bpm"))}</b>`,
+    `Active kcal: <b>${escapeHtml(formatNumberValue(health.activeEnergyKcal, "kcal"))}</b>`,
+    `Workout: <b>${escapeHtml(formatMinutesValue(health.workoutMinutes))}</b>`,
+    `Stress: <b>${escapeHtml(formatNumberValue(health.stressScore))}</b>`,
+    `Mood: <b>${escapeHtml(formatNumberValue(health.moodScore))}</b>`,
+    `Energy: <b>${escapeHtml(formatNumberValue(health.energyScore))}</b>`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function formatHealthWeek(health: TmaHealthSummary): string {
+  const week = health.weekly;
+  return [
+    `Health week: <code>${escapeHtml(week.startDate)}</code> to <code>${escapeHtml(week.endDate)}</code>`,
+    `Avg steps: <b>${escapeHtml(formatNumberValue(week.avgSteps, "steps"))}</b>`,
+    `Avg sleep: <b>${escapeHtml(formatMinutesValue(week.avgSleepMinutes))}</b>`,
+    `Avg RHR: <b>${escapeHtml(formatNumberValue(week.avgRestingHeartRate, "bpm"))}</b>`,
+    `Workout total: <b>${escapeHtml(formatMinutesValue(week.totalWorkoutMinutes))}</b>`,
+    `Missing days: <b>${week.missingDays.length}</b>${
+      week.missingDays.length
+        ? ` (${escapeHtml(week.missingDays.join(", "))})`
+        : ""
+    }`,
+  ].join("\n");
+}
+
+function healthImportHelp(): string {
+  return [
+    "Health import JSON:",
+    "<pre>{",
+    '  "date": "2026-06-07",',
+    '  "source": "xiaomi_health_connect",',
+    '  "device": "Xiaomi Watch 4",',
+    '  "metrics": [',
+    '    {"type":"steps","value":8200,"unit":"steps"},',
+    '    {"type":"sleep_minutes","value":420,"unit":"min"}',
+    "  ],",
+    '  "raw": {}',
+    "}</pre>",
+    "curl:",
+    "<code>curl -X POST https://archlinux.tail2492c9.ts.net/api/health/ingest -H 'content-type: application/json' -H 'x-lifeos-health-secret: ***' --data @health.json</code>",
+  ].join("\n");
 }
 
 function formatUpcomingReminders(
@@ -1158,22 +1332,39 @@ async function handleCreateCommand(
     return;
   }
 
-  if (command === "health") {
-    const signals = parseHealthSignalArgs(args);
-    const mode = resolveHealthMode(signals);
-    const focus = scoreFocus({ ...signals, healthMode: mode });
-    const entity = await createEntityAndQueueSync(runtime.store, message, {
+  if (command === "health_log") {
+    const metrics = parseHealthLogArgs(args);
+
+    if (!metrics) {
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: healthLogUsage(),
+      });
+      return;
+    }
+
+    const date = localDateString(runtime.now?.() ?? new Date(), user.timezone);
+    const result = await runtime.store.upsertHealthMetrics({
       userId: user.userId,
-      entityType: "health",
-      title: args.trim() || `Health check: ${healthModeLabel(mode)}`,
-      body: args.trim() || null,
-      sourceCommand: "/health",
-      metadata: metadata({ ...signals, mode, focusScore: focus.score }),
+      date,
+      source: "telegram",
+      device: "manual",
+      timezone: user.timezone,
+      metrics,
+      raw: {
+        command: "/health_log",
+        telegram_user_id: message.from?.id ?? null,
+        chat_id: message.chat.id,
+        message_id: message.message_id,
+      },
     });
 
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
-      text: `${entitySummary(entity)}\nMode: <b>${healthModeLabel(mode)}</b>\nFocus score: <b>${focus.score}</b>`,
+      text: [
+        `Health metrics logged for <code>${escapeHtml(date)}</code>.`,
+        `Created: <b>${result.created}</b> Updated: <b>${result.updated}</b>`,
+      ].join("\n"),
     });
     return;
   }
@@ -1839,12 +2030,38 @@ async function handleReadCommand(
 
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
-      text: [
-        `Health date: <b>${health.date}</b>`,
-        `Recovery mode: <b>${healthModeLabel(health.recoveryMode)}</b>`,
-        `Data completeness: <b>${health.dataCompletenessScore}</b>`,
-        `Samples: <b>${health.samplesCount}</b>`,
-      ].join("\n"),
+      text: formatHealthToday(health),
+    });
+    return;
+  }
+
+  if (command === "health_week") {
+    const health = await runtime.store.getTmaHealthSummary(user.userId);
+
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: formatHealthWeek(health),
+    });
+    return;
+  }
+
+  if (command === "health_import") {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: healthImportHelp(),
+    });
+    return;
+  }
+
+  if (command === "health_sources") {
+    const sources = await runtime.store.getHealthMetricSources(user.userId);
+    const lines = sources.map((source) => {
+      return `${escapeHtml(source.label)}: <code>${escapeHtml(source.latestMetricAt ?? "never")}</code>`;
+    });
+
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: ["Health sources:", ...lines].join("\n"),
     });
     return;
   }

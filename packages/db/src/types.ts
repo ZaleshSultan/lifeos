@@ -1,4 +1,6 @@
 import type {
+  HealthMetricSource,
+  HealthMetricType,
   HealthMode,
   HealthSyncReason,
   LifeMode,
@@ -847,6 +849,34 @@ export interface Database {
           source?: string;
           metadata?: Json;
           created_at?: string;
+        }
+      >;
+      health_metrics: TableDefinition<
+        {
+          id: string;
+          user_id: string;
+          metric_date: string;
+          metric_type: HealthMetricType;
+          value: number;
+          unit: string | null;
+          source: HealthMetricSource;
+          confidence: number | null;
+          raw_json: Json;
+          created_at: string;
+          updated_at: string;
+        },
+        {
+          id?: string;
+          user_id: string;
+          metric_date: string;
+          metric_type: HealthMetricType;
+          value: number;
+          unit?: string | null;
+          source?: HealthMetricSource;
+          confidence?: number | null;
+          raw_json?: Json;
+          created_at?: string;
+          updated_at?: string;
         }
       >;
       finance_accounts: TableDefinition<

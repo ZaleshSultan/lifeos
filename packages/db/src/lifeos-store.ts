@@ -11,6 +11,9 @@ import {
   scoreFocus,
   type FocusScoringItem,
   type HealthIngestPayload,
+  type HealthMetricSource,
+  type HealthMetricType,
+  type HealthMetricsIngestPayload,
   type HealthMode,
   type LifeMode,
   type LifeModeProjectSprint,
@@ -40,6 +43,7 @@ type WorkoutSetRow = Database["public"]["Tables"]["workout_sets"]["Row"];
 type FitnessExerciseRow =
   Database["public"]["Tables"]["fitness_exercises"]["Row"];
 type HealthDailyRow = Database["public"]["Tables"]["health_daily"]["Row"];
+type HealthMetricRow = Database["public"]["Tables"]["health_metrics"]["Row"];
 type LifeModeRow = Database["public"]["Tables"]["life_modes"]["Row"];
 type LifeSeasonRow = Database["public"]["Tables"]["life_seasons"]["Row"];
 type ProjectRow = Database["public"]["Tables"]["projects"]["Row"];
@@ -456,6 +460,80 @@ export interface TmaHealthSummary {
   activeEnergyKcal: number | null;
   missingMetrics: Record<string, boolean>;
   samplesCount: number;
+  hasMetrics: boolean;
+  sourceLabel: string | null;
+  latestSource: string | null;
+  averageHeartRate: number | null;
+  totalEnergyKcal: number | null;
+  workoutMinutes: number | null;
+  distanceM: number | null;
+  weightKg: number | null;
+  sleepScore: number | null;
+  stressScore: number | null;
+  moodScore: number | null;
+  energyScore: number | null;
+  weekly: HealthMetricWeekSummary;
+  trends: HealthMetricTrendDay[];
+  sources: HealthMetricSourceStatus[];
+}
+
+export interface HealthMetricRecord {
+  id: string;
+  userId: string;
+  metricDate: string;
+  metricType: HealthMetricType;
+  value: number;
+  unit: string | null;
+  source: HealthMetricSource;
+  confidence: number | null;
+  rawJson: Json;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type HealthMetricValues = Partial<Record<HealthMetricType, number>>;
+
+export interface HealthMetricDaySummary {
+  date: string;
+  metrics: HealthMetricValues;
+  sources: string[];
+  sourceLabel: string | null;
+  latestSource: string | null;
+  missingMetrics: Record<string, boolean>;
+  records: HealthMetricRecord[];
+}
+
+export interface HealthMetricTrendDay {
+  date: string;
+  steps: number | null;
+  sleepMinutes: number | null;
+  restingHeartRate: number | null;
+  activeEnergyKcal: number | null;
+  workoutMinutes: number | null;
+}
+
+export interface HealthMetricWeekSummary {
+  startDate: string;
+  endDate: string;
+  avgSteps: number | null;
+  avgSleepMinutes: number | null;
+  avgRestingHeartRate: number | null;
+  totalWorkoutMinutes: number;
+  missingDays: string[];
+}
+
+export interface HealthMetricSourceStatus {
+  source: string;
+  label: string;
+  latestMetricAt: string | null;
+}
+
+export interface HealthMetricsIngestResult {
+  date: string;
+  source: HealthMetricSource;
+  created: number;
+  updated: number;
+  metrics: HealthMetricRecord[];
 }
 
 export interface TmaFocusSummary {
@@ -568,6 +646,18 @@ export interface LifeOSStore {
   }): Promise<CurrentWorkoutSummary>;
   getTmaHomeSummary(user: TelegramUserRecord): Promise<TmaHomeSummary>;
   getTmaHealthSummary(userId: string): Promise<TmaHealthSummary>;
+  getHealthMetricDay(
+    userId: string,
+    date: string,
+  ): Promise<HealthMetricDaySummary>;
+  getHealthMetricWeek(
+    userId: string,
+    endDate: string,
+  ): Promise<HealthMetricWeekSummary & { trends: HealthMetricTrendDay[] }>;
+  getHealthMetricSources(userId: string): Promise<HealthMetricSourceStatus[]>;
+  upsertHealthMetrics(
+    input: HealthMetricsIngestPayload,
+  ): Promise<HealthMetricsIngestResult>;
   getTmaFocusSummary(userId: string): Promise<TmaFocusSummary>;
   getTmaSourcesSummary(userId: string): Promise<TmaSourcesSummary>;
   getTmaAcademicSummary(userId: string): Promise<TmaAcademicSummary>;
@@ -837,6 +927,22 @@ function toReminderRecord(row: ReminderRow): ReminderRecord {
   };
 }
 
+function toHealthMetricRecord(row: HealthMetricRow): HealthMetricRecord {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    metricDate: row.metric_date,
+    metricType: row.metric_type,
+    value: Number(row.value),
+    unit: row.unit,
+    source: row.source,
+    confidence: numberOrNull(row.confidence),
+    rawJson: row.raw_json,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 function toSyncRunRecord(row: SyncRunRow): SyncRunRecord {
   return {
     id: row.id,
@@ -903,10 +1009,18 @@ function throwSupabaseError(error: unknown, context: string): never {
 
 function localDateFor(timezone: string): string {
   try {
-    return new Intl.DateTimeFormat("en-CA", {
-      dateStyle: "medium",
+    const parts = new Intl.DateTimeFormat("en-US", {
       timeZone: timezone,
-    }).format(new Date());
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date());
+    const values = Object.fromEntries(
+      parts
+        .filter((part) => part.type !== "literal")
+        .map((part) => [part.type, part.value]),
+    );
+    return `${values.year}-${values.month}-${values.day}`;
   } catch {
     return new Date().toISOString().slice(0, 10);
   }
@@ -954,6 +1068,103 @@ function jsonObject(value: Json | null | undefined): Record<string, unknown> {
   }
 
   return value as Record<string, unknown>;
+}
+
+const HEALTH_SOURCE_LABELS: Record<string, string> = {
+  manual: "Manual",
+  telegram: "Manual",
+  tma: "Manual",
+  xiaomi_health_connect: "Xiaomi Watch / Health Connect",
+  import_json: "JSON import",
+  import_csv: "CSV import",
+  api: "API",
+};
+
+const REQUIRED_TODAY_HEALTH_METRICS: HealthMetricType[] = [
+  "steps",
+  "sleep_minutes",
+  "resting_heart_rate",
+  "active_energy_kcal",
+  "workout_minutes",
+  "stress_score",
+  "mood_score",
+  "energy_score",
+];
+
+const HEALTH_SOURCE_PRIORITY: Record<string, number> = {
+  xiaomi_health_connect: 50,
+  import_json: 40,
+  import_csv: 35,
+  api: 30,
+  tma: 25,
+  telegram: 20,
+  manual: 10,
+};
+
+function healthSourceLabel(source: string | null | undefined): string | null {
+  if (!source) {
+    return null;
+  }
+
+  return HEALTH_SOURCE_LABELS[source] ?? source;
+}
+
+function preferredMetricRows(rows: HealthMetricRecord[]): HealthMetricValues {
+  const selected = new Map<HealthMetricType, HealthMetricRecord>();
+
+  for (const row of rows) {
+    const current = selected.get(row.metricType);
+    const currentPriority = current
+      ? (HEALTH_SOURCE_PRIORITY[current.source] ?? 0)
+      : -1;
+    const nextPriority = HEALTH_SOURCE_PRIORITY[row.source] ?? 0;
+
+    if (
+      !current ||
+      nextPriority > currentPriority ||
+      (nextPriority === currentPriority && row.updatedAt > current.updatedAt)
+    ) {
+      selected.set(row.metricType, row);
+    }
+  }
+
+  return Object.fromEntries(
+    [...selected.entries()].map(([type, row]) => [type, row.value]),
+  ) as HealthMetricValues;
+}
+
+function healthMissingMetrics(
+  metrics: HealthMetricValues,
+): Record<string, boolean> {
+  return Object.fromEntries(
+    REQUIRED_TODAY_HEALTH_METRICS.map((type) => [
+      type,
+      metrics[type] === undefined,
+    ]),
+  );
+}
+
+function addDaysToDate(date: string, days: number): string {
+  const value = new Date(`${date}T00:00:00.000Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
+
+function roundedAverage(values: number[]): number | null {
+  if (!values.length) {
+    return null;
+  }
+
+  return Math.round(
+    values.reduce((total, value) => total + value, 0) / values.length,
+  );
+}
+
+function metricValue(
+  metrics: HealthMetricValues,
+  type: HealthMetricType,
+): number | null {
+  return metrics[type] ?? null;
 }
 
 function addSeconds(timestamp: string, seconds: number): string {
@@ -1931,14 +2142,20 @@ export class SupabaseLifeOSStore implements LifeOSStore {
   }
 
   async getTmaHealthSummary(userId: string): Promise<TmaHealthSummary> {
-    const [mode, latest] = await Promise.all([
+    const today = localDateFor("Asia/Qyzylorda");
+    const [mode, todayMetrics, week, sources, latest] = await Promise.all([
       this.resolveCurrentMode(userId),
+      this.getHealthMetricDay(userId, today),
+      this.getHealthMetricWeek(userId, today),
+      this.getHealthMetricSources(userId),
       this.getLatestHealthDaily(userId),
     ]);
+    const metrics = todayMetrics.metrics;
+    const hasMetrics = Object.keys(metrics).length > 0;
 
-    if (!latest) {
+    if (!hasMetrics && !latest) {
       return {
-        date: new Date().toISOString().slice(0, 10),
+        date: today,
         lifeMode: mode.mode,
         lifeModeLabel: mode.label,
         recommendation: healthRecommendationForMode(mode.mode),
@@ -1955,29 +2172,302 @@ export class SupabaseLifeOSStore implements LifeOSStore {
         activeEnergyKcal: null,
         missingMetrics: {},
         samplesCount: 0,
+        hasMetrics: false,
+        sourceLabel: null,
+        latestSource: null,
+        averageHeartRate: null,
+        totalEnergyKcal: null,
+        workoutMinutes: null,
+        distanceM: null,
+        weightKg: null,
+        sleepScore: null,
+        stressScore: null,
+        moodScore: null,
+        energyScore: null,
+        weekly: week,
+        trends: week.trends,
+        sources,
       };
     }
 
-    const samplesCount = await this.getHealthSampleCount(latest.id);
+    const samplesCount = latest
+      ? await this.getHealthSampleCount(latest.id)
+      : 0;
 
     return {
-      date: latest.log_date,
+      date: hasMetrics ? today : (latest?.log_date ?? today),
       lifeMode: mode.mode,
       lifeModeLabel: mode.label,
       recommendation: healthRecommendationForMode(mode.mode),
-      recoveryMode: latest.recovery_mode,
-      dataCompletenessScore: Number(latest.data_completeness_score),
-      sleepMinutes: latest.sleep_minutes,
-      deepSleepMinutes: latest.deep_sleep_minutes,
-      remSleepMinutes: latest.rem_sleep_minutes,
-      awakeMinutes: latest.awake_minutes,
-      restingHeartRate: numberOrNull(latest.resting_heart_rate),
-      hrvMs: numberOrNull(latest.hrv_ms),
-      spo2Avg: numberOrNull(latest.spo2_avg),
-      steps: latest.steps,
-      activeEnergyKcal: numberOrNull(latest.active_energy_kcal),
-      missingMetrics: jsonBooleanRecord(latest.missing_metrics),
+      recoveryMode: latest?.recovery_mode ?? "baseline",
+      dataCompletenessScore: hasMetrics
+        ? Math.round(
+            ((REQUIRED_TODAY_HEALTH_METRICS.length -
+              Object.values(todayMetrics.missingMetrics).filter(Boolean)
+                .length) /
+              REQUIRED_TODAY_HEALTH_METRICS.length) *
+              100,
+          )
+        : Number(latest?.data_completeness_score ?? 0),
+      sleepMinutes:
+        metricValue(metrics, "sleep_minutes") ?? latest?.sleep_minutes ?? null,
+      deepSleepMinutes: latest?.deep_sleep_minutes ?? null,
+      remSleepMinutes: latest?.rem_sleep_minutes ?? null,
+      awakeMinutes: latest?.awake_minutes ?? null,
+      restingHeartRate:
+        metricValue(metrics, "resting_heart_rate") ??
+        numberOrNull(latest?.resting_heart_rate ?? null),
+      hrvMs: numberOrNull(latest?.hrv_ms ?? null),
+      spo2Avg:
+        metricValue(metrics, "spo2_percent") ??
+        numberOrNull(latest?.spo2_avg ?? null),
+      steps: metricValue(metrics, "steps") ?? latest?.steps ?? null,
+      activeEnergyKcal:
+        metricValue(metrics, "active_energy_kcal") ??
+        numberOrNull(latest?.active_energy_kcal ?? null),
+      missingMetrics: hasMetrics
+        ? todayMetrics.missingMetrics
+        : jsonBooleanRecord(latest?.missing_metrics),
       samplesCount,
+      hasMetrics,
+      sourceLabel: todayMetrics.sourceLabel,
+      latestSource: todayMetrics.latestSource,
+      averageHeartRate: metricValue(metrics, "average_heart_rate"),
+      totalEnergyKcal: metricValue(metrics, "total_energy_kcal"),
+      workoutMinutes: metricValue(metrics, "workout_minutes"),
+      distanceM: metricValue(metrics, "distance_m"),
+      weightKg: metricValue(metrics, "weight_kg"),
+      sleepScore: metricValue(metrics, "sleep_score"),
+      stressScore: metricValue(metrics, "stress_score"),
+      moodScore: metricValue(metrics, "mood_score"),
+      energyScore: metricValue(metrics, "energy_score"),
+      weekly: week,
+      trends: week.trends,
+      sources,
+    };
+  }
+
+  async getHealthMetricDay(
+    userId: string,
+    date: string,
+  ): Promise<HealthMetricDaySummary> {
+    const { data, error } = await this.client
+      .from("health_metrics")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("metric_date", date)
+      .order("updated_at", { ascending: false });
+
+    if (error) {
+      throwSupabaseError(error, "Failed to load health metrics");
+    }
+
+    const records = data.map(toHealthMetricRecord);
+    const metrics = preferredMetricRows(records);
+    const sources = [...new Set(records.map((row) => row.source))];
+    const latestSource = records[0]?.source ?? null;
+
+    return {
+      date,
+      metrics,
+      sources,
+      sourceLabel: healthSourceLabel(latestSource),
+      latestSource,
+      missingMetrics: healthMissingMetrics(metrics),
+      records,
+    };
+  }
+
+  async getHealthMetricWeek(
+    userId: string,
+    endDate: string,
+  ): Promise<HealthMetricWeekSummary & { trends: HealthMetricTrendDay[] }> {
+    const startDate = addDaysToDate(endDate, -6);
+    const { data, error } = await this.client
+      .from("health_metrics")
+      .select("*")
+      .eq("user_id", userId)
+      .gte("metric_date", startDate)
+      .lte("metric_date", endDate)
+      .order("metric_date", { ascending: true })
+      .order("updated_at", { ascending: false });
+
+    if (error) {
+      throwSupabaseError(error, "Failed to load health metric week");
+    }
+
+    const recordsByDate = new Map<string, HealthMetricRecord[]>();
+
+    for (const row of data.map(toHealthMetricRecord)) {
+      recordsByDate.set(row.metricDate, [
+        ...(recordsByDate.get(row.metricDate) ?? []),
+        row,
+      ]);
+    }
+
+    const trends: HealthMetricTrendDay[] = [];
+
+    for (let offset = 0; offset < 7; offset += 1) {
+      const date = addDaysToDate(startDate, offset);
+      const metrics = preferredMetricRows(recordsByDate.get(date) ?? []);
+      trends.push({
+        date,
+        steps: metricValue(metrics, "steps"),
+        sleepMinutes: metricValue(metrics, "sleep_minutes"),
+        restingHeartRate: metricValue(metrics, "resting_heart_rate"),
+        activeEnergyKcal: metricValue(metrics, "active_energy_kcal"),
+        workoutMinutes: metricValue(metrics, "workout_minutes"),
+      });
+    }
+
+    const missingDays = trends
+      .filter((day) => day.steps === null && day.sleepMinutes === null)
+      .map((day) => day.date);
+
+    return {
+      startDate,
+      endDate,
+      avgSteps: roundedAverage(
+        trends
+          .map((day) => day.steps)
+          .filter((value): value is number => value !== null),
+      ),
+      avgSleepMinutes: roundedAverage(
+        trends
+          .map((day) => day.sleepMinutes)
+          .filter((value): value is number => value !== null),
+      ),
+      avgRestingHeartRate: roundedAverage(
+        trends
+          .map((day) => day.restingHeartRate)
+          .filter((value): value is number => value !== null),
+      ),
+      totalWorkoutMinutes: trends.reduce(
+        (total, day) => total + (day.workoutMinutes ?? 0),
+        0,
+      ),
+      missingDays,
+      trends,
+    };
+  }
+
+  async getHealthMetricSources(
+    userId: string,
+  ): Promise<HealthMetricSourceStatus[]> {
+    const { data, error } = await this.client
+      .from("health_metrics")
+      .select("source,updated_at")
+      .eq("user_id", userId)
+      .order("updated_at", { ascending: false });
+
+    if (error) {
+      throwSupabaseError(error, "Failed to load health metric sources");
+    }
+
+    const latestBySource = new Map<string, string>();
+
+    for (const row of data) {
+      if (!latestBySource.has(row.source)) {
+        latestBySource.set(row.source, row.updated_at);
+      }
+    }
+
+    return ["manual", "xiaomi_health_connect", "import_json"].map((source) => ({
+      source,
+      label: healthSourceLabel(source) ?? source,
+      latestMetricAt: latestBySource.get(source) ?? null,
+    }));
+  }
+
+  async upsertHealthMetrics(
+    input: HealthMetricsIngestPayload,
+  ): Promise<HealthMetricsIngestResult> {
+    const existingRows = await this.client
+      .from("health_metrics")
+      .select("metric_type,source")
+      .eq("user_id", input.userId)
+      .eq("metric_date", input.date)
+      .eq("source", input.source);
+
+    if (existingRows.error) {
+      throwSupabaseError(
+        existingRows.error,
+        "Failed to load existing health metrics",
+      );
+    }
+
+    const existingKeys = new Set(
+      existingRows.data.map((row) => `${row.metric_type}:${row.source}`),
+    );
+    const rows = input.metrics.map((metric) => ({
+      user_id: input.userId,
+      metric_date: input.date,
+      metric_type: metric.type,
+      value: metric.value,
+      unit: metric.unit ?? null,
+      source: input.source,
+      confidence: metric.confidence ?? null,
+      raw_json: {
+        ...(metric.rawJson ?? {}),
+        device: input.device ?? undefined,
+        timezone: input.timezone ?? undefined,
+        ingestRaw: input.raw ?? undefined,
+      } as Json,
+    }));
+    const { data, error } = await this.client
+      .from("health_metrics")
+      .upsert(rows, {
+        onConflict: "user_id,metric_date,metric_type,source",
+      })
+      .select("*");
+
+    if (error) {
+      throwSupabaseError(error, "Failed to upsert health metrics");
+    }
+
+    const day = await this.getHealthMetricDay(input.userId, input.date);
+    const metricValues = day.metrics;
+
+    await this.ingestHealthPayload({
+      userId: input.userId,
+      date: input.date,
+      syncReason: "manual",
+      source: input.source,
+      timezone: input.timezone ?? "Asia/Qyzylorda",
+      metrics: {
+        sleepMinutes: metricValues.sleep_minutes,
+        sleepScore: metricValues.sleep_score,
+        restingHeartRate: metricValues.resting_heart_rate,
+        spo2Avg: metricValues.spo2_percent,
+        steps: metricValues.steps,
+        caloriesBurned: metricValues.total_energy_kcal,
+        activeEnergyKcal: metricValues.active_energy_kcal,
+        workoutMinutes: metricValues.workout_minutes,
+        weightKg: metricValues.weight_kg,
+        moodScore: metricValues.mood_score,
+        energyScore: metricValues.energy_score,
+        stressScore: metricValues.stress_score,
+      },
+      workouts: [],
+      samples: [],
+      missing: healthMissingMetrics(metricValues),
+      raw: {
+        normalizedHealthMetrics: day.records,
+        device: input.device ?? null,
+        raw: input.raw ?? {},
+      },
+    });
+
+    return {
+      date: input.date,
+      source: input.source,
+      created: rows.filter(
+        (row) => !existingKeys.has(`${row.metric_type}:${row.source}`),
+      ).length,
+      updated: rows.filter((row) =>
+        existingKeys.has(`${row.metric_type}:${row.source}`),
+      ).length,
+      metrics: data.map(toHealthMetricRecord),
     };
   }
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   calculateHealthIngestDaily,
   parseHealthIngestPayload,
+  parseHealthMetricsIngestPayload,
 } from "./health-ingest.js";
 
 describe("health ingest", () => {
@@ -115,5 +116,37 @@ describe("health ingest", () => {
 
     expect(computed.recoveryMode).toBe("recovery");
     expect(computed.dataCompletenessScore).toBe(55);
+  });
+
+  it("parses normalized Xiaomi Health Connect metrics", () => {
+    const payload = parseHealthMetricsIngestPayload(
+      {
+        date: "2026-06-07",
+        source: "xiaomi_health_connect",
+        device: "Xiaomi Watch 4",
+        metrics: [
+          { type: "steps", value: 8200, unit: "steps" },
+          { type: "sleep_minutes", value: 420, unit: "min" },
+        ],
+      },
+      "user-1",
+    );
+
+    expect(payload.userId).toBe("user-1");
+    expect(payload.source).toBe("xiaomi_health_connect");
+    expect(payload.metrics).toHaveLength(2);
+  });
+
+  it("rejects unsupported normalized metric types", () => {
+    expect(() =>
+      parseHealthMetricsIngestPayload(
+        {
+          date: "2026-06-07",
+          source: "xiaomi_health_connect",
+          metrics: [{ type: "unknown_metric", value: 1 }],
+        },
+        "user-1",
+      ),
+    ).toThrow("metrics[0].type");
   });
 });

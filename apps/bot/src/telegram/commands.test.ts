@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import type {
   HealthIngestPayload,
+  HealthMetricsIngestPayload,
   LifeMode,
   LifeModeResolution,
 } from "@lifeos/core";
@@ -13,6 +14,7 @@ import type {
   FinanceSummary,
   HealthIngestResult,
   HealthSyncStatusSummary,
+  Json,
   LifeEntityRecord,
   LifeOSStore,
   ObsidianSyncStatusSummary,
@@ -46,6 +48,7 @@ class FakeStore implements LifeOSStore {
   readonly syncJobs: Array<Parameters<LifeOSStore["enqueueObsidianSync"]>[0]> =
     [];
   readonly reminders: ReminderRecord[] = [];
+  readonly healthMetricPayloads: HealthMetricsIngestPayload[] = [];
   reminderMode: "chill" | "normal" | "duolingo" | "war" = "normal";
   readonly sources: SourceRecord[] = [
     {
@@ -118,6 +121,66 @@ class FakeStore implements LifeOSStore {
       modePriorityMatches: ["study"],
     },
   ];
+  healthSummary: TmaHealthSummary = {
+    date: "2026-05-18",
+    lifeMode: "trimester",
+    lifeModeLabel: "Trimester Mode",
+    recommendation: "Balance study blocks with health and finance basics.",
+    recoveryMode: "baseline",
+    dataCompletenessScore: 50,
+    sleepMinutes: 480,
+    deepSleepMinutes: 90,
+    remSleepMinutes: 80,
+    awakeMinutes: 20,
+    restingHeartRate: 58,
+    hrvMs: 45,
+    spo2Avg: 97,
+    steps: 9000,
+    activeEnergyKcal: 600,
+    missingMetrics: {
+      stress_score: true,
+    },
+    samplesCount: 4,
+    hasMetrics: true,
+    sourceLabel: "Xiaomi Watch / Health Connect",
+    latestSource: "xiaomi_health_connect",
+    averageHeartRate: null,
+    totalEnergyKcal: null,
+    workoutMinutes: 45,
+    distanceM: null,
+    weightKg: null,
+    sleepScore: null,
+    stressScore: null,
+    moodScore: 7,
+    energyScore: 6,
+    weekly: {
+      startDate: "2026-05-12",
+      endDate: "2026-05-18",
+      avgSteps: 7500,
+      avgSleepMinutes: 420,
+      avgRestingHeartRate: 61,
+      totalWorkoutMinutes: 120,
+      missingDays: ["2026-05-14"],
+    },
+    trends: [],
+    sources: [
+      {
+        source: "manual",
+        label: "Manual",
+        latestMetricAt: null,
+      },
+      {
+        source: "xiaomi_health_connect",
+        label: "Xiaomi Watch / Health Connect",
+        latestMetricAt: "2026-05-18T12:00:00.000Z",
+      },
+      {
+        source: "import_json",
+        label: "JSON import",
+        latestMetricAt: null,
+      },
+    ],
+  };
 
   user: TelegramUserRecord | null = {
     userId: "user-1",
@@ -439,27 +502,7 @@ class FakeStore implements LifeOSStore {
   }
 
   async getTmaHealthSummary(): Promise<TmaHealthSummary> {
-    return {
-      date: "2026-05-17",
-      lifeMode: "trimester",
-      lifeModeLabel: "Trimester Mode",
-      recommendation: "Balance study blocks with health and finance basics.",
-      recoveryMode: "baseline",
-      dataCompletenessScore: 50,
-      sleepMinutes: 480,
-      deepSleepMinutes: 90,
-      remSleepMinutes: 80,
-      awakeMinutes: 20,
-      restingHeartRate: 58,
-      hrvMs: 45,
-      spo2Avg: 97,
-      steps: 9000,
-      activeEnergyKcal: 600,
-      missingMetrics: {
-        stress: true,
-      },
-      samplesCount: 4,
-    };
+    return this.healthSummary;
   }
 
   async getTmaFocusSummary(): Promise<TmaFocusSummary> {
@@ -716,6 +759,60 @@ class FakeStore implements LifeOSStore {
       samplesInserted: payload.samples.length,
     };
   }
+
+  async upsertHealthMetrics(
+    payload: HealthMetricsIngestPayload,
+  ): Promise<Awaited<ReturnType<LifeOSStore["upsertHealthMetrics"]>>> {
+    this.healthMetricPayloads.push(payload);
+    return {
+      date: payload.date,
+      source: payload.source,
+      created: payload.metrics.length,
+      updated: 0,
+      metrics: payload.metrics.map((metric, index) => ({
+        id: `health-metric-${index + 1}`,
+        userId: payload.userId,
+        metricDate: payload.date,
+        metricType: metric.type,
+        value: metric.value,
+        unit: metric.unit ?? null,
+        source: payload.source,
+        confidence: metric.confidence ?? null,
+        rawJson: (metric.rawJson ?? {}) as Json,
+        createdAt: "2026-05-18T12:00:00.000Z",
+        updatedAt: "2026-05-18T12:00:00.000Z",
+      })),
+    };
+  }
+
+  async getHealthMetricDay(): Promise<
+    Awaited<ReturnType<LifeOSStore["getHealthMetricDay"]>>
+  > {
+    return {
+      date: this.healthSummary.date,
+      metrics: {},
+      sources: [],
+      sourceLabel: this.healthSummary.sourceLabel,
+      latestSource: this.healthSummary.latestSource,
+      missingMetrics: this.healthSummary.missingMetrics,
+      records: [],
+    };
+  }
+
+  async getHealthMetricWeek(): Promise<
+    Awaited<ReturnType<LifeOSStore["getHealthMetricWeek"]>>
+  > {
+    return {
+      ...this.healthSummary.weekly,
+      trends: this.healthSummary.trends,
+    };
+  }
+
+  async getHealthMetricSources(): Promise<
+    Awaited<ReturnType<LifeOSStore["getHealthMetricSources"]>>
+  > {
+    return this.healthSummary.sources;
+  }
 }
 
 function update(text: string): TelegramUpdate {
@@ -945,6 +1042,67 @@ describe("Telegram commands", () => {
     expect(context.sent.at(-1)?.text).toContain("Failed: <b>1</b>");
     expect(context.sent.at(-1)?.text).toContain("score=85");
     expect(context.sent.at(-1)?.text).toContain("missing=stress");
+  });
+
+  it("logs manual health metrics with /health_log", async () => {
+    const context = runtime();
+
+    await handleTelegramUpdate(
+      update(
+        "/health_log steps:8000 sleep:7h rhr:62 weight:70.5 mood:7 energy:6",
+      ),
+      context,
+    );
+
+    expect(context.store.healthMetricPayloads).toHaveLength(1);
+    expect(context.store.healthMetricPayloads[0]).toMatchObject({
+      userId: "user-1",
+      date: "2026-05-18",
+      source: "telegram",
+      metrics: [
+        { type: "steps", value: 8000, unit: "steps" },
+        { type: "sleep_minutes", value: 420, unit: "min" },
+        { type: "resting_heart_rate", value: 62, unit: "bpm" },
+        { type: "weight_kg", value: 70.5, unit: "kg" },
+        { type: "mood_score", value: 7, unit: "score" },
+        { type: "energy_score", value: 6, unit: "score" },
+      ],
+    });
+    expect(context.sent.at(-1)?.text).toContain("Health metrics logged");
+  });
+
+  it("shows an honest health empty state", async () => {
+    const context = runtime();
+    context.store.healthSummary = {
+      ...context.store.healthSummary,
+      hasMetrics: false,
+      steps: null,
+      sleepMinutes: null,
+      restingHeartRate: null,
+      activeEnergyKcal: null,
+      workoutMinutes: null,
+      stressScore: null,
+      moodScore: null,
+      energyScore: null,
+      sourceLabel: null,
+      latestSource: null,
+      sources: [],
+    };
+
+    await handleTelegramUpdate(update("/health"), context);
+
+    expect(context.sent.at(-1)?.text).toContain("No Xiaomi Watch data yet");
+    expect(context.sent.at(-1)?.text).toContain("/health_log");
+  });
+
+  it("shows health week with missing days", async () => {
+    const context = runtime();
+
+    await handleTelegramUpdate(update("/health_week"), context);
+
+    expect(context.sent.at(-1)?.text).toContain("Health week");
+    expect(context.sent.at(-1)?.text).toContain("Missing days: <b>1</b>");
+    expect(context.sent.at(-1)?.text).toContain("2026-05-14");
   });
 
   it("creates a reminder and queues notification metadata", async () => {
