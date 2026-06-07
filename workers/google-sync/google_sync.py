@@ -88,7 +88,7 @@ def authenticate(settings: Settings) -> None:
     flow = installed_app_flow.from_client_secrets_file(
         str(settings.client_secrets_file), scopes=list(settings.scopes)
     )
-    credentials = flow.run_local_server(port=0)
+    credentials = flow.run_local_server(host="127.0.0.1", port=8765, open_browser=False)
     settings.token_file.write_text(credentials.to_json(), encoding="utf-8")
     settings.token_file.chmod(0o600)
     print(f"Google OAuth token written to {settings.token_file}")
