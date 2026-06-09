@@ -1,0 +1,16 @@
+[Unit]
+Description=LifeOS Moodle and Personal ICS Sync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=zalewko
+WorkingDirectory=/home/zalewko/lifeos/workers/ics-sync
+EnvironmentFile=/home/zalewko/lifeos/workers/ics-sync/.env
+ExecStart=/home/zalewko/lifeos/workers/ics-sync/.venv/bin/python -u /home/zalewko/lifeos/workers/ics-sync/ics_sync.py run-loop
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

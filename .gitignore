@@ -1,0 +1,59 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+.next/
+.turbo/
+coverage/
+.vercel/
+__pycache__/
+.venv/
+*.tsbuildinfo
+
+# Environment
+.env
+.env.*
+!.env.example
+!**/.env.example
+!.env.selfhost.example
+!**/.env.selfhost.example
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# JVM crash logs
+hs_err_pid*.log
+replay_pid*.log
+
+# Android build artifacts
+*.apk
+*.aab
+*.keystore
+!debug.keystore
+apps/*/build/
+apps/*/.gradle/
+
+# Secrets
+secrets/
+!secrets/.gitignore
+
+# Vitest
+.vitest-cache/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Python cache
+__pycache__/
+*.py[cod]
+supabase/.temp/

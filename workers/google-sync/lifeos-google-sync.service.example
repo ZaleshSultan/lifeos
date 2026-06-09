@@ -1,0 +1,17 @@
+[Unit]
+Description=LifeOS Google Calendar and Tasks Sync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=zalewko
+WorkingDirectory=/home/zalewko/lifeos/workers/google-sync
+EnvironmentFile=/home/zalewko/lifeos/workers/google-sync/.env
+ExecStart=/home/zalewko/lifeos/workers/google-sync/.venv/bin/python -u /home/zalewko/lifeos/workers/google-sync/google_sync.py run-loop
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+
