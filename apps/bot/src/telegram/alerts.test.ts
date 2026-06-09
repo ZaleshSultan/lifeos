@@ -10,6 +10,7 @@ describe("Telegram push alerts integration", () => {
       sendMessage: async (input) => {
         sentMessages.push(input);
       },
+      getFileUrl: async () => "https://api.telegram.org/file/bot/test",
     };
 
     const mockStore = {
@@ -41,6 +42,7 @@ describe("Telegram push alerts integration", () => {
       sendMessage: async (input) => {
         sentMessages.push(input);
       },
+      getFileUrl: async () => "https://api.telegram.org/file/bot/test",
     };
 
     const mockStore = {
@@ -61,6 +63,7 @@ describe("Telegram push alerts integration", () => {
       sendMessage: async (input) => {
         sentMessages.push(input);
       },
+      getFileUrl: async () => "https://api.telegram.org/file/bot/test",
     };
 
     const mockStore = {

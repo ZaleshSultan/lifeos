@@ -13,6 +13,8 @@ import {
   type LifeModeResolution,
 } from "@lifeos/core";
 import type {
+  BankLineRecord,
+  BudgetSummaryPayload,
   CreateLifeEntityInput,
   FinanceTransactionRecord,
   Json,
@@ -31,6 +33,7 @@ import type {
 import type {
   TelegramBotRuntime,
   TelegramMessage,
+  TelegramPhotoSize,
   TelegramUpdate,
 } from "./types.js";
 import { triggerFinanceAlerts } from "./alerts.js";
@@ -103,6 +106,14 @@ const HELP_TEXT = [
   "/monthly_review_status",
   "/monthly_review_regenerate YYYY-MM",
   "/workout [title]",
+  "",
+  "Finance V2:",
+  "/budget — budget overview with progress bars",
+  "/budget_set <category> <amount> [monthly|quarterly|custom]",
+  "/bank unmatched — list unmatched bank transactions",
+  "/bank match <short_id> <entity_id>",
+  "Photo upload — send a receipt photo to start OCR scan",
+  "",
   "/status",
   "/healthz",
 ].join("\n");
@@ -2896,7 +2907,388 @@ const COMMAND_REGISTRY: Record<string, CommandConfig> = {
   },
   finance_fix: { handler: handleFinanceFixCommand, requiresUser: true },
   finance_ask: { handler: handleFinanceAskCommand, requiresUser: true },
+  budget: { handler: handleBudgetCommand, requiresUser: true },
+  budget_set: { handler: handleBudgetSetCommand, requiresUser: true },
+  bank: { handler: handleBankCommand, requiresUser: true },
 };
+
+// ---------------------------------------------------------------------------
+// Single-point Telegram update dispatcher
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Finance V2 — Budget overview command
+// ---------------------------------------------------------------------------
+
+function buildProgressBar(percentUsed: number): string {
+  const clamped = Math.max(0, Math.min(100, percentUsed));
+  const filled = Math.round(clamped / 10);
+  const empty = 10 - filled;
+  const filledChar = "█";
+  const emptyChar = "░";
+  return `[${filledChar.repeat(filled)}${emptyChar.repeat(empty)}]`;
+}
+
+function formatBudgetPayload(payload: BudgetSummaryPayload): string {
+  const bar = buildProgressBar(payload.percentUsed);
+  const sign = payload.isOverspent ? "⚠️ " : "";
+  return [
+    `${sign}<b>${escapeHtml(payload.category)}</b>`,
+    `  ${bar} ${payload.percentUsed}%`,
+    `  Limit: <b>${escapeHtml(formatMoney(payload.limitAmount, payload.currency))}</b>`,
+    `  Spent: <b>${escapeHtml(formatMoney(payload.actualSpent, payload.currency))}</b>`,
+    `  Remaining: <b>${escapeHtml(formatMoney(payload.remainingBalance, payload.currency))}</b>`,
+  ].join("\n");
+}
+
+async function handleBudgetCommand(
+  _args: string,
+  message: TelegramMessage,
+  runtime: TelegramBotRuntime,
+  user: TelegramUserRecord | null,
+): Promise<void> {
+  try {
+    const now = runtime.now?.() ?? new Date();
+    const today = localDateString(now, user!.timezone || LOCAL_TIMEZONE);
+
+    const payloads = await runtime.store!.getActiveBudgetsWithPeriods(
+      user!.userId,
+      user!.userId,
+      today,
+    );
+
+    if (payloads.length === 0) {
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: [
+          "No active budgets found.",
+          "Create one with: <code>/budget_set Food 50000 monthly</code>",
+        ].join("\n"),
+      });
+      return;
+    }
+
+    const grouped = new Map<string, BudgetSummaryPayload[]>();
+    for (const payload of payloads) {
+      const key = payload.budgetId;
+      const group = grouped.get(key) ?? [];
+      group.push(payload);
+      grouped.set(key, group);
+    }
+
+    const sections: string[] = [];
+    for (const [, group] of grouped) {
+      const first = group[0]!;
+      const header = [
+        `📊 <b>${escapeHtml(first.name ?? "Budget")}</b>`,
+        `Period: <code>${escapeHtml(first.periodStart)}</code> → <code>${escapeHtml(first.periodEnd)}</code> (${escapeHtml(first.period)})`,
+      ].join("\n");
+
+      const categoryLines = group.map((p) => formatBudgetPayload(p));
+
+      const totalSpent = group.reduce((s, p) => s + p.actualSpent, 0);
+      const totalLimit = group.reduce((s, p) => s + p.limitAmount, 0);
+      const totalRemaining = totalLimit - totalSpent;
+      const totalPercent = totalLimit > 0 ? Math.round((totalSpent / totalLimit) * 100) : 0;
+
+      const footer = [
+        "",
+        `Total: ${buildProgressBar(totalPercent)} ${totalPercent}%`,
+        `<b>${escapeHtml(formatMoney(totalSpent, first.currency))}</b> / <b>${escapeHtml(formatMoney(totalLimit, first.currency))}</b> (${escapeHtml(formatMoney(totalRemaining, first.currency))} left)`,
+      ].join("\n");
+
+      sections.push([header, ...categoryLines, footer].join("\n"));
+    }
+
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: sections.join("\n\n"),
+    });
+  } catch (error) {
+    console.error(
+      "[CRITICAL] /budget command failed:",
+      error instanceof Error ? error.message : error,
+    );
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "Failed to load budget overview. Please try again.",
+    });
+  }
+}
+
+async function handleBudgetSetCommand(
+  args: string,
+  message: TelegramMessage,
+  runtime: TelegramBotRuntime,
+  user: TelegramUserRecord | null,
+): Promise<void> {
+  const parts = args.trim().split(/\s+/);
+  const category = parts[0] ?? "";
+  const amountStr = parts[1] ?? "";
+  const periodType = parts[2] ?? "monthly";
+
+  if (!category || !amountStr) {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "Usage: /budget_set <category> <amount> [monthly|quarterly|custom]",
+    });
+    return;
+  }
+
+  const amount = Number(amountStr.replace(",", "."));
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "Budget amount must be a positive number.",
+    });
+    return;
+  }
+
+  try {
+    await runtime.store!.updateBudgetLimit(
+      user!.userId,
+      user!.userId,
+      category,
+      amount,
+      periodType,
+    );
+
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: [
+        "✅ Budget updated.",
+        `Category: <b>${escapeHtml(category)}</b>`,
+        `Limit: <b>${escapeHtml(formatMoney(amount))}</b>`,
+        `Period: <b>${escapeHtml(periodType)}</b>`,
+      ].join("\n"),
+    });
+  } catch (error) {
+    console.error(
+      "[CRITICAL] /budget_set command failed:",
+      error instanceof Error ? error.message : error,
+    );
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: escapeHtml(
+        error instanceof Error ? error.message : "Failed to update budget.",
+      ),
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Finance V2 — Bank reconciliation commands
+// ---------------------------------------------------------------------------
+
+function formatBankLine(line: BankLineRecord, index: number): string {
+  return [
+    `${index + 1}. <code>${escapeHtml(line.shortId)}</code>`,
+    `   ${escapeHtml(formatMoney(line.amount, line.currency))}`,
+    `   ${escapeHtml(line.description ?? line.merchant ?? "—")}`,
+    `   <code>${escapeHtml(line.bookingDate)}</code>`,
+  ].join("\n");
+}
+
+async function handleBankCommand(
+  args: string,
+  message: TelegramMessage,
+  runtime: TelegramBotRuntime,
+  user: TelegramUserRecord | null,
+): Promise<void> {
+  const trimmed = args.trim().toLowerCase();
+  const parts = args.trim().split(/\s+/);
+  const subcommand = parts[0]?.toLowerCase() ?? "";
+
+  if (!trimmed || subcommand === "unmatched") {
+    try {
+      const lines = await runtime.store!.listUnmatchedBankLines(
+        user!.userId,
+        user!.userId,
+      );
+
+      if (lines.length === 0) {
+        await runtime.telegram.sendMessage({
+          chatId: message.chat.id,
+          text: "No unmatched bank transactions found. All clear! ✅",
+        });
+        return;
+      }
+
+      const PAGE_SIZE = 5;
+      const page = lines.slice(0, PAGE_SIZE);
+      const remaining = lines.length - PAGE_SIZE;
+
+      const lineTexts = page.map((line, index) =>
+        formatBankLine(line, index),
+      );
+
+      const footer =
+        remaining > 0
+          ? `\n\n<i>${remaining} more unmatched transaction${remaining === 1 ? "" : "s"}.</i>`
+          : "";
+
+      const inlineButtons = page.map((line) => ({
+        text: `${line.shortId} — ${formatMoney(line.amount, line.currency)}`,
+        callback_data: `bank_match:${line.shortId}`,
+      }));
+
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: [
+          `<b>Unmatched bank transactions</b> (${lines.length} total):`,
+          "",
+          ...lineTexts,
+          footer,
+          "",
+          "Match with: <code>/bank match &lt;short_id&gt; &lt;entity_id&gt;</code>",
+        ].join("\n"),
+        replyMarkup:
+          inlineButtons.length > 0
+            ? {
+                inline_keyboard: inlineButtons.map((btn) => [btn]),
+              }
+            : undefined,
+      });
+    } catch (error) {
+      console.error(
+        "[CRITICAL] /bank unmatched command failed:",
+        error instanceof Error ? error.message : error,
+      );
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: "Failed to list unmatched bank transactions.",
+      });
+    }
+    return;
+  }
+
+  if (subcommand === "match") {
+    const lineShortId = parts[1] ?? "";
+    const entityId = parts[2] ?? "";
+
+    if (!lineShortId || !entityId) {
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: "Usage: /bank match <short_id> <entity_id>",
+      });
+      return;
+    }
+
+    try {
+      await runtime.store!.reconcileBankLine(
+        user!.userId,
+        lineShortId,
+        entityId,
+      );
+
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: [
+          "✅ Bank line matched.",
+          `Line: <code>${escapeHtml(lineShortId)}</code>`,
+          `Linked to: <code>${escapeHtml(entityId)}</code>`,
+        ].join("\n"),
+      });
+    } catch (error) {
+      console.error(
+        "[CRITICAL] /bank match command failed:",
+        error instanceof Error ? error.message : error,
+      );
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: escapeHtml(
+          error instanceof Error ? error.message : "Bank match failed.",
+        ),
+      });
+    }
+    return;
+  }
+
+  await runtime.telegram.sendMessage({
+    chatId: message.chat.id,
+    text: [
+      "Bank commands:",
+      "/bank unmatched — list unmatched transactions",
+      "/bank match <short_id> <entity_id> — match a transaction",
+    ].join("\n"),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Finance V2 — Photo upload handler for receipt OCR
+// ---------------------------------------------------------------------------
+
+async function handlePhotoUpload(
+  message: TelegramMessage,
+  runtime: TelegramBotRuntime,
+  user: TelegramUserRecord,
+): Promise<void> {
+  const photos = message.photo;
+
+  if (!photos || photos.length === 0) {
+    return;
+  }
+
+  const bestPhoto: TelegramPhotoSize = photos.reduce(
+    (best: TelegramPhotoSize, current: TelegramPhotoSize) =>
+      (current.file_size ?? 0) > (best.file_size ?? 0) ? current : best,
+    photos[0]!,
+  );
+
+  try {
+    const fileUrl = await runtime.telegram.getFileUrl(bestPhoto.file_id);
+
+    const fileResponse = await fetch(fileUrl);
+
+    if (!fileResponse.ok) {
+      throw new Error(
+        `Failed to download photo from Telegram: ${fileResponse.status}`,
+      );
+    }
+
+    const arrayBuffer = await fileResponse.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+    const contentType = fileResponse.headers.get("content-type") ?? "image/jpeg";
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const fileName = `receipt-${timestamp}.jpg`;
+    const objectPath = `${user.userId}/${crypto.randomUUID()}-${fileName}`;
+
+    const receipt = await runtime.store!.uploadReceiptImage({
+      userId: user.userId,
+      fileName,
+      mimeType: contentType,
+      bytes,
+    });
+
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: [
+        "📸 Receipt photo received.",
+        `Status: <b>processing</b>`,
+        `Receipt ID: <code>${escapeHtml(receipt.id)}</code>`,
+        `File: <code>${escapeHtml(fileName)}</code>`,
+        "",
+        "OCR processing will extract amount, currency, and category.",
+      ].join("\n"),
+    });
+  } catch (error) {
+    console.error(
+      "[CRITICAL] Photo upload receipt processing failed:",
+      error instanceof Error ? error.message : error,
+    );
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: [
+        "Failed to process receipt photo.",
+        escapeHtml(
+          error instanceof Error ? error.message : "Unknown error",
+        ),
+      ].join("\n"),
+    });
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Single-point Telegram update dispatcher
@@ -2908,7 +3300,31 @@ export async function handleTelegramUpdate(
 ): Promise<void> {
   const message = update.message;
 
-  if (!message?.text) {
+  if (!message) {
+    return;
+  }
+
+  // Handle photo uploads (receipt OCR)
+  if (message.photo && message.photo.length > 0 && !message.text) {
+    const user = await resolveUser(message, runtime);
+
+    if (!user || !runtime.store) {
+      return;
+    }
+
+    try {
+      await handlePhotoUpload(message, runtime, user);
+    } catch (error) {
+      console.error("[ERROR] Photo upload handler failed", {
+        errorType: error instanceof Error ? error.name : typeof error,
+      });
+      throw error;
+    }
+
+    return;
+  }
+
+  if (!message.text) {
     return;
   }
 

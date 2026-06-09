@@ -976,6 +976,29 @@ export function tmaStore(events: string[] = []): LifeOSStore {
     async getHealthMetricSources() {
       return [];
     },
+    async listUnmatchedBankLines() {
+      return [];
+    },
+    async reconcileBankLine() {},
+    async getActiveBudgetsWithPeriods() {
+      return [];
+    },
+    async createReceiptScanJob() {
+      return {
+        id: "receipt-scan-1",
+        userId: "user-1",
+        storagePath: "receipts/scan.jpg",
+        status: "processing" as const,
+        extractedAmount: null,
+        extractedCurrency: null,
+        extractedCategory: null,
+        matchedEntityId: null,
+        fileName: null,
+        mimeType: null,
+        createdAt: "2026-06-09T00:00:00.000Z",
+      };
+    },
+    async updateBudgetLimit() {},
   };
 }
 
@@ -1020,6 +1043,9 @@ async function startWebhookServer(
       ({
         async sendMessage(input) {
           sent.push(input);
+        },
+        async getFileUrl() {
+          return "https://api.telegram.org/file/bot/test";
         },
       } satisfies TelegramClient),
     dependencies: {
@@ -1265,6 +1291,9 @@ describe("bot server", () => {
     const telegram: TelegramClient = {
       async sendMessage(input) {
         sent.push(input);
+      },
+      async getFileUrl() {
+        return "https://api.telegram.org/file/bot/test";
       },
     };
     const server = createBotServer({
@@ -1546,6 +1575,9 @@ describe("bot server", () => {
       },
       telegram: {
         async sendMessage() {},
+        async getFileUrl() {
+          return "https://api.telegram.org/file/bot/test";
+        },
       },
     });
     servers.push(server);
@@ -2353,6 +2385,7 @@ describe("bot server", () => {
       async answerCallbackQuery() {},
       async sendChatAction() {},
       async getFile() { return { filePath: "test" }; },
+      async getFileUrl() { return "https://api.telegram.org/file/bot/test"; },
     };
 
     const server = createBotServer({

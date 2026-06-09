@@ -1,5 +1,13 @@
 import type { LifeOSStore } from "@lifeos/db";
 
+export interface TelegramPhotoSize {
+  file_id: string;
+  file_unique_id: string;
+  width: number;
+  height: number;
+  file_size?: number;
+}
+
 export interface TelegramUser {
   id: number;
   is_bot?: boolean;
@@ -18,6 +26,8 @@ export interface TelegramMessage {
   chat: TelegramChat;
   date?: number;
   text?: string;
+  caption?: string;
+  photo?: TelegramPhotoSize[];
   web_app_data?: {
     data: string;
     button_text?: string;
@@ -40,6 +50,7 @@ export interface TelegramUpdate {
 export interface TelegramInlineKeyboardButton {
   text: string;
   url?: string;
+  callback_data?: string;
   web_app?: {
     url: string;
   };
@@ -57,6 +68,7 @@ export interface SendMessageInput {
 
 export interface TelegramClient {
   sendMessage(input: SendMessageInput): Promise<void>;
+  getFileUrl(fileId: string): Promise<string>;
 }
 
 export interface TelegramBotRuntime {

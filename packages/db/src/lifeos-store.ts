@@ -814,6 +814,57 @@ export interface HealthIngestResult {
   samplesInserted: number;
 }
 
+// ---------------------------------------------------------------------------
+// Finance V2 types — Bank lines, receipt scans, budget summary payloads
+// ---------------------------------------------------------------------------
+
+export type BankLineStatus = "unmatched" | "matched";
+
+export interface BankLineRecord {
+  id: string;
+  userId: string;
+  amount: number;
+  currency: string;
+  description: string | null;
+  bookingDate: string;
+  status: BankLineStatus;
+  matchedEntityId: string | null;
+  shortId: string;
+  merchant: string | null;
+  source: string;
+  createdAt: string;
+}
+
+export interface ReceiptScanRecord {
+  id: string;
+  userId: string;
+  storagePath: string;
+  status: FinanceReceiptStatus;
+  extractedAmount: number | null;
+  extractedCurrency: string | null;
+  extractedCategory: string | null;
+  matchedEntityId: string | null;
+  fileName: string | null;
+  mimeType: string | null;
+  createdAt: string;
+}
+
+export interface BudgetSummaryPayload {
+  budgetId: string;
+  name: string | null;
+  category: string;
+  period: FinanceBudgetPeriod;
+  periodStart: string;
+  periodEnd: string;
+  limitAmount: number;
+  actualSpent: number;
+  remainingBalance: number;
+  percentUsed: number;
+  isOverspent: boolean;
+  rolloverEnabled: boolean;
+  currency: string;
+}
+
 export interface TmaHomeSummary {
   displayName?: string;
   localDate: string;
@@ -1283,6 +1334,40 @@ export interface LifeOSStore {
   ingestHealthPayload(
     payload: HealthIngestPayload,
   ): Promise<HealthIngestResult>;
+
+  // Finance V2 — Bank line reconciliation
+  listUnmatchedBankLines(
+    userId: string,
+    tenantId: string,
+  ): Promise<BankLineRecord[]>;
+  reconcileBankLine(
+    userId: string,
+    lineId: string,
+    entityId: string,
+  ): Promise<void>;
+
+  // Finance V2 — Budget periods with rollover
+  getActiveBudgetsWithPeriods(
+    userId: string,
+    tenantId: string,
+    currentDate: string,
+  ): Promise<BudgetSummaryPayload[]>;
+
+  // Finance V2 — Receipt scan jobs
+  createReceiptScanJob(
+    userId: string,
+    tenantId: string,
+    storagePath: string,
+  ): Promise<ReceiptScanRecord>;
+
+  // Finance V2 — Budget limit management
+  updateBudgetLimit(
+    userId: string,
+    tenantId: string,
+    category: string,
+    amount: number,
+    periodType: string,
+  ): Promise<void>;
 }
 
 type WorkoutPlan = ReadonlyArray<{
@@ -1999,6 +2084,41 @@ function financePeriodEnd(
       date.setUTCFullYear(date.getUTCFullYear() + 1);
       date.setUTCDate(date.getUTCDate() - 1);
       break;
+  }
+
+  return date.toISOString().slice(0, 10);
+}
+
+function financePeriodStart(
+  inputDate: string,
+  period: FinanceBudgetPeriod,
+): string {
+  const date = new Date(`${inputDate}T00:00:00.000Z`);
+
+  if (Number.isNaN(date.getTime())) {
+    throw new Error("Invalid date for financePeriodStart");
+  }
+
+  switch (period) {
+    case "weekly": {
+      const day = date.getUTCDay();
+      const diff = day === 0 ? 6 : day - 1;
+      date.setUTCDate(date.getUTCDate() - diff);
+      break;
+    }
+    case "monthly":
+      date.setUTCDate(1);
+      break;
+    case "quarterly": {
+      const quarter = Math.floor(date.getUTCMonth() / 3);
+      date.setUTCMonth(quarter * 3, 1);
+      break;
+    }
+    case "yearly":
+      date.setUTCMonth(0, 1);
+      break;
+    case "custom":
+      return inputDate;
   }
 
   return date.toISOString().slice(0, 10);
@@ -8083,5 +8203,366 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       ) ?? [];
 
     return toFinanceReceiptRecord(updatedReceipt, items);
+  }
+
+  // -------------------------------------------------------------------------
+  // Finance V2 — Bank line reconciliation
+  // -------------------------------------------------------------------------
+
+  async listUnmatchedBankLines(
+    userId: string,
+    _tenantId: string,
+  ): Promise<BankLineRecord[]> {
+    try {
+      const { data, error } = await this.client
+        .from("finance_transactions")
+        .select(
+          "id, user_id, amount, currency, description, merchant, occurred_on, status, receipt_id, source, created_at",
+        )
+        .eq("user_id", userId)
+        .eq("status", "draft")
+        .is("receipt_id", null)
+        .order("occurred_on", { ascending: false })
+        .limit(50);
+
+      if (error) {
+        throwSupabaseError(error, "Failed to list unmatched bank lines");
+      }
+
+      return (data ?? []).map(
+        (row): BankLineRecord => ({
+          id: row.id,
+          userId: row.user_id,
+          amount: Number(row.amount),
+          currency: row.currency,
+          description: row.description,
+          bookingDate: row.occurred_on,
+          status: "unmatched" as const,
+          matchedEntityId: null,
+          shortId: row.id.slice(0, 8),
+          merchant: row.merchant,
+          source: row.source,
+          createdAt: row.created_at,
+        }),
+      );
+    } catch (err) {
+      console.error(
+        "[CRITICAL] listUnmatchedBankLines failed:",
+        err instanceof Error ? err.message : err,
+      );
+      throw err;
+    }
+  }
+
+  async reconcileBankLine(
+    userId: string,
+    lineId: string,
+    entityId: string,
+  ): Promise<void> {
+    try {
+      const fullId = lineId.length < 36
+        ? await this.resolveTransactionFullId(userId, lineId)
+        : lineId;
+
+      if (!fullId) {
+        throw new Error(
+          `No unmatched bank line matches short ID: ${lineId}`,
+        );
+      }
+
+      const { error } = await this.client
+        .from("finance_transactions")
+        .update({
+          status: "confirmed" as FinanceTransactionStatus,
+          receipt_id: entityId,
+          confirmed_at: new Date().toISOString(),
+        })
+        .eq("id", fullId)
+        .eq("user_id", userId)
+        .eq("status", "draft");
+
+      if (error) {
+        throwSupabaseError(error, "Failed to reconcile bank line");
+      }
+    } catch (err) {
+      console.error(
+        "[CRITICAL] reconcileBankLine failed:",
+        err instanceof Error ? err.message : err,
+      );
+      throw err;
+    }
+  }
+
+  private async resolveTransactionFullId(
+    userId: string,
+    shortId: string,
+  ): Promise<string | null> {
+    const { data, error } = await this.client
+      .from("finance_transactions")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("status", "draft")
+      .like("id", `${shortId}%`)
+      .limit(2);
+
+    if (error) {
+      throwSupabaseError(error, "Failed to resolve transaction ID");
+    }
+
+    if (!data || data.length === 0) {
+      return null;
+    }
+
+    if (data.length > 1) {
+      throw new Error(
+        `Ambiguous short ID: ${shortId} matches ${data.length} transactions`,
+      );
+    }
+
+    return data[0]!.id;
+  }
+
+  // -------------------------------------------------------------------------
+  // Finance V2 — Budget periods with rollover
+  // -------------------------------------------------------------------------
+
+  async getActiveBudgetsWithPeriods(
+    userId: string,
+    _tenantId: string,
+    currentDate: string,
+  ): Promise<BudgetSummaryPayload[]> {
+    try {
+      const summaries = await this.getBudgetSummary({
+        userId,
+        today: currentDate,
+      });
+
+      const payloads: BudgetSummaryPayload[] = [];
+
+      for (const summary of summaries) {
+        for (const cat of summary.categories) {
+          payloads.push({
+            budgetId: summary.budgetId,
+            name: summary.name,
+            category: cat.categoryName,
+            period: summary.period,
+            periodStart: summary.periodStart,
+            periodEnd: summary.periodEnd,
+            limitAmount: cat.limit,
+            actualSpent: cat.spent,
+            remainingBalance: cat.remaining,
+            percentUsed: cat.percentUsed,
+            isOverspent: cat.isOverspent,
+            rolloverEnabled: false,
+            currency: summary.currency,
+          });
+        }
+
+        if (summary.categories.length === 0) {
+          payloads.push({
+            budgetId: summary.budgetId,
+            name: summary.name,
+            category: summary.name ?? "General",
+            period: summary.period,
+            periodStart: summary.periodStart,
+            periodEnd: summary.periodEnd,
+            limitAmount: summary.planned,
+            actualSpent: summary.spent,
+            remainingBalance: summary.remaining,
+            percentUsed: summary.totalPercentUsed,
+            isOverspent: summary.isOverspent,
+            rolloverEnabled: false,
+            currency: summary.currency,
+          });
+        }
+      }
+
+      return payloads;
+    } catch (err) {
+      console.error(
+        "[CRITICAL] getActiveBudgetsWithPeriods failed:",
+        err instanceof Error ? err.message : err,
+      );
+      throw err;
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Finance V2 — Receipt scan jobs
+  // -------------------------------------------------------------------------
+
+  async createReceiptScanJob(
+    userId: string,
+    _tenantId: string,
+    storagePath: string,
+  ): Promise<ReceiptScanRecord> {
+    try {
+      const trimmedPath = storagePath.trim();
+
+      if (!trimmedPath) {
+        throw new Error("Receipt scan storage path is required");
+      }
+
+      const { data, error } = await this.client
+        .from("finance_receipts")
+        .insert({
+          user_id: userId,
+          storage_path: trimmedPath,
+          status: "processing" as FinanceReceiptStatus,
+          metadata: { source: "telegram_photo", scan_job: true },
+        })
+        .select(
+          "id, user_id, storage_path, status, file_name, mime_type, parsed_json, created_at",
+        )
+        .single();
+
+      if (error) {
+        throwSupabaseError(error, "Failed to create receipt scan job");
+      }
+
+      const parsedJson =
+        typeof data.parsed_json === "object" && data.parsed_json !== null
+          ? (data.parsed_json as Record<string, unknown>)
+          : {};
+
+      return {
+        id: data.id,
+        userId: data.user_id,
+        storagePath: data.storage_path,
+        status: data.status as FinanceReceiptStatus,
+        extractedAmount:
+          typeof parsedJson.amount === "number" ? parsedJson.amount : null,
+        extractedCurrency:
+          typeof parsedJson.currency === "string" ? parsedJson.currency : null,
+        extractedCategory:
+          typeof parsedJson.category === "string" ? parsedJson.category : null,
+        matchedEntityId: null,
+        fileName: data.file_name,
+        mimeType: data.mime_type,
+        createdAt: data.created_at,
+      };
+    } catch (err) {
+      console.error(
+        "[CRITICAL] createReceiptScanJob failed:",
+        err instanceof Error ? err.message : err,
+      );
+      throw err;
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Finance V2 — Budget limit management
+  // -------------------------------------------------------------------------
+
+  async updateBudgetLimit(
+    userId: string,
+    _tenantId: string,
+    category: string,
+    amount: number,
+    periodType: string,
+  ): Promise<void> {
+    try {
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new Error("Budget amount must be a positive finite number");
+      }
+
+      const validPeriods: FinanceBudgetPeriod[] = [
+        "weekly",
+        "monthly",
+        "quarterly",
+        "yearly",
+        "custom",
+      ];
+      const period = validPeriods.includes(periodType as FinanceBudgetPeriod)
+        ? (periodType as FinanceBudgetPeriod)
+        : "monthly";
+
+      const categories = await this.listFinanceCategories(userId);
+      const normalizedCategoryName = category.trim().toLowerCase();
+      const matchedCategory = categories.find(
+        (cat) => cat.name.toLowerCase() === normalizedCategoryName,
+      );
+
+      let categoryId: string;
+
+      if (matchedCategory) {
+        categoryId = matchedCategory.id;
+      } else {
+        const { data: newCategory, error: catError } = await this.client
+          .from("finance_categories")
+          .insert({
+            user_id: userId,
+            name: category.trim(),
+            transaction_type: "expense",
+          })
+          .select("id")
+          .single();
+
+        if (catError) {
+          throwSupabaseError(catError, "Failed to create budget category");
+        }
+
+        categoryId = newCategory.id;
+      }
+
+      const today = new Date().toISOString().slice(0, 10);
+      const periodStart = financePeriodStart(today, period);
+
+      const existingBudgets = await this.listBudgets({
+        userId,
+        period,
+        activeOnly: true,
+      });
+
+      const existingBudget = existingBudgets.find(
+        (budget) =>
+          budget.periodStart === periodStart &&
+          budget.categoryLimits.some(
+            (limit) => limit.categoryId === categoryId,
+          ),
+      );
+
+      if (existingBudget) {
+        const { error: updateError } = await this.client
+          .from("finance_budget_categories")
+          .update({ limit_amount: amount })
+          .eq("user_id", userId)
+          .eq("budget_id", existingBudget.id)
+          .eq("category_id", categoryId);
+
+        if (updateError) {
+          throwSupabaseError(updateError, "Failed to update budget category limit");
+        }
+
+        const { error: budgetUpdateError } = await this.client
+          .from("finance_budgets")
+          .update({ amount })
+          .eq("id", existingBudget.id)
+          .eq("user_id", userId);
+
+        if (budgetUpdateError) {
+          throwSupabaseError(
+            budgetUpdateError,
+            "Failed to update budget amount",
+          );
+        }
+      } else {
+        await this.createBudget({
+          userId,
+          categoryId,
+          categoryLimits: [{ categoryId, limit: amount }],
+          period,
+          periodStart,
+          amount,
+          name: category.trim(),
+        });
+      }
+    } catch (err) {
+      console.error(
+        "[CRITICAL] updateBudgetLimit failed:",
+        err instanceof Error ? err.message : err,
+      );
+      throw err;
+    }
   }
 }

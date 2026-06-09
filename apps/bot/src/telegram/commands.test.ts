@@ -1251,6 +1251,40 @@ class FakeStore implements LifeOSStore {
   > {
     return this.healthSummary.sources;
   }
+
+  async listUnmatchedBankLines(): Promise<
+    Awaited<ReturnType<LifeOSStore["listUnmatchedBankLines"]>>
+  > {
+    return [];
+  }
+
+  async reconcileBankLine(): Promise<void> {}
+
+  async getActiveBudgetsWithPeriods(): Promise<
+    Awaited<ReturnType<LifeOSStore["getActiveBudgetsWithPeriods"]>>
+  > {
+    return [];
+  }
+
+  async createReceiptScanJob(): Promise<
+    Awaited<ReturnType<LifeOSStore["createReceiptScanJob"]>>
+  > {
+    return {
+      id: "receipt-scan-1",
+      userId: "user-1",
+      storagePath: "receipts/scan.jpg",
+      status: "processing" as const,
+      extractedAmount: null,
+      extractedCurrency: null,
+      extractedCategory: null,
+      matchedEntityId: null,
+      fileName: null,
+      mimeType: null,
+      createdAt: "2026-06-09T00:00:00.000Z",
+    };
+  }
+
+  async updateBudgetLimit(): Promise<void> {}
 }
 
 function update(text: string): TelegramUpdate {
@@ -1285,6 +1319,9 @@ function runtime(store = new FakeStore()): TelegramBotRuntime & {
     telegram: {
       async sendMessage(input) {
         sent.push(input);
+      },
+      async getFileUrl() {
+        return "https://api.telegram.org/file/bot/test";
       },
     },
   };

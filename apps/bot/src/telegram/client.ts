@@ -7,6 +7,16 @@ interface TelegramSendMessagePayload {
   reply_markup?: SendMessageInput["replyMarkup"];
 }
 
+interface TelegramGetFileResponse {
+  ok: boolean;
+  result?: {
+    file_id: string;
+    file_unique_id: string;
+    file_size?: number;
+    file_path?: string;
+  };
+}
+
 export class TelegramHttpClient implements TelegramClient {
   constructor(
     private readonly token: string,
@@ -37,5 +47,35 @@ export class TelegramHttpClient implements TelegramClient {
         `Telegram sendMessage failed: ${response.status} ${body}`,
       );
     }
+  }
+
+  async getFileUrl(fileId: string): Promise<string> {
+    const response = await this.fetchImpl(
+      `https://api.telegram.org/bot${this.token}/getFile`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ file_id: fileId }),
+      },
+    );
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(
+        `Telegram getFile failed: ${response.status} ${body}`,
+      );
+    }
+
+    const json = (await response.json()) as TelegramGetFileResponse;
+
+    if (!json.ok || !json.result?.file_path) {
+      throw new Error(
+        "Telegram getFile returned no file_path",
+      );
+    }
+
+    return `https://api.telegram.org/file/bot${this.token}/${json.result.file_path}`;
   }
 }

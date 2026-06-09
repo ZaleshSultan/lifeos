@@ -24,6 +24,7 @@ import {
   useReviewReceiptMutation,
   useBackfillMutation,
 } from "../api/hooks";
+import { telegram } from "../telegram";
 import type {
   BudgetSummary,
   FinanceReceiptSummary,
