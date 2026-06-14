@@ -1,3 +1,5 @@
+external-skills/
+
 # Dependencies
 node_modules/
 .pnpm-store/
@@ -57,3 +59,7 @@ Thumbs.db
 __pycache__/
 *.py[cod]
 supabase/.temp/
+
+# Local downloaded skill repositories
+external-skills/
+
