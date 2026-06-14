@@ -67,9 +67,29 @@ cp .env.example .env
 
 See `docs/REMINDER_WORKER.md` for Arch/systemd setup.
 
-## Single-User Bootstrap
+## Multi-User Telegram Onboarding
 
 LifeOS currently uses Supabase Auth users as owner records. User-owned tables reference `auth.users(id)`, and `public.profiles.user_id` is the LifeOS user id.
+
+For multi-user Telegram onboarding, set:
+
+```bash
+LIFEOS_ADMIN_TELEGRAM_IDS=123456789
+LIFEOS_SIGNUP_MODE=pending_approval
+```
+
+The first admin can be assigned with `LIFEOS_ADMIN_TELEGRAM_IDS` before any profile has `role = 'admin'`. New Telegram users send `/start`; the bot creates a Supabase Auth user plus a `profiles` row with `status = 'pending'` and `role = 'user'`. Admins can review and manage access with:
+
+```text
+/pending
+/approve <telegram_id>
+/block <telegram_id>
+/users
+```
+
+Only `status = 'active'` users can use protected bot and TMA flows.
+
+## Single-User Bootstrap
 
 For local single-user operation:
 
@@ -83,7 +103,7 @@ LIFEOS_DEFAULT_TELEGRAM_USER_ID=your-telegram-user-id
 ALLOW_UNSAFE_TMA_DEV_AUTH=false
 ```
 
-If `/start` sees the configured Telegram id, it will try to link the profile. If the `auth.users` row is missing, it replies with the exact profile SQL to run.
+These default-user variables are legacy/dev bootstrap helpers. They are not used to register new production users. If `/start` sees the configured Telegram id, it will try to link that one profile as active/admin. If the `auth.users` row is missing, it replies with the exact profile SQL to run.
 
 ## Health Ingest API
 

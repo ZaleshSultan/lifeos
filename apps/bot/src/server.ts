@@ -35,6 +35,8 @@ export interface BotServerOptions {
       | "lifeosIngestSecret"
       | "lifeosDefaultUserId"
       | "lifeosDefaultTelegramUserId"
+      | "lifeosAdminTelegramIds"
+      | "lifeosSignupMode"
       | "allowUnsafeTmaDevAuth"
       | "openRouterApiKey"
       | "financeAiModel"
@@ -78,6 +80,8 @@ interface ResolvedBotServerOptions {
   tmaStaticDir?: string;
   defaultUserId?: string;
   defaultTelegramUserId?: number;
+  adminTelegramUserIds: number[];
+  signupMode: "pending_approval";
   allowUnsafeTmaDevAuth: boolean;
   openRouterApiKey?: string;
   financeAiModel?: string;
@@ -433,6 +437,17 @@ async function resolveTmaUser(
       );
 
       if (user) {
+        if (user.status !== "active") {
+          return {
+            ok: false,
+            statusCode: 403,
+            error:
+              user.status === "pending"
+                ? "telegram_user_pending"
+                : "telegram_user_blocked",
+          };
+        }
+
         return { ok: true, user };
       }
 
@@ -449,8 +464,12 @@ async function resolveTmaUser(
       ok: true,
       user: {
         userId: options.defaultUserId,
+        telegramUserId: options.defaultTelegramUserId ?? null,
         displayName: "Dev user",
+        username: null,
         timezone: "Asia/Qyzylorda",
+        status: "active",
+        role: "admin",
       },
     };
   }
@@ -690,6 +709,8 @@ async function handleTelegramWebhook(
       tmaUrl: options.tmaUrl,
       defaultUserId: options.defaultUserId,
       defaultTelegramUserId: options.defaultTelegramUserId,
+      adminTelegramUserIds: options.adminTelegramUserIds,
+      signupMode: options.signupMode,
       financeAi: {
         enabled: options.financeAiEnabled,
         openRouterApiKey: options.openRouterApiKey,
@@ -923,10 +944,15 @@ function parseTmaReceiptReviewBody(body: unknown):
       : typeof record.amount === "string"
         ? Number(record.amount)
         : Number.NaN;
-  const currency = typeof record.currency === "string" ? record.currency.trim().toUpperCase() : "";
-  const merchant = typeof record.merchant === "string" ? record.merchant.trim() : "";
+  const currency =
+    typeof record.currency === "string"
+      ? record.currency.trim().toUpperCase()
+      : "";
+  const merchant =
+    typeof record.merchant === "string" ? record.merchant.trim() : "";
   const date = typeof record.date === "string" ? record.date.trim() : "";
-  const category = typeof record.category === "string" ? record.category.trim() : "";
+  const category =
+    typeof record.category === "string" ? record.category.trim() : "";
 
   if (!Number.isFinite(amount) || amount <= 0) {
     return { ok: false, error: "invalid_amount" };
@@ -995,7 +1021,11 @@ function parseTmaBudgetBody(body: unknown):
   const categoryLimits = Array.isArray(record.categoryLimits)
     ? record.categoryLimits
         .map((item) => {
-          if (typeof item !== "object" || item === null || Array.isArray(item)) {
+          if (
+            typeof item !== "object" ||
+            item === null ||
+            Array.isArray(item)
+          ) {
             return null;
           }
 
@@ -1027,7 +1057,10 @@ function parseTmaBudgetBody(body: unknown):
     return { ok: false, error: "invalid_budget_amount" };
   }
 
-  if (!periodStart || Number.isNaN(new Date(`${periodStart}T00:00:00.000Z`).getTime())) {
+  if (
+    !periodStart ||
+    Number.isNaN(new Date(`${periodStart}T00:00:00.000Z`).getTime())
+  ) {
     return { ok: false, error: "invalid_budget_period_start" };
   }
 
@@ -1080,7 +1113,11 @@ function parseTmaBudgetUpdateBody(body: unknown):
   const categoryLimits = Array.isArray(record.categoryLimits)
     ? record.categoryLimits
         .map((item) => {
-          if (typeof item !== "object" || item === null || Array.isArray(item)) {
+          if (
+            typeof item !== "object" ||
+            item === null ||
+            Array.isArray(item)
+          ) {
             return null;
           }
 
@@ -1135,11 +1172,11 @@ function parseTmaReceiptUploadBody(body: unknown):
 
   const record = body as Record<string, unknown>;
   const fileName =
-    typeof record.fileName === "string" ? record.fileName.trim() : "receipt.jpg";
+    typeof record.fileName === "string"
+      ? record.fileName.trim()
+      : "receipt.jpg";
   const mimeType =
-    typeof record.mimeType === "string"
-      ? record.mimeType.trim()
-      : "image/jpeg";
+    typeof record.mimeType === "string" ? record.mimeType.trim() : "image/jpeg";
   const imageBase64 =
     typeof record.imageBase64 === "string"
       ? record.imageBase64.trim()
@@ -1154,9 +1191,9 @@ function parseTmaReceiptUploadBody(body: unknown):
   return { ok: true, fileName, mimeType, imageBase64 };
 }
 
-function parseTmaFinanceSettingsBody(body: unknown):
-  | { ok: true; baseCurrency: string }
-  | { ok: false; error: string } {
+function parseTmaFinanceSettingsBody(
+  body: unknown,
+): { ok: true; baseCurrency: string } | { ok: false; error: string } {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     return { ok: false, error: "invalid_finance_settings_payload" };
   }
@@ -1474,9 +1511,13 @@ async function handleRequest(
       request.method === "GET" &&
       requestUrl.pathname === "/api/tma/finance/settings"
     ) {
-      writeJson(response, 200, tmaData({
-        baseCurrency: await store.getFinanceBaseCurrency(auth.user.userId),
-      }));
+      writeJson(
+        response,
+        200,
+        tmaData({
+          baseCurrency: await store.getFinanceBaseCurrency(auth.user.userId),
+        }),
+      );
       return;
     }
 
@@ -1493,11 +1534,20 @@ async function handleRequest(
 
       await store.setFinanceBaseCurrency(auth.user.userId, body.baseCurrency);
       await store.backfillFinanceBaseAmounts({ userId: auth.user.userId });
-      
-      const today = todayForTimezone(auth.user.timezone);
-      void triggerFinanceAlerts(store, options.telegram, auth.user.userId, today).catch(console.error);
 
-      writeJson(response, 200, tmaData(await tmaFinanceSummary(store, auth.user)));
+      const today = todayForTimezone(auth.user.timezone);
+      void triggerFinanceAlerts(
+        store,
+        options.telegram,
+        auth.user.userId,
+        today,
+      ).catch(console.error);
+
+      writeJson(
+        response,
+        200,
+        tmaData(await tmaFinanceSummary(store, auth.user)),
+      );
       return;
     }
 
@@ -1598,7 +1648,12 @@ async function handleRequest(
       });
 
       const today = todayForTimezone(auth.user.timezone);
-      void triggerFinanceAlerts(store, options.telegram, auth.user.userId, today).catch(console.error);
+      void triggerFinanceAlerts(
+        store,
+        options.telegram,
+        auth.user.userId,
+        today,
+      ).catch(console.error);
 
       writeJson(response, 200, tmaData(receipt));
       return;
@@ -1625,10 +1680,19 @@ async function handleRequest(
 
       if (receipt.status === "linked") {
         const today = todayForTimezone(auth.user.timezone);
-        void triggerFinanceAlerts(store, options.telegram, auth.user.userId, today).catch(console.error);
+        void triggerFinanceAlerts(
+          store,
+          options.telegram,
+          auth.user.userId,
+          today,
+        ).catch(console.error);
       }
 
-      writeJson(response, 200, tmaData(await tmaFinanceSummary(store, auth.user)));
+      writeJson(
+        response,
+        200,
+        tmaData(await tmaFinanceSummary(store, auth.user)),
+      );
       return;
     }
 
@@ -1656,9 +1720,18 @@ async function handleRequest(
       });
 
       const today = todayForTimezone(auth.user.timezone);
-      void triggerFinanceAlerts(store, options.telegram, auth.user.userId, today).catch(console.error);
+      void triggerFinanceAlerts(
+        store,
+        options.telegram,
+        auth.user.userId,
+        today,
+      ).catch(console.error);
 
-      writeJson(response, 200, tmaData(await tmaFinanceSummary(store, auth.user)));
+      writeJson(
+        response,
+        200,
+        tmaData(await tmaFinanceSummary(store, auth.user)),
+      );
       return;
     }
 
@@ -1695,7 +1768,11 @@ async function handleRequest(
         categoryLimits: body.categoryLimits,
       });
 
-      writeJson(response, 200, tmaData(await tmaFinanceSummary(store, auth.user)));
+      writeJson(
+        response,
+        200,
+        tmaData(await tmaFinanceSummary(store, auth.user)),
+      );
       return;
     }
 
@@ -1721,14 +1798,26 @@ async function handleRequest(
         categoryLimits: body.categoryLimits,
       });
 
-      writeJson(response, 200, tmaData(await tmaFinanceSummary(store, auth.user)));
+      writeJson(
+        response,
+        200,
+        tmaData(await tmaFinanceSummary(store, auth.user)),
+      );
       return;
     }
 
-    if (request.method === "POST" && budgetRoute?.[1] && budgetRoute[2] === "archive") {
+    if (
+      request.method === "POST" &&
+      budgetRoute?.[1] &&
+      budgetRoute[2] === "archive"
+    ) {
       const budgetId = decodeURIComponent(budgetRoute[1]);
       await store.archiveBudget(auth.user.userId, budgetId);
-      writeJson(response, 200, tmaData(await tmaFinanceSummary(store, auth.user)));
+      writeJson(
+        response,
+        200,
+        tmaData(await tmaFinanceSummary(store, auth.user)),
+      );
       return;
     }
 
@@ -1973,7 +2062,9 @@ async function handleRequest(
     if (options.webhookSecret) {
       const providedSecret = request.headers["x-telegram-bot-api-secret-token"];
 
-      if (providedSecret !== options.webhookSecret) {
+      if (
+        !secureCompare(headerValue(providedSecret) ?? "", options.webhookSecret)
+      ) {
         writeJson(response, 401, {
           error: "invalid_webhook_secret",
         });
@@ -2014,6 +2105,8 @@ export function createBotServer(options: BotServerOptions = {}): Server {
     tmaStaticDir: resolveStaticDirectory(options.config?.tmaStaticDir),
     defaultUserId: options.config?.lifeosDefaultUserId,
     defaultTelegramUserId: options.config?.lifeosDefaultTelegramUserId,
+    adminTelegramUserIds: options.config?.lifeosAdminTelegramIds ?? [],
+    signupMode: options.config?.lifeosSignupMode ?? "pending_approval",
     allowUnsafeTmaDevAuth: options.config?.allowUnsafeTmaDevAuth ?? false,
     openRouterApiKey: options.config?.openRouterApiKey,
     financeAiModel: options.config?.financeAiModel,

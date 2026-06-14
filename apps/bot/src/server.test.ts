@@ -23,6 +23,8 @@ import type {
   SourceRecord,
   StudyCourseRecord,
   SyncRunRecord,
+  TelegramProfileRecord,
+  TelegramUserRecord,
   TmaAcademicSummary,
   TmaHealthSummary,
   TmaSourcesSummary,
@@ -33,6 +35,21 @@ import type { SendMessageInput, TelegramClient } from "./telegram/types.js";
 
 const servers: ReturnType<typeof createBotServer>[] = [];
 const tempDirectories: string[] = [];
+
+function activeTelegramUser(
+  overrides: Partial<TelegramUserRecord> = {},
+): TelegramUserRecord {
+  return {
+    userId: "user-1",
+    telegramUserId: 30,
+    displayName: "Test",
+    username: "test",
+    timezone: "UTC",
+    status: "active",
+    role: "user",
+    ...overrides,
+  };
+}
 
 export async function listen(
   server: ReturnType<typeof createBotServer>,
@@ -275,11 +292,29 @@ export function tmaStore(events: string[] = []): LifeOSStore {
       return null;
     },
     async linkDefaultTelegramUser() {
-      return {
-        userId: "user-1",
-        displayName: "User",
-        timezone: "UTC",
-      };
+      return activeTelegramUser({ displayName: "User" });
+    },
+    async createPendingTelegramUser() {
+      return activeTelegramUser({
+        userId: "pending-user",
+        telegramUserId: 456,
+        status: "pending",
+      });
+    },
+    async listPendingUsers(): Promise<TelegramProfileRecord[]> {
+      return [];
+    },
+    async listTelegramUsers(): Promise<TelegramProfileRecord[]> {
+      return [];
+    },
+    async approveTelegramUser() {
+      return activeTelegramUser();
+    },
+    async blockTelegramUser() {
+      return activeTelegramUser({ status: "blocked" });
+    },
+    async isAdminTelegramUser() {
+      return false;
     },
     async createTask() {
       throw new Error("not used");
@@ -1002,7 +1037,10 @@ export function tmaStore(events: string[] = []): LifeOSStore {
   };
 }
 
-export function signedInitData(botToken: string, telegramUserId: number): string {
+export function signedInitData(
+  botToken: string,
+  telegramUserId: number,
+): string {
   const params = new URLSearchParams({
     auth_date: "1779120000",
     query_id: "test-query",
@@ -1103,11 +1141,32 @@ function webhookCommandStore(overrides: Partial<LifeOSStore> = {}): {
   const syncJobs: Array<Parameters<LifeOSStore["enqueueObsidianSync"]>[0]> = [];
   const store = {
     async resolveTelegramUser() {
-      return {
-        userId: "user-1",
-        displayName: "User",
-        timezone: "UTC",
-      };
+      return activeTelegramUser({ displayName: "User" });
+    },
+    async linkDefaultTelegramUser() {
+      return activeTelegramUser({ displayName: "User", role: "admin" });
+    },
+    async createPendingTelegramUser() {
+      return activeTelegramUser({
+        userId: "pending-user",
+        telegramUserId: 456,
+        status: "pending",
+      });
+    },
+    async listPendingUsers(): Promise<TelegramProfileRecord[]> {
+      return [];
+    },
+    async listTelegramUsers(): Promise<TelegramProfileRecord[]> {
+      return [];
+    },
+    async approveTelegramUser() {
+      return activeTelegramUser();
+    },
+    async blockTelegramUser() {
+      return activeTelegramUser({ status: "blocked" });
+    },
+    async isAdminTelegramUser() {
+      return false;
     },
     async createLifeCapture(input: CreateLifeCaptureInput) {
       captures.push(input);
@@ -1829,11 +1888,7 @@ describe("bot server", () => {
 
   it("accepts valid Telegram initData for TMA requests", async () => {
     const store = tmaStore();
-    store.resolveTelegramUser = async () => ({
-      userId: "user-1",
-      displayName: "Test",
-      timezone: "UTC",
-    });
+    store.resolveTelegramUser = async () => activeTelegramUser();
     const server = createBotServer({
       config: {
         telegramBotToken: "bot-token",
@@ -1857,13 +1912,34 @@ describe("bot server", () => {
     });
   });
 
+  it("rejects pending Telegram profiles for TMA requests", async () => {
+    const store = tmaStore();
+    store.resolveTelegramUser = async () =>
+      activeTelegramUser({ status: "pending" });
+    const server = createBotServer({
+      config: {
+        telegramBotToken: "bot-token",
+      },
+      store,
+    });
+    servers.push(server);
+
+    const port = await listen(server);
+    const response = await fetch(`http://127.0.0.1:${port}/api/tma/home`, {
+      headers: {
+        "x-telegram-init-data": signedInitData("bot-token", 30),
+      },
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "telegram_user_pending",
+    });
+  });
+
   it("serves live finance data to the TMA", async () => {
     const store = tmaStore();
-    store.resolveTelegramUser = async () => ({
-      userId: "user-1",
-      displayName: "Test",
-      timezone: "UTC",
-    });
+    store.resolveTelegramUser = async () => activeTelegramUser();
     const server = createBotServer({
       config: {
         telegramBotToken: "bot-token",
@@ -1891,11 +1967,7 @@ describe("bot server", () => {
 
   it("handles receipt details, image retrieval, review, and backfill via TMA API", async () => {
     const store = tmaStore();
-    store.resolveTelegramUser = async () => ({
-      userId: "user-1",
-      displayName: "Test",
-      timezone: "UTC",
-    });
+    store.resolveTelegramUser = async () => activeTelegramUser();
     const server = createBotServer({
       config: {
         telegramBotToken: "bot-token",
@@ -1986,11 +2058,7 @@ describe("bot server", () => {
 
   it("serves and generates monthly review data to the TMA", async () => {
     const store = tmaStore();
-    store.resolveTelegramUser = async () => ({
-      userId: "user-1",
-      displayName: "Test",
-      timezone: "UTC",
-    });
+    store.resolveTelegramUser = async () => activeTelegramUser();
     const server = createBotServer({
       config: {
         telegramBotToken: "bot-token",
@@ -2364,15 +2432,11 @@ describe("bot server", () => {
 
   it("completes full lifecycle: budget creation -> receipt upload -> telegram alert", async () => {
     const store = tmaStore();
-    store.resolveTelegramUser = async () => ({
-      userId: "user-1",
-      displayName: "Test",
-      timezone: "UTC",
-    });
+    store.resolveTelegramUser = async () => activeTelegramUser();
     store.processFinanceAlerts = async () => {
       return ["⚠️ Внимание: Бюджет превышен для 'Groceries E2E'"];
     };
-    store.createBudget = async () => ({} as any);
+    store.createBudget = async () => ({}) as any;
 
     let sentMessageText = "";
     const telegramMock = {
@@ -2384,8 +2448,12 @@ describe("bot server", () => {
       async deleteMessage() {},
       async answerCallbackQuery() {},
       async sendChatAction() {},
-      async getFile() { return { filePath: "test" }; },
-      async getFileUrl() { return "https://api.telegram.org/file/bot/test"; },
+      async getFile() {
+        return { filePath: "test" };
+      },
+      async getFileUrl() {
+        return "https://api.telegram.org/file/bot/test";
+      },
     };
 
     const server = createBotServer({

@@ -25,6 +25,7 @@ import type {
   StudyCourseRecord,
   SyncRunRecord,
   TaskRecord,
+  TelegramProfileRecord,
   TelegramUserRecord,
   TmaAcademicSummary,
   TmaFocusSummary,
@@ -194,9 +195,16 @@ class FakeStore implements LifeOSStore {
 
   user: TelegramUserRecord | null = {
     userId: "user-1",
+    telegramUserId: 123,
     displayName: "User",
+    username: "user",
     timezone: "UTC",
+    status: "active",
+    role: "user",
   };
+  pendingProfiles: TelegramProfileRecord[] = [];
+  telegramProfiles: TelegramProfileRecord[] = [];
+  adminTelegramIds = new Set<number>();
 
   workout: WorkoutRecord = {
     id: "workout-1",
@@ -230,10 +238,101 @@ class FakeStore implements LifeOSStore {
   async linkDefaultTelegramUser(): Promise<TelegramUserRecord> {
     this.user = {
       userId: "user-1",
+      telegramUserId: 123,
       displayName: "User",
+      username: "user",
       timezone: "UTC",
+      status: "active",
+      role: "admin",
     };
     return this.user;
+  }
+
+  async createPendingTelegramUser(
+    input: Parameters<LifeOSStore["createPendingTelegramUser"]>[0],
+  ): Promise<TelegramUserRecord> {
+    this.user = {
+      userId: "pending-user",
+      telegramUserId: input.telegramUserId,
+      displayName: input.displayName ?? "Pending",
+      username: input.username ?? "pending",
+      timezone: "UTC",
+      status: "pending",
+      role: "user",
+    };
+    const profile = {
+      ...this.user,
+      createdAt: "2026-05-18T00:00:00.000Z",
+      updatedAt: "2026-05-18T00:00:00.000Z",
+    };
+    this.pendingProfiles = [profile];
+    this.telegramProfiles = [profile];
+    return this.user;
+  }
+
+  async listPendingUsers(): Promise<TelegramProfileRecord[]> {
+    return this.pendingProfiles;
+  }
+
+  async listTelegramUsers(): Promise<TelegramProfileRecord[]> {
+    return this.telegramProfiles;
+  }
+
+  async approveTelegramUser(
+    telegramUserId: number,
+  ): Promise<TelegramUserRecord | null> {
+    const pending = this.pendingProfiles.find(
+      (profile) => profile.telegramUserId === telegramUserId,
+    );
+
+    if (!pending) {
+      return null;
+    }
+
+    this.user = {
+      ...pending,
+      timezone: "UTC",
+      status: "active",
+      role: "user",
+    };
+    this.pendingProfiles = this.pendingProfiles.filter(
+      (profile) => profile.telegramUserId !== telegramUserId,
+    );
+    this.telegramProfiles = this.telegramProfiles.map((profile) =>
+      profile.telegramUserId === telegramUserId
+        ? { ...profile, status: "active" }
+        : profile,
+    );
+    return this.user;
+  }
+
+  async blockTelegramUser(
+    telegramUserId: number,
+  ): Promise<TelegramUserRecord | null> {
+    const existing = this.telegramProfiles.find(
+      (profile) => profile.telegramUserId === telegramUserId,
+    );
+
+    if (!existing) {
+      return null;
+    }
+
+    this.user = {
+      ...existing,
+      timezone: "UTC",
+      status: "blocked",
+      role: "user",
+    };
+    this.telegramProfiles = this.telegramProfiles.map((profile) =>
+      profile.telegramUserId === telegramUserId
+        ? { ...profile, status: "blocked" }
+        : profile,
+    );
+    return this.user;
+  }
+
+  async isAdminTelegramUser(telegramUserId: number): Promise<boolean> {
+    return this.adminTelegramIds.has(telegramUserId);
   }
 
   async createTask(input: CreateTaskInput): Promise<TaskRecord> {
@@ -858,17 +957,14 @@ class FakeStore implements LifeOSStore {
           )
           .reduce((total, item) => total + item.amount, 0),
         expense: amount,
-        net:
-          this.financeTransactions
-            .filter((item) => item.status === "confirmed")
-            .reduce(
-              (total, item) =>
-                total +
-                (item.transactionType === "income"
-                  ? item.amount
-                  : -item.amount),
-              0,
-            ),
+        net: this.financeTransactions
+          .filter((item) => item.status === "confirmed")
+          .reduce(
+            (total, item) =>
+              total +
+              (item.transactionType === "income" ? item.amount : -item.amount),
+            0,
+          ),
       },
       topCategories: [],
       budgets: [],
@@ -1052,7 +1148,10 @@ class FakeStore implements LifeOSStore {
     return "KZT";
   }
 
-  async setFinanceBaseCurrency(_userId: string, currency: string): Promise<string> {
+  async setFinanceBaseCurrency(
+    _userId: string,
+    currency: string,
+  ): Promise<string> {
     return currency;
   }
 
@@ -1367,6 +1466,78 @@ describe("Telegram commands", () => {
 
     expect(context.sent.at(-1)?.text).toContain("healthz is an HTTP endpoint");
     expect(context.sent.at(-1)?.text).toContain("/status");
+  });
+
+  it("creates a pending profile for an unknown /start user", async () => {
+    const store = new FakeStore();
+    store.user = null;
+    const context = runtime(store);
+
+    await handleTelegramUpdate(update("/start"), context);
+
+    const createdUser = store.user as TelegramUserRecord | null;
+    expect(createdUser?.status).toBe("pending");
+    expect(createdUser?.telegramUserId).toBe(30);
+    expect(context.sent.at(-1)?.text).toContain("access request created");
+  });
+
+  it("blocks pending users from protected commands", async () => {
+    const store = new FakeStore();
+    store.user = {
+      ...store.user!,
+      status: "pending",
+    };
+    const context = runtime(store);
+
+    await handleTelegramUpdate(update("/task Buy milk"), context);
+
+    expect(store.tasks).toHaveLength(0);
+    expect(context.sent.at(-1)?.text).toContain("waiting for approval");
+  });
+
+  it("allows an admin to approve a pending Telegram user", async () => {
+    const store = new FakeStore();
+    await store.createPendingTelegramUser({
+      telegramUserId: 456,
+      displayName: "Pending",
+      username: "pending",
+    });
+    store.adminTelegramIds.add(30);
+    const context = runtime(store);
+
+    await handleTelegramUpdate(update("/approve 456"), context);
+
+    expect(store.pendingProfiles).toHaveLength(0);
+    expect(store.telegramProfiles[0]?.status).toBe("active");
+    expect(context.sent.at(-1)?.chatId).toBe(456);
+    expect(context.sent.at(-1)?.text).toContain("approved");
+  });
+
+  it("allows an approved user to use protected commands", async () => {
+    const store = new FakeStore();
+    store.user = {
+      ...store.user!,
+      status: "active",
+    };
+    const context = runtime(store);
+
+    await handleTelegramUpdate(update("/task Buy milk"), context);
+
+    expect(store.tasks).toHaveLength(1);
+  });
+
+  it("blocks blocked users from protected commands", async () => {
+    const store = new FakeStore();
+    store.user = {
+      ...store.user!,
+      status: "blocked",
+    };
+    const context = runtime(store);
+
+    await handleTelegramUpdate(update("/task Buy milk"), context);
+
+    expect(store.tasks).toHaveLength(0);
+    expect(context.sent.at(-1)?.text).toContain("blocked");
   });
 
   it("creates an expense with /spend", async () => {
@@ -1748,8 +1919,7 @@ describe("Telegram commands", () => {
   it("parses explicit reminder times in Asia/Qyzylorda", async () => {
     const context = runtime();
     context.store.user = {
-      userId: "user-1",
-      displayName: "User",
+      ...context.store.user!,
       timezone: "Asia/Qyzylorda",
     };
 
@@ -1766,8 +1936,7 @@ describe("Telegram commands", () => {
   it("parses tomorrow reminder times in Asia/Qyzylorda", async () => {
     const context = runtime();
     context.store.user = {
-      userId: "user-1",
-      displayName: "User",
+      ...context.store.user!,
       timezone: "Asia/Qyzylorda",
     };
 
@@ -2037,6 +2206,6 @@ describe("Telegram commands", () => {
     await handleTelegramUpdate(update("/cap private note"), context);
 
     expect(context.store.entities).toHaveLength(0);
-    expect(context.sent.at(-1)?.text).toContain("not linked");
+    expect(context.sent.at(-1)?.text).toContain("Send /start");
   });
 });

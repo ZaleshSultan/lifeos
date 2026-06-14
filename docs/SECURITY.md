@@ -29,6 +29,8 @@ Browser apps may use public URLs and public client identifiers only. They must n
 - Do not use polling in production.
 - Keep TMA URLs short and resolve sensitive state through backend APIs.
 - Validate TMA `X-Telegram-Init-Data` with `TELEGRAM_BOT_TOKEN`.
+- Require `profiles.status = 'active'` before protected bot/TMA operations.
+- Restrict `/pending`, `/approve`, `/block`, and `/users` to profile admins or IDs listed in `LIFEOS_ADMIN_TELEGRAM_IDS`.
 - Keep `ALLOW_UNSAFE_TMA_DEV_AUTH=false` except for local development.
 
 ## Health Ingest

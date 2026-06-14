@@ -8,18 +8,24 @@ insert into public.profiles (
   telegram_user_id,
   display_name,
   timezone,
-  locale
+  locale,
+  status,
+  role
 )
 values (
   '00000000-0000-0000-0000-000000000000',
   123456789,
   'LifeOS User',
   'Asia/Qyzylorda',
-  'en'
+  'en',
+  'active',
+  'admin'
 )
 on conflict (user_id) do update set
   telegram_user_id = excluded.telegram_user_id,
   display_name = coalesce(public.profiles.display_name, excluded.display_name),
   timezone = excluded.timezone,
   locale = excluded.locale,
+  status = excluded.status,
+  role = excluded.role,
   updated_at = now();

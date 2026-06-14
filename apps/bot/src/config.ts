@@ -13,10 +13,44 @@ export interface BotConfig {
   lifeosIngestSecret?: string;
   lifeosDefaultUserId?: string;
   lifeosDefaultTelegramUserId?: number;
+  lifeosAdminTelegramIds: number[];
+  lifeosSignupMode: "pending_approval";
   allowUnsafeTmaDevAuth: boolean;
   openRouterApiKey?: string;
   financeAiModel?: string;
   financeAiEnabled: boolean;
+}
+
+export function telegramIdListEnv(source: EnvSource, name: string): number[] {
+  const value = optionalEnv(source, name);
+
+  if (!value) {
+    return [];
+  }
+
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => {
+      const parsed = Number(item);
+
+      if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+        throw new Error(`${name} must contain comma-separated Telegram ids`);
+      }
+
+      return parsed;
+    });
+}
+
+function signupModeEnv(source: EnvSource): "pending_approval" {
+  const value = optionalEnv(source, "LIFEOS_SIGNUP_MODE", "pending_approval");
+
+  if (value !== "pending_approval") {
+    throw new Error("LIFEOS_SIGNUP_MODE must be pending_approval");
+  }
+
+  return value;
 }
 
 function booleanEnv(
@@ -59,6 +93,11 @@ export function loadBotConfig(source: EnvSource = process.env): BotConfig {
     )
       ? integerEnv(source, "LIFEOS_DEFAULT_TELEGRAM_USER_ID", 0)
       : undefined,
+    lifeosAdminTelegramIds: telegramIdListEnv(
+      source,
+      "LIFEOS_ADMIN_TELEGRAM_IDS",
+    ),
+    lifeosSignupMode: signupModeEnv(source),
     allowUnsafeTmaDevAuth: booleanEnv(
       source,
       "ALLOW_UNSAFE_TMA_DEV_AUTH",

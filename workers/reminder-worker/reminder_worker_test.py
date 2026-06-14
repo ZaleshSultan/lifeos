@@ -36,6 +36,7 @@ class FakeSupabase:
         self.reminders = [
             {
                 "id": "reminder-1",
+                "user_id": "user-1",
                 "message": "Review graph theory",
                 "remind_at": "2026-05-18T12:00:00Z",
                 "status": "pending",
@@ -44,6 +45,7 @@ class FakeSupabase:
             }
         ]
         self.failures: list[str] = []
+        self.recipients = {"user-1": "456"}
 
     def list_due_reminders(self, _before: str, _limit: int) -> list[dict[str, Any]]:
         return self.reminders
@@ -54,6 +56,9 @@ class FakeSupabase:
             return None
         reminder["status"] = "processing"
         return reminder
+
+    def resolve_reminder_recipient(self, reminder: dict[str, Any]) -> str | None:
+        return self.recipients.get(str(reminder.get("user_id") or ""))
 
     def mark_reminder_sent(self, reminder_id: str) -> dict[str, Any] | None:
         reminder = self.reminders[0]
@@ -97,6 +102,14 @@ class FailingTelegram:
         raise reminder_worker.WorkerError("Telegram send failed: test failure")
 
 
+class CapturingTelegram:
+    def __init__(self) -> None:
+        self.messages: list[tuple[str, str]] = []
+
+    def send_message(self, chat_id: str, text: str) -> None:
+        self.messages.append((chat_id, text))
+
+
 class ReminderWorkerTest(unittest.TestCase):
     def test_due_reminder_query_filters_pending_telegram_rows(self) -> None:
         client = CapturingSupabaseClient()
@@ -133,12 +146,45 @@ class ReminderWorkerTest(unittest.TestCase):
         self.assertIn("updated_at", body)
         self.assertEqual(prefer, "return=representation")
 
+    def test_recipient_query_filters_active_owner_profile(self) -> None:
+        client = CapturingSupabaseClient()
+
+        reminder_worker.SupabaseRestClient.resolve_reminder_recipient(
+            client,
+            {"id": "reminder-1", "user_id": "user-1"},
+        )
+
+        method, table, query, _body, _prefer = client.calls[0]
+        self.assertEqual(method, "GET")
+        self.assertEqual(table, "profiles")
+        self.assertEqual(query["user_id"], "eq.user-1")
+        self.assertEqual(query["status"], "eq.active")
+
+    def test_worker_sends_to_owner_telegram_id(self) -> None:
+        settings = reminder_worker.Settings(
+            supabase_url="https://example.supabase.co",
+            service_role_key="service-role",
+            telegram_bot_token="bot-token",
+            poll_seconds=30,
+            batch_size=20,
+        )
+        supabase = FakeSupabase()
+        telegram = CapturingTelegram()
+
+        summary = reminder_worker.process_due_reminders(
+            settings,
+            supabase,
+            telegram,
+        )
+
+        self.assertEqual(summary.sent, 1)
+        self.assertEqual(telegram.messages[0][0], "456")
+
     def test_worker_does_not_crash_when_telegram_send_fails(self) -> None:
         settings = reminder_worker.Settings(
             supabase_url="https://example.supabase.co",
             service_role_key="service-role",
             telegram_bot_token="bot-token",
-            telegram_user_id="123",
             poll_seconds=30,
             batch_size=20,
         )
@@ -170,7 +216,6 @@ class ReminderWorkerTest(unittest.TestCase):
             supabase_url="https://example.supabase.co",
             service_role_key="service-role",
             telegram_bot_token="bot-token",
-            telegram_user_id="123",
             poll_seconds=30,
             batch_size=20,
             local_timezone="Asia/Qyzylorda",

@@ -30,6 +30,9 @@ TELEGRAM_WEBHOOK_PATH=/telegram/webhook
 TELEGRAM_WEBHOOK_SECRET=replace-with-random-secret
 TMA_URL=https://YOUR_TMA_HOST
 LIFEOS_INGEST_SECRET=replace-with-random-secret
+LIFEOS_ADMIN_TELEGRAM_IDS=123456789
+LIFEOS_SIGNUP_MODE=pending_approval
+# Legacy/dev bootstrap only:
 LIFEOS_DEFAULT_USER_ID=your-auth-user-uuid
 LIFEOS_DEFAULT_TELEGRAM_USER_ID=your-telegram-user-id
 ALLOW_UNSAFE_TMA_DEV_AUTH=false

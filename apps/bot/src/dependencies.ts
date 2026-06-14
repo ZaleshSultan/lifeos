@@ -4,6 +4,7 @@ import {
   SupabaseLifeOSStore,
   type LifeOSStore,
 } from "@lifeos/db";
+import { telegramIdListEnv } from "./config.js";
 
 export interface BotDependencies {
   supabase?: ReturnType<typeof createLifeOSSupabaseClient>;
@@ -29,6 +30,11 @@ export function createBotDependencies(
 
   return {
     supabase,
-    store: new SupabaseLifeOSStore(supabase),
+    store: new SupabaseLifeOSStore(supabase, {
+      adminTelegramUserIds: telegramIdListEnv(
+        source,
+        "LIFEOS_ADMIN_TELEGRAM_IDS",
+      ),
+    }),
   };
 }

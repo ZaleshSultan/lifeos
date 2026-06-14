@@ -47,6 +47,10 @@ export type HealthSyncRunStatus = "success" | "failed";
 
 export type ExternalSourceStatus = "disabled" | "connected" | "error";
 
+export type ProfileStatus = "pending" | "active" | "blocked";
+
+export type ProfileRole = "user" | "admin";
+
 export type SyncRunStatus = "running" | "success" | "partial" | "failed";
 
 export type ReminderStatus =
@@ -134,6 +138,8 @@ export interface Database {
           timezone: string;
           locale: string;
           telegram_user_id: number | null;
+          status: ProfileStatus;
+          role: ProfileRole;
           metadata: Json;
           created_at: string;
           updated_at: string;
@@ -144,6 +150,8 @@ export interface Database {
           timezone?: string;
           locale?: string;
           telegram_user_id?: number | null;
+          status?: ProfileStatus;
+          role?: ProfileRole;
           metadata?: Json;
           created_at?: string;
           updated_at?: string;
@@ -1710,6 +1718,8 @@ export interface Database {
       health_sync_reason: HealthSyncReason;
       health_recovery_mode: HealthMode;
       health_sync_run_status: HealthSyncRunStatus;
+      profile_status: ProfileStatus;
+      profile_role: ProfileRole;
     };
     CompositeTypes: Record<string, never>;
   };

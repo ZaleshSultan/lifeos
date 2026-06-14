@@ -24,6 +24,7 @@ Current migration set:
 - `20260521000100_life_modes.sql`
 - `20260523000100_life_modes_phase1_study_courses.sql`
 - `20260524000100_dynamic_sources_mvp.sql`
+- `20260615000100_profile_status_roles.sql`
 
 ## Kernel Tables
 
@@ -67,6 +68,10 @@ LifeOS currently uses Supabase Auth as the identity root:
 - `auth.users.id` is the durable LifeOS `user_id`.
 - `public.profiles.user_id` references `auth.users(id)`.
 - Telegram linking lives in `public.profiles.telegram_user_id`.
+- `public.profiles.status` controls access: `pending`, `active`, or `blocked`.
+- `public.profiles.role` controls admin commands: `user` or `admin`.
+
+Only `active` profiles can use protected bot/TMA flows. New Telegram signups default to `pending` and `user`; admins approve them through the bot.
 
 Single-user bootstrap snippet:
 

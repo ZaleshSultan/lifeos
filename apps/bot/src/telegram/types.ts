@@ -77,6 +77,8 @@ export interface TelegramBotRuntime {
   tmaUrl?: string;
   defaultUserId?: string;
   defaultTelegramUserId?: number;
+  adminTelegramUserIds?: number[];
+  signupMode?: "pending_approval";
   financeAi?: {
     enabled: boolean;
     openRouterApiKey?: string;

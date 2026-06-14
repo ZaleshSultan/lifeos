@@ -68,6 +68,8 @@ import type {
   Json,
   LifeEntityType,
   ObsidianSyncStatus,
+  ProfileRole,
+  ProfileStatus,
   ReminderStatus,
   MonthlyReviewStatus,
   SyncRunStatus,
@@ -114,11 +116,16 @@ type FinanceReceiptItemRow =
 type FinanceAiAnalysisRunRow =
   Database["public"]["Tables"]["finance_ai_analysis_runs"]["Row"];
 type MonthlyReviewRow = Database["public"]["Tables"]["monthly_reviews"]["Row"];
+type ProfileRow = Database["public"]["Tables"]["profiles"]["Row"];
 
 export interface TelegramUserRecord {
   userId: string;
+  telegramUserId: number | null;
   displayName: string | null;
+  username: string | null;
   timezone: string;
+  status: ProfileStatus;
+  role: ProfileRole;
 }
 
 export interface BootstrapTelegramUserInput {
@@ -127,6 +134,19 @@ export interface BootstrapTelegramUserInput {
   displayName?: string | null;
   timezone?: string;
   locale?: string;
+}
+
+export interface CreatePendingTelegramUserInput {
+  telegramUserId: number;
+  displayName?: string | null;
+  username?: string | null;
+  timezone?: string;
+  locale?: string;
+}
+
+export interface TelegramProfileRecord extends TelegramUserRecord {
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface LifeEntityRecord {
@@ -1016,6 +1036,17 @@ export interface LifeOSStore {
   linkDefaultTelegramUser(
     input: BootstrapTelegramUserInput,
   ): Promise<TelegramUserRecord>;
+  createPendingTelegramUser(
+    input: CreatePendingTelegramUserInput,
+  ): Promise<TelegramUserRecord>;
+  listPendingUsers(): Promise<TelegramProfileRecord[]>;
+  listTelegramUsers(limit?: number): Promise<TelegramProfileRecord[]>;
+  approveTelegramUser(
+    telegramUserId: number,
+    approvedByTelegramUserId?: number,
+  ): Promise<TelegramUserRecord | null>;
+  blockTelegramUser(telegramUserId: number): Promise<TelegramUserRecord | null>;
+  isAdminTelegramUser(telegramUserId: number): Promise<boolean>;
   createTask(input: CreateTaskInput): Promise<TaskRecord>;
   createLifeCapture(input: CreateLifeCaptureInput): Promise<LifeCaptureRecord>;
   createLifeEntity(input: CreateLifeEntityInput): Promise<LifeEntityRecord>;
@@ -1250,7 +1281,10 @@ export interface LifeOSStore {
     input: ProcessReceiptOcrTextInput,
   ): Promise<FinanceReceiptRecord>;
   listReceipts(userId: string): Promise<FinanceReceiptRecord[]>;
-  getReceipt(userId: string, receiptId: string): Promise<FinanceReceiptRecord | null>;
+  getReceipt(
+    userId: string,
+    receiptId: string,
+  ): Promise<FinanceReceiptRecord | null>;
   downloadReceiptImage(
     userId: string,
     receiptId: string,
@@ -1574,6 +1608,35 @@ function toReminderRecord(row: ReminderRow): ReminderRecord {
     message: row.message,
     metadataJson: row.metadata_json,
     sentAt: row.sent_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function profileUsername(row: Pick<ProfileRow, "metadata">): string | null {
+  const metadata = jsonObject(row.metadata);
+  return typeof metadata.telegramUsername === "string"
+    ? metadata.telegramUsername
+    : typeof metadata.username === "string"
+      ? metadata.username
+      : null;
+}
+
+function toTelegramUserRecord(row: ProfileRow): TelegramUserRecord {
+  return {
+    userId: row.user_id,
+    telegramUserId: row.telegram_user_id,
+    displayName: row.display_name,
+    username: profileUsername(row),
+    timezone: row.timezone,
+    status: row.status,
+    role: row.role,
+  };
+}
+
+function toTelegramProfileRecord(row: ProfileRow): TelegramProfileRecord {
+  return {
+    ...toTelegramUserRecord(row),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -2718,15 +2781,26 @@ function workoutBody(summary: CurrentWorkoutSummary): string {
   ].join("\n");
 }
 
+export interface SupabaseLifeOSStoreOptions {
+  adminTelegramUserIds?: number[];
+}
+
 export class SupabaseLifeOSStore implements LifeOSStore {
-  constructor(private readonly client: LifeOSSupabaseClient) {}
+  private readonly adminTelegramUserIds: ReadonlySet<number>;
+
+  constructor(
+    private readonly client: LifeOSSupabaseClient,
+    options: SupabaseLifeOSStoreOptions = {},
+  ) {
+    this.adminTelegramUserIds = new Set(options.adminTelegramUserIds ?? []);
+  }
 
   async resolveTelegramUser(
     telegramUserId: number,
   ): Promise<TelegramUserRecord | null> {
     const { data, error } = await this.client
       .from("profiles")
-      .select("user_id, display_name, timezone")
+      .select("*")
       .eq("telegram_user_id", telegramUserId)
       .maybeSingle();
 
@@ -2738,11 +2812,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       return null;
     }
 
-    return {
-      userId: data.user_id,
-      displayName: data.display_name,
-      timezone: data.timezone,
-    };
+    return toTelegramUserRecord(data);
   }
 
   async linkDefaultTelegramUser(
@@ -2757,6 +2827,8 @@ export class SupabaseLifeOSStore implements LifeOSStore {
           timezone: input.timezone ?? "Asia/Qyzylorda",
           locale: input.locale ?? "en",
           telegram_user_id: input.telegramUserId,
+          status: "active",
+          role: "admin",
           metadata: {
             bootstrap: true,
             linkedBy: "telegram_start",
@@ -2766,18 +2838,181 @@ export class SupabaseLifeOSStore implements LifeOSStore {
           onConflict: "user_id",
         },
       )
-      .select("user_id, display_name, timezone")
+      .select("*")
       .single();
 
     if (error) {
       throwSupabaseError(error, "Failed to link default Telegram user");
     }
 
-    return {
-      userId: data.user_id,
-      displayName: data.display_name,
-      timezone: data.timezone,
-    };
+    return toTelegramUserRecord(data);
+  }
+
+  async createPendingTelegramUser(
+    input: CreatePendingTelegramUserInput,
+  ): Promise<TelegramUserRecord> {
+    const existing = await this.resolveTelegramUser(input.telegramUserId);
+
+    if (existing) {
+      return existing;
+    }
+
+    const password = `${crypto.randomUUID()}${crypto.randomUUID()}`;
+    const email = `telegram-${input.telegramUserId}@telegram.lifeos.local`;
+    const { data: authData, error: authError } =
+      await this.client.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: {
+          provider: "telegram",
+          telegram_user_id: input.telegramUserId,
+          telegram_username: input.username ?? null,
+          display_name: input.displayName ?? null,
+        },
+      });
+
+    if (authError) {
+      throwSupabaseError(authError, "Failed to create pending auth user");
+    }
+
+    const userId = authData.user?.id;
+
+    if (!userId) {
+      throw new Error("Supabase did not return an auth user id");
+    }
+
+    const { data, error } = await this.client
+      .from("profiles")
+      .insert({
+        user_id: userId,
+        display_name: input.displayName ?? null,
+        timezone: input.timezone ?? "Asia/Qyzylorda",
+        locale: input.locale ?? "en",
+        telegram_user_id: input.telegramUserId,
+        status: "pending",
+        role: "user",
+        metadata: {
+          signupMode: "pending_approval",
+          telegramUsername: input.username ?? null,
+          registeredVia: "telegram_start",
+        },
+      })
+      .select("*")
+      .single();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to create pending Telegram profile");
+    }
+
+    return toTelegramUserRecord(data);
+  }
+
+  async listPendingUsers(): Promise<TelegramProfileRecord[]> {
+    const { data, error } = await this.client
+      .from("profiles")
+      .select("*")
+      .eq("status", "pending")
+      .not("telegram_user_id", "is", null)
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      throwSupabaseError(error, "Failed to list pending Telegram users");
+    }
+
+    return data.map(toTelegramProfileRecord);
+  }
+
+  async listTelegramUsers(limit = 25): Promise<TelegramProfileRecord[]> {
+    const { data, error } = await this.client
+      .from("profiles")
+      .select("*")
+      .not("telegram_user_id", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      throwSupabaseError(error, "Failed to list Telegram users");
+    }
+
+    return data.map(toTelegramProfileRecord);
+  }
+
+  async approveTelegramUser(
+    telegramUserId: number,
+    approvedByTelegramUserId?: number,
+  ): Promise<TelegramUserRecord | null> {
+    const { data: existing, error: existingError } = await this.client
+      .from("profiles")
+      .select("*")
+      .eq("telegram_user_id", telegramUserId)
+      .maybeSingle();
+
+    if (existingError) {
+      throwSupabaseError(existingError, "Failed to load Telegram user");
+    }
+
+    if (!existing) {
+      return null;
+    }
+
+    const metadata = jsonObject(existing.metadata);
+
+    const { data, error } = await this.client
+      .from("profiles")
+      .update({
+        status: "active",
+        metadata: {
+          ...metadata,
+          approvedByTelegramUserId: approvedByTelegramUserId ?? null,
+          approvedAt: new Date().toISOString(),
+        },
+        updated_at: new Date().toISOString(),
+      })
+      .eq("telegram_user_id", telegramUserId)
+      .select("*")
+      .single();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to approve Telegram user");
+    }
+
+    return toTelegramUserRecord(data);
+  }
+
+  async blockTelegramUser(
+    telegramUserId: number,
+  ): Promise<TelegramUserRecord | null> {
+    const existing = await this.resolveTelegramUser(telegramUserId);
+
+    if (!existing) {
+      return null;
+    }
+
+    const { data, error } = await this.client
+      .from("profiles")
+      .update({
+        status: "blocked",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("telegram_user_id", telegramUserId)
+      .select("*")
+      .single();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to block Telegram user");
+    }
+
+    return toTelegramUserRecord(data);
+  }
+
+  async isAdminTelegramUser(telegramUserId: number): Promise<boolean> {
+    if (this.adminTelegramUserIds.has(telegramUserId)) {
+      return true;
+    }
+
+    const user = await this.resolveTelegramUser(telegramUserId);
+    return user?.status === "active" && user.role === "admin";
   }
 
   async createTask(input: CreateTaskInput): Promise<TaskRecord> {
@@ -6043,7 +6278,10 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       .limit(20);
 
     if (error) {
-      throwSupabaseError(error, "Failed to load finance assistant transactions");
+      throwSupabaseError(
+        error,
+        "Failed to load finance assistant transactions",
+      );
     }
 
     const recentTransactions = data.map((item) => ({
@@ -7883,14 +8121,16 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     // 1. Check budgets and category limits
     const budgets = await this.getBudgetSummary({ userId, today });
     const dbBudgets = await this.listBudgets({ userId, activeOnly: true });
-    
+
     for (const budget of budgets) {
       const dbBudget = dbBudgets.find((b) => b.id === budget.budgetId);
       if (!dbBudget) continue;
 
       const budgetMeta = jsonObject((dbBudget.metadata || {}) as Json);
       const lastNotifiedPeriodStart = budgetMeta.lastNotifiedPeriodStart;
-      const notifiedCategories = jsonObject(budgetMeta.notifiedCategories as Json);
+      const notifiedCategories = jsonObject(
+        budgetMeta.notifiedCategories as Json,
+      );
 
       let budgetMetaChanged = false;
 
@@ -7898,7 +8138,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       if (budget.isOverspent) {
         if (lastNotifiedPeriodStart !== budget.periodStart) {
           alerts.push(
-            `⚠️ Бюджет "${budget.name || "Основной"}" превышен!\nЛимит: ${budget.totalLimit} ${budget.currency}\nПотрачено: ${budget.totalSpent} ${budget.currency}`
+            `⚠️ Бюджет "${budget.name || "Основной"}" превышен!\nЛимит: ${budget.totalLimit} ${budget.currency}\nПотрачено: ${budget.totalSpent} ${budget.currency}`,
           );
           budgetMeta.lastNotifiedPeriodStart = budget.periodStart;
           budgetMetaChanged = true;
@@ -7910,7 +8150,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
         if (cat.isOverspent) {
           if (notifiedCategories[cat.categoryId] !== budget.periodStart) {
             alerts.push(
-              `⚠️ Лимит категории "${cat.categoryName}" в бюджете "${budget.name || "Основной"}" превышен!\nЛимит: ${cat.limit} ${budget.currency}\nПотрачено: ${cat.spent} ${budget.currency}`
+              `⚠️ Лимит категории "${cat.categoryName}" в бюджете "${budget.name || "Основной"}" превышен!\nЛимит: ${cat.limit} ${budget.currency}\nПотрачено: ${cat.spent} ${budget.currency}`,
             );
             notifiedCategories[cat.categoryId] = budget.periodStart;
             budgetMetaChanged = true;
@@ -7926,14 +8166,20 @@ export class SupabaseLifeOSStore implements LifeOSStore {
           .eq("id", budget.budgetId)
           .eq("user_id", userId);
         if (updateError) {
-          console.error("[finance] failed to update budget metadata in alerts check", updateError);
+          console.error(
+            "[finance] failed to update budget metadata in alerts check",
+            updateError,
+          );
         }
       }
     }
 
     // 2. Check anomalies
     try {
-      const anomalies = await this.detectFinanceAnomaliesForUser({ userId, today });
+      const anomalies = await this.detectFinanceAnomaliesForUser({
+        userId,
+        today,
+      });
       if (anomalies.length > 0) {
         const { data: settingsData, error: settingsError } = await this.client
           .from("user_settings")
@@ -7943,7 +8189,9 @@ export class SupabaseLifeOSStore implements LifeOSStore {
 
         if (!settingsError) {
           const currentSettings = jsonObject(settingsData?.settings);
-          const notifiedAnomalies = Array.isArray(currentSettings.notified_anomalies)
+          const notifiedAnomalies = Array.isArray(
+            currentSettings.notified_anomalies,
+          )
             ? (currentSettings.notified_anomalies as string[])
             : [];
 
@@ -7953,7 +8201,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
             const key = `${anomaly.type}:${anomaly.occurredOn}:${anomaly.amount}:${anomaly.categoryName ?? ""}:${anomaly.merchant ?? ""}`;
             if (!notifiedAnomalies.includes(key)) {
               alerts.push(
-                `🔍 Зафиксирована аномалия:\n${anomaly.reason}\nСтепень: ${anomaly.severity}`
+                `🔍 Зафиксирована аномалия:\n${anomaly.reason}\nСтепень: ${anomaly.severity}`,
               );
               notifiedAnomalies.push(key);
               settingsChanged = true;
@@ -7969,22 +8217,28 @@ export class SupabaseLifeOSStore implements LifeOSStore {
               .from("user_settings")
               .upsert({ user_id: userId, settings: updatedSettings as Json });
             if (updateSettingsError) {
-              console.error("[finance] failed to update user settings in anomalies check", updateSettingsError);
+              console.error(
+                "[finance] failed to update user settings in anomalies check",
+                updateSettingsError,
+              );
             }
           }
         }
       }
     } catch (anomalyError) {
-      console.error("[finance] anomaly checking failed in alerts check", anomalyError);
+      console.error(
+        "[finance] anomaly checking failed in alerts check",
+        anomalyError,
+      );
     }
 
     return alerts;
   }
 
-  async backfillFinanceBaseAmounts(input?: { userId?: string }): Promise<number> {
-    let query = this.client
-      .from("finance_transactions")
-      .select("*");
+  async backfillFinanceBaseAmounts(input?: {
+    userId?: string;
+  }): Promise<number> {
+    let query = this.client.from("finance_transactions").select("*");
 
     if (input?.userId) {
       query = query.eq("user_id", input.userId);
@@ -7999,8 +8253,10 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     const userBaseCurrencies = new Map<string, string>();
 
     for (const tx of transactions) {
-      const hasBaseCurrency = tx.base_currency && tx.base_currency.trim().length > 0;
-      const hasBaseAmount = tx.base_amount !== null && tx.base_amount !== undefined;
+      const hasBaseCurrency =
+        tx.base_currency && tx.base_currency.trim().length > 0;
+      const hasBaseAmount =
+        tx.base_amount !== null && tx.base_amount !== undefined;
 
       if (hasBaseCurrency && hasBaseAmount) {
         continue;
@@ -8033,7 +8289,10 @@ export class SupabaseLifeOSStore implements LifeOSStore {
         .eq("id", tx.id);
 
       if (updateError) {
-        throwSupabaseError(updateError, `Failed to update transaction ${tx.id} in backfill`);
+        throwSupabaseError(
+          updateError,
+          `Failed to update transaction ${tx.id} in backfill`,
+        );
       }
 
       updatedCount++;
@@ -8042,7 +8301,10 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     return updatedCount;
   }
 
-  async getReceipt(userId: string, receiptId: string): Promise<FinanceReceiptRecord | null> {
+  async getReceipt(
+    userId: string,
+    receiptId: string,
+  ): Promise<FinanceReceiptRecord | null> {
     const { data, error } = await this.client
       .from("finance_receipts")
       .select("*")
@@ -8074,7 +8336,10 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       .single();
 
     if (rxError || !receipt) {
-      throwSupabaseError(rxError || new Error("Receipt not found"), "Failed to find receipt for image download");
+      throwSupabaseError(
+        rxError || new Error("Receipt not found"),
+        "Failed to find receipt for image download",
+      );
     }
 
     const { data, error } = await this.client.storage
@@ -8082,7 +8347,10 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       .download(receipt.storage_path);
 
     if (error || !data) {
-      throwSupabaseError(error || new Error("Failed to download image"), "Failed to download receipt image");
+      throwSupabaseError(
+        error || new Error("Failed to download image"),
+        "Failed to download receipt image",
+      );
     }
 
     const arrayBuffer = await data.arrayBuffer();
@@ -8109,18 +8377,24 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       .single();
 
     if (rxError || !receipt) {
-      throwSupabaseError(rxError || new Error("Receipt not found"), "Failed to load receipt for review");
+      throwSupabaseError(
+        rxError || new Error("Receipt not found"),
+        "Failed to load receipt for review",
+      );
     }
 
     const defaults = await this.ensureFinanceDefaults(input.userId);
     const categoryName = normalizeFinanceCategory(input.category) ?? "Other";
-    const categoryObj = defaults.categories.find(
-      (item) =>
-        item.name.toLocaleLowerCase("en") === categoryName.toLocaleLowerCase("en") &&
-        item.transaction_type === "expense",
-    ) ?? defaults.categories.find(
-      (item) => item.name === "Other" && item.transaction_type === "expense",
-    );
+    const categoryObj =
+      defaults.categories.find(
+        (item) =>
+          item.name.toLocaleLowerCase("en") ===
+            categoryName.toLocaleLowerCase("en") &&
+          item.transaction_type === "expense",
+      ) ??
+      defaults.categories.find(
+        (item) => item.name === "Other" && item.transaction_type === "expense",
+      );
 
     let transactionId = receipt.transaction_id;
     if (transactionId) {
@@ -8152,7 +8426,10 @@ export class SupabaseLifeOSStore implements LifeOSStore {
         .eq("user_id", input.userId);
 
       if (txError) {
-        throwSupabaseError(txError, "Failed to update transaction during receipt review");
+        throwSupabaseError(
+          txError,
+          "Failed to update transaction during receipt review",
+        );
       }
     } else {
       const transaction = await this.createFinanceTransaction({
@@ -8172,7 +8449,10 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     }
 
     const updatedParsedJson = {
-      ...(typeof receipt.parsed_json === "object" && receipt.parsed_json !== null ? receipt.parsed_json : {}),
+      ...(typeof receipt.parsed_json === "object" &&
+      receipt.parsed_json !== null
+        ? receipt.parsed_json
+        : {}),
       amount: input.amount,
       currency: input.currency,
       merchant: input.merchant,
@@ -8260,14 +8540,13 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     entityId: string,
   ): Promise<void> {
     try {
-      const fullId = lineId.length < 36
-        ? await this.resolveTransactionFullId(userId, lineId)
-        : lineId;
+      const fullId =
+        lineId.length < 36
+          ? await this.resolveTransactionFullId(userId, lineId)
+          : lineId;
 
       if (!fullId) {
-        throw new Error(
-          `No unmatched bank line matches short ID: ${lineId}`,
-        );
+        throw new Error(`No unmatched bank line matches short ID: ${lineId}`);
       }
 
       const { error } = await this.client
@@ -8531,7 +8810,10 @@ export class SupabaseLifeOSStore implements LifeOSStore {
           .eq("category_id", categoryId);
 
         if (updateError) {
-          throwSupabaseError(updateError, "Failed to update budget category limit");
+          throwSupabaseError(
+            updateError,
+            "Failed to update budget category limit",
+          );
         }
 
         const { error: budgetUpdateError } = await this.client

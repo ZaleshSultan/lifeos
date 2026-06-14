@@ -18,13 +18,31 @@ The Telegram bot is the fastest input surface for LifeOS.
 - `/spend` - expense capture.
 - `/finance` - finance summary.
 - `/workout` - current workout creation/fetch plus TMA open button.
+- `/pending` - admin-only pending user list.
+- `/approve <telegram_id>` - admin-only approval.
+- `/block <telegram_id>` - admin-only block.
+- `/users` - admin-only Telegram user list.
 - `/status` - backend status.
 
-## `/start` Bootstrap
+## `/start` Onboarding
 
-`/start` reports the sender's Telegram user id and checks `profiles.telegram_user_id`.
+`/start` checks `profiles.telegram_user_id` and profile status:
 
-If these env vars are set and the sender id matches, the bot attempts to upsert the profile link:
+- `active` - welcome back and show `/help`.
+- `pending` - tell the user the access request is waiting for approval.
+- `blocked` - deny access.
+- unknown - create a Supabase Auth user and `profiles` row with `status = 'pending'`, `role = 'user'`, Telegram display metadata, then notify admins from `LIFEOS_ADMIN_TELEGRAM_IDS`.
+
+Admins approve with `/approve <telegram_id>`. Protected commands only run for `status = 'active'`.
+
+Set:
+
+```bash
+LIFEOS_ADMIN_TELEGRAM_IDS=123456789,987654321
+LIFEOS_SIGNUP_MODE=pending_approval
+```
+
+The legacy single-user bootstrap still exists for local/dev recovery. If these env vars are set and the sender id matches, the bot attempts to upsert that one profile as active/admin:
 
 ```bash
 LIFEOS_DEFAULT_USER_ID=your-auth-user-uuid
@@ -40,7 +58,7 @@ If the profile cannot be written, usually because the referenced `auth.users` ro
 - `/workout` must not serialize full workout state into the TMA URL.
 - `/workout` creates or loads the active workout, ensures default exercises/sets exist, and sends a TMA button.
 - User resolution is by Telegram user id through `profiles.telegram_user_id`.
-- Unknown users should receive a clear registration/configuration message.
+- Unknown users should receive a pending approval registration message.
 
 ## Health Mode Labels
 

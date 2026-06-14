@@ -41,8 +41,18 @@ The stabilized vertical slice keeps Supabase Auth as the identity root:
 - `public.profiles.user_id` references `auth.users(id)`.
 - `public.profiles.telegram_user_id` links Telegram bot and TMA requests to the LifeOS user.
 - User-owned tables keep `user_id uuid references auth.users(id)`.
+- `public.profiles.status` gates access; only `active` users can use protected bot/TMA flows.
+- `public.profiles.role` plus `LIFEOS_ADMIN_TELEGRAM_IDS` gates Telegram admin commands.
 
 For local single-user setup, `LIFEOS_DEFAULT_USER_ID` and `LIFEOS_DEFAULT_TELEGRAM_USER_ID` let `/start` link the configured Telegram account when the auth user exists.
+
+Current multi-user MVP caveat: Telegram bot/TMA access and reminder delivery are user-scoped, but several local integrations still need per-user configuration before they are production multi-user:
+
+- `workers/common/lifeos_sync.py` uses `LIFEOS_DEFAULT_USER_ID` for Google/ICS sync ownership.
+- `workers/monthly-review-worker` uses `LIFEOS_DEFAULT_USER_ID`, optional `LIFEOS_DEFAULT_TELEGRAM_USER_ID`, and one vault path.
+- `workers/obsidian-mirror` writes to one `OBSIDIAN_VAULT_PATH` mirror.
+
+Do not present these integrations as connected for every newly approved user until per-user OAuth/vault configuration exists.
 
 ## Deployment Targets
 

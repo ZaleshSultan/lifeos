@@ -2,7 +2,7 @@
 
 The reminder worker sends due LifeOS reminders to Telegram.
 
-Supabase stays the source of truth. Telegram `/remind` and the TMA create rows in `public.reminders`; the worker polls for pending Telegram reminders whose `remind_at` is due, sends a Telegram message, then marks the row `sent`.
+Supabase stays the source of truth. Telegram `/remind` and the TMA create rows in `public.reminders`; the worker polls for pending Telegram reminders whose `remind_at` is due, resolves `reminders.user_id` to an active `profiles.telegram_user_id`, sends a Telegram message to that owner, then marks the row `sent`.
 
 ## Why It Runs On Arch
 
@@ -16,12 +16,14 @@ The worker is an always-on background process, similar to the Obsidian mirror wo
 SUPABASE_URL=https://PROJECT_REF.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=replace-with-supabase-service-role-key
 TELEGRAM_BOT_TOKEN=replace-with-telegram-bot-token
-LIFEOS_DEFAULT_TELEGRAM_USER_ID=123456789
+REMINDER_WORKER_TEST_TELEGRAM_USER_ID=123456789
 REMINDER_WORKER_POLL_SECONDS=30
 REMINDER_WORKER_BATCH_SIZE=20
 ```
 
 Never expose `TELEGRAM_BOT_TOKEN` or `SUPABASE_SERVICE_ROLE_KEY` to the TMA, web app, logs, screenshots, or client-side env.
+
+`REMINDER_WORKER_TEST_TELEGRAM_USER_ID` is only for `test-send`. Real reminders are never sent through a default Telegram id; inactive, blocked, pending, or unlinked profiles are skipped and recorded as send failures.
 
 ## Setup
 
@@ -87,7 +89,8 @@ Wants=network-online.target
 ## Troubleshooting
 
 - `Missing required environment variable`: check `.env` path and `EnvironmentFile`.
-- `Telegram send failed`: run `test-send`, confirm the bot token and `LIFEOS_DEFAULT_TELEGRAM_USER_ID`.
+- `Telegram send failed`: run `test-send`, confirm the bot token and `REMINDER_WORKER_TEST_TELEGRAM_USER_ID`.
+- `Reminder owner has no active Telegram profile`: approve/link the owning profile before the reminder can be delivered.
 - `Supabase PATCH reminders failed`: confirm the service-role key and that `public.reminders` has `sent_at`, `updated_at`, and `metadata_json`.
 - Reminder stays `pending`: send failures are retried and stored under `metadata_json.reminder_worker`; after three failed attempts the worker marks the reminder `failed`.
 - Nothing sends: run `status` and confirm the row has `status='pending'`, `channel='telegram'`, and `remind_at <= now()`.

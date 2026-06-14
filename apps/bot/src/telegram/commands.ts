@@ -26,6 +26,7 @@ import type {
   SourceRecord,
   StudyCourseRecord,
   SyncRunRecord,
+  TelegramProfileRecord,
   TelegramUserRecord,
   TmaHealthSummary,
   TmaFinanceSummary,
@@ -113,6 +114,12 @@ const HELP_TEXT = [
   "/bank unmatched — list unmatched bank transactions",
   "/bank match <short_id> <entity_id>",
   "Photo upload — send a receipt photo to start OCR scan",
+  "",
+  "Admin:",
+  "/pending",
+  "/approve <telegram_id>",
+  "/block <telegram_id>",
+  "/users",
   "",
   "/status",
   "/healthz",
@@ -257,6 +264,56 @@ function requireText(
   return `Usage: /${command} ${usage}`;
 }
 
+function telegramDisplayName(message: TelegramMessage): string | null {
+  return message.from?.first_name ?? message.from?.username ?? null;
+}
+
+function telegramUsername(message: TelegramMessage): string | null {
+  return message.from?.username ?? null;
+}
+
+function parseTelegramId(args: string): number | null {
+  const value = args.trim().split(/\s+/, 1)[0] ?? "";
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function formatTelegramProfile(user: TelegramProfileRecord): string {
+  const username = user.username ? ` @${user.username}` : "";
+  const name = user.displayName ? ` ${user.displayName}` : "";
+  return [
+    `<code>${user.telegramUserId ?? "unknown"}</code>${escapeHtml(username)}${escapeHtml(name)}`,
+    `status=<b>${escapeHtml(user.status)}</b>`,
+    `role=<b>${escapeHtml(user.role)}</b>`,
+  ].join(" ");
+}
+
+async function requireAdmin(
+  message: TelegramMessage,
+  runtime: TelegramBotRuntime,
+): Promise<boolean> {
+  if (!runtime.store || !message.from?.id) {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "Access denied.",
+    });
+    return false;
+  }
+
+  const envAdmin = runtime.adminTelegramUserIds?.includes(message.from.id);
+  const profileAdmin = await runtime.store.isAdminTelegramUser(message.from.id);
+
+  if (!envAdmin && !profileAdmin) {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "Access denied.",
+    });
+    return false;
+  }
+
+  return true;
+}
+
 async function resolveUser(
   message: TelegramMessage,
   runtime: TelegramBotRuntime,
@@ -283,10 +340,26 @@ async function resolveUser(
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
       text: [
-        "Your Telegram account is not linked to LifeOS yet.",
+        "Your Telegram account is not registered with LifeOS yet.",
         `Telegram user id: <code>${message.from.id}</code>`,
-        "Link this id to your LifeOS profile, then try again.",
+        "Send /start to request access.",
       ].join("\n"),
+    });
+    return null;
+  }
+
+  if (user.status === "pending") {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "Your LifeOS access request is waiting for approval.",
+    });
+    return null;
+  }
+
+  if (user.status === "blocked") {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "LifeOS access is blocked.",
     });
     return null;
   }
@@ -1382,7 +1455,12 @@ async function createFinanceEntry(
   });
 
   if (transaction.status === "confirmed") {
-    void triggerFinanceAlerts(runtime.store, runtime.telegram, user.userId, occurredOn).catch(console.error);
+    void triggerFinanceAlerts(
+      runtime.store,
+      runtime.telegram,
+      user.userId,
+      occurredOn,
+    ).catch(console.error);
   }
 
   return transaction;
@@ -1390,13 +1468,15 @@ async function createFinanceEntry(
 
 function bootstrapProfileSql(userId: string, telegramUserId: number): string {
   return [
-    "insert into public.profiles (user_id, telegram_user_id, display_name, timezone, locale)",
-    `values ('${userId}', ${telegramUserId}, 'LifeOS User', '${LOCAL_TIMEZONE}', 'en')`,
+    "insert into public.profiles (user_id, telegram_user_id, display_name, timezone, locale, status, role)",
+    `values ('${userId}', ${telegramUserId}, 'LifeOS User', '${LOCAL_TIMEZONE}', 'en', 'active', 'admin')`,
     "on conflict (user_id) do update set",
     "  telegram_user_id = excluded.telegram_user_id,",
     "  display_name = coalesce(public.profiles.display_name, excluded.display_name),",
     "  timezone = excluded.timezone,",
     "  locale = excluded.locale,",
+    "  status = excluded.status,",
+    "  role = excluded.role,",
     "  updated_at = now();",
   ].join("\n");
 }
@@ -1419,6 +1499,48 @@ function bootstrapHint(message: TelegramMessage, runtime: TelegramBotRuntime) {
       bootstrapProfileSql(runtime.defaultUserId, message.from.id),
     )}</pre>`,
   ].join("\n");
+}
+
+async function notifyAdminsOfPendingUser(
+  message: TelegramMessage,
+  runtime: TelegramBotRuntime,
+  telegramUserId: number,
+): Promise<void> {
+  const adminIds = runtime.adminTelegramUserIds ?? [];
+
+  if (!adminIds.length) {
+    return;
+  }
+
+  const username = message.from?.username ? `@${message.from.username}` : "";
+  const displayName = telegramDisplayName(message) ?? "";
+  const text = [
+    "New LifeOS access request.",
+    `Telegram id: <code>${telegramUserId}</code>`,
+    displayName ? `Name: ${escapeHtml(displayName)}` : "",
+    username ? `Username: ${escapeHtml(username)}` : "",
+    "",
+    `Approve: <code>/approve ${telegramUserId}</code>`,
+    `Block: <code>/block ${telegramUserId}</code>`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  await Promise.all(
+    adminIds.map((chatId) =>
+      runtime.telegram
+        .sendMessage({
+          chatId,
+          text,
+        })
+        .catch((error: unknown) => {
+          console.warn("[telegram] admin pending notification failed", {
+            chatId,
+            errorType: error instanceof Error ? error.name : typeof error,
+          });
+        }),
+    ),
+  );
 }
 
 async function handleStartCommand(
@@ -1450,6 +1572,22 @@ async function handleStartCommand(
   const existing = await runtime.store.resolveTelegramUser(telegramUserId);
 
   if (existing) {
+    if (existing.status === "pending") {
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: "Your LifeOS access request is already waiting for approval.",
+      });
+      return;
+    }
+
+    if (existing.status === "blocked") {
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: "LifeOS access is blocked.",
+      });
+      return;
+    }
+
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
       text: [
@@ -1471,7 +1609,7 @@ async function handleStartCommand(
       const linked = await runtime.store.linkDefaultTelegramUser({
         userId: runtime.defaultUserId,
         telegramUserId,
-        displayName: message.from?.first_name ?? null,
+        displayName: telegramDisplayName(message),
       });
 
       await runtime.telegram.sendMessage({
@@ -1498,12 +1636,37 @@ async function handleStartCommand(
 
   await runtime.telegram.sendMessage({
     chatId: message.chat.id,
-    text: [
-      "LifeOS bot is online.",
-      "Your Telegram account is not linked yet.",
-      bootstrapHint(message, runtime),
-    ].join("\n"),
+    text: "Creating your LifeOS access request...",
   });
+
+  try {
+    const pending = await runtime.store.createPendingTelegramUser({
+      telegramUserId,
+      displayName: telegramDisplayName(message),
+      username: telegramUsername(message),
+    });
+
+    await notifyAdminsOfPendingUser(message, runtime, telegramUserId);
+
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: [
+        "LifeOS access request created.",
+        `Telegram user id: <code>${telegramUserId}</code>`,
+        `Status: <b>${pending.status}</b>`,
+        "An admin needs to approve it before commands are available.",
+      ].join("\n"),
+    });
+  } catch (error) {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: [
+        "LifeOS bot is online, but signup failed.",
+        error instanceof Error ? escapeHtml(error.message) : "Unknown error",
+        bootstrapHint(message, runtime),
+      ].join("\n"),
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1519,6 +1682,135 @@ async function handleHelpCommand(
   await runtime.telegram.sendMessage({
     chatId: message.chat.id,
     text: HELP_TEXT,
+  });
+}
+
+async function handlePendingCommand(
+  _args: string,
+  message: TelegramMessage,
+  runtime: TelegramBotRuntime,
+  _user: TelegramUserRecord | null,
+): Promise<void> {
+  if (!(await requireAdmin(message, runtime))) {
+    return;
+  }
+
+  const pending = await runtime.store!.listPendingUsers();
+
+  await runtime.telegram.sendMessage({
+    chatId: message.chat.id,
+    text: pending.length
+      ? ["Pending LifeOS users:", ...pending.map(formatTelegramProfile)].join(
+          "\n",
+        )
+      : "No pending LifeOS users.",
+  });
+}
+
+async function handleApproveCommand(
+  args: string,
+  message: TelegramMessage,
+  runtime: TelegramBotRuntime,
+  _user: TelegramUserRecord | null,
+): Promise<void> {
+  if (!(await requireAdmin(message, runtime))) {
+    return;
+  }
+
+  const telegramUserId = parseTelegramId(args);
+
+  if (!telegramUserId) {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "Usage: /approve <telegram_id>",
+    });
+    return;
+  }
+
+  const approved = await runtime.store!.approveTelegramUser(
+    telegramUserId,
+    message.from?.id,
+  );
+
+  if (!approved) {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "Telegram user not found.",
+    });
+    return;
+  }
+
+  await runtime.telegram.sendMessage({
+    chatId: message.chat.id,
+    text: [
+      "LifeOS user approved.",
+      `Telegram id: <code>${telegramUserId}</code>`,
+      `Profile: <code>${approved.userId}</code>`,
+    ].join("\n"),
+  });
+
+  await runtime.telegram
+    .sendMessage({
+      chatId: telegramUserId,
+      text: "Your LifeOS access has been approved. Use /help to see commands.",
+    })
+    .catch((error: unknown) => {
+      console.warn("[telegram] approval notification failed", {
+        telegramUserId,
+        errorType: error instanceof Error ? error.name : typeof error,
+      });
+    });
+}
+
+async function handleBlockCommand(
+  args: string,
+  message: TelegramMessage,
+  runtime: TelegramBotRuntime,
+  _user: TelegramUserRecord | null,
+): Promise<void> {
+  if (!(await requireAdmin(message, runtime))) {
+    return;
+  }
+
+  const telegramUserId = parseTelegramId(args);
+
+  if (!telegramUserId) {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "Usage: /block <telegram_id>",
+    });
+    return;
+  }
+
+  const blocked = await runtime.store!.blockTelegramUser(telegramUserId);
+
+  await runtime.telegram.sendMessage({
+    chatId: message.chat.id,
+    text: blocked
+      ? `LifeOS user blocked: <code>${telegramUserId}</code>`
+      : "Telegram user not found.",
+  });
+}
+
+async function handleUsersCommand(
+  _args: string,
+  message: TelegramMessage,
+  runtime: TelegramBotRuntime,
+  _user: TelegramUserRecord | null,
+): Promise<void> {
+  if (!(await requireAdmin(message, runtime))) {
+    return;
+  }
+
+  const users = await runtime.store!.listTelegramUsers(25);
+
+  await runtime.telegram.sendMessage({
+    chatId: message.chat.id,
+    text: users.length
+      ? ["LifeOS Telegram users:", ...users.map(formatTelegramProfile)].join(
+          "\n",
+        )
+      : "No LifeOS Telegram users found.",
   });
 }
 
@@ -2700,12 +2992,18 @@ async function handleFinanceAskCommand(
   const lines = [
     result.answer,
     result.recommendations.length
-      ? ["", "Recommendations:", ...result.recommendations.map((item) => `- ${item}`)]
+      ? [
+          "",
+          "Recommendations:",
+          ...result.recommendations.map((item) => `- ${item}`),
+        ]
           .flat()
           .join("\n")
       : "",
     result.risks.length
-      ? ["", "Risks:", ...result.risks.map((item) => `- ${item}`)].flat().join("\n")
+      ? ["", "Risks:", ...result.risks.map((item) => `- ${item}`)]
+          .flat()
+          .join("\n")
       : "",
   ]
     .filter(Boolean)
@@ -2749,7 +3047,12 @@ function makeFinanceStatusHandler(
           runtime.now?.() ?? new Date(),
           user!.timezone || LOCAL_TIMEZONE,
         );
-        void triggerFinanceAlerts(runtime.store!, runtime.telegram, user!.userId, today).catch(console.error);
+        void triggerFinanceAlerts(
+          runtime.store!,
+          runtime.telegram,
+          user!.userId,
+          today,
+        ).catch(console.error);
       }
     } catch (error) {
       await runtime.telegram.sendMessage({
@@ -2796,7 +3099,12 @@ async function handleFinanceFixCommand(
         runtime.now?.() ?? new Date(),
         user!.timezone || LOCAL_TIMEZONE,
       );
-      void triggerFinanceAlerts(runtime.store!, runtime.telegram, user!.userId, today).catch(console.error);
+      void triggerFinanceAlerts(
+        runtime.store!,
+        runtime.telegram,
+        user!.userId,
+        today,
+      ).catch(console.error);
     }
   } catch (error) {
     await runtime.telegram.sendMessage({
@@ -2821,6 +3129,10 @@ const COMMAND_REGISTRY: Record<string, CommandConfig> = {
   },
   help: { handler: handleHelpCommand, requiresUser: false },
   hepl: { handler: handleHelpCommand, requiresUser: false },
+  pending: { handler: handlePendingCommand, requiresUser: false },
+  approve: { handler: handleApproveCommand, requiresUser: false },
+  block: { handler: handleBlockCommand, requiresUser: false },
+  users: { handler: handleUsersCommand, requiresUser: false },
   status: { handler: handleStatusCommand, requiresUser: false },
   healthz: { handler: handleHealthzCommand, requiresUser: false },
 
@@ -2989,7 +3301,8 @@ async function handleBudgetCommand(
       const totalSpent = group.reduce((s, p) => s + p.actualSpent, 0);
       const totalLimit = group.reduce((s, p) => s + p.limitAmount, 0);
       const totalRemaining = totalLimit - totalSpent;
-      const totalPercent = totalLimit > 0 ? Math.round((totalSpent / totalLimit) * 100) : 0;
+      const totalPercent =
+        totalLimit > 0 ? Math.round((totalSpent / totalLimit) * 100) : 0;
 
       const footer = [
         "",
@@ -3119,9 +3432,7 @@ async function handleBankCommand(
       const page = lines.slice(0, PAGE_SIZE);
       const remaining = lines.length - PAGE_SIZE;
 
-      const lineTexts = page.map((line, index) =>
-        formatBankLine(line, index),
-      );
+      const lineTexts = page.map((line, index) => formatBankLine(line, index));
 
       const footer =
         remaining > 0
@@ -3249,7 +3560,8 @@ async function handlePhotoUpload(
 
     const arrayBuffer = await fileResponse.arrayBuffer();
     const bytes = new Uint8Array(arrayBuffer);
-    const contentType = fileResponse.headers.get("content-type") ?? "image/jpeg";
+    const contentType =
+      fileResponse.headers.get("content-type") ?? "image/jpeg";
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     const fileName = `receipt-${timestamp}.jpg`;
@@ -3282,9 +3594,7 @@ async function handlePhotoUpload(
       chatId: message.chat.id,
       text: [
         "Failed to process receipt photo.",
-        escapeHtml(
-          error instanceof Error ? error.message : "Unknown error",
-        ),
+        escapeHtml(error instanceof Error ? error.message : "Unknown error"),
       ].join("\n"),
     });
   }

@@ -24,6 +24,8 @@ LIFEOS_DEFAULT_USER_ID=your-auth-user-uuid
 
 The default is `ALLOW_UNSAFE_TMA_DEV_AUTH=false`.
 
+The resolved Telegram profile must be `status = 'active'`. Pending users receive `telegram_user_pending`; blocked users receive `telegram_user_blocked`.
+
 For local browser testing without Telegram, set:
 
 ```bash

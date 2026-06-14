@@ -35,6 +35,8 @@ class SupabaseClientProtocol(Protocol):
 
     def claim_reminder(self, reminder_id: str) -> JsonObject | None: ...
 
+    def resolve_reminder_recipient(self, reminder: JsonObject) -> str | None: ...
+
     def mark_reminder_sent(self, reminder_id: str) -> JsonObject | None: ...
 
     def record_send_failure(self, reminder: JsonObject, error: str) -> JsonObject | None: ...
@@ -55,9 +57,9 @@ class Settings:
     supabase_url: str
     service_role_key: str
     telegram_bot_token: str
-    telegram_user_id: str
     poll_seconds: int
     batch_size: int
+    test_telegram_user_id: str | None = None
     local_timezone: str = LOCAL_TIMEZONE
     quiet_hours_start: str = "23:00"
     quiet_hours_end: str = "08:00"
@@ -130,9 +132,12 @@ def load_settings(env_file: Path | None = None) -> Settings:
         supabase_url=getenv_required("SUPABASE_URL").rstrip("/"),
         service_role_key=getenv_required("SUPABASE_SERVICE_ROLE_KEY"),
         telegram_bot_token=getenv_required("TELEGRAM_BOT_TOKEN"),
-        telegram_user_id=getenv_required("LIFEOS_DEFAULT_TELEGRAM_USER_ID"),
         poll_seconds=getenv_int("REMINDER_WORKER_POLL_SECONDS", 30),
         batch_size=getenv_int("REMINDER_WORKER_BATCH_SIZE", 20),
+        test_telegram_user_id=os.environ.get(
+            "REMINDER_WORKER_TEST_TELEGRAM_USER_ID", ""
+        ).strip()
+        or None,
         local_timezone=os.environ.get("APP_TIMEZONE", LOCAL_TIMEZONE).strip()
         or LOCAL_TIMEZONE,
         quiet_hours_start=os.environ.get(
@@ -161,19 +166,24 @@ def parse_datetime(value: str) -> datetime:
     return parsed
 
 
-def local_time_label(value: str, timezone_name: str = LOCAL_TIMEZONE) -> str:
+def resolve_timezone(timezone_name: str):
     try:
-        tz = ZoneInfo(timezone_name)
+        return ZoneInfo(timezone_name), timezone_name
     except ZoneInfoNotFoundError:
-        tz = timezone.utc
-        timezone_name = "UTC"
+        if timezone_name == "Asia/Qyzylorda":
+            return timezone(timedelta(hours=5)), timezone_name
+        return timezone.utc, "UTC"
+
+
+def local_time_label(value: str, timezone_name: str = LOCAL_TIMEZONE) -> str:
+    tz, label = resolve_timezone(timezone_name)
 
     try:
         local = parse_datetime(value).astimezone(tz)
     except ValueError:
         return value
 
-    return f"{local:%Y-%m-%d %H:%M} ({timezone_name})"
+    return f"{local:%Y-%m-%d %H:%M} ({label})"
 
 
 def truncate_error(error: object) -> str:
@@ -309,6 +319,33 @@ class SupabaseRestClient:
             prefer="return=representation",
         )
         return rows[0] if rows else None
+
+    def resolve_reminder_recipient(self, reminder: JsonObject) -> str | None:
+        user_id = str(reminder.get("user_id") or "").strip()
+
+        if not user_id:
+            raise WorkerError("Cannot resolve reminder recipient without user_id")
+
+        rows = self.request(
+            "GET",
+            "profiles",
+            {
+                "select": "telegram_user_id",
+                "user_id": f"eq.{user_id}",
+                "status": "eq.active",
+                "limit": "1",
+            },
+        )
+
+        if not rows:
+            return None
+
+        telegram_user_id = rows[0].get("telegram_user_id")
+
+        if telegram_user_id is None or str(telegram_user_id).strip() == "":
+            return None
+
+        return str(telegram_user_id)
 
     def mark_reminder_sent(self, reminder_id: str) -> JsonObject | None:
         now = utc_now()
@@ -516,10 +553,8 @@ def reminder_metadata(reminder: JsonObject) -> JsonObject:
 
 
 def is_quiet_time(value: datetime, settings: Settings) -> bool:
-    try:
-        local = value.astimezone(ZoneInfo(settings.local_timezone))
-    except ZoneInfoNotFoundError:
-        local = value.astimezone(timezone.utc)
+    tz, _label = resolve_timezone(settings.local_timezone)
+    local = value.astimezone(tz)
     current = local.time().replace(tzinfo=None)
     start = datetime_time.fromisoformat(settings.quiet_hours_start)
     end = datetime_time.fromisoformat(settings.quiet_hours_end)
@@ -529,10 +564,8 @@ def is_quiet_time(value: datetime, settings: Settings) -> bool:
 
 
 def next_quiet_end(value: datetime, settings: Settings) -> datetime:
-    try:
-        local = value.astimezone(ZoneInfo(settings.local_timezone))
-    except ZoneInfoNotFoundError:
-        local = value.astimezone(timezone.utc)
+    tz, _label = resolve_timezone(settings.local_timezone)
+    local = value.astimezone(tz)
     end = datetime_time.fromisoformat(settings.quiet_hours_end)
     target_day = local.date()
     if local.time().replace(tzinfo=None) >= datetime_time.fromisoformat(
@@ -643,9 +676,21 @@ def process_due_reminders(
                     defer_until,
                 )
                 continue
+            recipient = supabase.resolve_reminder_recipient(reminder)
+            if recipient is None:
+                raise WorkerError(
+                    "Reminder owner has no active Telegram profile; "
+                    f"user_id={reminder.get('user_id') or 'unknown'}"
+                )
             context = supabase.fetch_reminder_context(reminder)
+            logging.info(
+                "reminder id=%s user_id=%s telegram_user_id=%s status=sending",
+                reminder_id,
+                reminder.get("user_id") or "unknown",
+                recipient,
+            )
             telegram.send_message(
-                settings.telegram_user_id,
+                recipient,
                 format_telegram_message(reminder, context, settings.local_timezone),
             )
         except Exception as exc:  # noqa: BLE001 - isolate one reminder from the batch.
@@ -720,14 +765,19 @@ def run_loop(settings: Settings) -> None:
 
 
 def test_send(settings: Settings) -> None:
+    if not settings.test_telegram_user_id:
+        raise WorkerError(
+            "Missing required environment variable: REMINDER_WORKER_TEST_TELEGRAM_USER_ID"
+        )
+
     telegram = TelegramApiClient(settings.telegram_bot_token)
     text = (
         "🔔 Reminder\n\n"
         "LifeOS reminder worker test-send\n\n"
         f"Time: {local_time_label(utc_now(), settings.local_timezone)}"
     )
-    telegram.send_message(settings.telegram_user_id, text)
-    print(f"Sent test reminder to Telegram user id {settings.telegram_user_id}.")
+    telegram.send_message(settings.test_telegram_user_id, text)
+    print(f"Sent test reminder to Telegram user id {settings.test_telegram_user_id}.")
 
 
 def status(settings: Settings) -> None:
