@@ -27,7 +27,7 @@ The Android health bridge reads previous-day data from Health Connect and posts 
 
 The web dashboard reads through backend APIs. It does not carry service-role keys, ingest secrets, or bot tokens.
 
-The Obsidian mirror worker runs on an Arch Linux server, claims queue rows from Supabase, renders safe Markdown paths inside `OBSIDIAN_VAULT_PATH`, and writes atomically.
+The Obsidian mirror worker runs on an Arch Linux server, claims queue rows from Supabase, loads `public.user_obsidian_settings` for the row owner, renders safe Markdown paths inside that user's configured vault, and writes atomically.
 
 ## Source Of Truth
 
@@ -46,14 +46,13 @@ The stabilized vertical slice keeps Supabase Auth as the identity root:
 
 For local single-user setup, `LIFEOS_DEFAULT_USER_ID` and `LIFEOS_DEFAULT_TELEGRAM_USER_ID` let `/start` link the configured Telegram account when the auth user exists.
 
-Current multi-user MVP caveat: Telegram bot/TMA access, health ingest, and reminder delivery are user-scoped. The remaining local integrations are guarded legacy single-user modes and are not production multi-user until per-user configuration exists:
+Current multi-user MVP caveat: Telegram bot/TMA access, health ingest, reminder delivery, and Obsidian mirror routing are user-scoped. The remaining local integrations are guarded legacy single-user modes and are not production multi-user until per-user configuration exists:
 
 - `workers/google-sync` uses one local `GOOGLE_TOKEN_FILE` and `LIFEOS_DEFAULT_USER_ID`. It requires `LIFEOS_ENABLE_LEGACY_SINGLE_USER_GOOGLE_SYNC=true`.
 - `workers/ics-sync` assigns configured feed URLs to `LIFEOS_DEFAULT_USER_ID`. It requires `LIFEOS_ENABLE_LEGACY_SINGLE_USER_ICS_SYNC=true`.
 - `workers/monthly-review-worker` uses `LIFEOS_DEFAULT_USER_ID`, optional `LIFEOS_DEFAULT_TELEGRAM_USER_ID`, and one vault path. It requires `LIFEOS_ENABLE_LEGACY_SINGLE_USER_MONTHLY_REVIEW=true`.
-- `workers/obsidian-mirror` writes to one `OBSIDIAN_VAULT_PATH` mirror. It requires `LIFEOS_ENABLE_LEGACY_SINGLE_USER_OBSIDIAN=true`.
 
-Do not present these integrations as connected for every newly approved user until per-user OAuth/source/vault configuration exists.
+Do not present Google, ICS, or standalone monthly-review integrations as connected for every newly approved user until per-user OAuth/source configuration exists. Obsidian mirror is connected only for users with `user_obsidian_settings.enabled = true`, `status = 'connected'`, and a local vault path.
 
 ## Deployment Targets
 

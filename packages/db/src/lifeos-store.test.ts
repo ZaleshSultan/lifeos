@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { SupabaseLifeOSStore } from "./lifeos-store.js";
 
 interface FakeRow {
-  id: string;
+  [key: string]: unknown;
+  id?: string;
   user_id?: string;
   status?: string;
 }
@@ -19,6 +20,7 @@ class FakeSupabaseClient {
   transactions: FakeRow[] = [];
   tags: FakeRow[] = [];
   receipts: FakeRow[] = [];
+  obsidianSettings: FakeRow[] = [];
   queries: FakeQueryReceipt[] = [];
 
   from(table: string): FakeQuery {
@@ -37,7 +39,7 @@ class FakeQuery {
     private readonly table: string,
   ) {}
 
-  select(): this {
+  select(_columns?: string): this {
     return this;
   }
 
@@ -47,7 +49,7 @@ class FakeQuery {
     return this;
   }
 
-  upsert(payload: unknown): this {
+  upsert(payload: unknown, _options?: unknown): this {
     this.action = "upsert";
     this.payload = payload;
     return this;
@@ -64,10 +66,18 @@ class FakeQuery {
   }
 
   maybeSingle(): Promise<{ data: FakeRow | null; error: null }> {
-    return Promise.resolve({
-      data: this.filteredRows()[0] ?? null,
-      error: null,
-    });
+    const data = this.action === "select" ? this.filteredRows()[0] ?? null : null;
+    this.recordQuery();
+    return Promise.resolve({ data, error: null });
+  }
+
+  single(): Promise<{ data: FakeRow; error: null }> {
+    const data =
+      this.action === "upsert"
+        ? this.upsertRow()
+        : (this.filteredRows()[0] ?? {});
+    this.recordQuery();
+    return Promise.resolve({ data, error: null });
   }
 
   then<TResult1 = { data: FakeRow[] | null; error: null }, TResult2 = never>(
@@ -76,6 +86,18 @@ class FakeQuery {
       | null,
     onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
   ): Promise<TResult1 | TResult2> {
+    return Promise.resolve({
+      data: this.action === "select" ? this.filteredRows() : null,
+      error: null,
+    })
+      .then((value) => {
+        this.recordQuery();
+        return value;
+      })
+      .then(onfulfilled, onrejected);
+  }
+
+  private recordQuery(): void {
     this.client.queries.push({
       table: this.table,
       action: this.action,
@@ -83,11 +105,40 @@ class FakeQuery {
       inFilters: { ...this.inFilters },
       payload: this.payload,
     });
+  }
 
-    return Promise.resolve({
-      data: this.action === "select" ? this.filteredRows() : null,
-      error: null,
-    }).then(onfulfilled, onrejected);
+  private upsertRow(): FakeRow {
+    if (this.table !== "user_obsidian_settings") {
+      return {};
+    }
+
+    if (!this.payload || Array.isArray(this.payload)) {
+      throw new Error("Unexpected upsert payload");
+    }
+
+    const payload = this.payload as FakeRow;
+    const rows = this.tableRows();
+    const existing = rows.find((row) => row.user_id === payload.user_id);
+    const defaults = {
+      enabled: false,
+      mode: "local_vault",
+      vault_path: null,
+      status: "disconnected",
+      metadata: {},
+      created_at: "2026-06-15T10:00:00Z",
+      updated_at: "2026-06-15T10:00:00Z",
+    };
+
+    if (existing) {
+      Object.assign(existing, payload, {
+        updated_at: "2026-06-15T10:00:00Z",
+      });
+      return existing;
+    }
+
+    const row = { ...defaults, ...payload };
+    rows.push(row);
+    return row;
   }
 
   private filteredRows(): FakeRow[] {
@@ -119,6 +170,10 @@ class FakeQuery {
 
     if (this.table === "finance_receipts") {
       return this.client.receipts;
+    }
+
+    if (this.table === "user_obsidian_settings") {
+      return this.client.obsidianSettings;
     }
 
     return [];
@@ -212,5 +267,104 @@ describe("SupabaseLifeOSStore tenant isolation", () => {
           query.table === "finance_transactions" && query.action === "update",
       ),
     ).toBe(false);
+  });
+});
+
+describe("SupabaseLifeOSStore Obsidian settings", () => {
+  it("loads Obsidian settings scoped by user_id", async () => {
+    const client = new FakeSupabaseClient();
+    client.obsidianSettings = [
+      {
+        user_id: "user-a",
+        enabled: true,
+        mode: "local_vault",
+        vault_path: "/vault/a",
+        status: "connected",
+        metadata: {},
+        created_at: "2026-06-15T10:00:00Z",
+        updated_at: "2026-06-15T10:00:00Z",
+      },
+      {
+        user_id: "user-b",
+        enabled: true,
+        mode: "local_vault",
+        vault_path: "/vault/b",
+        status: "connected",
+        metadata: {},
+        created_at: "2026-06-15T10:00:00Z",
+        updated_at: "2026-06-15T10:00:00Z",
+      },
+    ];
+
+    const settings = await storeWith(client).getUserObsidianSettings("user-a");
+
+    expect(settings?.vaultPath).toBe("/vault/a");
+    expect(
+      client.queries.some(
+        (query) =>
+          query.table === "user_obsidian_settings" &&
+          query.filters.user_id === "user-a",
+      ),
+    ).toBe(true);
+  });
+
+  it("upserts Obsidian settings for the requested user", async () => {
+    const client = new FakeSupabaseClient();
+
+    const settings = await storeWith(client).upsertUserObsidianSettings(
+      "user-a",
+      {
+        enabled: true,
+        mode: "local_vault",
+        vaultPath: "/vault/a",
+        status: "connected",
+        metadata: { host: "arch" },
+      },
+    );
+
+    expect(settings.userId).toBe("user-a");
+    expect(settings.vaultPath).toBe("/vault/a");
+    expect(client.obsidianSettings[0]).toMatchObject({
+      user_id: "user-a",
+      enabled: true,
+      vault_path: "/vault/a",
+      status: "connected",
+    });
+  });
+
+  it("requires enabled connected local vault settings", async () => {
+    const client = new FakeSupabaseClient();
+    client.obsidianSettings = [
+      {
+        user_id: "user-a",
+        enabled: true,
+        mode: "local_vault",
+        vault_path: "/vault/a",
+        status: "connected",
+        metadata: {},
+        created_at: "2026-06-15T10:00:00Z",
+        updated_at: "2026-06-15T10:00:00Z",
+      },
+      {
+        user_id: "user-b",
+        enabled: true,
+        mode: "local_vault",
+        vault_path: "",
+        status: "connected",
+        metadata: {},
+        created_at: "2026-06-15T10:00:00Z",
+        updated_at: "2026-06-15T10:00:00Z",
+      },
+    ];
+
+    await expect(storeWith(client).isObsidianEnabledForUser("user-a")).resolves.toBe(
+      true,
+    );
+    await expect(storeWith(client).isObsidianEnabledForUser("user-b")).resolves.toBe(
+      false,
+    );
+    await expect(storeWith(client).isObsidianEnabledForUser("missing")).resolves.toBe(
+      false,
+    );
   });
 });

@@ -15,7 +15,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -67,10 +67,10 @@ RESERVED_WINDOWS_NAMES = {
 class Settings:
     supabase_url: str
     service_role_key: str
-    vault_path: Path
     batch_size: int
     interval_seconds: int
     dashboard_dir: str
+    legacy_vault_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -133,14 +133,11 @@ def getenv_bool(name: str, default: bool = False) -> bool:
     return raw in {"1", "true", "yes", "on"}
 
 
-def require_legacy_single_user_mode() -> None:
-    if getenv_bool(LEGACY_SINGLE_USER_ENV):
-        return
-    raise WorkerError(
-        "obsidian-mirror is still legacy single-user mode; set "
-        f"{LEGACY_SINGLE_USER_ENV}=true only for local/dev or explicitly accepted "
-        "single-user deployments. Per-user vault routing is not implemented yet."
-    )
+def resolve_vault_path(value: str | Path | None) -> Path:
+    raw = str(value or "").strip()
+    if not raw:
+        raise WorkerError("Obsidian vault path is empty")
+    return Path(raw).expanduser().resolve()
 
 
 def load_settings(env_file: Path | None = None) -> Settings:
@@ -150,16 +147,20 @@ def load_settings(env_file: Path | None = None) -> Settings:
     if env_file is not None:
         load_dotenv(env_file)
 
-    require_legacy_single_user_mode()
+    legacy_vault_path = (
+        resolve_vault_path(getenv_required("OBSIDIAN_VAULT_PATH"))
+        if getenv_bool(LEGACY_SINGLE_USER_ENV)
+        else None
+    )
 
     return Settings(
         supabase_url=getenv_required("SUPABASE_URL").rstrip("/"),
         service_role_key=getenv_required("SUPABASE_SERVICE_ROLE_KEY"),
-        vault_path=Path(getenv_required("OBSIDIAN_VAULT_PATH")).expanduser().resolve(),
         batch_size=getenv_int("OBSIDIAN_MIRROR_BATCH_SIZE", 10),
         interval_seconds=getenv_int("OBSIDIAN_MIRROR_INTERVAL_SECONDS", 30),
         dashboard_dir=os.environ.get("OBSIDIAN_MIRROR_DASHBOARD_DIR", "Dashboards").strip()
         or "Dashboards",
+        legacy_vault_path=legacy_vault_path,
     )
 
 
@@ -271,21 +272,58 @@ class SupabaseRestClient:
             },
         )
 
-    def fetch_one(self, table: str, row_id: str) -> JsonObject | None:
+    def defer_job(self, job_id: str, error: str, delay_seconds: int = 3600) -> None:
+        available_at = (
+            datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
+        ).isoformat().replace("+00:00", "Z")
+        self.request(
+            "PATCH",
+            "obsidian_sync_queue",
+            {"id": f"eq.{job_id}"},
+            {
+                "status": "pending",
+                "available_at": available_at,
+                "locked_at": None,
+                "last_error": error[:2000],
+            },
+        )
+
+    def fetch_one(
+        self,
+        table: str,
+        row_id: str,
+        user_id: str | None = None,
+    ) -> JsonObject | None:
+        query = {
+            "select": "*",
+            "id": f"eq.{row_id}",
+            "limit": "1",
+        }
+        if user_id is not None:
+            query["user_id"] = f"eq.{user_id}"
+
         rows = self.request(
             "GET",
             table,
-            {
-                "select": "*",
-                "id": f"eq.{row_id}",
-                "limit": "1",
-            },
+            query,
         )
 
         if not rows:
             return None
 
         return rows[0]
+
+    def get_user_obsidian_settings(self, user_id: str) -> JsonObject | None:
+        rows = self.request(
+            "GET",
+            "user_obsidian_settings",
+            {
+                "select": "enabled,mode,vault_path,status",
+                "user_id": f"eq.{user_id}",
+                "limit": "1",
+            },
+        )
+        return rows[0] if rows else None
 
 
 def sanitize_segment(value: Any, fallback: str = "untitled", max_length: int = 120) -> str:
@@ -320,6 +358,7 @@ def note_path(vault: Path, relative_segments: list[str]) -> Path:
     if not relative_segments:
         raise WorkerError("Note path requires at least one segment")
 
+    vault = resolve_vault_path(vault)
     safe_segments = [sanitize_segment(segment) for segment in relative_segments]
     safe_segments[-1] = sanitize_segment(safe_segments[-1].removesuffix(".md")) + ".md"
     target = vault.joinpath(*safe_segments).resolve()
@@ -865,12 +904,13 @@ SORT created_at DESC
 """
 
 
-def init_dashboards(settings: Settings) -> int:
-    settings.vault_path.mkdir(parents=True, exist_ok=True)
+def init_dashboards(vault_path: Path, dashboard_dir: str) -> int:
+    vault_path = resolve_vault_path(vault_path)
+    vault_path.mkdir(parents=True, exist_ok=True)
     created = 0
 
     for filename, content in DASHBOARDS.items():
-        target = note_path(settings.vault_path, [settings.dashboard_dir, filename])
+        target = note_path(vault_path, [dashboard_dir, filename])
 
         if write_if_missing(target, content):
             created += 1
@@ -884,26 +924,57 @@ def init_dashboards(settings: Settings) -> int:
     return created
 
 
-def fetch_linked_detail(client: SupabaseRestClient, entity: JsonObject) -> JsonObject | None:
+def fetch_linked_detail(
+    client: SupabaseRestClient,
+    entity: JsonObject,
+    user_id: str,
+) -> JsonObject | None:
     linked_table = entity.get("linked_table")
     linked_id = entity.get("linked_id")
 
     if linked_table not in {"tasks", "workouts", "health_daily"} or not linked_id:
         return None
 
-    return client.fetch_one(str(linked_table), str(linked_id))
+    return client.fetch_one(str(linked_table), str(linked_id), user_id=user_id)
 
 
 def write_entity_note(
-    settings: Settings,
+    vault_path: Path,
     entity: JsonObject,
     detail: JsonObject | None,
     target_segments: list[str] | None = None,
 ) -> Path:
     rendered = render_entity(entity, detail)
-    target = note_path(settings.vault_path, target_segments or rendered.relative_segments)
+    target = note_path(vault_path, target_segments or rendered.relative_segments)
     atomic_write(target, rendered.markdown)
     return target
+
+
+def job_user_id(job: JsonObject) -> str:
+    user_id = str(job.get("user_id") or "").strip()
+    if not user_id:
+        raise WorkerError("Queue job has no user_id")
+    return user_id
+
+
+def settings_vault_path(settings: Settings, client: SupabaseRestClient, user_id: str) -> Path | None:
+    obsidian_settings = client.get_user_obsidian_settings(user_id)
+
+    if obsidian_settings is None:
+        return settings.legacy_vault_path
+
+    if not obsidian_settings.get("enabled"):
+        return None
+    if obsidian_settings.get("status") != "connected":
+        return None
+    if obsidian_settings.get("mode") != "local_vault":
+        return None
+
+    vault_path = str(obsidian_settings.get("vault_path") or "").strip()
+    if not vault_path:
+        return None
+
+    return resolve_vault_path(vault_path)
 
 
 def process_job(settings: Settings, client: SupabaseRestClient, job: JsonObject) -> bool:
@@ -915,18 +986,27 @@ def process_job(settings: Settings, client: SupabaseRestClient, job: JsonObject)
     job_id = str(claimed["id"])
 
     try:
+        user_id = job_user_id(claimed)
+        vault_path = settings_vault_path(settings, client, user_id)
+        if vault_path is None:
+            client.defer_job(job_id, "Obsidian sync is not connected for this user")
+            print(f"deferred {job_id}: Obsidian sync is not connected for user", file=sys.stderr)
+            return False
+
         life_entity_id = claimed.get("life_entity_id")
 
         if not life_entity_id:
             raise WorkerError("Queue job has no life_entity_id")
 
-        entity = client.fetch_one("life_entities", str(life_entity_id))
+        target_segments = queued_target_segments(claimed)
+        entity = client.fetch_one("life_entities", str(life_entity_id), user_id=user_id)
 
         if entity is None:
             raise WorkerError(f"Life entity not found: {life_entity_id}")
 
-        detail = fetch_linked_detail(client, entity)
-        target = write_entity_note(settings, entity, detail, queued_target_segments(claimed))
+        detail = fetch_linked_detail(client, entity, user_id)
+        init_dashboards(vault_path, settings.dashboard_dir)
+        target = write_entity_note(vault_path, entity, detail, target_segments)
         client.complete_job(job_id)
         print(f"mirrored {life_entity_id} -> {target}")
         return True
@@ -938,7 +1018,6 @@ def process_job(settings: Settings, client: SupabaseRestClient, job: JsonObject)
 
 
 def run_once(settings: Settings) -> int:
-    init_dashboards(settings)
     client = SupabaseRestClient(settings.supabase_url, settings.service_role_key)
     jobs = client.list_pending_jobs(settings.batch_size)
     processed = 0
@@ -1072,7 +1151,13 @@ def main(argv: list[str] | None = None) -> int:
     settings = load_settings(args.env_file)
 
     if args.command == "init-dashboards":
-        init_dashboards(settings)
+        if settings.legacy_vault_path is None:
+            raise WorkerError(
+                "init-dashboards requires "
+                f"{LEGACY_SINGLE_USER_ENV}=true and OBSIDIAN_VAULT_PATH; "
+                "multi-user dashboards are initialized per user vault while processing jobs"
+            )
+        init_dashboards(settings.legacy_vault_path, settings.dashboard_dir)
         return 0
 
     if args.command == "run-once":

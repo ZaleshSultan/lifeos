@@ -1,6 +1,8 @@
 # Obsidian Sync
 
 The Obsidian mirror is a local Markdown projection of Supabase life entities.
+In multi-user mode, each owner routes to their own local vault through
+`public.user_obsidian_settings`.
 
 ## Worker
 
@@ -15,14 +17,26 @@ Modes:
 
 ## Safety Rules
 
-- The worker must write only inside `OBSIDIAN_VAULT_PATH`.
+- The worker must write only inside the selected user's configured `vault_path`.
 - Rendered paths must pass sanitizer checks.
 - Writes are atomic.
 - The worker does not delete files.
 - Supabase remains the source of truth.
-- The current worker is legacy single-user and must keep
-  `LIFEOS_ENABLE_LEGACY_SINGLE_USER_OBSIDIAN=false` in multi-user production
-  until queue claims and vault output are routed per user.
+- `OBSIDIAN_VAULT_PATH` is legacy/dev fallback only and is ignored unless
+  `LIFEOS_ENABLE_LEGACY_SINGLE_USER_OBSIDIAN=true`.
+- Queue rows without connected per-user settings are deferred without file
+  writes.
+
+## User Settings
+
+Table: `public.user_obsidian_settings`
+
+Required local-vault settings for writes:
+
+- `enabled = true`
+- `mode = 'local_vault'`
+- `status = 'connected'`
+- `vault_path` points to that user's local vault
 
 ## Supported Render Types
 
@@ -40,16 +54,15 @@ Completed TMA workouts update the linked `workout` life entity with exercise/set
 
 ```bash
 sudo pacman -Syu --needed python git
-sudo mkdir -p /opt/lifeos /etc/lifeos /srv/obsidian-vault
+sudo mkdir -p /opt/lifeos /etc/lifeos /srv/obsidian-vaults
 cd /opt/lifeos/workers/obsidian-mirror
 cp .env.example /etc/lifeos/obsidian-mirror.env
 $EDITOR /etc/lifeos/obsidian-mirror.env
-python obsidian_mirror.py init-dashboards
 python obsidian_mirror.py run-once
 ```
 
-Set `LIFEOS_ENABLE_LEGACY_SINGLE_USER_OBSIDIAN=true` only for local/dev or an
-explicitly accepted single-user deployment.
+`init-dashboards` is for legacy single-user fallback only. Multi-user dashboards
+are initialized in the selected user's vault while processing jobs.
 
 ## systemd
 

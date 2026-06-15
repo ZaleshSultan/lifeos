@@ -336,6 +336,15 @@ export function tmaStore(events: string[] = []): LifeOSStore {
     async getObsidianSyncStatus() {
       return { counts: {} };
     },
+    async getUserObsidianSettings() {
+      return null;
+    },
+    async upsertUserObsidianSettings() {
+      throw new Error("not used");
+    },
+    async isObsidianEnabledForUser() {
+      return false;
+    },
     async getHealthSyncStatus() {
       return { counts: {}, runs: [], latestRun: null };
     },

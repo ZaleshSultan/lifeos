@@ -413,6 +413,22 @@ class FakeStore implements LifeOSStore {
     };
   }
 
+  async getUserObsidianSettings(): Promise<
+    Awaited<ReturnType<LifeOSStore["getUserObsidianSettings"]>>
+  > {
+    return null;
+  }
+
+  async upsertUserObsidianSettings(): Promise<
+    Awaited<ReturnType<LifeOSStore["upsertUserObsidianSettings"]>>
+  > {
+    throw new Error("not used");
+  }
+
+  async isObsidianEnabledForUser(): Promise<boolean> {
+    return false;
+  }
+
   async getHealthSyncStatus(): Promise<HealthSyncStatusSummary> {
     return {
       counts: {

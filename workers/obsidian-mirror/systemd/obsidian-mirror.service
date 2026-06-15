@@ -16,7 +16,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/srv/obsidian-vault
+ReadWritePaths=/srv/obsidian-vaults
 
 [Install]
 WantedBy=multi-user.target

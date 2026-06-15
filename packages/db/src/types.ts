@@ -43,6 +43,10 @@ export type ObsidianSyncStatus =
   | "failed"
   | "cancelled";
 
+export type UserObsidianMode = "local_vault" | "agent";
+
+export type UserObsidianStatus = "disconnected" | "connected" | "error";
+
 export type HealthSyncRunStatus = "success" | "failed";
 
 export type ExternalSourceStatus = "disabled" | "connected" | "error";
@@ -167,6 +171,28 @@ export interface Database {
         {
           user_id: string;
           settings?: Json;
+          created_at?: string;
+          updated_at?: string;
+        }
+      >;
+      user_obsidian_settings: TableDefinition<
+        {
+          user_id: string;
+          enabled: boolean;
+          mode: UserObsidianMode;
+          vault_path: string | null;
+          status: UserObsidianStatus;
+          metadata: Json;
+          created_at: string;
+          updated_at: string;
+        },
+        {
+          user_id: string;
+          enabled?: boolean;
+          mode?: UserObsidianMode;
+          vault_path?: string | null;
+          status?: UserObsidianStatus;
+          metadata?: Json;
           created_at?: string;
           updated_at?: string;
         }

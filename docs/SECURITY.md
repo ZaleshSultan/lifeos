@@ -41,12 +41,13 @@ Browser apps may use public URLs and public client identifiers only. They must n
 
 ## Obsidian Worker
 
-- `OBSIDIAN_VAULT_PATH` must be an explicit local path.
+- Multi-user routing uses `public.user_obsidian_settings.vault_path`.
+- `OBSIDIAN_VAULT_PATH` is legacy/dev fallback only and is ignored unless
+  `LIFEOS_ENABLE_LEGACY_SINGLE_USER_OBSIDIAN=true`.
+- Each configured `vault_path` must be an explicit local path for that user.
 - Path traversal is blocked by sanitizer code.
 - Worker writes atomically and must not delete files.
-- The current mirror is legacy single-user and must keep
-  `LIFEOS_ENABLE_LEGACY_SINGLE_USER_OBSIDIAN=false` in multi-user production
-  until per-user vault routing exists.
+- Queue rows without connected settings are deferred without writing.
 
 ## Legacy Single-user Workers
 
@@ -56,8 +57,10 @@ Browser apps may use public URLs and public client identifiers only. They must n
   `LIFEOS_ENABLE_LEGACY_SINGLE_USER_OBSIDIAN=false` in multi-user production.
 - Enable a legacy flag only for local/dev or an explicitly accepted single-user
   deployment.
-- Do not describe Google, ICS, monthly review, or Obsidian mirror integrations
-  as multi-user-safe until they use per-user source ownership and output routing.
+- Do not describe Google, ICS, or standalone monthly review integrations as
+  multi-user-safe until they use per-user source ownership and output routing.
+- Obsidian mirror is multi-user-safe only when using `user_obsidian_settings`,
+  not the legacy global vault fallback.
 
 ## Operational Hygiene
 

@@ -72,6 +72,8 @@ import type {
   ProfileStatus,
   ReminderStatus,
   MonthlyReviewStatus,
+  UserObsidianMode,
+  UserObsidianStatus,
   SyncRunStatus,
   StudyCourseStatus,
   WorkoutIntensity,
@@ -117,6 +119,8 @@ type FinanceAiAnalysisRunRow =
   Database["public"]["Tables"]["finance_ai_analysis_runs"]["Row"];
 type MonthlyReviewRow = Database["public"]["Tables"]["monthly_reviews"]["Row"];
 type ProfileRow = Database["public"]["Tables"]["profiles"]["Row"];
+type UserObsidianSettingsRow =
+  Database["public"]["Tables"]["user_obsidian_settings"]["Row"];
 
 export interface TelegramUserRecord {
   userId: string;
@@ -300,6 +304,25 @@ export interface UpsertExternalSourceInput {
   status?: ExternalSourceStatus;
   configJson?: Json;
   lastSyncAt?: string | null;
+}
+
+export interface UserObsidianSettings {
+  userId: string;
+  enabled: boolean;
+  mode: UserObsidianMode;
+  vaultPath: string | null;
+  status: UserObsidianStatus;
+  metadata: Json;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpsertUserObsidianSettingsInput {
+  enabled?: boolean;
+  mode?: UserObsidianMode;
+  vaultPath?: string | null;
+  status?: UserObsidianStatus;
+  metadata?: Json;
 }
 
 export interface SourceEventRecord {
@@ -1066,6 +1089,14 @@ export interface LifeOSStore {
   }): Promise<LifeEntityRecord[]>;
   getLatestDailyLog(userId: string): Promise<DailyLogRecord | null>;
   getObsidianSyncStatus(userId: string): Promise<ObsidianSyncStatusSummary>;
+  getUserObsidianSettings(
+    userId: string,
+  ): Promise<UserObsidianSettings | null>;
+  upsertUserObsidianSettings(
+    userId: string,
+    input: UpsertUserObsidianSettingsInput,
+  ): Promise<UserObsidianSettings>;
+  isObsidianEnabledForUser(userId: string): Promise<boolean>;
   getHealthSyncStatus(userId: string): Promise<HealthSyncStatusSummary>;
   getActiveManualMode(
     userId: string,
@@ -1570,6 +1601,21 @@ function toSourceRecord(row: ExternalSourceRow): SourceRecord {
     status: row.status,
     configJson: row.config_json,
     lastSyncAt: row.last_sync_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toUserObsidianSettings(
+  row: UserObsidianSettingsRow,
+): UserObsidianSettings {
+  return {
+    userId: row.user_id,
+    enabled: row.enabled,
+    mode: row.mode,
+    vaultPath: row.vault_path,
+    status: row.status,
+    metadata: row.metadata,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -3197,6 +3243,70 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     }
 
     return { counts };
+  }
+
+  async getUserObsidianSettings(
+    userId: string,
+  ): Promise<UserObsidianSettings | null> {
+    const { data, error } = await this.client
+      .from("user_obsidian_settings")
+      .select("*")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to load Obsidian settings");
+    }
+
+    return data ? toUserObsidianSettings(data) : null;
+  }
+
+  async upsertUserObsidianSettings(
+    userId: string,
+    input: UpsertUserObsidianSettingsInput,
+  ): Promise<UserObsidianSettings> {
+    const payload: Database["public"]["Tables"]["user_obsidian_settings"]["Insert"] =
+      {
+        user_id: userId,
+      };
+
+    if (input.enabled !== undefined) {
+      payload.enabled = input.enabled;
+    }
+    if (input.mode !== undefined) {
+      payload.mode = input.mode;
+    }
+    if (input.vaultPath !== undefined) {
+      payload.vault_path = input.vaultPath;
+    }
+    if (input.status !== undefined) {
+      payload.status = input.status;
+    }
+    if (input.metadata !== undefined) {
+      payload.metadata = input.metadata;
+    }
+
+    const { data, error } = await this.client
+      .from("user_obsidian_settings")
+      .upsert(payload, { onConflict: "user_id" })
+      .select("*")
+      .single();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to upsert Obsidian settings");
+    }
+
+    return toUserObsidianSettings(data);
+  }
+
+  async isObsidianEnabledForUser(userId: string): Promise<boolean> {
+    const settings = await this.getUserObsidianSettings(userId);
+    return Boolean(
+      settings?.enabled &&
+        settings.mode === "local_vault" &&
+        settings.status === "connected" &&
+        settings.vaultPath?.trim(),
+    );
   }
 
   async getHealthSyncStatus(userId: string): Promise<HealthSyncStatusSummary> {
