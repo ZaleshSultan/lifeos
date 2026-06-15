@@ -47,7 +47,10 @@ def load_settings(env_file: Path | None = None) -> Settings:
     if env_file:
         load_dotenv(env_file)
     return Settings(
-        base=load_base_settings(),
+        base=load_base_settings(
+            legacy_guard_env="LIFEOS_ENABLE_LEGACY_SINGLE_USER_ICS_SYNC",
+            worker_name="ICS sync",
+        ),
         moodle_url=os.environ.get("MOODLE_ICS_URL", "").strip() or None,
         personal_url=os.environ.get("PERSONAL_ICS_URL", "").strip() or None,
         poll_seconds=getenv_int("ICS_SYNC_POLL_SECONDS", 600),

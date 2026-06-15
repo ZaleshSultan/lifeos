@@ -59,7 +59,10 @@ def load_settings(env_file: Path | None = None) -> Settings:
     if env_file:
         load_dotenv(env_file)
     return Settings(
-        base=load_base_settings(),
+        base=load_base_settings(
+            legacy_guard_env="LIFEOS_ENABLE_LEGACY_SINGLE_USER_GOOGLE_SYNC",
+            worker_name="Google sync",
+        ),
         client_secrets_file=Path(getenv_required("GOOGLE_CLIENT_SECRETS_FILE")).expanduser(),
         token_file=Path(getenv_required("GOOGLE_TOKEN_FILE")).expanduser(),
         scopes=csv_env("GOOGLE_SCOPES", SCOPES_DEFAULT),

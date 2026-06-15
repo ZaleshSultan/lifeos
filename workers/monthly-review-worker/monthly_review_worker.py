@@ -25,6 +25,7 @@ DEFAULT_MODEL = "openai/gpt-4o-mini"
 DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 CARD_OR_ACCOUNT_PATTERN = re.compile(r"(?<!\d)(?:\d[\s-]?){12,19}(?!\d)")
 SAFE_SEGMENT_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+LEGACY_SINGLE_USER_ENV = "LIFEOS_ENABLE_LEGACY_SINGLE_USER_MONTHLY_REVIEW"
 
 
 class WorkerError(RuntimeError):
@@ -104,11 +105,23 @@ def getenv_int(name: str, default: int) -> int:
     return value
 
 
+def require_legacy_single_user_mode() -> None:
+    if getenv_bool(LEGACY_SINGLE_USER_ENV):
+        return
+    raise WorkerError(
+        "monthly-review-worker is still legacy single-user mode; set "
+        f"{LEGACY_SINGLE_USER_ENV}=true only for local/dev or explicitly accepted "
+        "single-user deployments. Per-user monthly review fan-out is not implemented yet."
+    )
+
+
 def load_settings(env_file: Path | None = None) -> Settings:
     load_dotenv(Path(__file__).with_name(".env"))
 
     if env_file:
         load_dotenv(env_file)
+
+    require_legacy_single_user_mode()
 
     vault = os.environ.get("OBSIDIAN_VAULT_PATH", "").strip()
     telegram_chat_id = (

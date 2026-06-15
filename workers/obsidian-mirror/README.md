@@ -18,6 +18,7 @@ python obsidian_mirror.py init-dashboards
 ```bash
 SUPABASE_URL=https://PROJECT_REF.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=replace-with-supabase-service-role-key
+LIFEOS_ENABLE_LEGACY_SINGLE_USER_OBSIDIAN=false
 OBSIDIAN_VAULT_PATH=/srv/obsidian-vault
 OBSIDIAN_MIRROR_BATCH_SIZE=10
 OBSIDIAN_MIRROR_INTERVAL_SECONDS=30
@@ -25,6 +26,17 @@ OBSIDIAN_MIRROR_DASHBOARD_DIR=Dashboards
 ```
 
 Use a service-role key only on the server. Do not ship it to a frontend.
+
+## Multi-user Status
+
+This worker is still legacy single-user. It claims the shared
+`obsidian_sync_queue` and writes all rendered notes into one `OBSIDIAN_VAULT_PATH`.
+It will not load settings unless `LIFEOS_ENABLE_LEGACY_SINGLE_USER_OBSIDIAN=true`
+is set. Only enable that flag for local/dev or an explicitly accepted
+single-user deployment.
+
+Next stage: add per-user Obsidian settings or vault routing and claim/write jobs
+only for users with Obsidian sync enabled.
 
 ## Arch Setup
 

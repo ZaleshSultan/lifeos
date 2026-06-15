@@ -20,6 +20,9 @@ Modes:
 - Writes are atomic.
 - The worker does not delete files.
 - Supabase remains the source of truth.
+- The current worker is legacy single-user and must keep
+  `LIFEOS_ENABLE_LEGACY_SINGLE_USER_OBSIDIAN=false` in multi-user production
+  until queue claims and vault output are routed per user.
 
 ## Supported Render Types
 
@@ -44,6 +47,9 @@ $EDITOR /etc/lifeos/obsidian-mirror.env
 python obsidian_mirror.py init-dashboards
 python obsidian_mirror.py run-once
 ```
+
+Set `LIFEOS_ENABLE_LEGACY_SINGLE_USER_OBSIDIAN=true` only for local/dev or an
+explicitly accepted single-user deployment.
 
 ## systemd
 

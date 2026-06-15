@@ -22,6 +22,7 @@ day of each month.
 SUPABASE_URL=https://PROJECT_REF.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=replace-with-service-role-key
 LIFEOS_DEFAULT_USER_ID=00000000-0000-0000-0000-000000000000
+LIFEOS_ENABLE_LEGACY_SINGLE_USER_MONTHLY_REVIEW=false
 OBSIDIAN_VAULT_PATH=/home/zalewko/Documents/MAINN
 TELEGRAM_BOT_TOKEN=replace-with-bot-token
 LIFEOS_DEFAULT_TELEGRAM_USER_ID=123456789
@@ -34,6 +35,17 @@ MONTHLY_REVIEW_POLL_SECONDS=3600
 
 AI is optional. If disabled or missing a key, the worker writes deterministic
 local markdown and still succeeds.
+
+## Multi-user Status
+
+The standalone worker is still legacy single-user. It reads one
+`LIFEOS_DEFAULT_USER_ID`, optionally sends to one fallback Telegram user, and can
+write one local Obsidian vault path. It will not load settings unless
+`LIFEOS_ENABLE_LEGACY_SINGLE_USER_MONTHLY_REVIEW=true` is set. Only enable that
+flag for local/dev or an explicitly accepted single-user deployment.
+
+Next stage: generate monthly reviews per active user and route notifications and
+Obsidian output through user-owned settings.
 
 ## Systemd
 

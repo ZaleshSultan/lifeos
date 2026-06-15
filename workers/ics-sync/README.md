@@ -14,3 +14,12 @@ cp .env.example .env
 
 Keep Moodle and personal ICS URLs only in the local `.env`.
 
+## Multi-user Status
+
+This worker is still legacy single-user. The configured ICS URLs are assigned to
+`LIFEOS_DEFAULT_USER_ID`, so settings fail closed unless
+`LIFEOS_ENABLE_LEGACY_SINGLE_USER_ICS_SYNC=true` is set. Only enable that flag
+for local/dev or an explicitly accepted single-user deployment.
+
+Next stage: store ICS feed configuration per user and sync only connected active
+users.

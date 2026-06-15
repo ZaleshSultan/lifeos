@@ -11,7 +11,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -128,9 +128,32 @@ def getenv_int(name: str, default: int) -> int:
     return value
 
 
-def load_base_settings(env_file: Path | None = None) -> BaseSettings:
+def getenv_bool(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name, "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
+
+
+def require_legacy_single_user_mode(worker_name: str, env_name: str) -> None:
+    if getenv_bool(env_name):
+        return
+    raise SyncError(
+        f"{worker_name} is still legacy single-user mode; set {env_name}=true "
+        "only for local/dev or explicitly accepted single-user deployments. "
+        "Per-user source ownership is not implemented yet."
+    )
+
+
+def load_base_settings(
+    env_file: Path | None = None,
+    legacy_guard_env: str | None = None,
+    worker_name: str = "sync worker",
+) -> BaseSettings:
     if env_file:
         load_dotenv(env_file)
+    if legacy_guard_env:
+        require_legacy_single_user_mode(worker_name, legacy_guard_env)
     return BaseSettings(
         supabase_url=getenv_required("SUPABASE_URL").rstrip("/"),
         service_role_key=getenv_required("SUPABASE_SERVICE_ROLE_KEY"),
@@ -156,11 +179,13 @@ def parse_datetime(value: str | None) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
-def timezone_for(name: str) -> ZoneInfo:
+def timezone_for(name: str) -> tzinfo:
     try:
         return ZoneInfo(name)
     except ZoneInfoNotFoundError:
-        return ZoneInfo("UTC")
+        if name == "Asia/Qyzylorda":
+            return timezone(timedelta(hours=5))
+        return timezone.utc
 
 
 def iso_utc(value: datetime | None) -> str | None:

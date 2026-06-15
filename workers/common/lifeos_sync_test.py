@@ -1,17 +1,21 @@
 from __future__ import annotations
 
+import os
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 import sys
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from lifeos_sync import (
     BaseSettings,
     SupabaseRestClient,
+    SyncError,
     build_reminder_schedule,
     is_high_priority,
+    load_base_settings,
     reminder_policy_keys,
     shift_out_of_quiet_hours,
 )
@@ -69,6 +73,44 @@ class InMemoryReminderClient(SupabaseRestClient):
 
 
 class ReminderPolicyTest(unittest.TestCase):
+    def test_legacy_single_user_guard_blocks_default_user_without_opt_in(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "SUPABASE_URL": "https://example.supabase.co",
+                "SUPABASE_SERVICE_ROLE_KEY": "service-role",
+                "LIFEOS_DEFAULT_USER_ID": "user-1",
+            },
+            clear=True,
+        ):
+            with self.assertRaises(SyncError) as context:
+                load_base_settings(
+                    legacy_guard_env="LIFEOS_ENABLE_LEGACY_SINGLE_USER_TEST",
+                    worker_name="test sync",
+                )
+
+        self.assertIn("LIFEOS_ENABLE_LEGACY_SINGLE_USER_TEST", str(context.exception))
+        self.assertIn("legacy single-user mode", str(context.exception))
+
+    def test_legacy_single_user_guard_allows_explicit_opt_in(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "SUPABASE_URL": "https://example.supabase.co/",
+                "SUPABASE_SERVICE_ROLE_KEY": "service-role",
+                "LIFEOS_DEFAULT_USER_ID": "user-1",
+                "LIFEOS_ENABLE_LEGACY_SINGLE_USER_TEST": "true",
+            },
+            clear=True,
+        ):
+            settings = load_base_settings(
+                legacy_guard_env="LIFEOS_ENABLE_LEGACY_SINGLE_USER_TEST",
+                worker_name="test sync",
+            )
+
+        self.assertEqual(settings.supabase_url, "https://example.supabase.co")
+        self.assertEqual(settings.user_id, "user-1")
+
     def test_high_priority_keywords_include_english_and_russian(self) -> None:
         self.assertTrue(is_high_priority("Final exam"))
         self.assertTrue(is_high_priority("Пересдача по математике"))

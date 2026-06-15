@@ -73,6 +73,7 @@ SUPABASE_URL=https://PROJECT_REF.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=...
 LIFEOS_DEFAULT_USER_ID=...
 APP_TIMEZONE=Asia/Qyzylorda
+LIFEOS_ENABLE_LEGACY_SINGLE_USER_MONTHLY_REVIEW=false
 OBSIDIAN_VAULT_PATH=/home/zalewko/Documents/MAINN
 TELEGRAM_BOT_TOKEN=...
 LIFEOS_DEFAULT_TELEGRAM_USER_ID=...
@@ -85,6 +86,11 @@ MONTHLY_REVIEW_POLL_SECONDS=3600
 
 `MONTHLY_REVIEW_AI_ENABLED=false` is the default. If the OpenRouter key is
 missing, the worker uses fallback markdown and still succeeds.
+
+The standalone Python worker is guarded legacy single-user mode. It will not
+load settings unless `LIFEOS_ENABLE_LEGACY_SINGLE_USER_MONTHLY_REVIEW=true` is
+set for local/dev or an explicitly accepted single-user deployment. Multi-user
+monthly review fan-out remains a next stage.
 
 ## Manual Commands
 
@@ -129,9 +135,10 @@ Preferred report path:
 Reviews/Monthly/YYYY-MM-LifeOS-Review.md
 ```
 
-The standalone worker writes directly to `OBSIDIAN_VAULT_PATH` when configured
-and updates `Dashboards/Reviews.md` with a monthly review link. The bot/TMA path
-also queues an Obsidian mirror job using the same relative path.
+When the legacy flag is enabled, the standalone worker writes directly to
+`OBSIDIAN_VAULT_PATH` when configured and updates `Dashboards/Reviews.md` with a
+monthly review link. The bot/TMA path also queues an Obsidian mirror job using
+the same relative path.
 
 ## Systemd Timer
 

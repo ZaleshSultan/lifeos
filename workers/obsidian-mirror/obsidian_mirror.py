@@ -21,6 +21,7 @@ from typing import Any
 
 
 JsonObject = dict[str, Any]
+LEGACY_SINGLE_USER_ENV = "LIFEOS_ENABLE_LEGACY_SINGLE_USER_OBSIDIAN"
 
 SUPPORTED_RENDER_TYPES = {
     "task",
@@ -125,12 +126,31 @@ def getenv_int(name: str, default: int) -> int:
         raise WorkerError(f"{name} must be an integer") from exc
 
 
+def getenv_bool(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name, "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
+
+
+def require_legacy_single_user_mode() -> None:
+    if getenv_bool(LEGACY_SINGLE_USER_ENV):
+        return
+    raise WorkerError(
+        "obsidian-mirror is still legacy single-user mode; set "
+        f"{LEGACY_SINGLE_USER_ENV}=true only for local/dev or explicitly accepted "
+        "single-user deployments. Per-user vault routing is not implemented yet."
+    )
+
+
 def load_settings(env_file: Path | None = None) -> Settings:
     default_env = Path(__file__).with_name(".env")
     load_dotenv(default_env)
 
     if env_file is not None:
         load_dotenv(env_file)
+
+    require_legacy_single_user_mode()
 
     return Settings(
         supabase_url=getenv_required("SUPABASE_URL").rstrip("/"),
