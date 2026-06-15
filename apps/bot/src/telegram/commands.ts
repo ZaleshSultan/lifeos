@@ -12,6 +12,7 @@ import {
   type LifeMode,
   type LifeModeResolution,
 } from "@lifeos/core";
+import { validateObsidianVaultPath } from "@lifeos/obsidian";
 import type {
   BankLineRecord,
   BudgetSummaryPayload,
@@ -30,6 +31,7 @@ import type {
   TelegramUserRecord,
   TmaHealthSummary,
   TmaFinanceSummary,
+  UserObsidianSettings,
 } from "@lifeos/db";
 import type {
   TelegramBotRuntime,
@@ -120,6 +122,10 @@ const HELP_TEXT = [
   "/approve <telegram_id>",
   "/block <telegram_id>",
   "/users",
+  "/obsidian_status <telegram_id>",
+  "/obsidian_set_vault <telegram_id> <vault_path>",
+  "/obsidian_enable <telegram_id>",
+  "/obsidian_disable <telegram_id>",
   "",
   "/status",
   "/healthz",
@@ -278,6 +284,24 @@ function parseTelegramId(args: string): number | null {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
+function parseTelegramIdWithRest(
+  args: string,
+): { telegramUserId: number; rest: string } | null {
+  const match = args.trim().match(/^(\d+)\s+(.+)$/);
+
+  if (!match?.[1] || !match[2]?.trim()) {
+    return null;
+  }
+
+  const telegramUserId = Number(match[1]);
+
+  if (!Number.isSafeInteger(telegramUserId) || telegramUserId <= 0) {
+    return null;
+  }
+
+  return { telegramUserId, rest: match[2].trim() };
+}
+
 function formatTelegramProfile(user: TelegramProfileRecord): string {
   const username = user.username ? ` @${user.username}` : "";
   const name = user.displayName ? ` ${user.displayName}` : "";
@@ -286,6 +310,50 @@ function formatTelegramProfile(user: TelegramProfileRecord): string {
     `status=<b>${escapeHtml(user.status)}</b>`,
     `role=<b>${escapeHtml(user.role)}</b>`,
   ].join(" ");
+}
+
+function maskedVaultPath(vaultPath: string | null): string {
+  const trimmed = vaultPath?.trim();
+
+  if (!trimmed) {
+    return "not set";
+  }
+
+  const separator = trimmed.includes("\\") ? "\\" : "/";
+  const segments = trimmed.split(/[\\/]+/).filter(Boolean);
+  const tail = segments.slice(-2).join(separator);
+
+  if (!tail) {
+    return "configured";
+  }
+
+  if (/^[a-zA-Z]:/.test(trimmed)) {
+    return `${trimmed.slice(0, 2)}${separator}...${separator}${tail}`;
+  }
+
+  if (trimmed.startsWith("\\\\") || trimmed.startsWith("//")) {
+    return `${separator}${separator}...${separator}${tail}`;
+  }
+
+  if (trimmed.startsWith("/")) {
+    return `/.../${tail}`;
+  }
+
+  return `...${separator}${tail}`;
+}
+
+function formatObsidianSettings(
+  telegramUserId: number,
+  settings: UserObsidianSettings | null,
+): string {
+  return [
+    `Obsidian settings for <code>${telegramUserId}</code>:`,
+    `enabled=<b>${settings?.enabled ? "true" : "false"}</b>`,
+    `status=<b>${escapeHtml(settings?.status ?? "disconnected")}</b>`,
+    `mode=<b>${escapeHtml(settings?.mode ?? "local_vault")}</b>`,
+    `vault=<code>${escapeHtml(maskedVaultPath(settings?.vaultPath ?? null))}</code>`,
+    `updated_at=<code>${escapeHtml(settings?.updatedAt ?? "never")}</code>`,
+  ].join("\n");
 }
 
 async function requireAdmin(
@@ -1814,6 +1882,216 @@ async function handleUsersCommand(
   });
 }
 
+async function handleObsidianStatusCommand(
+  args: string,
+  message: TelegramMessage,
+  runtime: TelegramBotRuntime,
+  _user: TelegramUserRecord | null,
+): Promise<void> {
+  if (!(await requireAdmin(message, runtime))) {
+    return;
+  }
+
+  const telegramUserId = parseTelegramId(args);
+
+  if (!telegramUserId) {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "Usage: /obsidian_status <telegram_id>",
+    });
+    return;
+  }
+
+  const target = await runtime.store!.resolveTelegramUser(telegramUserId);
+
+  if (!target) {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "Telegram user not found.",
+    });
+    return;
+  }
+
+  const settings = await runtime.store!.getUserObsidianSettings(target.userId);
+
+  await runtime.telegram.sendMessage({
+    chatId: message.chat.id,
+    text: formatObsidianSettings(telegramUserId, settings),
+  });
+}
+
+async function handleObsidianSetVaultCommand(
+  args: string,
+  message: TelegramMessage,
+  runtime: TelegramBotRuntime,
+  _user: TelegramUserRecord | null,
+): Promise<void> {
+  if (!(await requireAdmin(message, runtime))) {
+    return;
+  }
+
+  const parsed = parseTelegramIdWithRest(args);
+
+  if (!parsed) {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "Usage: /obsidian_set_vault <telegram_id> <vault_path>",
+    });
+    return;
+  }
+
+  const target = await runtime.store!.resolveTelegramUser(
+    parsed.telegramUserId,
+  );
+
+  if (!target) {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "Telegram user not found.",
+    });
+    return;
+  }
+
+  const validation = validateObsidianVaultPath(parsed.rest);
+
+  if (!validation.ok) {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: `Invalid vault path: ${escapeHtml(validation.error)}`,
+    });
+    return;
+  }
+
+  const settings = await runtime.store!.upsertUserObsidianSettings(
+    target.userId,
+    {
+      vaultPath: validation.path,
+    },
+  );
+
+  await runtime.telegram.sendMessage({
+    chatId: message.chat.id,
+    text: [
+      "Obsidian vault path saved.",
+      `Telegram id: <code>${parsed.telegramUserId}</code>`,
+      `Vault: <code>${escapeHtml(maskedVaultPath(settings.vaultPath))}</code>`,
+      "Use /obsidian_enable after confirming the worker can access this path.",
+    ].join("\n"),
+  });
+}
+
+async function handleObsidianEnableCommand(
+  args: string,
+  message: TelegramMessage,
+  runtime: TelegramBotRuntime,
+  _user: TelegramUserRecord | null,
+): Promise<void> {
+  if (!(await requireAdmin(message, runtime))) {
+    return;
+  }
+
+  const telegramUserId = parseTelegramId(args);
+
+  if (!telegramUserId) {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "Usage: /obsidian_enable <telegram_id>",
+    });
+    return;
+  }
+
+  const target = await runtime.store!.resolveTelegramUser(telegramUserId);
+
+  if (!target) {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "Telegram user not found.",
+    });
+    return;
+  }
+
+  if (target.status !== "active") {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "Obsidian can only be enabled for active users.",
+    });
+    return;
+  }
+
+  const existing = await runtime.store!.getUserObsidianSettings(target.userId);
+  const validation = existing?.vaultPath
+    ? validateObsidianVaultPath(existing.vaultPath)
+    : { ok: false as const, error: "Set a vault path first." };
+
+  if (!validation.ok) {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "Set a valid vault path first with /obsidian_set_vault.",
+    });
+    return;
+  }
+
+  const settings = await runtime.store!.upsertUserObsidianSettings(
+    target.userId,
+    {
+      enabled: true,
+      mode: "local_vault",
+      status: "connected",
+      vaultPath: validation.path,
+    },
+  );
+
+  await runtime.telegram.sendMessage({
+    chatId: message.chat.id,
+    text: [
+      "Obsidian enabled.",
+      `Telegram id: <code>${telegramUserId}</code>`,
+      `Vault: <code>${escapeHtml(maskedVaultPath(settings.vaultPath))}</code>`,
+    ].join("\n"),
+  });
+}
+
+async function handleObsidianDisableCommand(
+  args: string,
+  message: TelegramMessage,
+  runtime: TelegramBotRuntime,
+  _user: TelegramUserRecord | null,
+): Promise<void> {
+  if (!(await requireAdmin(message, runtime))) {
+    return;
+  }
+
+  const telegramUserId = parseTelegramId(args);
+
+  if (!telegramUserId) {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "Usage: /obsidian_disable <telegram_id>",
+    });
+    return;
+  }
+
+  const target = await runtime.store!.resolveTelegramUser(telegramUserId);
+
+  if (!target) {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "Telegram user not found.",
+    });
+    return;
+  }
+
+  await runtime.store!.upsertUserObsidianSettings(target.userId, {
+    enabled: false,
+    status: "disconnected",
+  });
+
+  await runtime.telegram.sendMessage({
+    chatId: message.chat.id,
+    text: `Obsidian disabled for <code>${telegramUserId}</code>.`,
+  });
+}
+
 async function handleStatusCommand(
   _args: string,
   message: TelegramMessage,
@@ -3133,6 +3411,22 @@ const COMMAND_REGISTRY: Record<string, CommandConfig> = {
   approve: { handler: handleApproveCommand, requiresUser: false },
   block: { handler: handleBlockCommand, requiresUser: false },
   users: { handler: handleUsersCommand, requiresUser: false },
+  obsidian_status: {
+    handler: handleObsidianStatusCommand,
+    requiresUser: false,
+  },
+  obsidian_set_vault: {
+    handler: handleObsidianSetVaultCommand,
+    requiresUser: false,
+  },
+  obsidian_enable: {
+    handler: handleObsidianEnableCommand,
+    requiresUser: false,
+  },
+  obsidian_disable: {
+    handler: handleObsidianDisableCommand,
+    requiresUser: false,
+  },
   status: { handler: handleStatusCommand, requiresUser: false },
   healthz: { handler: handleHealthzCommand, requiresUser: false },
 

@@ -30,7 +30,9 @@ Browser apps may use public URLs and public client identifiers only. They must n
 - Keep TMA URLs short and resolve sensitive state through backend APIs.
 - Validate TMA `X-Telegram-Init-Data` with `TELEGRAM_BOT_TOKEN`.
 - Require `profiles.status = 'active'` before protected bot/TMA operations.
-- Restrict `/pending`, `/approve`, `/block`, and `/users` to profile admins or IDs listed in `LIFEOS_ADMIN_TELEGRAM_IDS`.
+- Restrict `/pending`, `/approve`, `/block`, `/users`, and `/obsidian_*`
+  management commands to profile admins or IDs listed in
+  `LIFEOS_ADMIN_TELEGRAM_IDS`.
 - Keep `ALLOW_UNSAFE_TMA_DEV_AUTH=false` except for local development.
 
 ## Health Ingest
@@ -42,6 +44,12 @@ Browser apps may use public URLs and public client identifiers only. They must n
 ## Obsidian Worker
 
 - Multi-user routing uses `public.user_obsidian_settings.vault_path`.
+- Admins manage settings with `/obsidian_set_vault <telegram_id> <vault_path>`,
+  `/obsidian_enable <telegram_id>`, `/obsidian_disable <telegram_id>`, and
+  `/obsidian_status <telegram_id>`.
+- Vault paths are validated as non-empty absolute POSIX/Windows paths and must
+  not contain traversal segments.
+- Telegram status replies mask vault paths instead of echoing full local paths.
 - `OBSIDIAN_VAULT_PATH` is legacy/dev fallback only and is ignored unless
   `LIFEOS_ENABLE_LEGACY_SINGLE_USER_OBSIDIAN=true`.
 - Each configured `vault_path` must be an explicit local path for that user.

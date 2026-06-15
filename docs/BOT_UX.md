@@ -22,6 +22,10 @@ The Telegram bot is the fastest input surface for LifeOS.
 - `/approve <telegram_id>` - admin-only approval.
 - `/block <telegram_id>` - admin-only block.
 - `/users` - admin-only Telegram user list.
+- `/obsidian_status <telegram_id>` - admin-only Obsidian settings status.
+- `/obsidian_set_vault <telegram_id> <vault_path>` - admin-only per-user vault path setup.
+- `/obsidian_enable <telegram_id>` - admin-only Obsidian enable.
+- `/obsidian_disable <telegram_id>` - admin-only Obsidian disable.
 - `/status` - backend status.
 
 ## `/start` Onboarding
@@ -50,6 +54,22 @@ LIFEOS_DEFAULT_TELEGRAM_USER_ID=your-telegram-user-id
 ```
 
 If the profile cannot be written, usually because the referenced `auth.users` row does not exist yet, the bot replies with the exact SQL needed to create/update the profile row.
+
+## Obsidian Admin Flow
+
+Admins configure per-user Obsidian routing through Telegram commands:
+
+```text
+/obsidian_set_vault 123456789 /srv/lifeos-vaults/user-a
+/obsidian_enable 123456789
+/obsidian_status 123456789
+```
+
+`/obsidian_set_vault` resolves the Telegram id through `profiles.telegram_user_id`
+and stores a normalized absolute vault path in `user_obsidian_settings`.
+`/obsidian_enable` only works for active users after a vault path exists.
+`/obsidian_disable` sets `enabled=false` and `status=disconnected`. Non-admins
+receive a generic denial and cannot inspect another user's settings.
 
 ## Interaction Principles
 

@@ -461,6 +461,14 @@ export function tmaStore(events: string[] = []): LifeOSStore {
         },
         healthCompletenessScore: 50,
         pendingSyncCount: 0,
+        obsidianStatus: {
+          enabled: true,
+          status: "connected",
+          mode: "local_vault",
+          configured: true,
+          updatedAt: "2026-05-18T10:00:00.000Z",
+          pendingSyncCount: 0,
+        },
       };
     },
     async getTmaHealthSummary() {
@@ -1928,6 +1936,12 @@ describe("bot server", () => {
     await expect(response.json()).resolves.toMatchObject({
       data: {
         displayName: "Dev user",
+        obsidianStatus: {
+          enabled: true,
+          status: "connected",
+          mode: "local_vault",
+          configured: true,
+        },
       },
     });
   });

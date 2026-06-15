@@ -31,6 +31,9 @@ importers:
       "@lifeos/db":
         specifier: workspace:*
         version: link:../../packages/db
+      "@lifeos/obsidian":
+        specifier: workspace:*
+        version: link:../../packages/obsidian
 
   apps/tma:
     dependencies:

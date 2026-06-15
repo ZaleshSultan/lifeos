@@ -924,6 +924,16 @@ export interface TmaHomeSummary {
   } | null;
   healthCompletenessScore: number | null;
   pendingSyncCount: number;
+  obsidianStatus: TmaObsidianStatus;
+}
+
+export interface TmaObsidianStatus {
+  enabled: boolean;
+  status: UserObsidianStatus;
+  mode: UserObsidianMode;
+  configured: boolean;
+  updatedAt: string | null;
+  pendingSyncCount: number;
 }
 
 export interface TmaHealthSummary {
@@ -3808,13 +3818,16 @@ export class SupabaseLifeOSStore implements LifeOSStore {
   }
 
   async getTmaHomeSummary(user: TelegramUserRecord): Promise<TmaHomeSummary> {
-    const [mode, health, focus, workout, obsidianStatus] = await Promise.all([
-      this.resolveCurrentMode(user.userId),
-      this.getTmaHealthSummary(user.userId),
-      this.getTmaFocusSummary(user.userId),
-      this.getCurrentWorkout({ userId: user.userId }),
-      this.getObsidianSyncStatus(user.userId),
-    ]);
+    const [mode, health, focus, workout, syncStatus, obsidianSettings] =
+      await Promise.all([
+        this.resolveCurrentMode(user.userId),
+        this.getTmaHealthSummary(user.userId),
+        this.getTmaFocusSummary(user.userId),
+        this.getCurrentWorkout({ userId: user.userId }),
+        this.getObsidianSyncStatus(user.userId),
+        this.getUserObsidianSettings(user.userId),
+      ]);
+    const pendingSyncCount = syncStatus.counts.pending ?? 0;
 
     return {
       displayName: user.displayName ?? undefined,
@@ -3833,7 +3846,15 @@ export class SupabaseLifeOSStore implements LifeOSStore {
           }
         : null,
       healthCompletenessScore: health.dataCompletenessScore,
-      pendingSyncCount: obsidianStatus.counts.pending ?? 0,
+      pendingSyncCount,
+      obsidianStatus: {
+        enabled: Boolean(obsidianSettings?.enabled),
+        status: obsidianSettings?.status ?? "disconnected",
+        mode: obsidianSettings?.mode ?? "local_vault",
+        configured: Boolean(obsidianSettings?.vaultPath?.trim()),
+        updatedAt: obsidianSettings?.updatedAt ?? null,
+        pendingSyncCount,
+      },
     };
   }
 

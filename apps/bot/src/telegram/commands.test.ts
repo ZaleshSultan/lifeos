@@ -42,6 +42,10 @@ import type {
   TelegramUpdate,
 } from "./types.js";
 
+type ObsidianSettingsRecord = NonNullable<
+  Awaited<ReturnType<LifeOSStore["getUserObsidianSettings"]>>
+>;
+
 class FakeStore implements LifeOSStore {
   readonly tasks: CreateTaskInput[] = [];
   readonly captures: CreateLifeCaptureInput[] = [];
@@ -205,6 +209,7 @@ class FakeStore implements LifeOSStore {
   pendingProfiles: TelegramProfileRecord[] = [];
   telegramProfiles: TelegramProfileRecord[] = [];
   adminTelegramIds = new Set<number>();
+  obsidianSettings = new Map<string, ObsidianSettingsRecord>();
 
   workout: WorkoutRecord = {
     id: "workout-1",
@@ -231,7 +236,17 @@ class FakeStore implements LifeOSStore {
     updatedAt: "2026-05-18T00:00:00.000Z",
   };
 
-  async resolveTelegramUser(): Promise<TelegramUserRecord | null> {
+  async resolveTelegramUser(
+    telegramUserId: number,
+  ): Promise<TelegramUserRecord | null> {
+    const profile = this.telegramProfiles.find(
+      (item) => item.telegramUserId === telegramUserId,
+    );
+
+    if (profile) {
+      return profile;
+    }
+
     return this.user;
   }
 
@@ -413,16 +428,35 @@ class FakeStore implements LifeOSStore {
     };
   }
 
-  async getUserObsidianSettings(): Promise<
+  async getUserObsidianSettings(userId: string): Promise<
     Awaited<ReturnType<LifeOSStore["getUserObsidianSettings"]>>
   > {
-    return null;
+    return this.obsidianSettings.get(userId) ?? null;
   }
 
-  async upsertUserObsidianSettings(): Promise<
+  async upsertUserObsidianSettings(
+    userId: string,
+    input: Parameters<LifeOSStore["upsertUserObsidianSettings"]>[1],
+  ): Promise<
     Awaited<ReturnType<LifeOSStore["upsertUserObsidianSettings"]>>
   > {
-    throw new Error("not used");
+    const existing = this.obsidianSettings.get(userId);
+    const now = "2026-05-18T12:00:00.000Z";
+    const settings: ObsidianSettingsRecord = {
+      userId,
+      enabled: input.enabled ?? existing?.enabled ?? false,
+      mode: input.mode ?? existing?.mode ?? "local_vault",
+      vaultPath:
+        input.vaultPath !== undefined
+          ? input.vaultPath
+          : (existing?.vaultPath ?? null),
+      status: input.status ?? existing?.status ?? "disconnected",
+      metadata: input.metadata ?? existing?.metadata ?? {},
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    this.obsidianSettings.set(userId, settings);
+    return settings;
   }
 
   async isObsidianEnabledForUser(): Promise<boolean> {
@@ -623,6 +657,14 @@ class FakeStore implements LifeOSStore {
       activeWorkout: null,
       healthCompletenessScore: 50,
       pendingSyncCount: 2,
+      obsidianStatus: {
+        enabled: false,
+        status: "disconnected",
+        mode: "local_vault",
+        configured: false,
+        updatedAt: null,
+        pendingSyncCount: 2,
+      },
     };
   }
 
@@ -1559,6 +1601,189 @@ describe("Telegram commands", () => {
     await handleTelegramUpdate(update("/users"), context);
 
     expect(context.sent.at(-1)?.text).toBe("Access denied.");
+  });
+
+  it("blocks non-admin Obsidian settings commands without exposing settings", async () => {
+    const store = new FakeStore();
+    store.telegramProfiles = [
+      {
+        ...store.user!,
+        userId: "target-user",
+        telegramUserId: 456,
+        createdAt: "2026-05-18T00:00:00.000Z",
+        updatedAt: "2026-05-18T00:00:00.000Z",
+      },
+    ];
+    store.obsidianSettings.set("target-user", {
+      userId: "target-user",
+      enabled: true,
+      mode: "local_vault",
+      vaultPath: "/srv/lifeos-vaults/user-a",
+      status: "connected",
+      metadata: {},
+      createdAt: "2026-05-18T00:00:00.000Z",
+      updatedAt: "2026-05-18T00:00:00.000Z",
+    });
+    const context = runtime(store);
+
+    await handleTelegramUpdate(update("/obsidian_status 456"), context);
+
+    expect(context.sent.at(-1)?.text).toBe("Access denied.");
+    expect(context.sent.at(-1)?.text).not.toContain("/srv/lifeos-vaults");
+  });
+
+  it("allows an admin to set an Obsidian vault for an active user", async () => {
+    const store = new FakeStore();
+    store.adminTelegramIds.add(30);
+    store.telegramProfiles = [
+      {
+        ...store.user!,
+        userId: "target-user",
+        telegramUserId: 456,
+        status: "active",
+        createdAt: "2026-05-18T00:00:00.000Z",
+        updatedAt: "2026-05-18T00:00:00.000Z",
+      },
+    ];
+    const context = runtime(store);
+
+    await handleTelegramUpdate(
+      update("/obsidian_set_vault 456 /srv/lifeos-vaults/user-a"),
+      context,
+    );
+
+    expect(store.obsidianSettings.get("target-user")).toMatchObject({
+      enabled: false,
+      status: "disconnected",
+      vaultPath: "/srv/lifeos-vaults/user-a",
+    });
+    expect(context.sent.at(-1)?.text).toContain("Obsidian vault path saved");
+    expect(context.sent.at(-1)?.text).toContain("/.../lifeos-vaults/user-a");
+    expect(context.sent.at(-1)?.text).not.toContain("/srv/lifeos-vaults");
+  });
+
+  it("rejects invalid Obsidian vault paths", async () => {
+    const store = new FakeStore();
+    store.adminTelegramIds.add(30);
+    store.telegramProfiles = [
+      {
+        ...store.user!,
+        userId: "target-user",
+        telegramUserId: 456,
+        status: "active",
+        createdAt: "2026-05-18T00:00:00.000Z",
+        updatedAt: "2026-05-18T00:00:00.000Z",
+      },
+    ];
+    const context = runtime(store);
+
+    await handleTelegramUpdate(
+      update("/obsidian_set_vault 456 ../vault"),
+      context,
+    );
+
+    expect(store.obsidianSettings.has("target-user")).toBe(false);
+    expect(context.sent.at(-1)?.text).toContain("Invalid vault path");
+  });
+
+  it("allows an admin to enable Obsidian only after a vault path exists", async () => {
+    const store = new FakeStore();
+    store.adminTelegramIds.add(30);
+    store.telegramProfiles = [
+      {
+        ...store.user!,
+        userId: "target-user",
+        telegramUserId: 456,
+        status: "active",
+        createdAt: "2026-05-18T00:00:00.000Z",
+        updatedAt: "2026-05-18T00:00:00.000Z",
+      },
+    ];
+    const context = runtime(store);
+
+    await handleTelegramUpdate(update("/obsidian_enable 456"), context);
+
+    expect(context.sent.at(-1)?.text).toContain("Set a valid vault path first");
+    expect(store.obsidianSettings.get("target-user")?.enabled).not.toBe(true);
+
+    await handleTelegramUpdate(
+      update("/obsidian_set_vault 456 /srv/lifeos-vaults/user-a"),
+      context,
+    );
+    await handleTelegramUpdate(update("/obsidian_enable 456"), context);
+
+    expect(store.obsidianSettings.get("target-user")).toMatchObject({
+      enabled: true,
+      mode: "local_vault",
+      status: "connected",
+      vaultPath: "/srv/lifeos-vaults/user-a",
+    });
+    expect(context.sent.at(-1)?.text).toContain("Obsidian enabled");
+  });
+
+  it("does not enable Obsidian for blocked users", async () => {
+    const store = new FakeStore();
+    store.adminTelegramIds.add(30);
+    store.telegramProfiles = [
+      {
+        ...store.user!,
+        userId: "target-user",
+        telegramUserId: 456,
+        status: "blocked",
+        createdAt: "2026-05-18T00:00:00.000Z",
+        updatedAt: "2026-05-18T00:00:00.000Z",
+      },
+    ];
+    store.obsidianSettings.set("target-user", {
+      userId: "target-user",
+      enabled: false,
+      mode: "local_vault",
+      vaultPath: "/srv/lifeos-vaults/user-a",
+      status: "disconnected",
+      metadata: {},
+      createdAt: "2026-05-18T00:00:00.000Z",
+      updatedAt: "2026-05-18T00:00:00.000Z",
+    });
+    const context = runtime(store);
+
+    await handleTelegramUpdate(update("/obsidian_enable 456"), context);
+
+    expect(store.obsidianSettings.get("target-user")?.enabled).toBe(false);
+    expect(context.sent.at(-1)?.text).toContain("active users");
+  });
+
+  it("allows an admin to disable Obsidian", async () => {
+    const store = new FakeStore();
+    store.adminTelegramIds.add(30);
+    store.telegramProfiles = [
+      {
+        ...store.user!,
+        userId: "target-user",
+        telegramUserId: 456,
+        status: "active",
+        createdAt: "2026-05-18T00:00:00.000Z",
+        updatedAt: "2026-05-18T00:00:00.000Z",
+      },
+    ];
+    store.obsidianSettings.set("target-user", {
+      userId: "target-user",
+      enabled: true,
+      mode: "local_vault",
+      vaultPath: "/srv/lifeos-vaults/user-a",
+      status: "connected",
+      metadata: {},
+      createdAt: "2026-05-18T00:00:00.000Z",
+      updatedAt: "2026-05-18T00:00:00.000Z",
+    });
+    const context = runtime(store);
+
+    await handleTelegramUpdate(update("/obsidian_disable 456"), context);
+
+    expect(store.obsidianSettings.get("target-user")).toMatchObject({
+      enabled: false,
+      status: "disconnected",
+    });
+    expect(context.sent.at(-1)?.text).toContain("Obsidian disabled");
   });
 
   it("allows an approved user to use protected commands", async () => {

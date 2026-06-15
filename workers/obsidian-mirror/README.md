@@ -59,19 +59,17 @@ sudo chmod 600 /etc/lifeos/obsidian-mirror.env
 sudoedit /etc/lifeos/obsidian-mirror.env
 ```
 
-Seed one settings row per connected user, for example:
+Configure one settings row per connected user through Telegram admin commands:
 
-```sql
-insert into public.user_obsidian_settings
-  (user_id, enabled, mode, vault_path, status)
-values
-  ('00000000-0000-0000-0000-000000000000', true, 'local_vault', '/srv/obsidian-vaults/user-a', 'connected')
-on conflict (user_id) do update set
-  enabled = excluded.enabled,
-  mode = excluded.mode,
-  vault_path = excluded.vault_path,
-  status = excluded.status;
+```text
+/obsidian_set_vault 123456789 /srv/lifeos-vaults/user-a
+/obsidian_enable 123456789
+/obsidian_status 123456789
 ```
+
+The bot validates that the vault path is absolute and does not contain traversal
+segments. It does not require the path to exist at setup time; the worker must
+still be able to create or write inside the path when jobs run.
 
 ## Systemd
 
@@ -84,7 +82,7 @@ journalctl -u obsidian-mirror.service -f
 ```
 
 Make sure `ReadWritePaths=` in the service file covers every configured user
-vault root, for example `/srv/obsidian-vaults`.
+vault root, for example `/srv/lifeos-vaults` or `/srv/obsidian-vaults`.
 
 ## Render Test
 

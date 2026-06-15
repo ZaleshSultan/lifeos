@@ -38,6 +38,20 @@ Required local-vault settings for writes:
 - `status = 'connected'`
 - `vault_path` points to that user's local vault
 
+Admins manage these settings through Telegram, not manual SQL:
+
+```text
+/obsidian_set_vault 123456789 /srv/lifeos-vaults/user-a
+/obsidian_enable 123456789
+/obsidian_status 123456789
+```
+
+`/obsidian_set_vault` accepts absolute POSIX or Windows paths, rejects empty or
+traversal-containing paths, and stores the normalized value. `/obsidian_enable`
+only succeeds for active profiles with an existing vault path.
+`/obsidian_disable <telegram_id>` marks the integration disconnected without
+deleting any notes.
+
 ## Supported Render Types
 
 - task
@@ -73,3 +87,6 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now obsidian-mirror.service
 sudo journalctl -u obsidian-mirror.service -f
 ```
+
+On Arch Linux, the systemd unit must allow writes to every configured user vault
+root through `ReadWritePaths=`, for example `/srv/lifeos-vaults`.

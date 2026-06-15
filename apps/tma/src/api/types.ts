@@ -46,6 +46,14 @@ export interface HomeSummary {
   } | null;
   healthCompletenessScore?: number | null;
   pendingSyncCount?: number;
+  obsidianStatus?: {
+    enabled: boolean;
+    status: "disconnected" | "connected" | "error";
+    mode: "local_vault" | "agent";
+    configured: boolean;
+    updatedAt: string | null;
+    pendingSyncCount: number;
+  };
 }
 
 export interface WorkoutSet {
