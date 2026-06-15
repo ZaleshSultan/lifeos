@@ -4,7 +4,7 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { realpathSync, statSync } from "node:fs";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { extname, isAbsolute, relative, resolve, sep } from "node:path";
@@ -20,6 +20,42 @@ import type { BotConfig } from "./config.js";
 import { handleTelegramUpdate } from "./telegram/commands.js";
 import type { TelegramClient, TelegramUpdate } from "./telegram/types.js";
 import { triggerFinanceAlerts } from "./telegram/alerts.js";
+
+type TmaSessionState = "unregistered" | "pending" | "active" | "blocked";
+
+interface TmaSessionStatus {
+  state: TmaSessionState;
+  telegramUserId: number;
+  displayName?: string | null;
+  username?: string | null;
+  profile: {
+    status: "pending" | "active" | "blocked";
+    role: "user" | "admin";
+  } | null;
+  integrations: {
+    telegram: {
+      connected: boolean;
+    };
+    obsidian: {
+      connected: boolean;
+      enabled: boolean;
+      configured: boolean;
+      status: "disconnected" | "connected" | "error" | null;
+      mode: "local_vault" | "agent" | null;
+      pendingSyncCount?: number;
+    };
+    google: {
+      connected: boolean;
+      status: "not_configured" | "connected" | "expired" | "revoked" | "error";
+      accountEmail?: string | null;
+      updatedAt?: string | null;
+    };
+    health: {
+      connected: false;
+      status: "not_configured";
+    };
+  };
+}
 
 export interface BotServerOptions {
   startedAt?: Date;
@@ -41,6 +77,10 @@ export interface BotServerOptions {
       | "openRouterApiKey"
       | "financeAiModel"
       | "financeAiEnabled"
+      | "googleOAuthClientId"
+      | "googleOAuthClientSecret"
+      | "googleOAuthRedirectUri"
+      | "googleOAuthStateSecret"
     >
   >;
   store?: LifeOSStore;
@@ -86,6 +126,10 @@ interface ResolvedBotServerOptions {
   openRouterApiKey?: string;
   financeAiModel?: string;
   financeAiEnabled: boolean;
+  googleOAuthClientId?: string;
+  googleOAuthClientSecret?: string;
+  googleOAuthRedirectUri?: string;
+  googleOAuthStateSecret?: string;
   store?: LifeOSStore;
   telegram?: TelegramClient;
 }
@@ -118,6 +162,29 @@ const TMA_MIME_TYPES: Record<string, string> = {
 };
 const TMA_INIT_DATA_MAX_AGE_SECONDS = 86_400;
 const TMA_INIT_DATA_MAX_FUTURE_SKEW_SECONDS = 300;
+const GOOGLE_OAUTH_STATE_MAX_AGE_SECONDS = 10 * 60;
+const GOOGLE_OAUTH_SCOPES = [
+  "https://www.googleapis.com/auth/calendar.readonly",
+  "https://www.googleapis.com/auth/tasks.readonly",
+  "https://www.googleapis.com/auth/userinfo.email",
+] as const;
+const GOOGLE_OAUTH_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
+const GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token";
+const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo";
+
+interface GoogleOAuthStatePayload {
+  userId: string;
+  telegramUserId: number | null;
+  nonce: string;
+  issuedAt: number;
+}
+
+interface GoogleTokenExchangeResult {
+  accessToken: string;
+  refreshToken?: string;
+  expiresAt: string | null;
+  scopes: string[];
+}
 
 function writeJson(
   response: ServerResponse,
@@ -140,6 +207,29 @@ function writeNoContent(response: ServerResponse): void {
     "access-control-allow-methods": "GET,POST,DELETE,OPTIONS",
     "access-control-allow-headers":
       "content-type,x-telegram-init-data,x-lifeos-health-secret,x-lifeos-ingest-secret,x-telegram-bot-api-secret-token",
+  });
+  response.end();
+}
+
+function writeHtml(
+  response: ServerResponse,
+  statusCode: number,
+  title: string,
+  body: string,
+): void {
+  response.writeHead(statusCode, {
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": "no-store",
+  });
+  response.end(
+    `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title></head><body><h1>${title}</h1><p>${body}</p></body></html>`,
+  );
+}
+
+function writeRedirect(response: ServerResponse, location: string): void {
+  response.writeHead(302, {
+    location,
+    "cache-control": "no-store",
   });
   response.end();
 }
@@ -357,7 +447,11 @@ function tmaData<T>(data: T): { data: T } {
 function validateTelegramInitData(
   initData: string,
   botToken: string,
-): { telegramUserId: number; displayName: string | null } | null {
+): {
+  telegramUserId: number;
+  displayName: string | null;
+  username: string | null;
+} | null {
   const params = new URLSearchParams(initData);
   const hash = params.get("hash");
   const authDateValue = params.get("auth_date");
@@ -416,10 +510,428 @@ function validateTelegramInitData(
           : typeof user.username === "string"
             ? user.username
             : null,
+      username: typeof user.username === "string" ? user.username : null,
     };
   } catch {
     return null;
   }
+}
+
+function googleOAuthConfigured(options: ResolvedBotServerOptions): boolean {
+  return Boolean(
+    options.googleOAuthClientId &&
+      options.googleOAuthClientSecret &&
+      options.googleOAuthRedirectUri &&
+      options.googleOAuthStateSecret,
+  );
+}
+
+function signGoogleOAuthState(
+  user: TelegramUserRecord,
+  secret: string,
+): string {
+  const payload: GoogleOAuthStatePayload = {
+    userId: user.userId,
+    telegramUserId: user.telegramUserId,
+    nonce: randomBytes(16).toString("hex"),
+    issuedAt: Math.floor(Date.now() / 1000),
+  };
+  const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString(
+    "base64url",
+  );
+  const signature = createHmac("sha256", secret)
+    .update(encoded)
+    .digest("base64url");
+  return `${encoded}.${signature}`;
+}
+
+function verifyGoogleOAuthState(
+  state: string | null,
+  secret: string | undefined,
+): GoogleOAuthStatePayload | null {
+  if (!state || !secret) {
+    return null;
+  }
+
+  const parts = state.split(".");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    return null;
+  }
+
+  const expectedSignature = createHmac("sha256", secret)
+    .update(parts[0])
+    .digest("base64url");
+
+  if (!secureCompare(parts[1], expectedSignature)) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(
+      Buffer.from(parts[0], "base64url").toString("utf8"),
+    ) as Partial<GoogleOAuthStatePayload>;
+    const now = Math.floor(Date.now() / 1000);
+
+    if (
+      typeof payload.userId !== "string" ||
+      !payload.userId ||
+      (typeof payload.telegramUserId !== "number" &&
+        payload.telegramUserId !== null) ||
+      typeof payload.nonce !== "string" ||
+      !payload.nonce ||
+      typeof payload.issuedAt !== "number" ||
+      now - payload.issuedAt > GOOGLE_OAUTH_STATE_MAX_AGE_SECONDS ||
+      payload.issuedAt - now > TMA_INIT_DATA_MAX_FUTURE_SKEW_SECONDS
+    ) {
+      return null;
+    }
+
+    return {
+      userId: payload.userId,
+      telegramUserId: payload.telegramUserId,
+      nonce: payload.nonce,
+      issuedAt: payload.issuedAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function buildGoogleOAuthUrl(
+  user: TelegramUserRecord,
+  options: ResolvedBotServerOptions,
+): string | null {
+  if (
+    !options.googleOAuthClientId ||
+    !options.googleOAuthRedirectUri ||
+    !options.googleOAuthStateSecret
+  ) {
+    return null;
+  }
+
+  const url = new URL(GOOGLE_OAUTH_AUTH_URL);
+  url.searchParams.set("client_id", options.googleOAuthClientId);
+  url.searchParams.set("redirect_uri", options.googleOAuthRedirectUri);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("scope", GOOGLE_OAUTH_SCOPES.join(" "));
+  url.searchParams.set("access_type", "offline");
+  url.searchParams.set("prompt", "consent");
+  url.searchParams.set("include_granted_scopes", "true");
+  url.searchParams.set(
+    "state",
+    signGoogleOAuthState(user, options.googleOAuthStateSecret),
+  );
+  return url.toString();
+}
+
+function parseGoogleScopes(value: unknown): string[] {
+  const scopeText =
+    typeof value === "string" ? value : GOOGLE_OAUTH_SCOPES.join(" ");
+  return scopeText.split(/[,\s]+/).filter(Boolean);
+}
+
+async function exchangeGoogleOAuthCode(
+  code: string,
+  options: ResolvedBotServerOptions,
+): Promise<GoogleTokenExchangeResult> {
+  if (
+    !options.googleOAuthClientId ||
+    !options.googleOAuthClientSecret ||
+    !options.googleOAuthRedirectUri
+  ) {
+    throw new Error("Google OAuth is not configured");
+  }
+
+  const tokenResponse = await fetch(GOOGLE_OAUTH_TOKEN_URL, {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      code,
+      client_id: options.googleOAuthClientId,
+      client_secret: options.googleOAuthClientSecret,
+      redirect_uri: options.googleOAuthRedirectUri,
+      grant_type: "authorization_code",
+    }),
+  });
+
+  if (!tokenResponse.ok) {
+    throw new Error("Google OAuth token exchange failed");
+  }
+
+  const body = (await tokenResponse.json()) as Record<string, unknown>;
+  const accessToken = body.access_token;
+
+  if (typeof accessToken !== "string" || !accessToken) {
+    throw new Error("Google OAuth token exchange returned no access token");
+  }
+
+  const rawExpiresIn = body.expires_in;
+  const expiresIn =
+    typeof rawExpiresIn === "number"
+      ? rawExpiresIn
+      : typeof rawExpiresIn === "string"
+        ? Number(rawExpiresIn)
+        : null;
+
+  return {
+    accessToken,
+    refreshToken:
+      typeof body.refresh_token === "string" && body.refresh_token
+        ? body.refresh_token
+        : undefined,
+    expiresAt:
+      expiresIn && Number.isFinite(expiresIn) && expiresIn > 0
+        ? new Date(Date.now() + expiresIn * 1000).toISOString()
+        : null,
+    scopes: parseGoogleScopes(body.scope),
+  };
+}
+
+async function fetchGoogleAccountEmail(
+  accessToken: string,
+): Promise<string | null> {
+  try {
+    const response = await fetch(GOOGLE_USERINFO_URL, {
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const body = (await response.json()) as Record<string, unknown>;
+    return typeof body.email === "string" && body.email ? body.email : null;
+  } catch {
+    return null;
+  }
+}
+
+function googleOAuthTmaRedirect(
+  options: ResolvedBotServerOptions,
+  status: "connected" | "error",
+): string {
+  const base = options.tmaUrl ?? "/tma/";
+  const isRelative = base.startsWith("/");
+  const url = new URL(base, "http://lifeos.local");
+  url.searchParams.set("google", status);
+  return isRelative ? `${url.pathname}${url.search}` : url.toString();
+}
+
+async function resolveTmaSessionIdentity(
+  request: IncomingMessage,
+  options: ResolvedBotServerOptions,
+): Promise<
+  | {
+      ok: true;
+      telegramUserId: number;
+      displayName: string | null;
+      username: string | null;
+      devUser?: TelegramUserRecord;
+    }
+  | { ok: false; statusCode: number; error: string }
+> {
+  const initData = headerValue(request.headers["x-telegram-init-data"]);
+
+  if (initData && options.telegramBotToken) {
+    const validated = validateTelegramInitData(
+      initData,
+      options.telegramBotToken,
+    );
+
+    if (validated) {
+      return { ok: true, ...validated };
+    }
+  }
+
+  if (options.allowUnsafeTmaDevAuth && options.defaultUserId) {
+    const devUser: TelegramUserRecord = {
+      userId: options.defaultUserId,
+      telegramUserId: options.defaultTelegramUserId ?? null,
+      displayName: "Dev user",
+      username: null,
+      timezone: "Asia/Qyzylorda",
+      status: "active",
+      role: "admin",
+    };
+
+    return {
+      ok: true,
+      telegramUserId: options.defaultTelegramUserId ?? 0,
+      displayName: devUser.displayName,
+      username: null,
+      devUser,
+    };
+  }
+
+  if (initData && !options.telegramBotToken) {
+    return {
+      ok: false,
+      statusCode: 503,
+      error: "tma_auth_not_configured",
+    };
+  }
+
+  return {
+    ok: false,
+    statusCode: 401,
+    error: "invalid_telegram_init_data",
+  };
+}
+
+function emptyIntegrations(): TmaSessionStatus["integrations"] {
+  return {
+    telegram: {
+      connected: false,
+    },
+    obsidian: {
+      connected: false,
+      enabled: false,
+      configured: false,
+      status: null,
+      mode: null,
+    },
+    google: {
+      connected: false,
+      status: "not_configured",
+    },
+    health: {
+      connected: false,
+      status: "not_configured",
+    },
+  };
+}
+
+async function buildTmaSessionStatus(
+  input: {
+    telegramUserId: number;
+    displayName: string | null;
+    username: string | null;
+    user: TelegramUserRecord | null;
+  },
+  store: LifeOSStore,
+): Promise<TmaSessionStatus> {
+  if (!input.user) {
+    return {
+      state: "unregistered",
+      telegramUserId: input.telegramUserId,
+      displayName: input.displayName,
+      username: input.username,
+      profile: null,
+      integrations: emptyIntegrations(),
+    };
+  }
+
+  const state: TmaSessionState =
+    input.user.status === "active"
+      ? "active"
+      : input.user.status === "blocked"
+        ? "blocked"
+        : "pending";
+  const integrations = emptyIntegrations();
+  integrations.telegram.connected = true;
+
+  if (state === "active") {
+    const [obsidianSettings, obsidianSyncStatus, googleConnection] =
+      await Promise.all([
+        store.getUserObsidianSettings(input.user.userId),
+        store.getObsidianSyncStatus(input.user.userId),
+        store.getSafeUserOAuthConnection(input.user.userId, "google"),
+      ]);
+    const configured = Boolean(obsidianSettings?.vaultPath?.trim());
+    const enabled = Boolean(obsidianSettings?.enabled);
+    const status = obsidianSettings?.status ?? null;
+    const mode = obsidianSettings?.mode ?? null;
+
+    integrations.obsidian = {
+      connected:
+        configured &&
+        enabled &&
+        status === "connected" &&
+        mode === "local_vault",
+      enabled,
+      configured,
+      status,
+      mode,
+      pendingSyncCount: obsidianSyncStatus.counts.pending ?? 0,
+    };
+
+    if (googleConnection) {
+      integrations.google = {
+        connected: googleConnection.status === "connected",
+        status: googleConnection.status,
+        accountEmail: googleConnection.providerAccountEmail,
+        updatedAt: googleConnection.updatedAt,
+      };
+    }
+  }
+
+  return {
+    state,
+    telegramUserId: input.user.telegramUserId ?? input.telegramUserId,
+    displayName: input.user.displayName ?? input.displayName,
+    username: input.user.username ?? input.username,
+    profile: {
+      status: input.user.status,
+      role: input.user.role,
+    },
+    integrations,
+  };
+}
+
+async function resolveTmaSessionStatus(
+  request: IncomingMessage,
+  options: ResolvedBotServerOptions,
+): Promise<
+  | { ok: true; session: TmaSessionStatus }
+  | { ok: false; statusCode: number; error: string }
+> {
+  if (!options.store) {
+    return {
+      ok: false,
+      statusCode: 503,
+      error: "database_not_configured",
+    };
+  }
+
+  const identity = await resolveTmaSessionIdentity(request, options);
+
+  if (!identity.ok) {
+    return identity;
+  }
+
+  if (identity.devUser) {
+    return {
+      ok: true,
+      session: await buildTmaSessionStatus(
+        {
+          telegramUserId: identity.telegramUserId,
+          displayName: identity.displayName,
+          username: identity.username,
+          user: identity.devUser,
+        },
+        options.store,
+      ),
+    };
+  }
+
+  const user = await options.store.resolveTelegramUser(identity.telegramUserId);
+
+  return {
+    ok: true,
+    session: await buildTmaSessionStatus(
+      {
+        telegramUserId: identity.telegramUserId,
+        displayName: identity.displayName,
+        username: identity.username,
+        user,
+      },
+      options.store,
+    ),
+  };
 }
 
 async function resolveTmaUser(
@@ -616,6 +1128,8 @@ function sensitiveLogValues(options: ResolvedBotServerOptions): string[] {
   return [
     options.telegramBotToken,
     options.webhookSecret,
+    options.googleOAuthClientSecret,
+    options.googleOAuthStateSecret,
     process.env.SUPABASE_SERVICE_ROLE_KEY,
     process.env.SUPABASE_SERVICE_KEY,
   ].filter((value): value is string => Boolean(value));
@@ -1299,6 +1813,184 @@ async function handleRequest(
     return;
   }
 
+  if (requestUrl.pathname === "/api/oauth/google/callback") {
+    if (request.method !== "GET") {
+      writeJson(response, 404, {
+        error: "not_found",
+      });
+      return;
+    }
+
+    if (!options.store) {
+      writeHtml(
+        response,
+        503,
+        "Google OAuth unavailable",
+        "LifeOS database access is not configured.",
+      );
+      return;
+    }
+
+    if (!googleOAuthConfigured(options)) {
+      writeHtml(
+        response,
+        503,
+        "Google OAuth unavailable",
+        "Google OAuth is not configured.",
+      );
+      return;
+    }
+
+    const state = verifyGoogleOAuthState(
+      requestUrl.searchParams.get("state"),
+      options.googleOAuthStateSecret,
+    );
+
+    if (!state) {
+      writeHtml(
+        response,
+        400,
+        "Google OAuth failed",
+        "The OAuth state was invalid or expired.",
+      );
+      return;
+    }
+
+    if (requestUrl.searchParams.get("error")) {
+      writeRedirect(response, googleOAuthTmaRedirect(options, "error"));
+      return;
+    }
+
+    const code = requestUrl.searchParams.get("code");
+
+    if (!code) {
+      writeHtml(
+        response,
+        400,
+        "Google OAuth failed",
+        "Google did not return an authorization code.",
+      );
+      return;
+    }
+
+    try {
+      const token = await exchangeGoogleOAuthCode(code, options);
+      const accountEmail = await fetchGoogleAccountEmail(token.accessToken);
+      await options.store.upsertUserOAuthConnection(state.userId, {
+        provider: "google",
+        providerAccountEmail: accountEmail,
+        accessToken: token.accessToken,
+        ...(token.refreshToken ? { refreshToken: token.refreshToken } : {}),
+        expiresAt: token.expiresAt,
+        scopes: token.scopes,
+        status: "connected",
+        metadata: {
+          source: "tma_google_oauth",
+          telegram_user_id: state.telegramUserId,
+          connected_at: new Date().toISOString(),
+        },
+      });
+      writeRedirect(response, googleOAuthTmaRedirect(options, "connected"));
+      return;
+    } catch {
+      writeRedirect(response, googleOAuthTmaRedirect(options, "error"));
+      return;
+    }
+  }
+
+  if (requestUrl.pathname === "/api/tma/session") {
+    if (request.method !== "GET") {
+      writeJson(response, 404, {
+        error: "not_found",
+      });
+      return;
+    }
+
+    const session = await resolveTmaSessionStatus(request, options);
+
+    if (!session.ok) {
+      writeJson(response, session.statusCode, {
+        error: session.error,
+      });
+      return;
+    }
+
+    writeJson(response, 200, tmaData(session.session));
+    return;
+  }
+
+  if (requestUrl.pathname === "/api/tma/register") {
+    if (request.method !== "POST") {
+      writeJson(response, 404, {
+        error: "not_found",
+      });
+      return;
+    }
+
+    if (!options.store) {
+      writeJson(response, 503, {
+        error: "database_not_configured",
+      });
+      return;
+    }
+
+    const identity = await resolveTmaSessionIdentity(request, options);
+
+    if (!identity.ok) {
+      writeJson(response, identity.statusCode, {
+        error: identity.error,
+      });
+      return;
+    }
+
+    if (identity.devUser) {
+      writeJson(
+        response,
+        200,
+        tmaData(
+          await buildTmaSessionStatus(
+            {
+              telegramUserId: identity.telegramUserId,
+              displayName: identity.displayName,
+              username: identity.username,
+              user: identity.devUser,
+            },
+            options.store,
+          ),
+        ),
+      );
+      return;
+    }
+
+    const existing = await options.store.resolveTelegramUser(
+      identity.telegramUserId,
+    );
+    const user =
+      existing ??
+      (await options.store.createPendingTelegramUser({
+        telegramUserId: identity.telegramUserId,
+        displayName: identity.displayName,
+        username: identity.username,
+      }));
+
+    writeJson(
+      response,
+      200,
+      tmaData(
+        await buildTmaSessionStatus(
+          {
+            telegramUserId: identity.telegramUserId,
+            displayName: identity.displayName,
+            username: identity.username,
+            user,
+          },
+          options.store,
+        ),
+      ),
+    );
+    return;
+  }
+
   if (requestUrl.pathname.startsWith("/api/tma/")) {
     const auth = await resolveTmaUser(request, options);
 
@@ -1315,6 +2007,53 @@ async function handleRequest(
       writeJson(response, 503, {
         error: "database_not_configured",
       });
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      requestUrl.pathname === "/api/tma/integrations/google/start"
+    ) {
+      if (!googleOAuthConfigured(options)) {
+        writeJson(response, 503, {
+          error: "google_oauth_not_configured",
+        });
+        return;
+      }
+
+      const url = buildGoogleOAuthUrl(auth.user, options);
+
+      if (!url) {
+        writeJson(response, 503, {
+          error: "google_oauth_not_configured",
+        });
+        return;
+      }
+
+      writeJson(response, 200, tmaData({ url }));
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname === "/api/tma/integrations/google/disconnect"
+    ) {
+      await store.deleteUserOAuthConnection(auth.user.userId, "google");
+      writeJson(
+        response,
+        200,
+        tmaData(
+          await buildTmaSessionStatus(
+            {
+              telegramUserId: auth.user.telegramUserId ?? 0,
+              displayName: auth.user.displayName,
+              username: auth.user.username,
+              user: auth.user,
+            },
+            store,
+          ),
+        ),
+      );
       return;
     }
 
@@ -2125,6 +2864,10 @@ export function createBotServer(options: BotServerOptions = {}): Server {
     openRouterApiKey: options.config?.openRouterApiKey,
     financeAiModel: options.config?.financeAiModel,
     financeAiEnabled: options.config?.financeAiEnabled ?? false,
+    googleOAuthClientId: options.config?.googleOAuthClientId,
+    googleOAuthClientSecret: options.config?.googleOAuthClientSecret,
+    googleOAuthRedirectUri: options.config?.googleOAuthRedirectUri,
+    googleOAuthStateSecret: options.config?.googleOAuthStateSecret,
     store: options.store,
     telegram: options.telegram,
   };

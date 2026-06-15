@@ -1,10 +1,14 @@
 # Google Calendar And Tasks Sync
 
-`lifeos-google-sync.service` reads Google Calendar and Google Tasks through
-local OAuth, writes normalized source events to Supabase, and reconciles future
-reminders.
+`lifeos-google-sync.service` currently reads Google Calendar and Google Tasks
+through legacy local OAuth, writes normalized source events to Supabase, and
+reconciles future reminders.
 
-OAuth credentials remain in `workers/google-sync/secrets/`.
+OAuth credentials for this worker remain in `workers/google-sync/secrets/`.
+The TMA Google OAuth MVP stores per-user connections in
+`public.user_oauth_connections`, but this worker does not consume those rows
+yet. Keep `LIFEOS_ENABLE_LEGACY_SINGLE_USER_GOOGLE_SYNC=false` unless you are
+explicitly running the accepted legacy single-user worker.
 
 ## OAuth Over SSH Port Forward
 
@@ -55,6 +59,8 @@ A Google Task due date has no reliable time component. LifeOS anchors it at
 
 - `/google_sync` should show Google Calendar and Google Tasks as connected.
 - Missing OAuth token: run the SSH-forwarded auth flow again.
+- Per-user OAuth connected in TMA but no sync: expected for this stage; the
+  worker migration to `user_oauth_connections` is next.
 - Task visible but no reminder: confirm it has a due date and the due date is
   still in the future.
 - Duplicate concern: run `sync-once` twice; the second run should log zero

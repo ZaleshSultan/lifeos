@@ -30,6 +30,42 @@ export interface ApiEnvelope<T> {
   data: T;
 }
 
+export type TmaSessionState = "unregistered" | "pending" | "active" | "blocked";
+
+export interface TmaSessionStatus {
+  state: TmaSessionState;
+  telegramUserId: number;
+  displayName?: string | null;
+  username?: string | null;
+  profile: {
+    status: "pending" | "active" | "blocked";
+    role: "user" | "admin";
+  } | null;
+  integrations: {
+    telegram: {
+      connected: boolean;
+    };
+    obsidian: {
+      connected: boolean;
+      enabled: boolean;
+      configured: boolean;
+      status: "disconnected" | "connected" | "error" | null;
+      mode: "local_vault" | "agent" | null;
+      pendingSyncCount?: number;
+    };
+    google: {
+      connected: boolean;
+      status: "not_configured" | "connected" | "expired" | "revoked" | "error";
+      accountEmail?: string | null;
+      updatedAt?: string | null;
+    };
+    health: {
+      connected: false;
+      status: "not_configured";
+    };
+  };
+}
+
 export interface HomeSummary {
   displayName?: string;
   localDate: string;

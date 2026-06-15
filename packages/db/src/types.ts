@@ -47,6 +47,10 @@ export type UserObsidianMode = "local_vault" | "agent";
 
 export type UserObsidianStatus = "disconnected" | "connected" | "error";
 
+export type UserOAuthProvider = "google";
+
+export type UserOAuthStatus = "connected" | "expired" | "revoked" | "error";
+
 export type HealthSyncRunStatus = "success" | "failed";
 
 export type ExternalSourceStatus = "disabled" | "connected" | "error";
@@ -192,6 +196,36 @@ export interface Database {
           mode?: UserObsidianMode;
           vault_path?: string | null;
           status?: UserObsidianStatus;
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        }
+      >;
+      user_oauth_connections: TableDefinition<
+        {
+          id: string;
+          user_id: string;
+          provider: UserOAuthProvider;
+          provider_account_email: string | null;
+          access_token: string | null;
+          refresh_token: string | null;
+          expires_at: string | null;
+          scopes: string[];
+          status: UserOAuthStatus;
+          metadata: Json;
+          created_at: string;
+          updated_at: string;
+        },
+        {
+          id?: string;
+          user_id: string;
+          provider: UserOAuthProvider;
+          provider_account_email?: string | null;
+          access_token?: string | null;
+          refresh_token?: string | null;
+          expires_at?: string | null;
+          scopes?: string[];
+          status?: UserOAuthStatus;
           metadata?: Json;
           created_at?: string;
           updated_at?: string;
@@ -1726,6 +1760,21 @@ export interface Database {
         };
         Relationships: [];
       };
+      safe_user_oauth_connections: {
+        Row: {
+          id: string;
+          user_id: string;
+          provider: UserOAuthProvider;
+          provider_account_email: string | null;
+          expires_at: string | null;
+          scopes: string[];
+          status: UserOAuthStatus;
+          metadata: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Relationships: [];
+      };
     };
     Functions: Record<string, never>;
     Enums: {
@@ -1746,6 +1795,8 @@ export interface Database {
       health_sync_run_status: HealthSyncRunStatus;
       profile_status: ProfileStatus;
       profile_role: ProfileRole;
+      user_oauth_provider: UserOAuthProvider;
+      user_oauth_status: UserOAuthStatus;
     };
     CompositeTypes: Record<string, never>;
   };

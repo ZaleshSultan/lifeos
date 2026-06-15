@@ -17,6 +17,8 @@ interface AppShellProps {
   screen: ScreenId;
   onScreenChange: (screen: ScreenId) => void;
   children: React.ReactNode;
+  showNavigation?: boolean;
+  statusLabel?: string;
 }
 
 const tabs: Array<{ id: ScreenId; label: string; icon: LucideIcon }> = [
@@ -30,7 +32,13 @@ const tabs: Array<{ id: ScreenId; label: string; icon: LucideIcon }> = [
   { id: "mode", label: "Mode", icon: Settings2 },
 ];
 
-export function AppShell({ screen, onScreenChange, children }: AppShellProps) {
+export function AppShell({
+  children,
+  onScreenChange,
+  screen,
+  showNavigation = true,
+  statusLabel = "Live",
+}: AppShellProps) {
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-md flex-col">
       <header className="safe-shell sticky top-0 z-20 border-b border-white/[0.06] bg-graphite-950/90 px-4 pb-3 backdrop-blur-md">
@@ -49,44 +57,46 @@ export function AppShell({ screen, onScreenChange, children }: AppShellProps) {
             </div>
           </div>
           <div className="rounded-full border border-emerald-400/20 bg-emerald-400/[0.08] px-2.5 py-1 text-[11px] font-medium text-emerald-400">
-            Live
+            {statusLabel}
           </div>
         </div>
       </header>
 
       <main className="flex-1 px-4 pb-28 pt-4">{children}</main>
 
-      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-white/[0.06] bg-graphite-950/95 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-md">
-        <div className="mx-auto grid max-w-md grid-cols-8">
-          {tabs.map((tab) => {
-            const Icon = tab.icon;
-            const active = screen === tab.id;
+      {showNavigation ? (
+        <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-white/[0.06] bg-graphite-950/95 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-md">
+          <div className="mx-auto grid max-w-md grid-cols-8">
+            {tabs.map((tab) => {
+              const Icon = tab.icon;
+              const active = screen === tab.id;
 
-            return (
-              <button
-                aria-label={tab.label}
-                className={cx(
-                  "flex min-h-14 flex-col items-center justify-center gap-1 rounded-lg py-1 text-[10px] font-medium transition active:scale-[0.98]",
-                  active
-                    ? "bg-white/[0.1] text-white"
-                    : "text-zinc-600 hover:bg-white/[0.04] hover:text-zinc-400",
-                )}
-                key={tab.id}
-                onClick={() => onScreenChange(tab.id)}
-                type="button"
-              >
-                <Icon
+              return (
+                <button
+                  aria-label={tab.label}
                   className={cx(
-                    "h-5 w-5",
-                    active ? "text-cyan-400" : "text-zinc-600",
+                    "flex min-h-14 flex-col items-center justify-center gap-1 rounded-lg py-1 text-[10px] font-medium transition active:scale-[0.98]",
+                    active
+                      ? "bg-white/[0.1] text-white"
+                      : "text-zinc-600 hover:bg-white/[0.04] hover:text-zinc-400",
                   )}
-                />
-                <span>{tab.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      </nav>
+                  key={tab.id}
+                  onClick={() => onScreenChange(tab.id)}
+                  type="button"
+                >
+                  <Icon
+                    className={cx(
+                      "h-5 w-5",
+                      active ? "text-cyan-400" : "text-zinc-600",
+                    )}
+                  />
+                  <span>{tab.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </nav>
+      ) : null}
     </div>
   );
 }

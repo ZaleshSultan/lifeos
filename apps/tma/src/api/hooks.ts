@@ -3,6 +3,7 @@ import { telegram } from "../telegram";
 import { api } from "./client";
 
 export const queryKeys = {
+  session: ["session"] as const,
   home: ["home"] as const,
   workout: ["workout", "current"] as const,
   health: ["health"] as const,
@@ -17,6 +18,48 @@ export const queryKeys = {
   activeCourse: ["course", "active"] as const,
   receipt: (id: string) => ["finance", "receipt", id] as const,
 };
+
+export function useSessionQuery() {
+  return useQuery({
+    queryKey: queryKeys.session,
+    queryFn: api.getSession,
+  });
+}
+
+export function useRegisterSessionMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: api.registerSession,
+    onSuccess(data) {
+      telegram.hapticImpact("medium");
+      queryClient.setQueryData(queryKeys.session, data);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.home });
+    },
+  });
+}
+
+export function useStartGoogleOAuthMutation() {
+  return useMutation({
+    mutationFn: api.startGoogleOAuth,
+    onSuccess(data) {
+      telegram.hapticImpact("medium");
+      window.location.assign(data.url);
+    },
+  });
+}
+
+export function useDisconnectGoogleOAuthMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: api.disconnectGoogleOAuth,
+    onSuccess(data) {
+      telegram.hapticImpact("light");
+      queryClient.setQueryData(queryKeys.session, data);
+    },
+  });
+}
 
 export function useHomeQuery() {
   return useQuery({

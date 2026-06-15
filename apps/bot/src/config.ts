@@ -19,6 +19,10 @@ export interface BotConfig {
   openRouterApiKey?: string;
   financeAiModel?: string;
   financeAiEnabled: boolean;
+  googleOAuthClientId?: string;
+  googleOAuthClientSecret?: string;
+  googleOAuthRedirectUri?: string;
+  googleOAuthStateSecret?: string;
 }
 
 export function telegramIdListEnv(source: EnvSource, name: string): number[] {
@@ -116,5 +120,9 @@ export function loadBotConfig(source: EnvSource = process.env): BotConfig {
     openRouterApiKey: optionalEnv(source, "OPENROUTER_API_KEY"),
     financeAiModel: optionalEnv(source, "FINANCE_AI_MODEL"),
     financeAiEnabled: booleanEnv(source, "FINANCE_AI_ENABLED", false),
+    googleOAuthClientId: optionalEnv(source, "GOOGLE_OAUTH_CLIENT_ID"),
+    googleOAuthClientSecret: optionalEnv(source, "GOOGLE_OAUTH_CLIENT_SECRET"),
+    googleOAuthRedirectUri: optionalEnv(source, "GOOGLE_OAUTH_REDIRECT_URI"),
+    googleOAuthStateSecret: optionalEnv(source, "GOOGLE_OAUTH_STATE_SECRET"),
   };
 }

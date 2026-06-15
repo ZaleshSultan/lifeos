@@ -463,6 +463,32 @@ class FakeStore implements LifeOSStore {
     return false;
   }
 
+  async getUserOAuthConnection(): Promise<
+    Awaited<ReturnType<LifeOSStore["getUserOAuthConnection"]>>
+  > {
+    return null;
+  }
+
+  async getSafeUserOAuthConnection(): Promise<
+    Awaited<ReturnType<LifeOSStore["getSafeUserOAuthConnection"]>>
+  > {
+    return null;
+  }
+
+  async upsertUserOAuthConnection(): Promise<
+    Awaited<ReturnType<LifeOSStore["upsertUserOAuthConnection"]>>
+  > {
+    throw new Error("not used");
+  }
+
+  async deleteUserOAuthConnection(): Promise<void> {}
+
+  async listConnectedOAuthUsers(): Promise<
+    Awaited<ReturnType<LifeOSStore["listConnectedOAuthUsers"]>>
+  > {
+    return [];
+  }
+
   async getHealthSyncStatus(): Promise<HealthSyncStatusSummary> {
     return {
       counts: {

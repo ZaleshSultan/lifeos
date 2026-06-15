@@ -5,6 +5,7 @@ import {
   GraduationCap,
   HeartPulse,
   NotebookText,
+  PlugZap,
   RefreshCw,
 } from "lucide-react";
 import {
@@ -12,22 +13,27 @@ import {
   useGenerateMonthlyReviewMutation,
   useHomeQuery,
   useMonthlyReviewQuery,
+  useStartGoogleOAuthMutation,
 } from "../api/hooks";
-import { recoveryModeLabels } from "../api/types";
+import { recoveryModeLabels, type TmaSessionStatus } from "../api/types";
 import { ErrorPanel, LoadingPanel } from "../components/AsyncState";
+import { IntegrationStatusCard } from "../components/IntegrationStatusCard";
 import { MetricTile } from "../components/MetricTile";
 import { ProgressRing } from "../components/ProgressRing";
 import { formatDateTime } from "../lib/format";
+import { integrationCardsForSession } from "../lib/session-status";
 
 interface HomeScreenProps {
   onOpenWorkout: () => void;
+  session: TmaSessionStatus;
 }
 
-export function HomeScreen({ onOpenWorkout }: HomeScreenProps) {
+export function HomeScreen({ onOpenWorkout, session }: HomeScreenProps) {
   const query = useHomeQuery();
   const academicQuery = useAcademicQuery();
   const monthlyReviewQuery = useMonthlyReviewQuery();
   const generateMonthlyReview = useGenerateMonthlyReviewMutation();
+  const startGoogleOAuth = useStartGoogleOAuthMutation();
 
   if (query.isLoading) {
     return <LoadingPanel title="Loading home" />;
@@ -66,6 +72,7 @@ export function HomeScreen({ onOpenWorkout }: HomeScreenProps) {
     typeof reviewStats?.health === "object" && reviewStats.health !== null
       ? (reviewStats.health as Record<string, unknown>)
       : {};
+  const integrationCards = integrationCardsForSession(session);
 
   return (
     <div className="space-y-4">
@@ -101,6 +108,32 @@ export function HomeScreen({ onOpenWorkout }: HomeScreenProps) {
           tone={home.pendingSyncCount ? "amber" : "mint"}
           value={home.pendingSyncCount ?? 0}
         />
+      </section>
+
+      <section className="space-y-2">
+        <div className="flex items-center gap-2 text-sm font-semibold text-white">
+          <PlugZap className="h-5 w-5 text-cyan-400" />
+          Integrations
+        </div>
+        {integrationCards.map((card) => (
+          <IntegrationStatusCard
+            actionBusy={
+              card.action === "connect_google" && startGoogleOAuth.isPending
+            }
+            actionLabel={
+              card.action === "connect_google" ? "Connect Google" : undefined
+            }
+            description={card.description}
+            key={card.title}
+            onAction={
+              card.action === "connect_google"
+                ? () => startGoogleOAuth.mutate()
+                : undefined
+            }
+            status={card.status}
+            title={card.title}
+          />
+        ))}
       </section>
 
       <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">

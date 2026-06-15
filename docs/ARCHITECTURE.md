@@ -23,6 +23,13 @@ Telegram sends webhooks to `apps/bot`. The bot resolves a LifeOS user through Su
 
 The TMA is opened from Telegram with a short URL only. Workout identity and state live in Supabase and are fetched through backend API routes with Telegram init data in `X-Telegram-Init-Data`.
 
+Google OAuth starts at the backend TMA boundary. Active Telegram users call
+`GET /api/tma/integrations/google/start`, the bot signs state bound to their
+LifeOS `user_id`, and `GET /api/oauth/google/callback` stores the resulting
+Google tokens in `public.user_oauth_connections`. TMA status uses only safe
+metadata from that connection; browser apps never receive access or refresh
+tokens.
+
 The Android health bridge reads previous-day data from Health Connect and posts to `POST /health/ingest`. The backend validates `x-lifeos-ingest-secret`, computes recovery and completeness with `packages/core`, upserts health tables, creates a `health_daily` life entity, and enqueues Obsidian sync.
 
 The web dashboard reads through backend APIs. It does not carry service-role keys, ingest secrets, or bot tokens.
@@ -46,13 +53,13 @@ The stabilized vertical slice keeps Supabase Auth as the identity root:
 
 For local single-user setup, `LIFEOS_DEFAULT_USER_ID` and `LIFEOS_DEFAULT_TELEGRAM_USER_ID` let `/start` link the configured Telegram account when the auth user exists.
 
-Current multi-user MVP caveat: Telegram bot/TMA access, health ingest, reminder delivery, and Obsidian mirror routing are user-scoped. The remaining local integrations are guarded legacy single-user modes and are not production multi-user until per-user configuration exists:
+Current multi-user MVP caveat: Telegram bot/TMA access, health ingest, reminder delivery, Obsidian mirror routing, and Google OAuth management are user-scoped. The remaining local worker integrations are guarded legacy single-user modes and are not production multi-user until their runtime sync loops consume per-user configuration:
 
-- `workers/google-sync` uses one local `GOOGLE_TOKEN_FILE` and `LIFEOS_DEFAULT_USER_ID`. It requires `LIFEOS_ENABLE_LEGACY_SINGLE_USER_GOOGLE_SYNC=true`.
+- `workers/google-sync` still uses one local `GOOGLE_TOKEN_FILE` and `LIFEOS_DEFAULT_USER_ID`. It ignores `user_oauth_connections` until the next worker migration and requires `LIFEOS_ENABLE_LEGACY_SINGLE_USER_GOOGLE_SYNC=true`.
 - `workers/ics-sync` assigns configured feed URLs to `LIFEOS_DEFAULT_USER_ID`. It requires `LIFEOS_ENABLE_LEGACY_SINGLE_USER_ICS_SYNC=true`.
 - `workers/monthly-review-worker` uses `LIFEOS_DEFAULT_USER_ID`, optional `LIFEOS_DEFAULT_TELEGRAM_USER_ID`, and one vault path. It requires `LIFEOS_ENABLE_LEGACY_SINGLE_USER_MONTHLY_REVIEW=true`.
 
-Do not present Google, ICS, or standalone monthly-review integrations as connected for every newly approved user until per-user OAuth/source configuration exists. Obsidian mirror is connected only for users with `user_obsidian_settings.enabled = true`, `status = 'connected'`, and a local vault path.
+Do not present the Google sync worker, ICS, or standalone monthly-review integrations as fully multi-user-safe until per-user source configuration is consumed by those workers. Google OAuth status is connected only for users with `user_oauth_connections.provider = 'google'` and `status = 'connected'`. Obsidian mirror is connected only for users with `user_obsidian_settings.enabled = true`, `status = 'connected'`, and a local vault path.
 
 ## Deployment Targets
 

@@ -345,6 +345,19 @@ export function tmaStore(events: string[] = []): LifeOSStore {
     async isObsidianEnabledForUser() {
       return false;
     },
+    async getUserOAuthConnection() {
+      return null;
+    },
+    async getSafeUserOAuthConnection() {
+      return null;
+    },
+    async upsertUserOAuthConnection() {
+      throw new Error("not used");
+    },
+    async deleteUserOAuthConnection() {},
+    async listConnectedOAuthUsers() {
+      return [];
+    },
     async getHealthSyncStatus() {
       return { counts: {}, runs: [], latestRun: null };
     },
@@ -1942,6 +1955,574 @@ describe("bot server", () => {
           mode: "local_vault",
           configured: true,
         },
+      },
+    });
+  });
+
+  it("returns an unregistered TMA session for an unknown Telegram user", async () => {
+    const store = tmaStore();
+    store.resolveTelegramUser = async () => null;
+    const server = createBotServer({
+      config: {
+        telegramBotToken: "bot-token",
+      },
+      store,
+    });
+    servers.push(server);
+
+    const port = await listen(server);
+    const response = await fetch(`http://127.0.0.1:${port}/api/tma/session`, {
+      headers: {
+        "x-telegram-init-data": signedInitData("bot-token", 777),
+      },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        state: "unregistered",
+        telegramUserId: 777,
+        profile: null,
+        integrations: {
+          telegram: { connected: false },
+          obsidian: {
+            connected: false,
+            enabled: false,
+            configured: false,
+            status: null,
+            mode: null,
+          },
+          google: { connected: false, status: "not_configured" },
+          health: { connected: false, status: "not_configured" },
+        },
+      },
+    });
+  });
+
+  it("returns a pending TMA session without allowing protected data", async () => {
+    const store = tmaStore();
+    store.resolveTelegramUser = async () =>
+      activeTelegramUser({ status: "pending" });
+    const server = createBotServer({
+      config: {
+        telegramBotToken: "bot-token",
+      },
+      store,
+    });
+    servers.push(server);
+
+    const port = await listen(server);
+    const sessionResponse = await fetch(
+      `http://127.0.0.1:${port}/api/tma/session`,
+      {
+        headers: {
+          "x-telegram-init-data": signedInitData("bot-token", 30),
+        },
+      },
+    );
+    const homeResponse = await fetch(`http://127.0.0.1:${port}/api/tma/home`, {
+      headers: {
+        "x-telegram-init-data": signedInitData("bot-token", 30),
+      },
+    });
+
+    expect(sessionResponse.status).toBe(200);
+    await expect(sessionResponse.json()).resolves.toMatchObject({
+      data: {
+        state: "pending",
+        profile: { status: "pending", role: "user" },
+      },
+    });
+    expect(homeResponse.status).toBe(403);
+    await expect(homeResponse.json()).resolves.toMatchObject({
+      error: "telegram_user_pending",
+    });
+  });
+
+  it("returns a blocked TMA session without technical details", async () => {
+    const store = tmaStore();
+    store.resolveTelegramUser = async () =>
+      activeTelegramUser({ status: "blocked" });
+    const server = createBotServer({
+      config: {
+        telegramBotToken: "bot-token",
+      },
+      store,
+    });
+    servers.push(server);
+
+    const port = await listen(server);
+    const response = await fetch(`http://127.0.0.1:${port}/api/tma/session`, {
+      headers: {
+        "x-telegram-init-data": signedInitData("bot-token", 30),
+      },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        state: "blocked",
+        profile: { status: "blocked", role: "user" },
+        integrations: {
+          telegram: { connected: true },
+          obsidian: {
+            connected: false,
+            enabled: false,
+            configured: false,
+            status: null,
+            mode: null,
+          },
+        },
+      },
+    });
+  });
+
+  it("returns active TMA session integrations without leaking vault paths", async () => {
+    const store = tmaStore();
+    store.resolveTelegramUser = async () => activeTelegramUser();
+    store.getUserObsidianSettings = async () => ({
+      userId: "user-1",
+      enabled: true,
+      mode: "local_vault",
+      vaultPath: "/srv/lifeos-vaults/user-a",
+      status: "connected",
+      metadata: {},
+      createdAt: "2026-06-15T10:00:00.000Z",
+      updatedAt: "2026-06-15T10:10:00.000Z",
+    });
+    store.getObsidianSyncStatus = async () => ({ counts: { pending: 2 } });
+    const server = createBotServer({
+      config: {
+        telegramBotToken: "bot-token",
+      },
+      store,
+    });
+    servers.push(server);
+
+    const port = await listen(server);
+    const response = await fetch(`http://127.0.0.1:${port}/api/tma/session`, {
+      headers: {
+        "x-telegram-init-data": signedInitData("bot-token", 30),
+      },
+    });
+    const text = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(text).not.toContain("vault_path");
+    expect(text).not.toContain("/srv/lifeos-vaults");
+    expect(JSON.parse(text)).toMatchObject({
+      data: {
+        state: "active",
+        profile: { status: "active", role: "user" },
+        integrations: {
+          telegram: { connected: true },
+          obsidian: {
+            connected: true,
+            enabled: true,
+            configured: true,
+            status: "connected",
+            mode: "local_vault",
+            pendingSyncCount: 2,
+          },
+          google: { connected: false, status: "not_configured" },
+          health: { connected: false, status: "not_configured" },
+        },
+      },
+    });
+  });
+
+  it("returns Google connection status in TMA session without leaking tokens", async () => {
+    const store = tmaStore();
+    store.resolveTelegramUser = async () => activeTelegramUser();
+    store.getSafeUserOAuthConnection = async (userId, provider) =>
+      ({
+        id: "oauth-google",
+        userId,
+        provider,
+        providerAccountEmail: "person@example.com",
+        expiresAt: "2026-06-15T11:00:00.000Z",
+        scopes: ["https://www.googleapis.com/auth/calendar.readonly"],
+        status: "connected",
+        metadata: {},
+        createdAt: "2026-06-15T10:00:00.000Z",
+        updatedAt: "2026-06-15T10:10:00.000Z",
+        accessToken: "access-secret",
+        refreshToken: "refresh-secret",
+      }) as never;
+    const server = createBotServer({
+      config: {
+        telegramBotToken: "bot-token",
+      },
+      store,
+    });
+    servers.push(server);
+
+    const port = await listen(server);
+    const response = await fetch(`http://127.0.0.1:${port}/api/tma/session`, {
+      headers: {
+        "x-telegram-init-data": signedInitData("bot-token", 30),
+      },
+    });
+    const text = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(text).toContain("person@example.com");
+    expect(text).not.toContain("access-secret");
+    expect(text).not.toContain("refresh-secret");
+    expect(JSON.parse(text)).toMatchObject({
+      data: {
+        integrations: {
+          google: {
+            connected: true,
+            status: "connected",
+            accountEmail: "person@example.com",
+          },
+        },
+      },
+    });
+  });
+
+  it("rejects pending and blocked users from Google OAuth start", async () => {
+    for (const status of ["pending", "blocked"] as const) {
+      const store = tmaStore();
+      store.resolveTelegramUser = async () => activeTelegramUser({ status });
+      const server = createBotServer({
+        config: {
+          telegramBotToken: "bot-token",
+          googleOAuthClientId: "google-client-id",
+          googleOAuthClientSecret: "google-client-secret",
+          googleOAuthRedirectUri:
+            "https://lifeos.example/api/oauth/google/callback",
+          googleOAuthStateSecret: "google-state-secret",
+        },
+        store,
+      });
+      servers.push(server);
+
+      const port = await listen(server);
+      const response = await fetch(
+        `http://127.0.0.1:${port}/api/tma/integrations/google/start`,
+        {
+          headers: {
+            "x-telegram-init-data": signedInitData("bot-token", 30),
+          },
+        },
+      );
+
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toMatchObject({
+        error:
+          status === "pending"
+            ? "telegram_user_pending"
+            : "telegram_user_blocked",
+      });
+    }
+  });
+
+  it("returns a signed Google OAuth start URL for an active user", async () => {
+    const store = tmaStore();
+    store.resolveTelegramUser = async () => activeTelegramUser();
+    const server = createBotServer({
+      config: {
+        telegramBotToken: "bot-token",
+        googleOAuthClientId: "google-client-id",
+        googleOAuthClientSecret: "google-client-secret",
+        googleOAuthRedirectUri:
+          "https://lifeos.example/api/oauth/google/callback",
+        googleOAuthStateSecret: "google-state-secret",
+      },
+      store,
+    });
+    servers.push(server);
+
+    const port = await listen(server);
+    const response = await fetch(
+      `http://127.0.0.1:${port}/api/tma/integrations/google/start`,
+      {
+        headers: {
+          "x-telegram-init-data": signedInitData("bot-token", 30),
+        },
+      },
+    );
+    const body = await response.json();
+    const url = new URL(body.data.url);
+
+    expect(response.status).toBe(200);
+    expect(url.origin).toBe("https://accounts.google.com");
+    expect(url.searchParams.get("client_id")).toBe("google-client-id");
+    expect(url.searchParams.get("access_type")).toBe("offline");
+    expect(url.searchParams.get("prompt")).toBe("consent");
+    expect(url.searchParams.get("state")).toMatch(/\./);
+    expect(url.searchParams.get("scope")).toContain(
+      "https://www.googleapis.com/auth/calendar.readonly",
+    );
+    expect(JSON.stringify(body)).not.toContain("google-client-secret");
+    expect(JSON.stringify(body)).not.toContain("google-state-secret");
+  });
+
+  it("rejects Google OAuth callback with invalid state", async () => {
+    const server = createBotServer({
+      config: {
+        googleOAuthClientId: "google-client-id",
+        googleOAuthClientSecret: "google-client-secret",
+        googleOAuthRedirectUri:
+          "https://lifeos.example/api/oauth/google/callback",
+        googleOAuthStateSecret: "google-state-secret",
+      },
+      store: tmaStore(),
+    });
+    servers.push(server);
+
+    const port = await listen(server);
+    const response = await rawGet(
+      port,
+      "/api/oauth/google/callback?code=auth-code&state=invalid",
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.body).toContain("OAuth state was invalid");
+    expect(response.body).not.toContain("auth-code");
+  });
+
+  it("stores Google OAuth callback tokens for the signed state user only", async () => {
+    const store = tmaStore();
+    let stored:
+      | {
+          userId: string;
+          input: Parameters<LifeOSStore["upsertUserOAuthConnection"]>[1];
+        }
+      | null = null;
+    store.resolveTelegramUser = async () => activeTelegramUser();
+    store.upsertUserOAuthConnection = async (userId, input) => {
+      stored = { userId, input };
+      return {
+        id: "oauth-google",
+        userId,
+        provider: input.provider,
+        providerAccountEmail: input.providerAccountEmail ?? null,
+        accessToken: input.accessToken ?? null,
+        refreshToken: input.refreshToken ?? null,
+        expiresAt: input.expiresAt ?? null,
+        scopes: input.scopes ?? [],
+        status: input.status ?? "connected",
+        metadata: input.metadata ?? {},
+        createdAt: "2026-06-15T10:00:00.000Z",
+        updatedAt: "2026-06-15T10:00:00.000Z",
+      };
+    };
+    const server = createBotServer({
+      config: {
+        telegramBotToken: "bot-token",
+        tmaUrl: "https://lifeos.example/tma/",
+        googleOAuthClientId: "google-client-id",
+        googleOAuthClientSecret: "google-client-secret",
+        googleOAuthRedirectUri:
+          "https://lifeos.example/api/oauth/google/callback",
+        googleOAuthStateSecret: "google-state-secret",
+      },
+      store,
+    });
+    servers.push(server);
+
+    const port = await listen(server);
+    const startResponse = await fetch(
+      `http://127.0.0.1:${port}/api/tma/integrations/google/start`,
+      {
+        headers: {
+          "x-telegram-init-data": signedInitData("bot-token", 30),
+        },
+      },
+    );
+    const startBody = await startResponse.json();
+    const state = new URL(startBody.data.url).searchParams.get("state");
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: Parameters<typeof fetch>[0]) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url === "https://oauth2.googleapis.com/token") {
+          return new Response(
+            JSON.stringify({
+              access_token: "access-secret",
+              refresh_token: "refresh-secret",
+              expires_in: 3600,
+              scope:
+                "https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/tasks.readonly",
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          );
+        }
+
+        if (url === "https://www.googleapis.com/oauth2/v2/userinfo") {
+          return new Response(JSON.stringify({ email: "person@example.com" }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+
+        throw new Error(`Unexpected fetch: ${url}`);
+      },
+    );
+
+    try {
+      const response = await rawGet(
+        port,
+        `/api/oauth/google/callback?code=auth-code&state=${encodeURIComponent(
+          state ?? "",
+        )}`,
+      );
+
+      expect(response.status).toBe(302);
+      expect(stored).toMatchObject({
+        userId: "user-1",
+        input: {
+          provider: "google",
+          providerAccountEmail: "person@example.com",
+          accessToken: "access-secret",
+          refreshToken: "refresh-secret",
+          status: "connected",
+        },
+      });
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it("disconnects Google OAuth only for the current TMA user", async () => {
+    const store = tmaStore();
+    let connected = true;
+    let deleted: { userId: string; provider: string } | null = null;
+    store.resolveTelegramUser = async () => activeTelegramUser();
+    store.getSafeUserOAuthConnection = async (userId, provider) =>
+      connected
+        ? {
+            id: "oauth-google",
+            userId,
+            provider,
+            providerAccountEmail: "person@example.com",
+            expiresAt: null,
+            scopes: [],
+            status: "connected",
+            metadata: {},
+            createdAt: "2026-06-15T10:00:00.000Z",
+            updatedAt: "2026-06-15T10:00:00.000Z",
+          }
+        : null;
+    store.deleteUserOAuthConnection = async (userId, provider) => {
+      deleted = { userId, provider };
+      connected = false;
+    };
+    const server = createBotServer({
+      config: {
+        telegramBotToken: "bot-token",
+      },
+      store,
+    });
+    servers.push(server);
+
+    const port = await listen(server);
+    const response = await fetch(
+      `http://127.0.0.1:${port}/api/tma/integrations/google/disconnect`,
+      {
+        method: "POST",
+        headers: {
+          "x-telegram-init-data": signedInitData("bot-token", 30),
+        },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(deleted).toEqual({ userId: "user-1", provider: "google" });
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        integrations: {
+          google: { connected: false, status: "not_configured" },
+        },
+      },
+    });
+  });
+
+  it("creates a pending profile from TMA registration for unknown users", async () => {
+    const store = tmaStore();
+    let createdTelegramId: number | null = null;
+    store.resolveTelegramUser = async () => null;
+    store.createPendingTelegramUser = async (input) => {
+      createdTelegramId = input.telegramUserId;
+      return activeTelegramUser({
+        userId: "pending-user",
+        telegramUserId: input.telegramUserId,
+        displayName: input.displayName ?? "Pending",
+        username: input.username ?? null,
+        status: "pending",
+      });
+    };
+    const server = createBotServer({
+      config: {
+        telegramBotToken: "bot-token",
+      },
+      store,
+    });
+    servers.push(server);
+
+    const port = await listen(server);
+    const response = await fetch(`http://127.0.0.1:${port}/api/tma/register`, {
+      method: "POST",
+      headers: {
+        "x-telegram-init-data": signedInitData("bot-token", 777),
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(createdTelegramId).toBe(777);
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        state: "pending",
+        telegramUserId: 777,
+        profile: { status: "pending", role: "user" },
+      },
+    });
+  });
+
+  it("does not re-register blocked TMA users", async () => {
+    const store = tmaStore();
+    let createCalled = false;
+    store.resolveTelegramUser = async () =>
+      activeTelegramUser({ status: "blocked" });
+    store.createPendingTelegramUser = async () => {
+      createCalled = true;
+      return activeTelegramUser({ status: "pending" });
+    };
+    const server = createBotServer({
+      config: {
+        telegramBotToken: "bot-token",
+      },
+      store,
+    });
+    servers.push(server);
+
+    const port = await listen(server);
+    const response = await fetch(`http://127.0.0.1:${port}/api/tma/register`, {
+      method: "POST",
+      headers: {
+        "x-telegram-init-data": signedInitData("bot-token", 30),
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(createCalled).toBe(false);
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        state: "blocked",
+        profile: { status: "blocked" },
       },
     });
   });

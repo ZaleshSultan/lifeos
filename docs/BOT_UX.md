@@ -38,6 +38,9 @@ The Telegram bot is the fastest input surface for LifeOS.
 - unknown - create a Supabase Auth user and `profiles` row with `status = 'pending'`, `role = 'user'`, Telegram display metadata, then notify admins from `LIFEOS_ADMIN_TELEGRAM_IDS`.
 
 Admins approve with `/approve <telegram_id>`. Protected commands only run for `status = 'active'`.
+The TMA mirrors the same lifecycle through `GET /api/tma/session`: unknown users
+see onboarding, pending users see the waiting state, blocked users see a simple
+blocked message, and active users see dashboard/integration status.
 
 Set:
 
@@ -70,6 +73,8 @@ and stores a normalized absolute vault path in `user_obsidian_settings`.
 `/obsidian_enable` only works for active users after a vault path exists.
 `/obsidian_disable` sets `enabled=false` and `status=disconnected`. Non-admins
 receive a generic denial and cannot inspect another user's settings.
+After `/obsidian_set_vault` and `/obsidian_enable`, active users see the
+path-free Obsidian status card in the TMA dashboard.
 
 ## Interaction Principles
 

@@ -11,6 +11,7 @@ interface FakeRow {
 interface FakeQueryReceipt {
   table: string;
   action: string;
+  columns?: string;
   filters: Record<string, unknown>;
   inFilters: Record<string, unknown[]>;
   payload?: unknown;
@@ -21,6 +22,7 @@ class FakeSupabaseClient {
   tags: FakeRow[] = [];
   receipts: FakeRow[] = [];
   obsidianSettings: FakeRow[] = [];
+  oauthConnections: FakeRow[] = [];
   queries: FakeQueryReceipt[] = [];
 
   from(table: string): FakeQuery {
@@ -33,19 +35,26 @@ class FakeQuery {
   private readonly filters: Record<string, unknown> = {};
   private readonly inFilters: Record<string, unknown[]> = {};
   private payload: unknown;
+  private columns: string | undefined;
 
   constructor(
     private readonly client: FakeSupabaseClient,
     private readonly table: string,
   ) {}
 
-  select(_columns?: string): this {
+  select(columns?: string): this {
+    this.columns = columns;
     return this;
   }
 
   update(payload: unknown): this {
     this.action = "update";
     this.payload = payload;
+    return this;
+  }
+
+  delete(): this {
+    this.action = "delete";
     return this;
   }
 
@@ -66,7 +75,8 @@ class FakeQuery {
   }
 
   maybeSingle(): Promise<{ data: FakeRow | null; error: null }> {
-    const data = this.action === "select" ? this.filteredRows()[0] ?? null : null;
+    const data =
+      this.action === "select" ? this.filteredRows()[0] ?? null : null;
     this.recordQuery();
     return Promise.resolve({ data, error: null });
   }
@@ -101,6 +111,7 @@ class FakeQuery {
     this.client.queries.push({
       table: this.table,
       action: this.action,
+      columns: this.columns,
       filters: { ...this.filters },
       inFilters: { ...this.inFilters },
       payload: this.payload,
@@ -108,7 +119,10 @@ class FakeQuery {
   }
 
   private upsertRow(): FakeRow {
-    if (this.table !== "user_obsidian_settings") {
+    if (
+      this.table !== "user_obsidian_settings" &&
+      this.table !== "user_oauth_connections"
+    ) {
       return {};
     }
 
@@ -118,12 +132,32 @@ class FakeQuery {
 
     const payload = this.payload as FakeRow;
     const rows = this.tableRows();
-    const existing = rows.find((row) => row.user_id === payload.user_id);
+    const existing = rows.find((row) => {
+      if (this.table === "user_oauth_connections") {
+        return (
+          row.user_id === payload.user_id && row.provider === payload.provider
+        );
+      }
+
+      return row.user_id === payload.user_id;
+    });
     const defaults = {
-      enabled: false,
-      mode: "local_vault",
-      vault_path: null,
-      status: "disconnected",
+      ...(this.table === "user_oauth_connections"
+        ? {
+            id: "oauth-1",
+            provider_account_email: null,
+            access_token: null,
+            refresh_token: null,
+            expires_at: null,
+            scopes: [],
+            status: "connected",
+          }
+        : {
+            enabled: false,
+            mode: "local_vault",
+            vault_path: null,
+            status: "disconnected",
+          }),
       metadata: {},
       created_at: "2026-06-15T10:00:00Z",
       updated_at: "2026-06-15T10:00:00Z",
@@ -174,6 +208,10 @@ class FakeQuery {
 
     if (this.table === "user_obsidian_settings") {
       return this.client.obsidianSettings;
+    }
+
+    if (this.table === "user_oauth_connections") {
+      return this.client.oauthConnections;
     }
 
     return [];
@@ -366,5 +404,158 @@ describe("SupabaseLifeOSStore Obsidian settings", () => {
     await expect(storeWith(client).isObsidianEnabledForUser("missing")).resolves.toBe(
       false,
     );
+  });
+});
+
+describe("SupabaseLifeOSStore OAuth connections", () => {
+  it("returns safe OAuth metadata without tokens", async () => {
+    const client = new FakeSupabaseClient();
+    client.oauthConnections = [
+      {
+        id: "oauth-a",
+        user_id: "user-a",
+        provider: "google",
+        provider_account_email: "a@example.com",
+        access_token: "access-secret",
+        refresh_token: "refresh-secret",
+        expires_at: "2026-06-15T11:00:00Z",
+        scopes: ["https://www.googleapis.com/auth/calendar.readonly"],
+        status: "connected",
+        metadata: {},
+        created_at: "2026-06-15T10:00:00Z",
+        updated_at: "2026-06-15T10:00:00Z",
+      },
+    ];
+
+    const connection = await storeWith(client).getSafeUserOAuthConnection(
+      "user-a",
+      "google",
+    );
+
+    expect(connection).toMatchObject({
+      userId: "user-a",
+      provider: "google",
+      providerAccountEmail: "a@example.com",
+      status: "connected",
+    });
+    expect(JSON.stringify(connection)).not.toContain("access-secret");
+    expect(JSON.stringify(connection)).not.toContain("refresh-secret");
+    expect(client.queries.at(-1)?.columns).not.toContain("access_token");
+    expect(client.queries.at(-1)?.columns).not.toContain("refresh_token");
+  });
+
+  it("scopes safe OAuth metadata by user_id and provider", async () => {
+    const client = new FakeSupabaseClient();
+    client.oauthConnections = [
+      {
+        id: "oauth-b",
+        user_id: "user-b",
+        provider: "google",
+        provider_account_email: "b@example.com",
+        access_token: "access-b",
+        refresh_token: "refresh-b",
+        expires_at: null,
+        scopes: [],
+        status: "connected",
+        metadata: {},
+        created_at: "2026-06-15T10:00:00Z",
+        updated_at: "2026-06-15T10:00:00Z",
+      },
+    ];
+
+    const connection = await storeWith(client).getSafeUserOAuthConnection(
+      "user-a",
+      "google",
+    );
+
+    expect(connection).toBeNull();
+    expect(client.queries.at(-1)).toMatchObject({
+      table: "user_oauth_connections",
+      filters: {
+        user_id: "user-a",
+        provider: "google",
+      },
+    });
+  });
+
+  it("upserts OAuth connection tokens for the requested user", async () => {
+    const client = new FakeSupabaseClient();
+
+    const connection = await storeWith(client).upsertUserOAuthConnection(
+      "user-a",
+      {
+        provider: "google",
+        providerAccountEmail: "a@example.com",
+        accessToken: "access-secret",
+        refreshToken: "refresh-secret",
+        expiresAt: "2026-06-15T11:00:00Z",
+        scopes: ["scope-a"],
+        status: "connected",
+      },
+    );
+
+    expect(connection.userId).toBe("user-a");
+    expect(connection.accessToken).toBe("access-secret");
+    expect(client.oauthConnections[0]).toMatchObject({
+      user_id: "user-a",
+      provider: "google",
+      access_token: "access-secret",
+      refresh_token: "refresh-secret",
+    });
+  });
+
+  it("lists connected OAuth users by provider and status", async () => {
+    const client = new FakeSupabaseClient();
+    client.oauthConnections = [
+      {
+        id: "oauth-a",
+        user_id: "user-a",
+        provider: "google",
+        provider_account_email: null,
+        access_token: "a",
+        refresh_token: "ra",
+        expires_at: null,
+        scopes: [],
+        status: "connected",
+        metadata: {},
+        created_at: "2026-06-15T10:00:00Z",
+        updated_at: "2026-06-15T10:00:00Z",
+      },
+      {
+        id: "oauth-b",
+        user_id: "user-b",
+        provider: "google",
+        provider_account_email: null,
+        access_token: "b",
+        refresh_token: "rb",
+        expires_at: null,
+        scopes: [],
+        status: "revoked",
+        metadata: {},
+        created_at: "2026-06-15T10:00:00Z",
+        updated_at: "2026-06-15T10:00:00Z",
+      },
+    ];
+
+    const connections = await storeWith(client).listConnectedOAuthUsers(
+      "google",
+    );
+
+    expect(connections.map((item) => item.userId)).toEqual(["user-a"]);
+  });
+
+  it("deletes OAuth connections scoped by user and provider", async () => {
+    const client = new FakeSupabaseClient();
+
+    await storeWith(client).deleteUserOAuthConnection("user-a", "google");
+
+    expect(client.queries.at(-1)).toMatchObject({
+      table: "user_oauth_connections",
+      action: "delete",
+      filters: {
+        user_id: "user-a",
+        provider: "google",
+      },
+    });
   });
 });

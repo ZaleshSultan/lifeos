@@ -18,6 +18,7 @@ import type {
   SaveModeInput,
   SourcesSummary,
   StudyCourse,
+  TmaSessionStatus,
   UpdateBudgetInput,
   UpdateCourseProgressInput,
   FinanceReceiptDetail,
@@ -71,6 +72,25 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
+  getSession(): Promise<TmaSessionStatus> {
+    return request<TmaSessionStatus>("/api/tma/session");
+  },
+  registerSession(): Promise<TmaSessionStatus> {
+    return request<TmaSessionStatus>("/api/tma/register", {
+      method: "POST",
+    });
+  },
+  startGoogleOAuth(): Promise<{ url: string }> {
+    return request<{ url: string }>("/api/tma/integrations/google/start");
+  },
+  disconnectGoogleOAuth(): Promise<TmaSessionStatus> {
+    return request<TmaSessionStatus>(
+      "/api/tma/integrations/google/disconnect",
+      {
+        method: "POST",
+      },
+    );
+  },
   getHome(): Promise<HomeSummary> {
     return request<HomeSummary>("/api/tma/home");
   },

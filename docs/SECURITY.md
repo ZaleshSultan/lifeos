@@ -30,10 +30,33 @@ Browser apps may use public URLs and public client identifiers only. They must n
 - Keep TMA URLs short and resolve sensitive state through backend APIs.
 - Validate TMA `X-Telegram-Init-Data` with `TELEGRAM_BOT_TOKEN`.
 - Require `profiles.status = 'active'` before protected bot/TMA operations.
+- Allow `GET /api/tma/session` for unregistered, pending, and blocked users
+  only after valid Telegram initData; it returns account/integration status but
+  no protected LifeOS data.
+- `POST /api/tma/register` may create a pending profile for an unknown
+  Telegram user after valid initData. Blocked users cannot re-register.
 - Restrict `/pending`, `/approve`, `/block`, `/users`, and `/obsidian_*`
   management commands to profile admins or IDs listed in
   `LIFEOS_ADMIN_TELEGRAM_IDS`.
 - Keep `ALLOW_UNSAFE_TMA_DEV_AUTH=false` except for local development.
+
+## Google OAuth
+
+- TMA users start OAuth through `GET /api/tma/integrations/google/start`, which
+  requires a validated active Telegram profile.
+- OAuth callback state is HMAC-signed with `GOOGLE_OAUTH_STATE_SECRET` and
+  bound to the LifeOS `user_id`; the callback never trusts a query-string
+  `user_id`.
+- Tokens are stored in `public.user_oauth_connections` and are for
+  service-role backend/worker access only.
+- The token table revokes direct `anon`/`authenticated` access. The
+  `safe_user_oauth_connections` view contains only token-free metadata and
+  filters rows through `lifeos_is_owner(user_id)`.
+- TMA/session responses may include `status`, scopes, timestamps, and account
+  email, but must never include `access_token` or `refresh_token`.
+- Token encryption-at-rest is not implemented yet; treat this as a P1 hardening
+  TODO and rotate the Supabase service-role key if a trusted runtime is
+  compromised.
 
 ## Health Ingest
 
@@ -47,6 +70,8 @@ Browser apps may use public URLs and public client identifiers only. They must n
 - Admins manage settings with `/obsidian_set_vault <telegram_id> <vault_path>`,
   `/obsidian_enable <telegram_id>`, `/obsidian_disable <telegram_id>`, and
   `/obsidian_status <telegram_id>`.
+- TMA receives only path-free Obsidian status (`enabled`, `configured`,
+  `status`, `mode`, pending queue count), never `vault_path`.
 - Vault paths are validated as non-empty absolute POSIX/Windows paths and must
   not contain traversal segments.
 - Telegram status replies mask vault paths instead of echoing full local paths.
@@ -65,8 +90,10 @@ Browser apps may use public URLs and public client identifiers only. They must n
   `LIFEOS_ENABLE_LEGACY_SINGLE_USER_OBSIDIAN=false` in multi-user production.
 - Enable a legacy flag only for local/dev or an explicitly accepted single-user
   deployment.
-- Do not describe Google, ICS, or standalone monthly review integrations as
-  multi-user-safe until they use per-user source ownership and output routing.
+- Do not describe the Google sync worker, ICS, or standalone monthly review
+  integrations as multi-user-safe until they use per-user source ownership and
+  output routing. Google OAuth management is per-user, but
+  `workers/google-sync` remains guarded legacy until its next migration.
 - Obsidian mirror is multi-user-safe only when using `user_obsidian_settings`,
   not the legacy global vault fallback.
 

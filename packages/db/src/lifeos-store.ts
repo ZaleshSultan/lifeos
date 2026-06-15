@@ -74,6 +74,8 @@ import type {
   MonthlyReviewStatus,
   UserObsidianMode,
   UserObsidianStatus,
+  UserOAuthProvider,
+  UserOAuthStatus,
   SyncRunStatus,
   StudyCourseStatus,
   WorkoutIntensity,
@@ -121,6 +123,8 @@ type MonthlyReviewRow = Database["public"]["Tables"]["monthly_reviews"]["Row"];
 type ProfileRow = Database["public"]["Tables"]["profiles"]["Row"];
 type UserObsidianSettingsRow =
   Database["public"]["Tables"]["user_obsidian_settings"]["Row"];
+type UserOAuthConnectionRow =
+  Database["public"]["Tables"]["user_oauth_connections"]["Row"];
 
 export interface TelegramUserRecord {
   userId: string;
@@ -322,6 +326,45 @@ export interface UpsertUserObsidianSettingsInput {
   mode?: UserObsidianMode;
   vaultPath?: string | null;
   status?: UserObsidianStatus;
+  metadata?: Json;
+}
+
+export interface UserOAuthConnection {
+  id: string;
+  userId: string;
+  provider: UserOAuthProvider;
+  providerAccountEmail: string | null;
+  accessToken: string | null;
+  refreshToken: string | null;
+  expiresAt: string | null;
+  scopes: string[];
+  status: UserOAuthStatus;
+  metadata: Json;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SafeUserOAuthConnection {
+  id: string;
+  userId: string;
+  provider: UserOAuthProvider;
+  providerAccountEmail: string | null;
+  expiresAt: string | null;
+  scopes: string[];
+  status: UserOAuthStatus;
+  metadata: Json;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpsertUserOAuthConnectionInput {
+  provider: UserOAuthProvider;
+  providerAccountEmail?: string | null;
+  accessToken?: string | null;
+  refreshToken?: string | null;
+  expiresAt?: string | null;
+  scopes?: string[];
+  status?: UserOAuthStatus;
   metadata?: Json;
 }
 
@@ -1107,6 +1150,25 @@ export interface LifeOSStore {
     input: UpsertUserObsidianSettingsInput,
   ): Promise<UserObsidianSettings>;
   isObsidianEnabledForUser(userId: string): Promise<boolean>;
+  getUserOAuthConnection(
+    userId: string,
+    provider: UserOAuthProvider,
+  ): Promise<UserOAuthConnection | null>;
+  getSafeUserOAuthConnection(
+    userId: string,
+    provider: UserOAuthProvider,
+  ): Promise<SafeUserOAuthConnection | null>;
+  upsertUserOAuthConnection(
+    userId: string,
+    input: UpsertUserOAuthConnectionInput,
+  ): Promise<UserOAuthConnection>;
+  deleteUserOAuthConnection(
+    userId: string,
+    provider: UserOAuthProvider,
+  ): Promise<void>;
+  listConnectedOAuthUsers(
+    provider: UserOAuthProvider,
+  ): Promise<UserOAuthConnection[]>;
   getHealthSyncStatus(userId: string): Promise<HealthSyncStatusSummary>;
   getActiveManualMode(
     userId: string,
@@ -1624,6 +1686,40 @@ function toUserObsidianSettings(
     enabled: row.enabled,
     mode: row.mode,
     vaultPath: row.vault_path,
+    status: row.status,
+    metadata: row.metadata,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toUserOAuthConnection(row: UserOAuthConnectionRow): UserOAuthConnection {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    provider: row.provider,
+    providerAccountEmail: row.provider_account_email,
+    accessToken: row.access_token,
+    refreshToken: row.refresh_token,
+    expiresAt: row.expires_at,
+    scopes: row.scopes,
+    status: row.status,
+    metadata: row.metadata,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toSafeUserOAuthConnection(
+  row: UserOAuthConnectionRow,
+): SafeUserOAuthConnection {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    provider: row.provider,
+    providerAccountEmail: row.provider_account_email,
+    expiresAt: row.expires_at,
+    scopes: row.scopes,
     status: row.status,
     metadata: row.metadata,
     createdAt: row.created_at,
@@ -3317,6 +3413,120 @@ export class SupabaseLifeOSStore implements LifeOSStore {
         settings.status === "connected" &&
         settings.vaultPath?.trim(),
     );
+  }
+
+  async getUserOAuthConnection(
+    userId: string,
+    provider: UserOAuthProvider,
+  ): Promise<UserOAuthConnection | null> {
+    const { data, error } = await this.client
+      .from("user_oauth_connections")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("provider", provider)
+      .maybeSingle();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to load OAuth connection");
+    }
+
+    return data ? toUserOAuthConnection(data) : null;
+  }
+
+  async getSafeUserOAuthConnection(
+    userId: string,
+    provider: UserOAuthProvider,
+  ): Promise<SafeUserOAuthConnection | null> {
+    const { data, error } = await this.client
+      .from("user_oauth_connections")
+      .select(
+        "id,user_id,provider,provider_account_email,expires_at,scopes,status,metadata,created_at,updated_at",
+      )
+      .eq("user_id", userId)
+      .eq("provider", provider)
+      .maybeSingle();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to load OAuth connection metadata");
+    }
+
+    return data ? toSafeUserOAuthConnection(data as UserOAuthConnectionRow) : null;
+  }
+
+  async upsertUserOAuthConnection(
+    userId: string,
+    input: UpsertUserOAuthConnectionInput,
+  ): Promise<UserOAuthConnection> {
+    const payload: Database["public"]["Tables"]["user_oauth_connections"]["Insert"] =
+      {
+        user_id: userId,
+        provider: input.provider,
+      };
+
+    if (input.providerAccountEmail !== undefined) {
+      payload.provider_account_email = input.providerAccountEmail;
+    }
+    if (input.accessToken !== undefined) {
+      payload.access_token = input.accessToken;
+    }
+    if (input.refreshToken !== undefined) {
+      payload.refresh_token = input.refreshToken;
+    }
+    if (input.expiresAt !== undefined) {
+      payload.expires_at = input.expiresAt;
+    }
+    if (input.scopes !== undefined) {
+      payload.scopes = input.scopes;
+    }
+    if (input.status !== undefined) {
+      payload.status = input.status;
+    }
+    if (input.metadata !== undefined) {
+      payload.metadata = input.metadata;
+    }
+
+    const { data, error } = await this.client
+      .from("user_oauth_connections")
+      .upsert(payload, { onConflict: "user_id,provider" })
+      .select("*")
+      .single();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to upsert OAuth connection");
+    }
+
+    return toUserOAuthConnection(data);
+  }
+
+  async deleteUserOAuthConnection(
+    userId: string,
+    provider: UserOAuthProvider,
+  ): Promise<void> {
+    const { error } = await this.client
+      .from("user_oauth_connections")
+      .delete()
+      .eq("user_id", userId)
+      .eq("provider", provider);
+
+    if (error) {
+      throwSupabaseError(error, "Failed to delete OAuth connection");
+    }
+  }
+
+  async listConnectedOAuthUsers(
+    provider: UserOAuthProvider,
+  ): Promise<UserOAuthConnection[]> {
+    const { data, error } = await this.client
+      .from("user_oauth_connections")
+      .select("*")
+      .eq("provider", provider)
+      .eq("status", "connected");
+
+    if (error) {
+      throwSupabaseError(error, "Failed to list OAuth connections");
+    }
+
+    return data.map(toUserOAuthConnection);
   }
 
   async getHealthSyncStatus(userId: string): Promise<HealthSyncStatusSummary> {
