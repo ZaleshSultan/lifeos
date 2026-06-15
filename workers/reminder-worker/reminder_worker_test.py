@@ -180,6 +180,31 @@ class ReminderWorkerTest(unittest.TestCase):
         self.assertEqual(summary.sent, 1)
         self.assertEqual(telegram.messages[0][0], "456")
 
+    def test_worker_does_not_send_without_active_recipient(self) -> None:
+        settings = reminder_worker.Settings(
+            supabase_url="https://example.supabase.co",
+            service_role_key="service-role",
+            telegram_bot_token="bot-token",
+            poll_seconds=30,
+            batch_size=20,
+        )
+        supabase = FakeSupabase()
+        supabase.recipients = {}
+        telegram = CapturingTelegram()
+
+        with self.assertLogs(level="WARNING") as logs:
+            summary = reminder_worker.process_due_reminders(
+                settings,
+                supabase,
+                telegram,
+            )
+
+        self.assertEqual(summary.sent, 0)
+        self.assertEqual(summary.send_failed, 1)
+        self.assertEqual(telegram.messages, [])
+        self.assertIn("no active Telegram profile", supabase.failures[0])
+        self.assertIn("no active Telegram profile", "\n".join(logs.output))
+
     def test_worker_does_not_crash_when_telegram_send_fails(self) -> None:
         settings = reminder_worker.Settings(
             supabase_url="https://example.supabase.co",
@@ -190,15 +215,17 @@ class ReminderWorkerTest(unittest.TestCase):
         )
         supabase = FakeSupabase()
 
-        summary = reminder_worker.process_due_reminders(
-            settings,
-            supabase,
-            FailingTelegram(),
-        )
+        with self.assertLogs(level="WARNING") as logs:
+            summary = reminder_worker.process_due_reminders(
+                settings,
+                supabase,
+                FailingTelegram(),
+            )
 
         self.assertEqual(summary.processed, 1)
         self.assertEqual(summary.send_failed, 1)
         self.assertEqual(supabase.reminders[0]["status"], "pending")
+        self.assertIn("Telegram send failed", "\n".join(logs.output))
         self.assertEqual(
             supabase.reminders[0]["metadata_json"]["reminder_worker"]["attempts"],
             1,

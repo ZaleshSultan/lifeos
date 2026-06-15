@@ -678,17 +678,9 @@ def process_due_reminders(
                 continue
             recipient = supabase.resolve_reminder_recipient(reminder)
             if recipient is None:
-                raise WorkerError(
-                    "Reminder owner has no active Telegram profile; "
-                    f"user_id={reminder.get('user_id') or 'unknown'}"
-                )
+                raise WorkerError("Reminder owner has no active Telegram profile")
             context = supabase.fetch_reminder_context(reminder)
-            logging.info(
-                "reminder id=%s user_id=%s telegram_user_id=%s status=sending",
-                reminder_id,
-                reminder.get("user_id") or "unknown",
-                recipient,
-            )
+            logging.info("reminder id=%s status=sending", reminder_id)
             telegram.send_message(
                 recipient,
                 format_telegram_message(reminder, context, settings.local_timezone),

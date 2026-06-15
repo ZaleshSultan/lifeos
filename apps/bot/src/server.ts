@@ -116,6 +116,8 @@ const TMA_MIME_TYPES: Record<string, string> = {
   ".webp": "image/webp",
   ".ico": "image/x-icon",
 };
+const TMA_INIT_DATA_MAX_AGE_SECONDS = 86_400;
+const TMA_INIT_DATA_MAX_FUTURE_SKEW_SECONDS = 300;
 
 function writeJson(
   response: ServerResponse,
@@ -358,8 +360,20 @@ function validateTelegramInitData(
 ): { telegramUserId: number; displayName: string | null } | null {
   const params = new URLSearchParams(initData);
   const hash = params.get("hash");
+  const authDateValue = params.get("auth_date");
 
-  if (!hash) {
+  if (!hash || !authDateValue) {
+    return null;
+  }
+
+  const authDate = Number(authDateValue);
+  const now = Math.floor(Date.now() / 1000);
+
+  if (
+    !Number.isSafeInteger(authDate) ||
+    now - authDate > TMA_INIT_DATA_MAX_AGE_SECONDS ||
+    authDate - now > TMA_INIT_DATA_MAX_FUTURE_SKEW_SECONDS
+  ) {
     return null;
   }
 

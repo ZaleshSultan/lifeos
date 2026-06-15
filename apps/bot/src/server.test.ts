@@ -30,6 +30,7 @@ import type {
   TmaSourcesSummary,
 } from "@lifeos/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { loadBotConfig } from "./config.js";
 import { createBotServer, type BotServerOptions } from "./server.js";
 import type { SendMessageInput, TelegramClient } from "./telegram/types.js";
 
@@ -1040,9 +1041,10 @@ export function tmaStore(events: string[] = []): LifeOSStore {
 export function signedInitData(
   botToken: string,
   telegramUserId: number,
+  authDate = Math.floor(Date.now() / 1000),
 ): string {
   const params = new URLSearchParams({
-    auth_date: "1779120000",
+    auth_date: String(authDate),
     query_id: "test-query",
     user: JSON.stringify({
       id: telegramUserId,
@@ -1258,6 +1260,15 @@ afterEach(async () => {
 });
 
 describe("bot server", () => {
+  it("rejects unsafe TMA dev auth in production config", () => {
+    expect(() =>
+      loadBotConfig({
+        NODE_ENV: "production",
+        ALLOW_UNSAFE_TMA_DEV_AUTH: "true",
+      }),
+    ).toThrow(/ALLOW_UNSAFE_TMA_DEV_AUTH/);
+  });
+
   it("serves healthz", async () => {
     const server = createBotServer({
       startedAt: new Date(),
@@ -1912,6 +1923,35 @@ describe("bot server", () => {
     });
   });
 
+  it("rejects expired Telegram initData for TMA requests", async () => {
+    const store = tmaStore();
+    store.resolveTelegramUser = async () => activeTelegramUser();
+    const server = createBotServer({
+      config: {
+        telegramBotToken: "bot-token",
+      },
+      store,
+    });
+    servers.push(server);
+
+    const port = await listen(server);
+    const expiredAuthDate = Math.floor(Date.now() / 1000) - 86_400 - 1;
+    const response = await fetch(`http://127.0.0.1:${port}/api/tma/home`, {
+      headers: {
+        "x-telegram-init-data": signedInitData(
+          "bot-token",
+          30,
+          expiredAuthDate,
+        ),
+      },
+    });
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "invalid_telegram_init_data",
+    });
+  });
+
   it("rejects pending Telegram profiles for TMA requests", async () => {
     const store = tmaStore();
     store.resolveTelegramUser = async () =>
@@ -1934,6 +1974,31 @@ describe("bot server", () => {
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({
       error: "telegram_user_pending",
+    });
+  });
+
+  it("rejects blocked Telegram profiles for TMA requests", async () => {
+    const store = tmaStore();
+    store.resolveTelegramUser = async () =>
+      activeTelegramUser({ status: "blocked" });
+    const server = createBotServer({
+      config: {
+        telegramBotToken: "bot-token",
+      },
+      store,
+    });
+    servers.push(server);
+
+    const port = await listen(server);
+    const response = await fetch(`http://127.0.0.1:${port}/api/tma/home`, {
+      headers: {
+        "x-telegram-init-data": signedInitData("bot-token", 30),
+      },
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "telegram_user_blocked",
     });
   });
 

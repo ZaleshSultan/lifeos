@@ -1513,6 +1513,38 @@ describe("Telegram commands", () => {
     expect(context.sent.at(-1)?.text).toContain("approved");
   });
 
+  it("blocks non-admin approval attempts", async () => {
+    const store = new FakeStore();
+    await store.createPendingTelegramUser({
+      telegramUserId: 456,
+      displayName: "Pending",
+      username: "pending",
+    });
+    const context = runtime(store);
+
+    await handleTelegramUpdate(update("/approve 456"), context);
+
+    expect(store.pendingProfiles).toHaveLength(1);
+    expect(store.telegramProfiles[0]?.status).toBe("pending");
+    expect(context.sent.at(-1)?.text).toBe("Access denied.");
+  });
+
+  it("blocks non-admin user listing", async () => {
+    const store = new FakeStore();
+    store.telegramProfiles = [
+      {
+        ...store.user!,
+        createdAt: "2026-05-18T00:00:00.000Z",
+        updatedAt: "2026-05-18T00:00:00.000Z",
+      },
+    ];
+    const context = runtime(store);
+
+    await handleTelegramUpdate(update("/users"), context);
+
+    expect(context.sent.at(-1)?.text).toBe("Access denied.");
+  });
+
   it("allows an approved user to use protected commands", async () => {
     const store = new FakeStore();
     store.user = {

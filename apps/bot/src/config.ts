@@ -68,8 +68,22 @@ function booleanEnv(
 }
 
 export function loadBotConfig(source: EnvSource = process.env): BotConfig {
+  const nodeEnv =
+    optionalEnv(source, "NODE_ENV", "development") ?? "development";
+  const allowUnsafeTmaDevAuth = booleanEnv(
+    source,
+    "ALLOW_UNSAFE_TMA_DEV_AUTH",
+    false,
+  );
+
+  if (nodeEnv.toLowerCase() === "production" && allowUnsafeTmaDevAuth) {
+    throw new Error(
+      "ALLOW_UNSAFE_TMA_DEV_AUTH cannot be enabled when NODE_ENV=production",
+    );
+  }
+
   return {
-    nodeEnv: optionalEnv(source, "NODE_ENV", "development") ?? "development",
+    nodeEnv,
     host: optionalEnv(source, "HOST", "0.0.0.0") ?? "0.0.0.0",
     port: integerEnv(source, "PORT", 3000),
     telegramBotToken: optionalEnv(source, "TELEGRAM_BOT_TOKEN"),
@@ -98,11 +112,7 @@ export function loadBotConfig(source: EnvSource = process.env): BotConfig {
       "LIFEOS_ADMIN_TELEGRAM_IDS",
     ),
     lifeosSignupMode: signupModeEnv(source),
-    allowUnsafeTmaDevAuth: booleanEnv(
-      source,
-      "ALLOW_UNSAFE_TMA_DEV_AUTH",
-      false,
-    ),
+    allowUnsafeTmaDevAuth,
     openRouterApiKey: optionalEnv(source, "OPENROUTER_API_KEY"),
     financeAiModel: optionalEnv(source, "FINANCE_AI_MODEL"),
     financeAiEnabled: booleanEnv(source, "FINANCE_AI_ENABLED", false),

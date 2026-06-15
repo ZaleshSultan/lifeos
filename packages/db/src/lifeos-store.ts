@@ -5796,14 +5796,62 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     }
   }
 
+  private async assertFinanceTransactionOwnedByUser(
+    userId: string,
+    transactionId: string,
+  ): Promise<void> {
+    const { data, error } = await this.client
+      .from("finance_transactions")
+      .select("id")
+      .eq("id", transactionId)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to verify finance transaction owner");
+    }
+
+    if (!data) {
+      throw new Error("Finance transaction not found");
+    }
+  }
+
+  private async assertFinanceTagsOwnedByUser(
+    userId: string,
+    tagIds: string[],
+  ): Promise<void> {
+    if (!tagIds.length) {
+      return;
+    }
+
+    const { data, error } = await this.client
+      .from("finance_tags")
+      .select("id")
+      .eq("user_id", userId)
+      .in("id", tagIds);
+
+    if (error) {
+      throwSupabaseError(error, "Failed to verify finance tag owners");
+    }
+
+    if ((data ?? []).length !== tagIds.length) {
+      throw new Error("Finance tag not found");
+    }
+  }
+
   async addTransactionTags(
     userId: string,
     transactionId: string,
     tagIds: string[],
   ): Promise<void> {
-    if (tagIds.length === 0) return;
+    const uniqueTagIds = [...new Set(tagIds)];
 
-    const rows = tagIds.map((tagId) => ({
+    if (uniqueTagIds.length === 0) return;
+
+    await this.assertFinanceTransactionOwnedByUser(userId, transactionId);
+    await this.assertFinanceTagsOwnedByUser(userId, uniqueTagIds);
+
+    const rows = uniqueTagIds.map((tagId) => ({
       transaction_id: transactionId,
       tag_id: tagId,
     }));
@@ -5822,13 +5870,18 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     transactionId: string,
     tagIds: string[],
   ): Promise<void> {
-    if (tagIds.length === 0) return;
+    const uniqueTagIds = [...new Set(tagIds)];
+
+    if (uniqueTagIds.length === 0) return;
+
+    await this.assertFinanceTransactionOwnedByUser(userId, transactionId);
+    await this.assertFinanceTagsOwnedByUser(userId, uniqueTagIds);
 
     const { error } = await this.client
       .from("finance_transaction_tags")
       .delete()
       .eq("transaction_id", transactionId)
-      .in("tag_id", tagIds);
+      .in("tag_id", uniqueTagIds);
 
     if (error) {
       throwSupabaseError(error, "Failed to remove transaction tags");
@@ -8547,6 +8600,40 @@ export class SupabaseLifeOSStore implements LifeOSStore {
 
       if (!fullId) {
         throw new Error(`No unmatched bank line matches short ID: ${lineId}`);
+      }
+
+      const { data: bankLine, error: bankLineError } = await this.client
+        .from("finance_transactions")
+        .select("id")
+        .eq("id", fullId)
+        .eq("user_id", userId)
+        .eq("status", "draft")
+        .maybeSingle();
+
+      if (bankLineError) {
+        throwSupabaseError(bankLineError, "Failed to verify bank line owner");
+      }
+
+      if (!bankLine) {
+        throw new Error(`No unmatched bank line matches short ID: ${lineId}`);
+      }
+
+      const { data: receipt, error: receiptError } = await this.client
+        .from("finance_receipts")
+        .select("id")
+        .eq("id", entityId)
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (receiptError) {
+        throwSupabaseError(
+          receiptError,
+          "Failed to verify matched receipt owner",
+        );
+      }
+
+      if (!receipt) {
+        throw new Error(`No receipt matches ID for this user: ${entityId}`);
       }
 
       const { error } = await this.client
