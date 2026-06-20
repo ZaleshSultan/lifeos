@@ -1,0 +1,10 @@
+[Unit]
+Description=Run LifeOS Monthly AI Review on the first day of each month
+
+[Timer]
+OnCalendar=*-*-01 09:30:00
+Persistent=true
+Unit=lifeos-monthly-review.service
+
+[Install]
+WantedBy=timers.target

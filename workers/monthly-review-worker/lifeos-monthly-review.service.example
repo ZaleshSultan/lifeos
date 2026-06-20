@@ -1,0 +1,18 @@
+[Unit]
+Description=LifeOS Monthly AI Review
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/zalewko/lifeos/workers/monthly-review-worker
+EnvironmentFile=/etc/lifeos/monthly-review.env
+ExecStart=/usr/bin/python /home/zalewko/lifeos/workers/monthly-review-worker/monthly_review_worker.py generate-last-month
+User=zalewko
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/home/zalewko/Documents/MAINN
+
+[Install]
+WantedBy=multi-user.target

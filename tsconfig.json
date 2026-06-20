@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "jsx": "react-jsx",
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@lifeos/core": ["packages/core/src/index.ts"],
+      "@lifeos/core/*": ["packages/core/src/*"],
+      "@lifeos/db": ["packages/db/src/index.ts"],
+      "@lifeos/db/*": ["packages/db/src/*"],
+      "@lifeos/obsidian": ["packages/obsidian/src/index.ts"],
+      "@lifeos/obsidian/*": ["packages/obsidian/src/*"]
+    }
+  },
+  "include": ["apps/bot/**/*.ts", "packages/**/*.ts"]
+}
