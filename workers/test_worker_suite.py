@@ -14,6 +14,8 @@ TEST_FILES = (
     ROOT / "ics-sync" / "ics_sync_test.py",
     ROOT / "monthly-review-worker" / "monthly_review_worker_test.py",
     ROOT / "obsidian-mirror" / "obsidian_mirror_test.py",
+    ROOT / "university-sync" / "platonus" / "platonus_sync_test.py",
+    ROOT / "university-sync" / "aitu-parser" / "university_scraper_test.py",
 )
 
 

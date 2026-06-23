@@ -1,0 +1,25 @@
+[Unit]
+Description=LifeOS AITU LMS University Grade Sync
+Documentation=https://github.com/yourorg/lifeos
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=zalewko
+Group=zalewko
+WorkingDirectory=/opt/lifeos/workers/university-sync
+EnvironmentFile=/opt/lifeos/workers/university-sync/aitu-parser/.env
+ExecStart=/opt/lifeos/workers/university-sync/aitu-parser/.venv/bin/python -u \
+    /opt/lifeos/workers/university-sync/aitu-parser/university_scraper.py run-loop
+Restart=always
+RestartSec=15
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/lifeos/workers/university-sync
+
+[Install]
+WantedBy=multi-user.target

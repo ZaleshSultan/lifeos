@@ -1,0 +1,16 @@
+[Unit]
+Description=LifeOS Platonus University Grades Sync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=zalewko
+WorkingDirectory=/opt/lifeos/workers/platonus-sync
+EnvironmentFile=/opt/lifeos/workers/platonus-sync/.env
+ExecStart=/opt/lifeos/workers/platonus-sync/.venv/bin/python -u platonus_sync.py run-loop
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
