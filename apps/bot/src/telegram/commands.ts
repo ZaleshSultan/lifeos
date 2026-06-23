@@ -81,18 +81,18 @@ const HELP_TEXT = [
   "/sync [health|obsidian]",
   "/reminders",
   "/remind review notes at:2026-07-06 08:00",
-  "/reminder cancel <short_id>",
-  "/reminder snooze <short_id> 10m",
+  "/reminder cancel [short_id]",
+  "/reminder snooze [short_id] 10m",
   "/reminder_mode [chill|normal|duolingo|war]",
   "/google_sync",
   "/ics_sync",
   "/mode",
-  "/mode set <mode> [today|until:YYYY-MM-DD]",
+  "/mode set [mode] [today|until:YYYY-MM-DD]",
   "/mode auto",
   "/mode clear",
   "/course",
-  "/course progress <number>",
-  "/course topic <text>",
+  "/course progress [number]",
+  "/course topic [text]",
   "/review review notes",
   "/spend 1200 шаурма",
   "Quick spend without slash: Такси 2700",
@@ -103,9 +103,9 @@ const HELP_TEXT = [
   "/finance_week",
   "/finance_month",
   "/finance_categories",
-  "/finance_confirm <short_id>",
-  "/finance_cancel <short_id>",
-  "/finance_fix <short_id> amount:1500 category:Еда",
+  "/finance_confirm [short_id]",
+  "/finance_cancel [short_id]",
+  "/finance_fix [short_id] amount:1500 category:Еда",
   "/finance_ask На что ушли деньги в этом месяце?",
   "/monthly_review [YYYY-MM]",
   "/monthly_review_status",
@@ -114,20 +114,20 @@ const HELP_TEXT = [
   "",
   "Finance V2:",
   "/budget — budget overview with progress bars",
-  "/budget_set <category> <amount> [monthly|quarterly|custom]",
+  "/budget_set [category] [amount] [monthly|quarterly|custom]",
   "/bank unmatched — list unmatched bank transactions",
-  "/bank match <short_id> <entity_id>",
+  "/bank match [short_id] [entity_id]",
   "Photo upload — send a receipt photo to start OCR scan",
   "",
   "Admin:",
   "/pending",
-  "/approve <telegram_id>",
-  "/block <telegram_id>",
+  "/approve [telegram_id]",
+  "/block [telegram_id]",
   "/users",
-  "/obsidian_status <telegram_id>",
-  "/obsidian_set_vault <telegram_id> <vault_path>",
-  "/obsidian_enable <telegram_id>",
-  "/obsidian_disable <telegram_id>",
+  "/obsidian_status [telegram_id]",
+  "/obsidian_set_vault [telegram_id] [vault_path]",
+  "/obsidian_enable [telegram_id]",
+  "/obsidian_disable [telegram_id]",
   "",
   "/status",
   "/healthz",
@@ -657,8 +657,8 @@ function courseUsage(): string {
   return [
     "Usage:",
     "/course",
-    "/course progress <number>",
-    "/course topic <text>",
+    "/course progress [number]",
+    "/course topic [text]",
   ].join("\n");
 }
 
@@ -683,8 +683,8 @@ function reminderModeUsage(): string {
 function reminderActionUsage(): string {
   return [
     "Reminder actions:",
-    "/reminder cancel <short_id>",
-    "/reminder snooze <short_id> 10m",
+    "/reminder cancel [short_id]",
+    "/reminder snooze [short_id] 10m",
   ].join("\n");
 }
 
@@ -1329,7 +1329,7 @@ function parseFinanceFixArgs(args: string):
   if (!shortId || (amount === undefined && !category)) {
     return {
       ok: false,
-      error: "Usage: /finance_fix <short_id> amount:1500 category:Еда",
+      error: "Usage: /finance_fix [short_id] amount:1500 category:Еда",
     };
   }
 
@@ -1681,7 +1681,7 @@ async function handleApproveCommand(
   if (!telegramUserId) {
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
-      text: "Usage: /approve <telegram_id>",
+      text: "Usage: /approve [telegram_id]",
     });
     return;
   }
@@ -1736,7 +1736,7 @@ async function handleBlockCommand(
   if (!telegramUserId) {
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
-      text: "Usage: /block <telegram_id>",
+      text: "Usage: /block [telegram_id]",
     });
     return;
   }
@@ -1788,7 +1788,7 @@ async function handleObsidianStatusCommand(
   if (!telegramUserId) {
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
-      text: "Usage: /obsidian_status <telegram_id>",
+      text: "Usage: /obsidian_status [telegram_id]",
     });
     return;
   }
@@ -1826,7 +1826,7 @@ async function handleObsidianSetVaultCommand(
   if (!parsed) {
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
-      text: "Usage: /obsidian_set_vault <telegram_id> <vault_path>",
+      text: "Usage: /obsidian_set_vault [telegram_id] [vault_path]",
     });
     return;
   }
@@ -1886,7 +1886,7 @@ async function handleObsidianEnableCommand(
   if (!telegramUserId) {
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
-      text: "Usage: /obsidian_enable <telegram_id>",
+      text: "Usage: /obsidian_enable [telegram_id]",
     });
     return;
   }
@@ -1957,7 +1957,7 @@ async function handleObsidianDisableCommand(
   if (!telegramUserId) {
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
-      text: "Usage: /obsidian_disable <telegram_id>",
+      text: "Usage: /obsidian_disable [telegram_id]",
     });
     return;
   }
@@ -3346,7 +3346,7 @@ function makeFinanceStatusHandler(
     if (!shortId) {
       await runtime.telegram.sendMessage({
         chatId: message.chat.id,
-        text: `Usage: /${commandName} <short_id>`,
+        text: `Usage: /${commandName} [short_id]`,
       });
       return;
     }
@@ -3680,7 +3680,7 @@ async function handleBudgetSetCommand(
   if (!category || !amountStr) {
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
-      text: "Usage: /budget_set <category> <amount> [monthly|quarterly|custom]",
+      text: "Usage: /budget_set [category] [amount] [monthly|quarterly|custom]",
     });
     return;
   }
@@ -3818,7 +3818,7 @@ async function handleBankCommand(
     if (!lineShortId || !entityId) {
       await runtime.telegram.sendMessage({
         chatId: message.chat.id,
-        text: "Usage: /bank match <short_id> <entity_id>",
+        text: "Usage: /bank match [short_id] [entity_id]",
       });
       return;
     }
@@ -3858,7 +3858,7 @@ async function handleBankCommand(
     text: [
       "Bank commands:",
       "/bank unmatched — list unmatched transactions",
-      "/bank match <short_id> <entity_id> — match a transaction",
+      "/bank match [short_id] [entity_id] — match a transaction",
     ].join("\n"),
   });
 }

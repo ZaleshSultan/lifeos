@@ -8,7 +8,7 @@ INDEX_FILE="$DIST_DIR/index.html"
 cd "$REPO_ROOT"
 rm -rf "$DIST_DIR"
 
-VITE_API_BASE_URL="https://archlinux.tail2492c9.ts.net" \
+VITE_API_BASE_URL="https://lifeos.zalewko.me" \
 VITE_ALLOW_MOCK_DATA="false" \
 VITE_BASE_PATH="/tma/" \
 pnpm --filter @lifeos/tma build

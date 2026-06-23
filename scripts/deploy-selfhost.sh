@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-PUBLIC_ORIGIN="https://archlinux.tail2492c9.ts.net"
+PUBLIC_ORIGIN="https://lifeos.zalewko.me"
 
 check_url() {
   local label="$1"
