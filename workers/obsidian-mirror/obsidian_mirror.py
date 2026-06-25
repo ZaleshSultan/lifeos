@@ -1034,6 +1034,7 @@ DASHBOARDS = {
 - [[Workouts]]
 - [[Finance]]
 - [[Reviews]]
+- [[LMS_Grades]]
 """,
     "Tasks.md": """# Tasks
 
@@ -1155,6 +1156,35 @@ FROM "Reviews"
 SORT created_at DESC
 ```
 """,
+    "LMS_Grades.md": """# 🎓 University Grades
+
+> Auto-synced from AITU Moodle & Platonus via LifeOS workers.
+
+## Grade Items
+
+```dataview
+TABLE course_title, record_type, score, max_score, percentage
+FROM "Academic"
+WHERE type = "academic_grade"
+SORT course_title ASC, record_type DESC
+```
+
+## Course Averages
+
+```dataviewjs
+const pages = dv.pages('"Academic"').where(p => p.type === "academic_grade").array();
+const byC = {};
+for (const p of pages) {
+  if (!byC[p.course_title]) byC[p.course_title] = [];
+  byC[p.course_title].push(Number(p.percentage || 0));
+}
+const rows = Object.entries(byC).map(([c, vals]) => [
+  c,
+  Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) + "%",
+]);
+dv.table(["Course", "Avg %"], rows.sort((a, b) => a[0].localeCompare(b[0])));
+```
+""",
 }
 
 
@@ -1166,6 +1196,96 @@ FROM "Finance"
 SORT created_at DESC
 ```
 """
+
+
+
+def render_lms_grades_dashboard(
+    supabase_url: str,
+    service_role_key: str,
+    user_id: str,
+    vault_path: Path,
+    dashboard_dir: str = "Dashboards",
+) -> Path | None:
+    """
+    Fetch ``public.academic_records`` for *user_id* and write a static
+    Markdown grade dashboard to ``<vault>/Academic/LMS_Grades_Dashboard.md``.
+
+    This is a *server-side* render that:
+    - Works without Obsidian being open (no Dataview dependency).
+    - Is always up-to-date the moment the Obsidian mirror processes a job.
+    - Complements the Dataview ``LMS_Grades.md`` file in the Dashboards folder.
+
+    Returns the written path, or ``None`` if no academic records exist yet.
+    """
+    client = SupabaseRestClient(supabase_url, service_role_key)
+    records = client.request(
+        "GET",
+        "academic_records",
+        query={
+            "select": "course_title,title,record_type,score,max_score,percentage",
+            "user_id": f"eq.{user_id}",
+            "order": "course_title.asc,record_type.desc",
+        },
+    ) or []
+
+    if not records:
+        return None
+
+    # Group by course
+    courses: dict[str, list[JsonObject]] = {}
+    for rec in records:
+        ctitle = str(rec.get("course_title") or "Unknown Course")
+        courses.setdefault(ctitle, []).append(rec)
+
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    lines: list[str] = [
+        "---",
+        'type: "lms_grades_dashboard"',
+        f'last_sync: "{now_str}"',
+        "---",
+        "",
+        "# 🎓 University Grades Dashboard",
+        "",
+        f"> 💾 Synced from Supabase `academic_records` on {now_str}.",
+        "> Источник: AITU Moodle WS API / Platonus / Resilient Mock.",
+        "",
+    ]
+
+    for course_title, items in courses.items():
+        lines.append(f"## 📘 {course_title}")
+        lines.append("")
+        lines.append("| Задание / Экзамен | Тип | Оценка | Макс. | % | Статус |")
+        lines.append("| --- | --- | --- | --- | --- | --- |")
+        for item in items:
+            title     = str(item.get("title") or "—")
+            rtype     = str(item.get("record_type") or "assignment")
+            score     = item.get("score")
+            max_score = item.get("max_score")
+            pct_raw   = item.get("percentage")
+            try:
+                pct = round(float(pct_raw), 1) if pct_raw is not None else None
+            except (TypeError, ValueError):
+                pct = None
+
+            if rtype in ("final", "midterm"):
+                status = f"🏆 {rtype.upper()}"
+            elif pct is not None and pct >= 50:
+                status = "🟢 Passed"
+            elif pct is not None:
+                status = "🔴 Action Required"
+            else:
+                status = "⏳ Pending"
+
+            pct_str   = f"{pct}%" if pct is not None else "—"
+            score_str = f"**{score}**" if score is not None else "—"
+            max_str   = str(max_score) if max_score is not None else "—"
+            lines.append(f"| {title} | {rtype} | {score_str} | {max_str} | {pct_str} | {status} |")
+        lines.append("")
+
+    content = "\n".join(lines) + "\n"
+    target = note_path(vault_path, ["Academic", "LMS_Grades_Dashboard.md"])
+    atomic_write(target, content, vault_path)
+    return target
 
 
 def ensure_syncthing_ignores(vault_path: Path) -> bool:

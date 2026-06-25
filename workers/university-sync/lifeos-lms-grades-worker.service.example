@@ -1,0 +1,25 @@
+[Unit]
+Description=LifeOS Multi-Tenant LMS Grades Sync Worker
+Documentation=https://github.com/yourorg/lifeos
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=zalewko
+Group=zalewko
+WorkingDirectory=/opt/lifeos/workers/university-sync
+EnvironmentFile=/opt/lifeos/workers/university-sync/.env
+ExecStart=/opt/lifeos/workers/university-sync/.venv/bin/python -u \
+    /opt/lifeos/workers/university-sync/lms_grades_worker.py run-loop
+Restart=always
+RestartSec=15
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/lifeos/workers/university-sync
+
+[Install]
+WantedBy=multi-user.target
