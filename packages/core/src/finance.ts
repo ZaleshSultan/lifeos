@@ -527,9 +527,7 @@ function receiptFromFinanceRules(ocrText: string): ReceiptParseResult | null {
     /\b(\d{4}-\d{2}-\d{2}|\d{1,2}[./]\d{1,2}[./]\d{2,4})\b/,
   );
   const merchant =
-    parsed.merchant?.trim() ||
-    parsed.description.trim() ||
-    "Unknown merchant";
+    parsed.merchant?.trim() || parsed.description.trim() || "Unknown merchant";
 
   return {
     merchant,
@@ -811,7 +809,10 @@ export function buildFinanceReportRecommendations(input: {
     "totalExpense" | "categoryBreakdown" | "periodComparison"
   >;
   budgets?: BudgetSummary[];
-}): { recommendations: string[]; overspentBudgets: FinanceReportData["overspentBudgets"] } {
+}): {
+  recommendations: string[];
+  overspentBudgets: FinanceReportData["overspentBudgets"];
+} {
   const recommendations: string[] = [];
   const topCategory = input.report.categoryBreakdown[0];
   const overspentBudgets = (input.budgets ?? [])
@@ -850,15 +851,15 @@ export function buildFinanceReportRecommendations(input: {
   }
 
   if (!recommendations.length) {
-    recommendations.push("Keep categorizing transactions to improve analytics.");
+    recommendations.push(
+      "Keep categorizing transactions to improve analytics.",
+    );
   }
 
   return { recommendations, overspentBudgets };
 }
 
-function normalizeReceiptItems(
-  value: unknown,
-): ReceiptParseResult["items"] {
+function normalizeReceiptItems(value: unknown): ReceiptParseResult["items"] {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -1238,7 +1239,8 @@ export function forecastMonthEndExpense(input: {
     Math.round((end.getTime() - today.getTime()) / 86_400_000),
   );
   const dailyAverage = input.totalExpense / elapsedDays;
-  const projected = Math.round((input.totalExpense + dailyAverage * remainingDays) * 100) / 100;
+  const projected =
+    Math.round((input.totalExpense + dailyAverage * remainingDays) * 100) / 100;
 
   return { projected, remainingDays, dailyAverage };
 }
@@ -1252,7 +1254,9 @@ export function interpretFinanceQuestion(
 ): FinanceAssistantResult | null {
   const normalized = question.trim().toLocaleLowerCase("ru");
   const topCategory = context.report.categoryBreakdown[0];
-  const overspent = (context.budgets ?? []).filter((budget) => budget.isOverspent);
+  const overspent = (context.budgets ?? []).filter(
+    (budget) => budget.isOverspent,
+  );
   const forecast =
     context.today && context.report.period === "monthly"
       ? forecastMonthEndExpense({
@@ -1287,9 +1291,7 @@ export function interpretFinanceQuestion(
     };
   }
 
-  if (
-    /(?:самые дорог|top categor|категор.*дорог)/iu.test(normalized)
-  ) {
+  if (/(?:самые дорог|top categor|категор.*дорог)/iu.test(normalized)) {
     return {
       answer: context.report.categoryBreakdown.length
         ? `Top categories: ${context.report.categoryBreakdown
@@ -1307,9 +1309,7 @@ export function interpretFinanceQuestion(
     };
   }
 
-  if (
-    /(?:превысил|overspent|почему.*бюджет)/iu.test(normalized)
-  ) {
+  if (/(?:превысил|overspent|почему.*бюджет)/iu.test(normalized)) {
     return {
       answer: overspent.length
         ? `You exceeded ${overspent.length} budget envelope(s). Biggest overspend: ${overspent[0]!.name ?? overspent[0]!.period} by ${overspent[0]!.overspent} ${overspent[0]!.currency}.`
@@ -1351,7 +1351,10 @@ export function interpretFinanceQuestion(
         : "No anomalous spending detected in the current period.",
       recommendations: anomalies
         .slice(0, 3)
-        .map((item) => `Review ${item.categoryName ?? "expense"} on ${item.occurredOn}.`),
+        .map(
+          (item) =>
+            `Review ${item.categoryName ?? "expense"} on ${item.occurredOn}.`,
+        ),
       risks: anomalies
         .filter((item) => item.severity === "high")
         .map((item) => item.reason),

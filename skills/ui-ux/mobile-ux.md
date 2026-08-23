@@ -14,13 +14,13 @@ The Telegram Mini App is opened from a **short bot URL**. Users expect:
 
 ## Layout Constraints
 
-| Constraint | Value | Source |
-|------------|-------|--------|
-| Max content width | `max-w-md` (448px) | `AppShell.tsx` |
-| Bottom nav height | `min-h-14` per tab | TMA `AppShell` |
-| Content bottom padding | `pb-28` | Clears fixed nav |
-| Safe area | `env(safe-area-inset-bottom)` | iOS notch/home bar |
-| Header | Sticky, `backdrop-blur-md` | `safe-shell` class |
+| Constraint             | Value                         | Source             |
+| ---------------------- | ----------------------------- | ------------------ |
+| Max content width      | `max-w-md` (448px)            | `AppShell.tsx`     |
+| Bottom nav height      | `min-h-14` per tab            | TMA `AppShell`     |
+| Content bottom padding | `pb-28`                       | Clears fixed nav   |
+| Safe area              | `env(safe-area-inset-bottom)` | iOS notch/home bar |
+| Header                 | Sticky, `backdrop-blur-md`    | `safe-shell` class |
 
 ## Navigation Model
 
@@ -34,12 +34,12 @@ Home | Workout | Health | Focus | Finance | Sources | Reminders | Mode
 
 ### Recommended Patterns
 
-| Pattern | When to use |
-|---------|-------------|
-| Icons-only below 360px | Reduce label truncation |
-| Primary 4 + “More” drawer | If nav exceeds 5 items |
+| Pattern                           | When to use                |
+| --------------------------------- | -------------------------- |
+| Icons-only below 360px            | Reduce label truncation    |
+| Primary 4 + “More” drawer         | If nav exceeds 5 items     |
 | `aria-label` on every icon button | Already implemented — keep |
-| Deep links via `?screen=` | Home, workout screens |
+| Deep links via `?screen=`         | Home, workout screens      |
 
 Screen state is in-memory (`useState<ScreenId>`). Prefer URL params for shareable states:
 
@@ -66,16 +66,17 @@ All data screens must use TanStack Query + `AsyncState` components:
 const { data, isLoading, isError, refetch } = useHomeQuery();
 
 if (isLoading) return <LoadingPanel title="Loading home..." />;
-if (isError) return <ErrorPanel title="Could not load" onRetry={() => refetch()} />;
+if (isError)
+  return <ErrorPanel title="Could not load" onRetry={() => refetch()} />;
 ```
 
 ### Error Copy Guidelines
 
-| Error code | User message |
-|------------|--------------|
+| Error code                 | User message                         |
+| -------------------------- | ------------------------------------ |
 | `telegram_user_not_linked` | “Link your Telegram in /start first” |
-| `database_not_configured` | “Backend is starting up — try again” |
-| Network failure | “Check connection and retry” |
+| `database_not_configured`  | “Backend is starting up — try again” |
+| Network failure            | “Check connection and retry”         |
 
 ## Touch Targets
 

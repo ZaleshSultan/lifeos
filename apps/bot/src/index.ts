@@ -25,8 +25,8 @@ server.listen(config.port, config.host, () => {
 
   if (dependencies.store?.syncFinanceExchangeRates) {
     const syncRates = () => {
-      void dependencies.store!
-        .syncFinanceExchangeRates()
+      void dependencies
+        .store!.syncFinanceExchangeRates()
         .then((count) => {
           if (count > 0) {
             console.info(`[finance] synced ${count} exchange rate quotes`);

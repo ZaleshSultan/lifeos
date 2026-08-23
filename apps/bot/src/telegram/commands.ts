@@ -979,7 +979,9 @@ function parseCourseProgress(value: string): number | null {
 }
 
 function zonedMidnightUtc(date: Date, timeZone: string): Date {
-  const localDateTime = DateTime.fromJSDate(date, { zone: "utc" }).setZone(timeZone);
+  const localDateTime = DateTime.fromJSDate(date, { zone: "utc" }).setZone(
+    timeZone,
+  );
 
   if (!localDateTime.isValid) {
     throw new Error(`Invalid timezone for midnight calculation: ${timeZone}`);
@@ -989,10 +991,14 @@ function zonedMidnightUtc(date: Date, timeZone: string): Date {
 }
 
 function untilDateUtc(date: string, timeZone: string): string {
-  const localDateTime = DateTime.fromISO(date, { zone: timeZone }).startOf("day");
+  const localDateTime = DateTime.fromISO(date, { zone: timeZone }).startOf(
+    "day",
+  );
 
   if (!localDateTime.isValid) {
-    throw new Error(`Invalid date or timezone for until date: ${date} / ${timeZone}`);
+    throw new Error(
+      `Invalid date or timezone for until date: ${date} / ${timeZone}`,
+    );
   }
 
   return localDateTime.toUTC().toJSDate().toISOString();
@@ -1011,7 +1017,9 @@ function localDateTimeUtc(
   );
 
   if (!localDateTime.isValid) {
-    throw new Error(`Invalid local date/time or timezone: ${date} ${time} / ${timeZone}`);
+    throw new Error(
+      `Invalid local date/time or timezone: ${date} ${time} / ${timeZone}`,
+    );
   }
 
   return localDateTime.toUTC().toJSDate().toISOString();
@@ -1212,7 +1220,6 @@ function enforceManualFinanceAmountRules(
   // the parser produced an amount and confidence.
   return parsed;
 }
-
 
 function financeTransactionMessage(
   transaction: FinanceTransactionRecord,
@@ -2398,7 +2405,6 @@ async function handleRemindCommand(
   });
 }
 
-
 interface ParsedWorkoutExercise {
   exercise_name: string;
   name: string;
@@ -2463,11 +2469,13 @@ function parseWorkoutCommandArgs(args: string): ParsedWorkoutCommandArgs {
     const explicitWeightMatch = part.match(WORKOUT_WEIGHT_PATTERN);
     const inferredWeightMatch = explicitWeightMatch
       ? null
-      : part.match(WORKOUT_TRAILING_WEIGHT_BEFORE_SETS_PATTERN) ??
-        part.match(WORKOUT_TRAILING_WEIGHT_AFTER_SETS_PATTERN);
+      : (part.match(WORKOUT_TRAILING_WEIGHT_BEFORE_SETS_PATTERN) ??
+        part.match(WORKOUT_TRAILING_WEIGHT_AFTER_SETS_PATTERN));
     const rawWeight =
-      explicitWeightMatch?.groups?.weight ?? inferredWeightMatch?.groups?.weight;
-    const weightKg = rawWeight === undefined ? null : Number(rawWeight.replace(",", "."));
+      explicitWeightMatch?.groups?.weight ??
+      inferredWeightMatch?.groups?.weight;
+    const weightKg =
+      rawWeight === undefined ? null : Number(rawWeight.replace(",", "."));
     const normalizedWeightKg =
       weightKg !== null && Number.isFinite(weightKg) && weightKg > 0
         ? weightKg
@@ -2512,7 +2520,8 @@ function parseWorkoutCommandArgs(args: string): ParsedWorkoutCommandArgs {
     plan,
     exercises,
     summaryLines: exercises.map((exercise) => {
-      const weight = exercise.weight_kg === null ? "" : ` @ ${exercise.weight_kg}kg`;
+      const weight =
+        exercise.weight_kg === null ? "" : ` @ ${exercise.weight_kg}kg`;
       return `${exercise.exercise_name}: ${exercise.sets}x${exercise.reps}${weight}`;
     }),
   };
@@ -2536,7 +2545,8 @@ async function handleWorkoutCommand(
   });
 
   let entity: LifeEntityRecord | null = null;
-  const shouldMirrorWorkoutInput = workout.created || parsedWorkout.exercises.length > 0;
+  const shouldMirrorWorkoutInput =
+    workout.created || parsedWorkout.exercises.length > 0;
 
   if (shouldMirrorWorkoutInput) {
     entity = await createEntityAndQueueSync(runtime.store!, message, {
@@ -2551,7 +2561,10 @@ async function handleWorkoutCommand(
         lifeMode: mode.mode,
         exercises: parsedWorkout.exercises,
         parsedWorkoutPlan: parsedWorkout.plan,
-        parsedWorkout: parsedWorkout.exercises.length === 1 ? parsedWorkout.exercises[0] : parsedWorkout.exercises,
+        parsedWorkout:
+          parsedWorkout.exercises.length === 1
+            ? parsedWorkout.exercises[0]
+            : parsedWorkout.exercises,
         rawArgs: args.trim() || null,
       }),
     });

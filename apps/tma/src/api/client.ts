@@ -238,9 +238,14 @@ export const api = {
     });
   },
   getReceipt(id: string): Promise<FinanceReceiptDetail> {
-    return request<FinanceReceiptDetail>(`/api/tma/finance/receipts/${encodeURIComponent(id)}`);
+    return request<FinanceReceiptDetail>(
+      `/api/tma/finance/receipts/${encodeURIComponent(id)}`,
+    );
   },
-  reviewReceipt(id: string, input: ReviewReceiptInput): Promise<FinanceReceiptDetail> {
+  reviewReceipt(
+    id: string,
+    input: ReviewReceiptInput,
+  ): Promise<FinanceReceiptDetail> {
     return request<FinanceReceiptDetail>(
       `/api/tma/finance/receipts/${encodeURIComponent(id)}/review`,
       {

@@ -17,21 +17,21 @@ Design for **clarity under cognitive load**, not visual novelty.
 
 Both `apps/web` and `apps/tma` converge on a shared dark “graphite” theme:
 
-| Token | Value | Usage |
-|-------|-------|-------|
-| `graphite-950` | `#05070b` | Page background |
-| `graphite-900`–`800` | `#090d14`–`#111927` | Elevated surfaces |
-| `signal.cyan` | `#22d3ee` | Primary accent, active nav |
-| `signal.mint` | `#4ade80` | Success, health-positive |
-| `signal.amber` | `#fbbf24` | Deadlines, warnings |
-| `signal.rose` | `#fb7185` | Errors, destructive |
-| `signal.violet` | `#a78bfa` | Mode, finance |
+| Token                | Value               | Usage                      |
+| -------------------- | ------------------- | -------------------------- |
+| `graphite-950`       | `#05070b`           | Page background            |
+| `graphite-900`–`800` | `#090d14`–`#111927` | Elevated surfaces          |
+| `signal.cyan`        | `#22d3ee`           | Primary accent, active nav |
+| `signal.mint`        | `#4ade80`           | Success, health-positive   |
+| `signal.amber`       | `#fbbf24`           | Deadlines, warnings        |
+| `signal.rose`        | `#fb7185`           | Errors, destructive        |
+| `signal.violet`      | `#a78bfa`           | Mode, finance              |
 
 ### Panel Pattern
 
 ```tsx
 // Standard content panel — reuse everywhere
-className="rounded-xl border border-white/[0.08] bg-white/[0.03]"
+className = "rounded-xl border border-white/[0.08] bg-white/[0.03]";
 ```
 
 ### Typography
@@ -45,7 +45,7 @@ className="rounded-xl border border-white/[0.08] bg-white/[0.03]"
 
 ### 1. Actionable Over Decorative
 
-Every screen answers: *“What should I do next?”*
+Every screen answers: _“What should I do next?”_
 
 - Bot replies: short, command-oriented (see `docs/BOT_UX.md`).
 - TMA screens: primary action visible without scroll.
@@ -53,25 +53,25 @@ Every screen answers: *“What should I do next?”*
 
 ### 2. Consistent Component Vocabulary
 
-| Component | Web | TMA | Purpose |
-|-----------|-----|-----|---------|
-| `AppShell` | Sidebar + bottom nav | 8-tab bottom nav | Navigation chrome |
-| `MetricCard` / `MetricTile` | ✓ | ✓ | KPI display |
-| `SectionPanel` | ✓ | inline panels | Grouped content |
-| `PageHeader` | ✓ | screen titles | Context + summary |
-| `LoadingPanel` / `ErrorPanel` | — | ✓ | Async states |
+| Component                     | Web                  | TMA              | Purpose           |
+| ----------------------------- | -------------------- | ---------------- | ----------------- |
+| `AppShell`                    | Sidebar + bottom nav | 8-tab bottom nav | Navigation chrome |
+| `MetricCard` / `MetricTile`   | ✓                    | ✓                | KPI display       |
+| `SectionPanel`                | ✓                    | inline panels    | Grouped content   |
+| `PageHeader`                  | ✓                    | screen titles    | Context + summary |
+| `LoadingPanel` / `ErrorPanel` | —                    | ✓                | Async states      |
 
 **Rule:** When adding UI in one app, check the sibling app for an existing pattern before inventing new ones.
 
 ### 3. Signal Colors Map to Domain Meaning
 
-| Tone | Domain |
-|------|--------|
-| `cyan` | Default, system, focus |
-| `mint` | Health, completion, queue |
-| `amber` | Deadlines, pending |
-| `rose` | Errors, alerts |
-| `violet` | Mode, finance |
+| Tone     | Domain                    |
+| -------- | ------------------------- |
+| `cyan`   | Default, system, focus    |
+| `mint`   | Health, completion, queue |
+| `amber`  | Deadlines, pending        |
+| `rose`   | Errors, alerts            |
+| `violet` | Mode, finance             |
 
 Do not use signal colors purely for decoration.
 
@@ -97,14 +97,14 @@ Do not use signal colors purely for decoration.
 
 ## Anti-Patterns for LifeOS
 
-| Avoid | Why | Instead |
-|-------|-----|---------|
-| Bright gradients / “AI purple” aesthetics | Conflicts with calm personal-OS tone | Graphite + single accent |
-| Full workout state in Telegram URLs | Security + URL length | Short TMA URL, state in Supabase |
-| Hardcoded “Live” badges | Misleading when API is down | Bind to `/healthz` or remove |
-| 8 cramped nav labels on small phones | Illegible at `text-[10px]` | Icons-first or grouped nav |
-| Placeholder copy in production | Erodes trust | “No data yet” + action CTA |
-| Duplicating design tokens ad hoc | Drift between web/TMA | Extract shared tokens (future `@lifeos/ui`) |
+| Avoid                                     | Why                                  | Instead                                     |
+| ----------------------------------------- | ------------------------------------ | ------------------------------------------- |
+| Bright gradients / “AI purple” aesthetics | Conflicts with calm personal-OS tone | Graphite + single accent                    |
+| Full workout state in Telegram URLs       | Security + URL length                | Short TMA URL, state in Supabase            |
+| Hardcoded “Live” badges                   | Misleading when API is down          | Bind to `/healthz` or remove                |
+| 8 cramped nav labels on small phones      | Illegible at `text-[10px]`           | Icons-first or grouped nav                  |
+| Placeholder copy in production            | Erodes trust                         | “No data yet” + action CTA                  |
+| Duplicating design tokens ad hoc          | Drift between web/TMA                | Extract shared tokens (future `@lifeos/ui`) |
 
 ## Pre-Delivery Checklist
 

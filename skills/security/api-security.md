@@ -5,14 +5,14 @@
 
 ## API Route Map
 
-| Route family | Auth | Body limit | CORS |
-|--------------|------|------------|------|
-| `GET /healthz` | None | — | `*` |
-| `POST /telegram/webhook` | Webhook secret | Telegram payload | — |
-| `/api/tma/*` | Init data HMAC | 1 MB JSON | `*` |
-| `POST /health/ingest` | Ingest secret | Health payload | `*` |
-| `GET /tma/*` | None (static) | — | `*` |
-| `/api/web/*` | **Not implemented** | — | — |
+| Route family             | Auth                | Body limit       | CORS |
+| ------------------------ | ------------------- | ---------------- | ---- |
+| `GET /healthz`           | None                | —                | `*`  |
+| `POST /telegram/webhook` | Webhook secret      | Telegram payload | —    |
+| `/api/tma/*`             | Init data HMAC      | 1 MB JSON        | `*`  |
+| `POST /health/ingest`    | Ingest secret       | Health payload   | `*`  |
+| `GET /tma/*`             | None (static)       | —                | `*`  |
+| `/api/web/*`             | **Not implemented** | —                | —    |
 
 ## Request Handling Rules
 
@@ -52,14 +52,14 @@ Never parse route params before auth resolution.
 
 ### 3. Input Validation
 
-| Input | Validation |
-|-------|------------|
-| JSON body | `readJsonBody` with 1 MB cap |
-| UUIDs | Validate format before DB lookup |
-| Enums | Match against `@lifeos/core` types |
-| Dates | ISO 8601 parse with fallback reject |
+| Input                   | Validation                          |
+| ----------------------- | ----------------------------------- |
+| JSON body               | `readJsonBody` with 1 MB cap        |
+| UUIDs                   | Validate format before DB lookup    |
+| Enums                   | Match against `@lifeos/core` types  |
+| Dates                   | ISO 8601 parse with fallback reject |
 | Base64 images (finance) | Size check, magic bytes if possible |
-| Telegram text | Length limits in command handlers |
+| Telegram text           | Length limits in command handlers   |
 
 ### 4. Output Filtering
 
@@ -75,8 +75,8 @@ Never parse route params before auth resolution.
 
 ```typescript
 const allowedOrigins = [
-  process.env.TMA_ORIGIN,      // e.g. https://tma.example.com
-  process.env.WEB_ORIGIN,      // e.g. https://dashboard.example.com
+  process.env.TMA_ORIGIN, // e.g. https://tma.example.com
+  process.env.WEB_ORIGIN, // e.g. https://dashboard.example.com
 ];
 // Reflect origin only if in allowlist
 ```
@@ -85,12 +85,12 @@ Wildcard CORS + stolen initData = cross-origin API abuse from malicious pages.
 
 ## Rate Limiting (Recommended)
 
-| Endpoint | Suggested limit |
-|----------|-----------------|
+| Endpoint            | Suggested limit                          |
+| ------------------- | ---------------------------------------- |
 | `/telegram/webhook` | Telegram controls rate; add 429 on burst |
-| `/api/tma/*` | 100 req/min per telegram_user_id |
-| `/health/ingest` | 10 req/hour per device |
-| `/healthz` | Unlimited |
+| `/api/tma/*`        | 100 req/min per telegram_user_id         |
+| `/health/ingest`    | 10 req/hour per device                   |
+| `/healthz`          | Unlimited                                |
 
 Implement at reverse proxy (Railway) or in-memory token bucket in `server.ts`.
 

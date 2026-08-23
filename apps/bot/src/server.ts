@@ -4,10 +4,22 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import {
+  createHash,
+  createHmac,
+  randomBytes,
+  timingSafeEqual,
+} from "node:crypto";
 import { createReadStream, realpathSync, statSync } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
-import { basename, extname, isAbsolute, relative, resolve, sep } from "node:path";
+import {
+  basename,
+  extname,
+  isAbsolute,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import {
   parseHealthMetricsIngestPayload,
   parseHealthIngestPayload,
@@ -569,9 +581,9 @@ function validateTelegramInitData(
 function googleOAuthConfigured(options: ResolvedBotServerOptions): boolean {
   return Boolean(
     options.googleOAuthClientId &&
-      options.googleOAuthClientSecret &&
-      options.googleOAuthRedirectUri &&
-      options.googleOAuthStateSecret,
+    options.googleOAuthClientSecret &&
+    options.googleOAuthRedirectUri &&
+    options.googleOAuthStateSecret,
   );
 }
 
@@ -906,8 +918,8 @@ function unsafeTmaDevAuthAllowed(
 ): options is ResolvedBotServerOptions & { defaultUserId: string } {
   return Boolean(
     options.allowUnsafeTmaDevAuth &&
-      options.defaultUserId !== undefined &&
-      process.env.NODE_ENV !== "production",
+    options.defaultUserId !== undefined &&
+    process.env.NODE_ENV !== "production",
   );
 }
 
@@ -1259,7 +1271,11 @@ async function readJsonBody(
     totalBytes += buffer.length;
 
     if (totalBytes > maxBytes) {
-      throw new RequestBodyError(413, "request_body_too_large", "Request body is too large");
+      throw new RequestBodyError(
+        413,
+        "request_body_too_large",
+        "Request body is too large",
+      );
     }
 
     chunks.push(buffer);
@@ -1274,7 +1290,11 @@ async function readJsonBody(
   try {
     return JSON.parse(raw) as unknown;
   } catch {
-    throw new RequestBodyError(400, "invalid_json", "Request body must be valid JSON");
+    throw new RequestBodyError(
+      400,
+      "invalid_json",
+      "Request body must be valid JSON",
+    );
   }
 }
 
@@ -1839,7 +1859,9 @@ function parseTmaBudgetBody(body: unknown):
     return { ok: false, error: "invalid_budget_amount" };
   }
 
-  const normalizedPeriodStart = periodStart ? parseIsoDateOnly(periodStart) : null;
+  const normalizedPeriodStart = periodStart
+    ? parseIsoDateOnly(periodStart)
+    : null;
   const normalizedPeriodEnd = periodEnd ? parseIsoDateOnly(periodEnd) : null;
 
   if (!normalizedPeriodStart) {
@@ -1850,7 +1872,10 @@ function parseTmaBudgetBody(body: unknown):
     return { ok: false, error: "invalid_budget_period_end" };
   }
 
-  if (normalizedPeriodEnd && isoDateIsBefore(normalizedPeriodEnd, normalizedPeriodStart)) {
+  if (
+    normalizedPeriodEnd &&
+    isoDateIsBefore(normalizedPeriodEnd, normalizedPeriodStart)
+  ) {
     return { ok: false, error: "invalid_budget_period_range" };
   }
 
@@ -1946,7 +1971,12 @@ function parseTmaBudgetUpdateBody(body: unknown):
         ? null
         : parseIsoDateOnly(periodEnd);
 
-  if (periodEnd !== undefined && periodEnd !== null && periodEnd !== "" && !normalizedPeriodEnd) {
+  if (
+    periodEnd !== undefined &&
+    periodEnd !== null &&
+    periodEnd !== "" &&
+    !normalizedPeriodEnd
+  ) {
     return { ok: false, error: "invalid_budget_period_end" };
   }
 
@@ -1984,7 +2014,9 @@ function mimeExtension(mimeType: string): string {
   }
 }
 
-function dataUrlParts(value: unknown): { mimeType: string | null; imageBase64: string } | null {
+function dataUrlParts(
+  value: unknown,
+): { mimeType: string | null; imageBase64: string } | null {
   if (typeof value !== "string") {
     return null;
   }
@@ -2087,7 +2119,7 @@ function parseTmaReceiptUploadBody(body: unknown):
   const imageBase64 =
     typeof record.imageBase64 === "string"
       ? record.imageBase64.trim()
-      : dataUrl?.imageBase64 ?? "";
+      : (dataUrl?.imageBase64 ?? "");
 
   if (!imageBase64) {
     return { ok: false, error: "invalid_receipt_image" };
@@ -2238,10 +2270,12 @@ async function handleRequest(
       return;
     }
 
-    const stateNonceConsumed = await options.store.consumeGoogleOAuthStateNonce({
-      nonce: state.nonce,
-      userId: state.userId,
-    });
+    const stateNonceConsumed = await options.store.consumeGoogleOAuthStateNonce(
+      {
+        nonce: state.nonce,
+        userId: state.userId,
+      },
+    );
 
     if (!stateNonceConsumed) {
       writeHtml(
@@ -2422,7 +2456,10 @@ async function handleRequest(
         response,
         200,
         tmaData({
-          token: signHealthIngestToken(auth.user, options.healthIngestJwtSecret),
+          token: signHealthIngestToken(
+            auth.user,
+            options.healthIngestJwtSecret,
+          ),
           tokenType: "Bearer",
           expiresInSeconds: HEALTH_INGEST_TOKEN_MAX_AGE_SECONDS,
         }),
@@ -2499,7 +2536,8 @@ async function handleRequest(
               serverDeviceId: provisioned.serverDeviceId,
               folderId: provisioned.folderId,
               folderLabel: `LifeOS ${auth.user.userId.slice(0, 8)}`,
-              localPathHint: "Choose an empty local Obsidian vault folder on your device.",
+              localPathHint:
+                "Choose an empty local Obsidian vault folder on your device.",
             },
           }),
         );
@@ -3371,10 +3409,7 @@ async function handleRequest(
       let payload;
 
       try {
-        payload = parseHealthMetricsIngestPayload(
-          scopedBody,
-          healthUserId,
-        );
+        payload = parseHealthMetricsIngestPayload(scopedBody, healthUserId);
       } catch (error) {
         writeJson(response, 400, {
           error: "invalid_health_metrics_payload",
@@ -3454,7 +3489,9 @@ export function createBotServer(options: BotServerOptions = {}): Server {
     dependencies: {
       supabaseConfigured: options.dependencies?.supabaseConfigured ?? false,
       telegramConfigured: options.dependencies?.telegramConfigured ?? false,
-      healthIngestConfigured: Boolean(options.config?.lifeosHealthIngestJwtSecret),
+      healthIngestConfigured: Boolean(
+        options.config?.lifeosHealthIngestJwtSecret,
+      ),
     },
     webhookPath: options.config?.telegramWebhookPath ?? "/telegram/webhook",
     webhookSecret: options.config?.telegramWebhookSecret,

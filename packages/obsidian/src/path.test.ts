@@ -22,7 +22,7 @@ describe("sanitizeObsidianSegment", () => {
   });
 
   it("normalizes Windows-invalid note characters", () => {
-    expect(sanitizeObsidianSegment('Legs: Quads * Calisthenics?')).toBe(
+    expect(sanitizeObsidianSegment("Legs: Quads * Calisthenics?")).toBe(
       "Legs- Quads - Calisthenics",
     );
   });

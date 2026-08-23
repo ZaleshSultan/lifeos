@@ -153,18 +153,18 @@ LifeOS has a **mature Telegram + TMA + bot backend vertical slice** with strong 
 
 ## Recommendations Priority Matrix
 
-| Priority | ID | Action |
-|----------|-----|--------|
-| P0 | SEC-01 | Web auth before public dashboard deploy |
-| P0 | SEC-05 | Enforce dev auth bypass off in production |
-| P1 | SEC-02 | initData `auth_date` validation |
-| P1 | SEC-03 | Timing-safe webhook secret compare |
-| P1 | UX-01 | Wire web dashboard to `/api/web/*` |
-| P1 | SEC-04 | CORS origin allowlist |
-| P2 | SEC-07 | Rate limiting |
-| P2 | UX-02 | TMA nav density fix |
-| P2 | ARCH-01/02 | Modularize server.ts and store |
-| P3 | UX-03–06 | Polish items |
+| Priority | ID         | Action                                    |
+| -------- | ---------- | ----------------------------------------- |
+| P0       | SEC-01     | Web auth before public dashboard deploy   |
+| P0       | SEC-05     | Enforce dev auth bypass off in production |
+| P1       | SEC-02     | initData `auth_date` validation           |
+| P1       | SEC-03     | Timing-safe webhook secret compare        |
+| P1       | UX-01      | Wire web dashboard to `/api/web/*`        |
+| P1       | SEC-04     | CORS origin allowlist                     |
+| P2       | SEC-07     | Rate limiting                             |
+| P2       | UX-02      | TMA nav density fix                       |
+| P2       | ARCH-01/02 | Modularize server.ts and store            |
+| P3       | UX-03–06   | Polish items                              |
 
 ---
 
@@ -185,9 +185,9 @@ LifeOS has a **mature Telegram + TMA + bot backend vertical slice** with strong 
 
 Issues map to skills for remediation guidance:
 
-| Category | Skill |
-|----------|-------|
-| UX | `skills/ui-ux/*` |
-| Security | `skills/security/*` |
-| Architecture | `skills/lifeos-architect.md` |
-| Agent routing | `AGENTS.md` |
+| Category      | Skill                        |
+| ------------- | ---------------------------- |
+| UX            | `skills/ui-ux/*`             |
+| Security      | `skills/security/*`          |
+| Architecture  | `skills/lifeos-architect.md` |
+| Agent routing | `AGENTS.md`                  |

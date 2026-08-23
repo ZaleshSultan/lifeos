@@ -1078,7 +1078,6 @@ export function tmaStore(events: string[] = []): LifeOSStore {
   };
 }
 
-
 function signedHealthIngestToken(
   secret = "health-secret",
   userId = "user-1",
@@ -2401,12 +2400,10 @@ describe("bot server", () => {
 
   it("stores Google OAuth callback tokens for the signed state user only", async () => {
     const store = tmaStore();
-    let stored:
-      | {
-          userId: string;
-          input: Parameters<LifeOSStore["upsertUserOAuthConnection"]>[1];
-        }
-      | null = null;
+    let stored: {
+      userId: string;
+      input: Parameters<LifeOSStore["upsertUserOAuthConnection"]>[1];
+    } | null = null;
     store.resolveTelegramUser = async () => activeTelegramUser();
     store.upsertUserOAuthConnection = async (userId, input) => {
       stored = { userId, input };
@@ -2451,8 +2448,9 @@ describe("bot server", () => {
     const startBody = await startResponse.json();
     const state = new URL(startBody.data.url).searchParams.get("state");
 
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
-      async (input: Parameters<typeof fetch>[0]) => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input: Parameters<typeof fetch>[0]) => {
         const url =
           typeof input === "string"
             ? input
@@ -2484,8 +2482,7 @@ describe("bot server", () => {
         }
 
         throw new Error(`Unexpected fetch: ${url}`);
-      },
-    );
+      });
 
     try {
       const response = await rawGet(

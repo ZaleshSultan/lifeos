@@ -63,17 +63,13 @@ export class TelegramHttpClient implements TelegramClient {
 
     if (!response.ok) {
       const body = await response.text();
-      throw new Error(
-        `Telegram getFile failed: ${response.status} ${body}`,
-      );
+      throw new Error(`Telegram getFile failed: ${response.status} ${body}`);
     }
 
     const json = (await response.json()) as TelegramGetFileResponse;
 
     if (!json.ok || !json.result?.file_path) {
-      throw new Error(
-        "Telegram getFile returned no file_path",
-      );
+      throw new Error("Telegram getFile returned no file_path");
     }
 
     return `https://api.telegram.org/file/bot${this.token}/${json.result.file_path}`;

@@ -56,7 +56,8 @@ export function sanitizeObsidianSegment(
     .trim();
   const safe = sanitized || fallback;
 
-  const reservedBaseName = safe.split(".", 1)[0]?.toLowerCase() ?? safe.toLowerCase();
+  const reservedBaseName =
+    safe.split(".", 1)[0]?.toLowerCase() ?? safe.toLowerCase();
 
   if (RESERVED_WINDOWS_NAMES.has(reservedBaseName)) {
     return `${safe}-note`;
@@ -100,8 +101,7 @@ export function validateObsidianVaultPath(
 
   const isPosixAbsolute = path.posix.isAbsolute(trimmed);
   const isWindowsAbsolute =
-    WINDOWS_DRIVE_ABSOLUTE.test(trimmed) ||
-    WINDOWS_UNC_ABSOLUTE.test(trimmed);
+    WINDOWS_DRIVE_ABSOLUTE.test(trimmed) || WINDOWS_UNC_ABSOLUTE.test(trimmed);
 
   if (!isPosixAbsolute && !isWindowsAbsolute) {
     return {

@@ -76,7 +76,7 @@ class FakeQuery {
 
   maybeSingle(): Promise<{ data: FakeRow | null; error: null }> {
     const data =
-      this.action === "select" ? this.filteredRows()[0] ?? null : null;
+      this.action === "select" ? (this.filteredRows()[0] ?? null) : null;
     this.recordQuery();
     return Promise.resolve({ data, error: null });
   }
@@ -397,15 +397,15 @@ describe("SupabaseLifeOSStore Obsidian settings", () => {
       },
     ];
 
-    await expect(storeWith(client).isObsidianEnabledForUser("user-a")).resolves.toBe(
-      true,
-    );
-    await expect(storeWith(client).isObsidianEnabledForUser("user-b")).resolves.toBe(
-      false,
-    );
-    await expect(storeWith(client).isObsidianEnabledForUser("missing")).resolves.toBe(
-      false,
-    );
+    await expect(
+      storeWith(client).isObsidianEnabledForUser("user-a"),
+    ).resolves.toBe(true);
+    await expect(
+      storeWith(client).isObsidianEnabledForUser("user-b"),
+    ).resolves.toBe(false);
+    await expect(
+      storeWith(client).isObsidianEnabledForUser("missing"),
+    ).resolves.toBe(false);
   });
 });
 
@@ -539,9 +539,8 @@ describe("SupabaseLifeOSStore OAuth connections", () => {
       },
     ];
 
-    const connections = await storeWith(client).listConnectedOAuthUsers(
-      "google",
-    );
+    const connections =
+      await storeWith(client).listConnectedOAuthUsers("google");
 
     expect(connections.map((item) => item.userId)).toEqual(["user-a"]);
   });

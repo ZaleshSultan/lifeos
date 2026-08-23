@@ -77,12 +77,12 @@ describe("TMA onboarding status content", () => {
     expect(cards.find((card) => card.title === "Obsidian")?.status).toBe(
       "connected",
     );
-    expect(cards.find((card) => card.title === "Google Calendar")).toMatchObject(
-      {
-        status: "not_configured",
-        action: "connect_google",
-      },
-    );
+    expect(
+      cards.find((card) => card.title === "Google Calendar"),
+    ).toMatchObject({
+      status: "not_configured",
+      action: "connect_google",
+    });
   });
 
   it("shows connected Google account email without a connect action", () => {

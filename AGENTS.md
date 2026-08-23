@@ -20,11 +20,11 @@ LifeOS is a **personal operating system** monorepo:
 
 LifeOS skills are adapted from these upstream projects:
 
-| Domain | Upstream | Local path |
-|--------|----------|------------|
-| UI/UX | [nextlevelbuilder/ui-ux-pro-max-skill](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill) | `skills/ui-ux/` |
-| Security | [mukul975/Anthropic-Cybersecurity-Skills](https://github.com/mukul975/Anthropic-Cybersecurity-Skills) | `skills/security/` |
-| Architecture | LifeOS-specific | `skills/lifeos-architect.md` |
+| Domain       | Upstream                                                                                              | Local path                   |
+| ------------ | ----------------------------------------------------------------------------------------------------- | ---------------------------- |
+| UI/UX        | [nextlevelbuilder/ui-ux-pro-max-skill](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill)       | `skills/ui-ux/`              |
+| Security     | [mukul975/Anthropic-Cybersecurity-Skills](https://github.com/mukul975/Anthropic-Cybersecurity-Skills) | `skills/security/`           |
+| Architecture | LifeOS-specific                                                                                       | `skills/lifeos-architect.md` |
 
 Local skills **override** upstream guidance when they conflict with project conventions.
 
@@ -34,27 +34,27 @@ Local skills **override** upstream guidance when they conflict with project conv
 
 ### Architecture (always read first)
 
-| Skill | Path | When to use |
-|-------|------|-------------|
+| Skill            | Path                                                       | When to use                                           |
+| ---------------- | ---------------------------------------------------------- | ----------------------------------------------------- |
 | LifeOS Architect | [`skills/lifeos-architect.md`](skills/lifeos-architect.md) | Any change — monorepo layout, boundaries, conventions |
 
 ### UI/UX
 
-| Skill | Path | When to use |
-|-------|------|-------------|
-| Design Principles | [`skills/ui-ux/design-principles.md`](skills/ui-ux/design-principles.md) | Visual design, tokens, components, accessibility |
+| Skill                | Path                                                                           | When to use                                         |
+| -------------------- | ------------------------------------------------------------------------------ | --------------------------------------------------- |
+| Design Principles    | [`skills/ui-ux/design-principles.md`](skills/ui-ux/design-principles.md)       | Visual design, tokens, components, accessibility    |
 | Dashboard Guidelines | [`skills/ui-ux/dashboard-guidelines.md`](skills/ui-ux/dashboard-guidelines.md) | `apps/web` pages, MetricCard, AppShell, data wiring |
-| Mobile UX | [`skills/ui-ux/mobile-ux.md`](skills/ui-ux/mobile-ux.md) | `apps/tma` screens, Telegram SDK, touch targets |
+| Mobile UX            | [`skills/ui-ux/mobile-ux.md`](skills/ui-ux/mobile-ux.md)                       | `apps/tma` screens, Telegram SDK, touch targets     |
 
 ### Security
 
-| Skill | Path | When to use |
-|-------|------|-------------|
-| OWASP Alignment | [`skills/security/owasp.md`](skills/security/owasp.md) | Security review, vulnerability assessment |
-| Auth Security | [`skills/security/auth-security.md`](skills/security/auth-security.md) | Telegram initData, webhook, ingest, web auth |
-| API Security | [`skills/security/api-security.md`](skills/security/api-security.md) | New routes in `server.ts`, CORS, rate limits |
-| Threat Modeling | [`skills/security/threat-modeling.md`](skills/security/threat-modeling.md) | New features, deployment changes, data flows |
-| Architecture Review | [`skills/security/architecture-review.md`](skills/security/architecture-review.md) | Pre-merge security checklist |
+| Skill               | Path                                                                               | When to use                                  |
+| ------------------- | ---------------------------------------------------------------------------------- | -------------------------------------------- |
+| OWASP Alignment     | [`skills/security/owasp.md`](skills/security/owasp.md)                             | Security review, vulnerability assessment    |
+| Auth Security       | [`skills/security/auth-security.md`](skills/security/auth-security.md)             | Telegram initData, webhook, ingest, web auth |
+| API Security        | [`skills/security/api-security.md`](skills/security/api-security.md)               | New routes in `server.ts`, CORS, rate limits |
+| Threat Modeling     | [`skills/security/threat-modeling.md`](skills/security/threat-modeling.md)         | New features, deployment changes, data flows |
+| Architecture Review | [`skills/security/architecture-review.md`](skills/security/architecture-review.md) | Pre-merge security checklist                 |
 
 ---
 
@@ -102,13 +102,13 @@ User request
 
 ## Key Documentation
 
-| Doc | Purpose |
-|-----|---------|
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Runtime topology, identity, deployment |
-| [`docs/SECURITY.md`](docs/SECURITY.md) | Secrets, RLS, operational hygiene |
-| [`docs/DATABASE.md`](docs/DATABASE.md) | Migrations, tables, bootstrap |
-| [`docs/BOT_UX.md`](docs/BOT_UX.md) | Telegram command patterns |
-| [`docs/PROJECT_AUDIT.md`](docs/PROJECT_AUDIT.md) | Known UX/security/architecture issues |
+| Doc                                              | Purpose                                |
+| ------------------------------------------------ | -------------------------------------- |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)   | Runtime topology, identity, deployment |
+| [`docs/SECURITY.md`](docs/SECURITY.md)           | Secrets, RLS, operational hygiene      |
+| [`docs/DATABASE.md`](docs/DATABASE.md)           | Migrations, tables, bootstrap          |
+| [`docs/BOT_UX.md`](docs/BOT_UX.md)               | Telegram command patterns              |
+| [`docs/PROJECT_AUDIT.md`](docs/PROJECT_AUDIT.md) | Known UX/security/architecture issues  |
 
 ---
 

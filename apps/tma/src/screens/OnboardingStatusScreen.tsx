@@ -1,4 +1,10 @@
-import { Clock3, RefreshCw, ShieldAlert, Sparkles, UserPlus } from "lucide-react";
+import {
+  Clock3,
+  RefreshCw,
+  ShieldAlert,
+  Sparkles,
+  UserPlus,
+} from "lucide-react";
 import type { TmaSessionState, TmaSessionStatus } from "../api/types";
 import { useRegisterSessionMutation } from "../api/hooks";
 import { ErrorPanel } from "../components/AsyncState";

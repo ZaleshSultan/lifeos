@@ -29,50 +29,50 @@
 
 ### A01: Broken Access Control
 
-| Risk in LifeOS | Mitigation |
-|----------------|------------|
-| Service role bypasses RLS | Enforce `user_id` scoping in every `SupabaseLifeOSStore` method |
-| TMA user resolved via Telegram ID | Reject unlinked users (`403 telegram_user_not_linked`) |
-| Web dashboard has no auth | **Block public deploy** until Supabase session auth is added |
-| IDOR on `/api/tma/*` routes | Always filter by resolved `user.userId`, never trust client IDs alone |
+| Risk in LifeOS                    | Mitigation                                                            |
+| --------------------------------- | --------------------------------------------------------------------- |
+| Service role bypasses RLS         | Enforce `user_id` scoping in every `SupabaseLifeOSStore` method       |
+| TMA user resolved via Telegram ID | Reject unlinked users (`403 telegram_user_not_linked`)                |
+| Web dashboard has no auth         | **Block public deploy** until Supabase session auth is added          |
+| IDOR on `/api/tma/*` routes       | Always filter by resolved `user.userId`, never trust client IDs alone |
 
 **Audit action:** Review new store methods for missing `user_id` filter.
 
 ### A02: Cryptographic Failures
 
-| Risk | Mitigation |
-|------|------------|
-| Secrets in repo | Only `.env.example` placeholders; see `docs/SECURITY.md` |
-| Telegram initData HMAC | `validateTelegramInitData` uses HMAC-SHA256 — correct |
+| Risk                      | Mitigation                                                     |
+| ------------------------- | -------------------------------------------------------------- |
+| Secrets in repo           | Only `.env.example` placeholders; see `docs/SECURITY.md`       |
+| Telegram initData HMAC    | `validateTelegramInitData` uses HMAC-SHA256 — correct          |
 | Webhook secret comparison | **Gap:** uses `!==` not `timingSafeEqual` — fix in `server.ts` |
-| TLS in transit | Enforce HTTPS on Railway/Vercel/Telegram endpoints |
+| TLS in transit            | Enforce HTTPS on Railway/Vercel/Telegram endpoints             |
 
 ### A03: Injection
 
-| Vector | Mitigation |
-|--------|------------|
-| SQL injection | Supabase client parameterized queries; no raw SQL in app code |
-| Obsidian path traversal | `@lifeos/obsidian` path sanitizer blocks `..` segments |
-| Telegram message parsing | Parsers in `@lifeos/core` — validate before persist |
-| JSON body bombs | 1 MB limit in `readJsonBody` |
+| Vector                   | Mitigation                                                    |
+| ------------------------ | ------------------------------------------------------------- |
+| SQL injection            | Supabase client parameterized queries; no raw SQL in app code |
+| Obsidian path traversal  | `@lifeos/obsidian` path sanitizer blocks `..` segments        |
+| Telegram message parsing | Parsers in `@lifeos/core` — validate before persist           |
+| JSON body bombs          | 1 MB limit in `readJsonBody`                                  |
 
 ### A04: Insecure Design
 
-| Gap | Recommendation |
-|-----|----------------|
+| Gap                                  | Recommendation                                                |
+| ------------------------------------ | ------------------------------------------------------------- |
 | No `auth_date` freshness on initData | Reject initData older than 24h (Telegram recommends checking) |
-| CORS `*` on all JSON responses | Restrict to known TMA/web origins in production |
-| Single-tenant bootstrap env vars | Document that multi-tenant requires auth redesign |
-| No rate limiting | Add per-IP limits on webhook, TMA, ingest |
+| CORS `*` on all JSON responses       | Restrict to known TMA/web origins in production               |
+| Single-tenant bootstrap env vars     | Document that multi-tenant requires auth redesign             |
+| No rate limiting                     | Add per-IP limits on webhook, TMA, ingest                     |
 
 ### A05: Security Misconfiguration
 
-| Check | Status |
-|-------|--------|
+| Check                                     | Status                           |
+| ----------------------------------------- | -------------------------------- |
 | `ALLOW_UNSAFE_TMA_DEV_AUTH=false` in prod | **Critical** — verify deploy env |
-| `TELEGRAM_WEBHOOK_SECRET` set | Required in production |
-| RLS enabled on user tables | Yes (migrations) |
-| Service role only in bot/workers | Yes — never in browser |
+| `TELEGRAM_WEBHOOK_SECRET` set             | Required in production           |
+| RLS enabled on user tables                | Yes (migrations)                 |
+| Service role only in bot/workers          | Yes — never in browser           |
 
 ### A06: Vulnerable Components
 
@@ -82,13 +82,13 @@
 
 ### A07: Identification & Authentication Failures
 
-| Surface | Auth mechanism |
-|---------|----------------|
-| Telegram webhook | `X-Telegram-Bot-Api-Secret-Token` |
-| TMA API | `X-Telegram-Init-Data` HMAC |
-| Health ingest | JWT Bearer token from TMA health session |
-| Web dashboard | **Not implemented** |
-| Python workers | `SUPABASE_SERVICE_ROLE_KEY` |
+| Surface          | Auth mechanism                           |
+| ---------------- | ---------------------------------------- |
+| Telegram webhook | `X-Telegram-Bot-Api-Secret-Token`        |
+| TMA API          | `X-Telegram-Init-Data` HMAC              |
+| Health ingest    | JWT Bearer token from TMA health session |
+| Web dashboard    | **Not implemented**                      |
+| Python workers   | `SUPABASE_SERVICE_ROLE_KEY`              |
 
 ### A08: Software & Data Integrity
 
@@ -98,12 +98,12 @@
 
 ### A09: Security Logging & Monitoring
 
-| Practice | LifeOS status |
-|----------|---------------|
-| Sanitize errors before client response | `sanitizeErrorMessage` in bot |
-| Avoid logging initData/tokens | Documented in `docs/SECURITY.md` |
-| Health check endpoint | `GET /healthz` exists |
-| Audit trail for finance | Finance v2 migrations add SSOT patterns |
+| Practice                               | LifeOS status                           |
+| -------------------------------------- | --------------------------------------- |
+| Sanitize errors before client response | `sanitizeErrorMessage` in bot           |
+| Avoid logging initData/tokens          | Documented in `docs/SECURITY.md`        |
+| Health check endpoint                  | `GET /healthz` exists                   |
+| Audit trail for finance                | Finance v2 migrations add SSOT patterns |
 
 ### A10: Server-Side Request Forgery
 

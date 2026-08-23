@@ -7,13 +7,13 @@
 
 The web dashboard is the **desktop command center** for LifeOS. It complements (does not replace) Telegram capture and the TMA.
 
-| Route | Purpose | Data source (target) |
-|-------|---------|----------------------|
-| `/today` | Daily operating queue, focus, mode | `/api/web/home` (planned) |
-| `/health` | Recovery mode, ingest status | `/api/web/health` (planned) |
-| `/finance` | Monthly spend, categories | `/api/web/finance` (planned) |
-| `/study` | Academic sources, courses | `/api/web/academic` (planned) |
-| `/settings` | System status, env hints | `GET /healthz` (live today) |
+| Route       | Purpose                            | Data source (target)          |
+| ----------- | ---------------------------------- | ----------------------------- |
+| `/today`    | Daily operating queue, focus, mode | `/api/web/home` (planned)     |
+| `/health`   | Recovery mode, ingest status       | `/api/web/health` (planned)   |
+| `/finance`  | Monthly spend, categories          | `/api/web/finance` (planned)  |
+| `/study`    | Academic sources, courses          | `/api/web/academic` (planned) |
+| `/settings` | System status, env hints           | `GET /healthz` (live today)   |
 
 **Current state:** Pages are scaffold UI with placeholder copy (“API pending”). New work should wire real backend endpoints without changing visual structure.
 
@@ -32,10 +32,10 @@ The web dashboard is the **desktop command center** for LifeOS. It complements (
 
 ### Responsive Breakpoints
 
-| Breakpoint | Navigation | Content |
-|------------|------------|---------|
-| `< xl` | Bottom tab bar (5 routes) | Full width, `pb-28` for tab clearance |
-| `≥ xl` | Fixed left sidebar | Content area with left margin |
+| Breakpoint | Navigation                | Content                               |
+| ---------- | ------------------------- | ------------------------------------- |
+| `< xl`     | Bottom tab bar (5 routes) | Full width, `pb-28` for tab clearance |
+| `≥ xl`     | Fixed left sidebar        | Content area with left margin         |
 
 ### Page Structure
 
@@ -101,12 +101,12 @@ export default async function TodayPage() {
 
 ## Empty & Error States
 
-| State | Pattern |
-|-------|---------|
-| No data | Neutral panel: “Nothing captured yet” + link to Telegram `/cap` |
-| API pending | Current badge style is OK for dev; replace with real data in prod |
-| Backend down | Rose-tinted banner referencing settings page |
-| Loading | Skeleton cards matching `MetricCard` dimensions |
+| State        | Pattern                                                           |
+| ------------ | ----------------------------------------------------------------- |
+| No data      | Neutral panel: “Nothing captured yet” + link to Telegram `/cap`   |
+| API pending  | Current badge style is OK for dev; replace with real data in prod |
+| Backend down | Rose-tinted banner referencing settings page                      |
+| Loading      | Skeleton cards matching `MetricCard` dimensions                   |
 
 ## Navigation Guidelines
 

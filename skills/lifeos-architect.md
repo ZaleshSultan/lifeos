@@ -38,12 +38,12 @@ Workers          → Supabase Postgres → Obsidian vault (mirror only)
 
 ### 2. Pure Core, Impure Boundaries
 
-| Package | Allowed | Forbidden |
-|---------|---------|-----------|
-| `@lifeos/core` | Pure functions, types, parsers | `fetch`, Supabase, `fs`, env reads |
-| `@lifeos/db` | Supabase queries, store methods | HTTP, Telegram |
-| `@lifeos/obsidian` | Path sanitization | DB access |
-| `apps/bot` | HTTP, auth, orchestration | Business logic duplication |
+| Package            | Allowed                         | Forbidden                          |
+| ------------------ | ------------------------------- | ---------------------------------- |
+| `@lifeos/core`     | Pure functions, types, parsers  | `fetch`, Supabase, `fs`, env reads |
+| `@lifeos/db`       | Supabase queries, store methods | HTTP, Telegram                     |
+| `@lifeos/obsidian` | Path sanitization               | DB access                          |
+| `apps/bot`         | HTTP, auth, orchestration       | Business logic duplication         |
 
 Put domain rules in `packages/core`. Bot handlers call core, then persist via store.
 
@@ -91,9 +91,9 @@ See `docs/LIFEOS_KERNEL.md`.
 Use helpers from `@lifeos/core/env`:
 
 ```typescript
-optionalEnv("KEY")
-integerEnv("PORT", 3000)
-urlEnv("BACKEND_URL")
+optionalEnv("KEY");
+integerEnv("PORT", 3000);
+urlEnv("BACKEND_URL");
 ```
 
 Document new vars in relevant `.env.example`.
@@ -142,13 +142,13 @@ Never edit applied migrations — add new timestamped files.
 
 ## Deployment Topology
 
-| Component | Target | Package |
-|-----------|--------|---------|
-| Backend | Railway | `apps/bot` |
-| Web dashboard | Vercel | `apps/web` |
-| TMA static | Vercel or bot `TMA_STATIC_DIR` | `apps/tma` build |
-| Obsidian mirror | Arch Linux | `workers/obsidian-mirror` |
-| Reminders | Arch Linux | `workers/reminder-worker` |
+| Component       | Target                         | Package                   |
+| --------------- | ------------------------------ | ------------------------- |
+| Backend         | Railway                        | `apps/bot`                |
+| Web dashboard   | Vercel                         | `apps/web`                |
+| TMA static      | Vercel or bot `TMA_STATIC_DIR` | `apps/tma` build          |
+| Obsidian mirror | Arch Linux                     | `workers/obsidian-mirror` |
+| Reminders       | Arch Linux                     | `workers/reminder-worker` |
 
 ## Phase Boundaries (Do Not Skip)
 
@@ -166,14 +166,14 @@ Do not add web auth shortcuts (anon RLS reads from browser) — implement proper
 
 ## Anti-Patterns
 
-| Don't | Do instead |
-|-------|------------|
-| Import `@lifeos/db` from TMA/web | Call bot API |
-| Put SQL in bot handlers | Use `SupabaseLifeOSStore` methods |
-| Duplicate parsers in apps | Import from `@lifeos/core` |
-| Store state in Telegram deep links | Supabase + short TMA URL |
-| Add Express/Fastify without discussion | Extend `server.ts` or propose ADR |
-| Create `@lifeos/ui` prematurely | Match web/tma patterns manually first |
+| Don't                                  | Do instead                            |
+| -------------------------------------- | ------------------------------------- |
+| Import `@lifeos/db` from TMA/web       | Call bot API                          |
+| Put SQL in bot handlers                | Use `SupabaseLifeOSStore` methods     |
+| Duplicate parsers in apps              | Import from `@lifeos/core`            |
+| Store state in Telegram deep links     | Supabase + short TMA URL              |
+| Add Express/Fastify without discussion | Extend `server.ts` or propose ADR     |
+| Create `@lifeos/ui` prematurely        | Match web/tma patterns manually first |
 
 ## File Size Guidance
 
@@ -186,17 +186,17 @@ When adding routes: group by domain in separate handler modules imported by `ser
 
 ## Documentation Map
 
-| Topic | Doc |
-|-------|-----|
-| Topology | `docs/ARCHITECTURE.md` |
-| Security | `docs/SECURITY.md` |
-| Database | `docs/DATABASE.md` |
-| Bot UX | `docs/BOT_UX.md` |
-| TMA | `docs/TMA.md` |
-| Kernel | `docs/LIFEOS_KERNEL.md` |
-| Finance | `docs/FINANCE_MODULE.md` |
+| Topic         | Doc                              |
+| ------------- | -------------------------------- |
+| Topology      | `docs/ARCHITECTURE.md`           |
+| Security      | `docs/SECURITY.md`               |
+| Database      | `docs/DATABASE.md`               |
+| Bot UX        | `docs/BOT_UX.md`                 |
+| TMA           | `docs/TMA.md`                    |
+| Kernel        | `docs/LIFEOS_KERNEL.md`          |
+| Finance       | `docs/FINANCE_MODULE.md`         |
 | Health bridge | `docs/HEALTH_BRIDGE_CONTRACT.md` |
-| Audit issues | `docs/PROJECT_AUDIT.md` |
+| Audit issues  | `docs/PROJECT_AUDIT.md`          |
 
 ## Agent Workflow
 

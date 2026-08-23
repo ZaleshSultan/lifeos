@@ -284,7 +284,12 @@ export interface FinanceSummary {
 export interface FinanceReceiptSummary {
   id: string;
   status: string;
-  displayStatus: "processing" | "partial" | "needs_review" | "completed" | "failed";
+  displayStatus:
+    | "processing"
+    | "partial"
+    | "needs_review"
+    | "completed"
+    | "failed";
   fileName: string | null;
   amount: number | null;
   currency: string | null;

@@ -77,10 +77,15 @@ interface SyncthingFolderConfig {
 
 const SAFE_DEVICE_ID = /^[A-Z2-7]{7}(?:-[A-Z2-7]{7}){7}$/;
 const SAFE_FOLDER_ID = /^lifeos-[a-f0-9]{32}$/;
-const UUID_V4ISH = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_V4ISH =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function syncthingConfigured(config: SyncthingConfig): boolean {
-  return Boolean(config.apiUrl?.trim() && config.apiKey?.trim() && config.serverDeviceId?.trim());
+  return Boolean(
+    config.apiUrl?.trim() &&
+    config.apiKey?.trim() &&
+    config.serverDeviceId?.trim(),
+  );
 }
 
 export function syncthingFolderIdForUser(userId: string): string {
@@ -119,7 +124,9 @@ export async function provisionSyncthingFolder(
   const folderId = input.folderId?.trim() || syncthingFolderIdForUser(userId);
   const vaultPath = input.vaultPath?.trim() || serverVaultPathForUser(userId);
   const userDeviceId = normalizeSyncthingDeviceId(input.userDeviceId);
-  const serverDeviceId = normalizeSyncthingDeviceId(config.serverDeviceId ?? "");
+  const serverDeviceId = normalizeSyncthingDeviceId(
+    config.serverDeviceId ?? "",
+  );
 
   if (!SAFE_FOLDER_ID.test(folderId)) {
     throw new Error("Invalid generated Syncthing folder ID");
@@ -131,7 +138,9 @@ export async function provisionSyncthingFolder(
 
   const client = new SyncthingRestClient(config);
   await mkdir(vaultPath, { recursive: true, mode: 0o700 });
-  const deviceLabel = sanitizeLabel(input.deviceName || `LifeOS user ${userId.slice(0, 8)}`);
+  const deviceLabel = sanitizeLabel(
+    input.deviceName || `LifeOS user ${userId.slice(0, 8)}`,
+  );
 
   await client.upsertDevice({
     deviceID: userDeviceId,
@@ -151,7 +160,10 @@ export async function provisionSyncthingFolder(
   });
 
   const existingFolder = await client.getFolder(folderId);
-  const devices = mergeFolderDevices(existingFolder?.devices ?? [], userDeviceId);
+  const devices = mergeFolderDevices(
+    existingFolder?.devices ?? [],
+    userDeviceId,
+  );
 
   await client.upsertFolder({
     id: folderId,
@@ -230,7 +242,10 @@ class SyncthingRestClient {
     );
   }
 
-  async ensureConfigApplied(): Promise<{ configApplied: boolean; restartPerformed: boolean }> {
+  async ensureConfigApplied(): Promise<{
+    configApplied: boolean;
+    restartPerformed: boolean;
+  }> {
     for (let attempt = 0; attempt < 10; attempt += 1) {
       const inSync = await this.configInSync();
 
@@ -254,16 +269,18 @@ class SyncthingRestClient {
       await sleep(500);
     }
 
-    throw new Error("Syncthing config was saved but did not become active after restart");
+    throw new Error(
+      "Syncthing config was saved but did not become active after restart",
+    );
   }
 
   private async configInSync(): Promise<boolean | null> {
-    const response = await this.request(
+    const response = (await this.request(
       "GET",
       "/rest/system/config/insync",
       undefined,
       { allowNotFound: true },
-    ) as { configInSync?: unknown } | null;
+    )) as { configInSync?: unknown } | null;
 
     if (!response || typeof response.configInSync !== "boolean") {
       return null;
@@ -305,7 +322,7 @@ class SyncthingRestClient {
       response = await fetch(`${this.apiUrl}${pathname}`, {
         method,
         headers: {
-          "accept": "application/json",
+          accept: "application/json",
           "content-type": "application/json",
           "X-API-Key": this.apiKey,
         },
@@ -381,10 +398,12 @@ function sleep(ms: number): Promise<void> {
 }
 
 function sanitizeLabel(value: string): string {
-  return value
-    .normalize("NFKC")
-    .replace(/[\u0000-\u001f<>:"/\\|?*]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 80) || "LifeOS device";
+  return (
+    value
+      .normalize("NFKC")
+      .replace(/[\u0000-\u001f<>:"/\\|?*]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 80) || "LifeOS device"
+  );
 }

@@ -88,7 +88,6 @@ import type {
   WorkoutIntensity,
 } from "./types.js";
 
-
 type LifeOSSupabaseClient = SupabaseClient<Database>;
 type WorkoutRow = Database["public"]["Tables"]["workouts"]["Row"];
 type WorkoutSetRow = Database["public"]["Tables"]["workout_sets"]["Row"];
@@ -1187,9 +1186,7 @@ export interface LifeOSStore {
   }): Promise<LifeEntityRecord[]>;
   getLatestDailyLog(userId: string): Promise<DailyLogRecord | null>;
   getObsidianSyncStatus(userId: string): Promise<ObsidianSyncStatusSummary>;
-  getUserObsidianSettings(
-    userId: string,
-  ): Promise<UserObsidianSettings | null>;
+  getUserObsidianSettings(userId: string): Promise<UserObsidianSettings | null>;
   upsertUserObsidianSettings(
     userId: string,
     input: UpsertUserObsidianSettingsInput,
@@ -1753,7 +1750,9 @@ function toUserObsidianSettings(
   };
 }
 
-function toUserOAuthConnection(row: UserOAuthConnectionRow): UserOAuthConnection {
+function toUserOAuthConnection(
+  row: UserOAuthConnectionRow,
+): UserOAuthConnection {
   return {
     id: row.id,
     userId: row.user_id,
@@ -3022,7 +3021,8 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     options: SupabaseLifeOSStoreOptions = {},
   ) {
     this.adminTelegramUserIds = new Set(options.adminTelegramUserIds ?? []);
-    const configuredKey = options.encryptionKey ?? options.oauthTokenEncryptionKey;
+    const configuredKey =
+      options.encryptionKey ?? options.oauthTokenEncryptionKey;
     this.encryptionKey = configuredKey
       ? parseEncryptionKey(configuredKey)
       : undefined;
@@ -3552,10 +3552,10 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     const settings = await this.getUserObsidianSettings(userId);
     return Boolean(
       settings?.enabled &&
-        settings.isActive &&
-        (settings.mode === "local_vault" || settings.mode === "syncthing") &&
-        settings.status === "connected" &&
-        settings.vaultPath?.trim(),
+      settings.isActive &&
+      (settings.mode === "local_vault" || settings.mode === "syncthing") &&
+      settings.status === "connected" &&
+      settings.vaultPath?.trim(),
     );
   }
 
@@ -3594,7 +3594,9 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       throwSupabaseError(error, "Failed to load OAuth connection metadata");
     }
 
-    return data ? toSafeUserOAuthConnection(data as UserOAuthConnectionRow) : null;
+    return data
+      ? toSafeUserOAuthConnection(data as UserOAuthConnectionRow)
+      : null;
   }
 
   async upsertUserOAuthConnection(
@@ -3673,13 +3675,15 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     expiresAt: string;
   }): Promise<void> {
     await this.client.rpc("purge_expired_google_oauth_state_nonces", {});
-    const { error } = await this.client.from("google_oauth_state_nonces").insert({
-      nonce: input.nonce,
-      user_id: input.userId,
-      telegram_user_id: input.telegramUserId,
-      issued_at: input.issuedAt,
-      expires_at: input.expiresAt,
-    });
+    const { error } = await this.client
+      .from("google_oauth_state_nonces")
+      .insert({
+        nonce: input.nonce,
+        user_id: input.userId,
+        telegram_user_id: input.telegramUserId,
+        issued_at: input.issuedAt,
+        expires_at: input.expiresAt,
+      });
 
     if (error) {
       throwSupabaseError(error, "Failed to store Google OAuth state nonce");
@@ -3772,7 +3776,9 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     return decryptSecret(token, this.resolveEncryptionKey(), { aad });
   }
 
-  private toUserOAuthConnection(row: UserOAuthConnectionRow): UserOAuthConnection {
+  private toUserOAuthConnection(
+    row: UserOAuthConnectionRow,
+  ): UserOAuthConnection {
     const connection = toUserOAuthConnection(row);
     const aadBase = `lifeos:user_oauth_connections:${connection.userId}:${connection.provider}`;
 
@@ -4157,9 +4163,10 @@ export class SupabaseLifeOSStore implements LifeOSStore {
         userId: input.userId,
         name: normalizedName,
         category: "strength",
-        equipment: exercise.weightKg === null || exercise.weightKg === undefined
-          ? "bodyweight"
-          : "free_weight",
+        equipment:
+          exercise.weightKg === null || exercise.weightKg === undefined
+            ? "bodyweight"
+            : "free_weight",
       });
 
       rows.push({
@@ -4182,12 +4189,13 @@ export class SupabaseLifeOSStore implements LifeOSStore {
 
     const query = this.client.from("fitness_logs");
 
-    const { error } = input.sourceTelegramChatId && input.sourceTelegramMessageId
-      ? await query.upsert(rows, {
-          onConflict:
-            "user_id,source_telegram_chat_id,source_telegram_message_id,exercise_name",
-        })
-      : await query.insert(rows);
+    const { error } =
+      input.sourceTelegramChatId && input.sourceTelegramMessageId
+        ? await query.upsert(rows, {
+            onConflict:
+              "user_id,source_telegram_chat_id,source_telegram_message_id,exercise_name",
+          })
+        : await query.insert(rows);
 
     if (error) {
       throwSupabaseError(error, "Failed to record fitness logs");

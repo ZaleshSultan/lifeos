@@ -14,16 +14,21 @@ describe("Telegram push alerts integration", () => {
     };
 
     const mockStore = {
-      processFinanceAlerts: vi.fn().mockResolvedValue([
-        "⚠️ Budget monthly budget is overspent by 500.00 KZT!",
-        "⚠️ Category Food limit (1,000.00 KZT) exceeded. Spent: 1,200.00 KZT.",
-      ]),
+      processFinanceAlerts: vi
+        .fn()
+        .mockResolvedValue([
+          "⚠️ Budget monthly budget is overspent by 500.00 KZT!",
+          "⚠️ Category Food limit (1,000.00 KZT) exceeded. Spent: 1,200.00 KZT.",
+        ]),
       getTelegramUserId: vi.fn().mockResolvedValue(123456789),
     } as unknown as LifeOSStore;
 
     await triggerFinanceAlerts(mockStore, mockTelegram, "user-1", "2026-06-09");
 
-    expect(mockStore.processFinanceAlerts).toHaveBeenCalledWith("user-1", "2026-06-09");
+    expect(mockStore.processFinanceAlerts).toHaveBeenCalledWith(
+      "user-1",
+      "2026-06-09",
+    );
     expect(mockStore.getTelegramUserId).toHaveBeenCalledWith("user-1");
     expect(sentMessages).toHaveLength(2);
     expect(sentMessages[0]).toEqual({
@@ -52,7 +57,10 @@ describe("Telegram push alerts integration", () => {
 
     await triggerFinanceAlerts(mockStore, mockTelegram, "user-1", "2026-06-09");
 
-    expect(mockStore.processFinanceAlerts).toHaveBeenCalledWith("user-1", "2026-06-09");
+    expect(mockStore.processFinanceAlerts).toHaveBeenCalledWith(
+      "user-1",
+      "2026-06-09",
+    );
     expect(mockStore.getTelegramUserId).not.toHaveBeenCalled();
     expect(sentMessages).toHaveLength(0);
   });
@@ -73,7 +81,10 @@ describe("Telegram push alerts integration", () => {
 
     await triggerFinanceAlerts(mockStore, mockTelegram, "user-1", "2026-06-09");
 
-    expect(mockStore.processFinanceAlerts).toHaveBeenCalledWith("user-1", "2026-06-09");
+    expect(mockStore.processFinanceAlerts).toHaveBeenCalledWith(
+      "user-1",
+      "2026-06-09",
+    );
     expect(mockStore.getTelegramUserId).toHaveBeenCalledWith("user-1");
     expect(sentMessages).toHaveLength(0);
   });

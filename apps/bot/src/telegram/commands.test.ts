@@ -61,9 +61,8 @@ class FakeStore implements LifeOSStore {
   readonly financeParseRuns: Array<
     Parameters<LifeOSStore["recordFinanceParseRun"]>[0]
   > = [];
-  readonly fitnessLogs: Array<
-    Parameters<LifeOSStore["recordFitnessLogs"]>[0]
-  > = [];
+  readonly fitnessLogs: Array<Parameters<LifeOSStore["recordFitnessLogs"]>[0]> =
+    [];
   readonly monthlyReviews: Array<
     Awaited<ReturnType<LifeOSStore["generateMonthlyReview"]>>
   > = [];
@@ -455,18 +454,16 @@ class FakeStore implements LifeOSStore {
     };
   }
 
-  async getUserObsidianSettings(userId: string): Promise<
-    Awaited<ReturnType<LifeOSStore["getUserObsidianSettings"]>>
-  > {
+  async getUserObsidianSettings(
+    userId: string,
+  ): Promise<Awaited<ReturnType<LifeOSStore["getUserObsidianSettings"]>>> {
     return this.obsidianSettings.get(userId) ?? null;
   }
 
   async upsertUserObsidianSettings(
     userId: string,
     input: Parameters<LifeOSStore["upsertUserObsidianSettings"]>[1],
-  ): Promise<
-    Awaited<ReturnType<LifeOSStore["upsertUserObsidianSettings"]>>
-  > {
+  ): Promise<Awaited<ReturnType<LifeOSStore["upsertUserObsidianSettings"]>>> {
     const existing = this.obsidianSettings.get(userId);
     const now = "2026-05-18T12:00:00.000Z";
     const settings: ObsidianSettingsRecord = {

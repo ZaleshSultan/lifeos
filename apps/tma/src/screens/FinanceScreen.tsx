@@ -10,7 +10,13 @@ import {
   WalletCards,
   X,
 } from "lucide-react";
-import { type ChangeEvent, type FormEvent, useMemo, useState, useEffect } from "react";
+import {
+  type ChangeEvent,
+  type FormEvent,
+  useMemo,
+  useState,
+  useEffect,
+} from "react";
 import {
   useArchiveBudgetMutation,
   useCreateBudgetMutation,
@@ -48,7 +54,9 @@ function currentMonthStart(): string {
   return date.toISOString().slice(0, 10);
 }
 
-function receiptStatusClass(status: FinanceReceiptSummary["displayStatus"]): string {
+function receiptStatusClass(
+  status: FinanceReceiptSummary["displayStatus"],
+): string {
   if (status === "completed") {
     return "border-emerald-400/20 bg-emerald-400/[0.08] text-emerald-300";
   }
@@ -92,7 +100,9 @@ function ReceiptRow({
             : ""}
         </div>
         {receipt.errorMessage ? (
-          <div className="mt-1 text-xs text-amber-200">{receipt.errorMessage}</div>
+          <div className="mt-1 text-xs text-amber-200">
+            {receipt.errorMessage}
+          </div>
         ) : null}
       </div>
       <span
@@ -334,7 +344,9 @@ export function FinanceScreen() {
   const [showExpenseForm, setShowExpenseForm] = useState(false);
   const [showBudgetForm, setShowBudgetForm] = useState(false);
   const [selectedCurrency, setSelectedCurrency] = useState<string | null>(null);
-  const [selectedReceiptId, setSelectedReceiptId] = useState<string | null>(null);
+  const [selectedReceiptId, setSelectedReceiptId] = useState<string | null>(
+    null,
+  );
   const [receiptUploadError, setReceiptUploadError] = useState<string | null>(
     null,
   );
@@ -391,7 +403,8 @@ export function FinanceScreen() {
           const result = typeof reader.result === "string" ? reader.result : "";
           resolve(result.replace(/^data:[^;]+;base64,/, ""));
         };
-        reader.onerror = () => reject(new Error("Failed to read receipt image"));
+        reader.onerror = () =>
+          reject(new Error("Failed to read receipt image"));
         reader.readAsDataURL(file);
       });
 
@@ -537,7 +550,9 @@ export function FinanceScreen() {
           </button>
         </form>
         <div className="mt-3 flex items-center justify-between border-t border-white/[0.06] pt-3">
-          <span className="text-xs text-zinc-500">Missing legacy base amounts?</span>
+          <span className="text-xs text-zinc-500">
+            Missing legacy base amounts?
+          </span>
           <button
             onClick={() => void backfill.mutateAsync()}
             disabled={backfill.isPending}
@@ -877,7 +892,11 @@ function ReceiptReviewModal({
   onClose: () => void;
   expenseCategories: FinanceCategory[];
 }) {
-  const { data: receipt, isLoading: receiptLoading, error: receiptError } = useReceiptQuery(receiptId);
+  const {
+    data: receipt,
+    isLoading: receiptLoading,
+    error: receiptError,
+  } = useReceiptQuery(receiptId);
   const reviewMutation = useReviewReceiptMutation();
 
   const [imageBlobUrl, setImageBlobUrl] = useState<string | null>(null);
@@ -897,7 +916,10 @@ function ReceiptReviewModal({
     setImageError(false);
     setImageBlobUrl(null);
 
-    const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
+    const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? "").replace(
+      /\/$/,
+      "",
+    );
     const imageUrl = `${apiBaseUrl}/api/tma/finance/receipts/${encodeURIComponent(receiptId)}/image`;
 
     fetch(imageUrl, {
@@ -932,18 +954,24 @@ function ReceiptReviewModal({
   useEffect(() => {
     if (receipt) {
       const parsed = receipt.parsedJson || {};
-      setAmount(parsed.amount !== undefined && parsed.amount !== null ? String(parsed.amount) : "");
+      setAmount(
+        parsed.amount !== undefined && parsed.amount !== null
+          ? String(parsed.amount)
+          : "",
+      );
       setCurrency(parsed.currency || "USD");
       setMerchant(parsed.merchant || "");
-      
+
       let formattedDate = parsed.date || "";
       if (!formattedDate) {
-        formattedDate = receipt.processedAt ? receipt.processedAt.slice(0, 10) : new Date().toISOString().slice(0, 10);
+        formattedDate = receipt.processedAt
+          ? receipt.processedAt.slice(0, 10)
+          : new Date().toISOString().slice(0, 10);
       } else if (formattedDate.includes("T")) {
         formattedDate = formattedDate.slice(0, 10);
       }
       setDate(formattedDate);
-      
+
       setCategory(parsed.category || (expenseCategories[0]?.name ?? "Food"));
     }
   }, [receipt, expenseCategories]);
@@ -985,7 +1013,9 @@ function ReceiptReviewModal({
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
         <div className="relative w-full max-w-lg rounded-xl border border-white/[0.08] bg-zinc-900 p-6 shadow-2xl text-center space-y-4">
           <AlertTriangle className="mx-auto h-6 w-6 text-rose-400" />
-          <p className="text-sm text-zinc-300">Failed to load receipt details.</p>
+          <p className="text-sm text-zinc-300">
+            Failed to load receipt details.
+          </p>
           <button
             onClick={onClose}
             className="w-full rounded-lg border border-white/[0.08] px-3 py-2 text-sm text-zinc-300"
@@ -1043,7 +1073,9 @@ function ReceiptReviewModal({
 
         {receipt.ocrText ? (
           <div className="space-y-1">
-            <span className="text-xs text-zinc-500 font-medium">Extracted OCR Text</span>
+            <span className="text-xs text-zinc-500 font-medium">
+              Extracted OCR Text
+            </span>
             <pre className="max-h-24 overflow-y-auto rounded-lg bg-black/40 p-2 text-[10px] font-mono text-zinc-400 whitespace-pre-wrap scrollbar-thin">
               {receipt.ocrText}
             </pre>

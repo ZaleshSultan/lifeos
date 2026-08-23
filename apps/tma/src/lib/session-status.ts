@@ -17,7 +17,8 @@ export function onboardingContentForState(state: TmaSessionState): {
     return {
       title: "Добро пожаловать в LifeOS",
       body: "Нажми /start в Telegram, чтобы создать заявку.",
-      detail: "Можно также создать заявку прямо здесь, если Telegram открыл Mini App с валидной сессией.",
+      detail:
+        "Можно также создать заявку прямо здесь, если Telegram открыл Mini App с валидной сессией.",
     };
   }
 

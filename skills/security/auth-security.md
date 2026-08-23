@@ -23,11 +23,11 @@ All user-owned tables  ← user_id FK → auth.users(id)
 
 **File:** `apps/bot/src/server.ts`
 
-| Control | Implementation |
-|---------|----------------|
-| Endpoint | `POST /telegram/webhook` |
-| Secret header | `X-Telegram-Bot-Api-Secret-Token` |
-| Env var | `TELEGRAM_WEBHOOK_SECRET` |
+| Control         | Implementation                     |
+| --------------- | ---------------------------------- |
+| Endpoint        | `POST /telegram/webhook`           |
+| Secret header   | `X-Telegram-Bot-Api-Secret-Token`  |
+| Env var         | `TELEGRAM_WEBHOOK_SECRET`          |
 | User resolution | `profiles.telegram_user_id` lookup |
 
 **Hardening:**
@@ -46,21 +46,21 @@ Use signed HS256 Bearer tokens from TMA health sessions.
 
 **File:** `apps/bot/src/server.ts` → `validateTelegramInitData()`
 
-| Step | Check |
-|------|-------|
-| 1 | Parse `X-Telegram-Init-Data` header |
-| 2 | Verify HMAC-SHA256 hash with bot token |
-| 3 | Extract `user.id` from JSON `user` param |
-| 4 | Resolve via `store.resolveTelegramUser(telegramUserId)` |
-| 5 | Reject if not linked (`403`) |
+| Step | Check                                                   |
+| ---- | ------------------------------------------------------- |
+| 1    | Parse `X-Telegram-Init-Data` header                     |
+| 2    | Verify HMAC-SHA256 hash with bot token                  |
+| 3    | Extract `user.id` from JSON `user` param                |
+| 4    | Resolve via `store.resolveTelegramUser(telegramUserId)` |
+| 5    | Reject if not linked (`403`)                            |
 
 **Gaps to close:**
 
-| Gap | Fix |
-|-----|-----|
-| No `auth_date` check | Reject if `Date.now()/1000 - auth_date > 86400` |
-| Dev bypass in prod | `ALLOW_UNSAFE_TMA_DEV_AUTH` must be `false` |
-| Replay of stolen initData | Short TTL + optional server-side nonce cache |
+| Gap                       | Fix                                             |
+| ------------------------- | ----------------------------------------------- |
+| No `auth_date` check      | Reject if `Date.now()/1000 - auth_date > 86400` |
+| Dev bypass in prod        | `ALLOW_UNSAFE_TMA_DEV_AUTH` must be `false`     |
+| Replay of stolen initData | Short TTL + optional server-side nonce cache    |
 
 **Client rule (`apps/tma/src/api/client.ts`):**
 
@@ -69,11 +69,11 @@ Use signed HS256 Bearer tokens from TMA health sessions.
 
 ### 3. Health Ingest (Android Bridge)
 
-| Control | Value |
-|---------|-------|
-| Header | `Authorization: Bearer <health-session-token>` |
-| Comparison | `secureCompare()` ✓ (timing-safe) |
-| Payload trust | Untrusted until `@lifeos/core` parsing |
+| Control       | Value                                          |
+| ------------- | ---------------------------------------------- |
+| Header        | `Authorization: Bearer <health-session-token>` |
+| Comparison    | `secureCompare()` ✓ (timing-safe)              |
+| Payload trust | Untrusted until `@lifeos/core` parsing         |
 
 ### 4. Web Dashboard (Future)
 
@@ -89,11 +89,11 @@ Use signed HS256 Bearer tokens from TMA health sessions.
 
 ### 5. Python Workers
 
-| Worker | Auth |
-|--------|------|
-| obsidian-mirror | `SUPABASE_SERVICE_ROLE_KEY` |
-| reminder-worker | Service role + Telegram bot token |
-| google-sync, ics-sync | Service role |
+| Worker                | Auth                              |
+| --------------------- | --------------------------------- |
+| obsidian-mirror       | `SUPABASE_SERVICE_ROLE_KEY`       |
+| reminder-worker       | Service role + Telegram bot token |
+| google-sync, ics-sync | Service role                      |
 
 Workers run in trusted environments only (Arch server, not Vercel).
 
