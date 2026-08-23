@@ -901,11 +901,13 @@ function googleOAuthTmaRedirect(
   return isRelative ? `${url.pathname}${url.search}` : url.toString();
 }
 
-function unsafeTmaDevAuthAllowed(options: ResolvedBotServerOptions): boolean {
-  return (
+function unsafeTmaDevAuthAllowed(
+  options: ResolvedBotServerOptions,
+): options is ResolvedBotServerOptions & { defaultUserId: string } {
+  return Boolean(
     options.allowUnsafeTmaDevAuth &&
-    options.defaultUserId !== undefined &&
-    process.env.NODE_ENV !== "production"
+      options.defaultUserId !== undefined &&
+      process.env.NODE_ENV !== "production",
   );
 }
 

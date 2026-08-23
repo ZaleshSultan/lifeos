@@ -326,6 +326,12 @@ export function tmaStore(events: string[] = []): LifeOSStore {
     async createLifeEntity() {
       throw new Error("not used");
     },
+    async createLifeEntityWithSync() {
+      throw new Error("not used");
+    },
+    async recordFitnessLogs() {
+      throw new Error("not used");
+    },
     async enqueueObsidianSync() {},
     async listTodayEntities() {
       return [];
@@ -1269,6 +1275,41 @@ function webhookCommandStore(overrides: Partial<LifeOSStore> = {}): {
       entities.push(entity);
       return entity;
     },
+    async createLifeEntityWithSync(
+      input: CreateLifeEntityInput,
+      sync: Parameters<LifeOSStore["createLifeEntityWithSync"]>[1] = {},
+    ) {
+      const entity: LifeEntityRecord = {
+        id: `entity-${entities.length + 1}`,
+        userId: input.userId,
+        entityType: input.entityType,
+        domain: input.domain ?? "personal",
+        status: input.status ?? "inbox",
+        title: input.title,
+        description: input.description ?? null,
+        body: input.body ?? null,
+        source: input.source ?? "telegram",
+        sourceCommand: input.sourceCommand ?? null,
+        telegramChatId: input.telegramChatId ?? null,
+        telegramMessageId: input.telegramMessageId ?? null,
+        dueAt: input.dueAt ?? null,
+        linkedTable: input.linkedTable ?? null,
+        linkedId: input.linkedId ?? null,
+        metadata: input.metadata ?? {},
+        rawPayloadJson: input.rawPayloadJson ?? {},
+        createdAt: "2026-05-18T00:00:00.000Z",
+      };
+      entities.push(entity);
+      syncJobs.push({
+        userId: input.userId,
+        lifeEntityId: entity.id,
+        entityType: sync.entityType ?? input.entityType,
+        action: sync.action ?? "upsert",
+        targetPath: sync.targetPath ?? null,
+        payloadJson: sync.payloadJson ?? sync.payload ?? {},
+      } as Parameters<LifeOSStore["enqueueObsidianSync"]>[0]);
+      return entity;
+    },
     async enqueueObsidianSync(
       input: Parameters<LifeOSStore["enqueueObsidianSync"]>[0],
     ) {
@@ -1881,7 +1922,7 @@ describe("bot server", () => {
         authorization: `Bearer ${signedHealthIngestToken()}`,
       },
       body: JSON.stringify({
-        user_id: "attacker-user",
+        user_id: "user-1",
         date: "2026-05-17",
         sync_reason: "nightly_00_01",
         source: "healthkit",
@@ -1921,6 +1962,44 @@ describe("bot server", () => {
     });
     expect(seen.at(0)?.syncReason).toBe("nightly_00_01");
     expect(seen.at(0)?.userId).toBe("user-1");
+  });
+
+  it("rejects health ingest payloads whose body user_id does not match the signed token", async () => {
+    const seen: HealthIngestPayload[] = [];
+    const server = createBotServer({
+      config: {
+        lifeosHealthIngestJwtSecret: "health-secret",
+      },
+      store: healthIngestStore(seen) as LifeOSStore,
+    });
+    servers.push(server);
+
+    const port = await listen(server);
+    const response = await fetch(`http://127.0.0.1:${port}/health/ingest`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${signedHealthIngestToken()}`,
+      },
+      body: JSON.stringify({
+        user_id: "attacker-user",
+        date: "2026-05-17",
+        sync_reason: "nightly_00_01",
+        source: "healthkit",
+        metrics: {
+          sleep_minutes: 480,
+          resting_heart_rate: 58,
+          hrv_ms: 45,
+          steps: 9200,
+        },
+      }),
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "health_ingest_user_mismatch",
+    });
+    expect(seen).toHaveLength(0);
   });
 
   it("rejects invalid health ingest payloads", async () => {
@@ -2119,6 +2198,8 @@ describe("bot server", () => {
       enabled: true,
       mode: "local_vault",
       vaultPath: "/srv/lifeos-vaults/user-a",
+      syncthingFolderId: null,
+      isActive: true,
       status: "connected",
       metadata: {},
       createdAt: "2026-06-15T10:00:00.000Z",
@@ -2906,6 +2987,7 @@ describe("bot server", () => {
     servers.push(server);
 
     const port = await listen(server);
+    const futureRemindAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
     const getResponse = await fetch(`http://127.0.0.1:${port}/api/tma/sources`);
     const createResponse = await fetch(
       `http://127.0.0.1:${port}/api/tma/reminders`,
@@ -2916,7 +2998,7 @@ describe("bot server", () => {
         },
         body: JSON.stringify({
           message: "Review graph theory",
-          remindAt: "2026-07-06T02:00:00.000Z",
+          remindAt: futureRemindAt,
         }),
       },
     );
@@ -2953,7 +3035,7 @@ describe("bot server", () => {
         reminders: [
           {
             message: "Review graph theory",
-            remindAt: "2026-07-06T02:00:00.000Z",
+            remindAt: futureRemindAt,
           },
         ],
       },
@@ -2964,7 +3046,7 @@ describe("bot server", () => {
         reminders: [
           {
             message: "Review graph theory",
-            remindAt: "2026-07-06T02:00:00.000Z",
+            remindAt: futureRemindAt,
             status: "pending",
             channel: "telegram",
           },

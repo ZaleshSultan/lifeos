@@ -33,7 +33,7 @@ import type {
   TmaHealthSummary,
   TmaFinanceSummary,
   UserObsidianSettings,
-  type WorkoutPlan,
+  WorkoutPlan,
 } from "@lifeos/db";
 import type {
   TelegramBotRuntime,
@@ -995,7 +995,7 @@ function untilDateUtc(date: string, timeZone: string): string {
     throw new Error(`Invalid date or timezone for until date: ${date} / ${timeZone}`);
   }
 
-  return localDateTime.toUTC().toISO({ suppressMilliseconds: true }) ?? localDateTime.toUTC().toJSDate().toISOString();
+  return localDateTime.toUTC().toJSDate().toISOString();
 }
 
 function localDateTimeUtc(
@@ -1014,7 +1014,7 @@ function localDateTimeUtc(
     throw new Error(`Invalid local date/time or timezone: ${date} ${time} / ${timeZone}`);
   }
 
-  return localDateTime.toUTC().toISO({ suppressMilliseconds: true }) ?? localDateTime.toUTC().toJSDate().toISOString();
+  return localDateTime.toUTC().toJSDate().toISOString();
 }
 
 function parseReminderArgs(
@@ -2468,7 +2468,10 @@ function parseWorkoutCommandArgs(args: string): ParsedWorkoutCommandArgs {
     const rawWeight =
       explicitWeightMatch?.groups?.weight ?? inferredWeightMatch?.groups?.weight;
     const weightKg = rawWeight === undefined ? null : Number(rawWeight.replace(",", "."));
-    const normalizedWeightKg = Number.isFinite(weightKg) && weightKg > 0 ? weightKg : null;
+    const normalizedWeightKg =
+      weightKg !== null && Number.isFinite(weightKg) && weightKg > 0
+        ? weightKg
+        : null;
     const exerciseName = part
       .replace(WORKOUT_WEIGHT_PATTERN, " ")
       .replace(WORKOUT_TRAILING_WEIGHT_BEFORE_SETS_PATTERN, " ")

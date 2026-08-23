@@ -4092,7 +4092,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       };
     }
 
-    const workoutMetadata: Record<string, unknown> = {
+    const workoutMetadata: Record<string, Json> = {
       source: "telegram",
       template: input.manualPlan?.length
         ? "telegram_manual_parsed"
@@ -4101,7 +4101,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     };
 
     if (input.manualPlan?.length) {
-      workoutMetadata.parsedPlan = input.manualPlan;
+      workoutMetadata.parsedPlan = input.manualPlan as unknown as Json;
     }
 
     const { data, error } = await this.client

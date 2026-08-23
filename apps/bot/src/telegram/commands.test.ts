@@ -409,6 +409,30 @@ class FakeStore implements LifeOSStore {
     this.syncJobs.push(input);
   }
 
+  async createLifeEntityWithSync(
+    input: CreateLifeEntityInput,
+    sync: Parameters<LifeOSStore["createLifeEntityWithSync"]>[1] = {},
+  ): Promise<LifeEntityRecord> {
+    const entity = await this.createLifeEntity(input);
+    await this.enqueueObsidianSync({
+      userId: input.userId,
+      lifeEntityId: entity.id,
+      entityType: sync.entityType ?? input.entityType,
+      action: sync.action ?? "upsert",
+      targetPath: sync.targetPath ?? null,
+      payloadJson: sync.payloadJson ?? sync.payload ?? {},
+    } as Parameters<LifeOSStore["enqueueObsidianSync"]>[0]);
+    return entity;
+  }
+
+  async storeGoogleOAuthStateNonce(): Promise<void> {
+    // not used in these tests
+  }
+
+  async consumeGoogleOAuthStateNonce(): Promise<boolean> {
+    return true;
+  }
+
   async listTodayEntities(): Promise<LifeEntityRecord[]> {
     return this.entities;
   }
@@ -453,6 +477,11 @@ class FakeStore implements LifeOSStore {
         input.vaultPath !== undefined
           ? input.vaultPath
           : (existing?.vaultPath ?? null),
+      syncthingFolderId:
+        input.syncthingFolderId !== undefined
+          ? input.syncthingFolderId
+          : (existing?.syncthingFolderId ?? null),
+      isActive: input.isActive ?? existing?.isActive ?? false,
       status: input.status ?? existing?.status ?? "disconnected",
       metadata: input.metadata ?? existing?.metadata ?? {},
       createdAt: existing?.createdAt ?? now,
@@ -1654,6 +1683,8 @@ describe("Telegram commands", () => {
       enabled: true,
       mode: "local_vault",
       vaultPath: "/srv/lifeos-vaults/user-a",
+      syncthingFolderId: null,
+      isActive: true,
       status: "connected",
       metadata: {},
       createdAt: "2026-05-18T00:00:00.000Z",
@@ -1774,6 +1805,8 @@ describe("Telegram commands", () => {
       enabled: false,
       mode: "local_vault",
       vaultPath: "/srv/lifeos-vaults/user-a",
+      syncthingFolderId: null,
+      isActive: false,
       status: "disconnected",
       metadata: {},
       createdAt: "2026-05-18T00:00:00.000Z",
@@ -1805,6 +1838,8 @@ describe("Telegram commands", () => {
       enabled: true,
       mode: "local_vault",
       vaultPath: "/srv/lifeos-vaults/user-a",
+      syncthingFolderId: null,
+      isActive: true,
       status: "connected",
       metadata: {},
       createdAt: "2026-05-18T00:00:00.000Z",
@@ -2016,10 +2051,6 @@ describe("Telegram commands", () => {
           capture: {
             id: "capture-1",
             text,
-          },
-          entity: {
-            id: "entity-1",
-            entityType: "capture",
           },
         },
       },
