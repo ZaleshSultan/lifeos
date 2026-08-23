@@ -48,6 +48,7 @@ from common.lifeos_sync import (  # noqa: E402
     SupabaseRestClient,
     SyncError,
     SyncStats,
+    getenv_bool,
     getenv_int,
     getenv_required,
     iso_utc,
@@ -107,6 +108,7 @@ class Settings:
     password: str
     ws_token: str | None          # Optional Moodle WS token (most reliable)
     poll_seconds: int
+    allow_mock: bool              # Explicit opt-in for mock fallback (never automatic)
 
 
 def load_settings(env_file: Path | None = None) -> Settings:
@@ -122,6 +124,7 @@ def load_settings(env_file: Path | None = None) -> Settings:
         password=getenv_required("UNIVERSITY_PASSWORD"),
         ws_token=os.environ.get("UNIVERSITY_WS_TOKEN", "").strip() or None,
         poll_seconds=getenv_int("UNIVERSITY_SYNC_POLL_SECONDS", 3600),
+        allow_mock=getenv_bool("AITU_SYNC_MOCK_MODE", False),
     )
 
 
@@ -181,6 +184,7 @@ class MoodleClient:
         self._username = settings.username
         self._password = settings.password
         self._ws_token = settings.ws_token
+        self._allow_mock = settings.allow_mock
         self._session: Any = None
         self._moodle_user_id: int | None = None
         self.is_mocked = False
@@ -473,13 +477,25 @@ class MoodleClient:
         except SyncError as exc:
             logging.warning("Session scrape failed (%s). Falling back to mock mode.", exc)
 
-        # Strategy 3: Mock fallback
-        self.is_mocked = True
-        self._mock_reason = (
+        # Strategy 3: Mock fallback — only if explicitly allowed. A live sync
+        # failure must surface as a failed sync_run, never as silent mock
+        # data standing in for real grades.
+        reason = (
             "All live fetch strategies failed (WS token absent or invalid, "
             "form login blocked by SSO/network). "
-            "Returning mock AITU CS course data for pipeline validation. "
             "Set UNIVERSITY_WS_TOKEN or ensure local Moodle accounts are enabled."
+        )
+
+        if not self._allow_mock:
+            raise SyncError(
+                f"{reason} Refusing to fall back to mock data automatically. "
+                "Set AITU_SYNC_MOCK_MODE=true to explicitly opt into mock mode "
+                "(e.g. for local pipeline testing)."
+            )
+
+        self.is_mocked = True
+        self._mock_reason = (
+            f"{reason} Returning mock AITU CS course data for pipeline validation."
         )
         logging.warning("[MOCK] %s", self._mock_reason)
         return self._mock_grades()
@@ -492,10 +508,12 @@ def sync_grades(
     records: list[dict[str, Any]],
     mode: str,
     is_mocked: bool,
+    run_id: str | None = None,
 ) -> SyncStats:
     """Write scraped grade records into source_events and academic_records."""
-    source = db.ensure_source("university_platform", "university", "University Platform")
-    run_id = db.start_sync_run(source)
+    if run_id is None:
+        source = db.ensure_source("university_platform", "university", "University Platform")
+        run_id = db.start_sync_run(source)
     stats = SyncStats(seen=len(records))
 
     try:
@@ -586,11 +604,23 @@ def sync_grades(
 # ── Top-level commands ────────────────────────────────────────────────────────
 def sync_once(settings: Settings) -> SyncStats:
     moodle = MoodleClient(settings)
-    records = moodle.fetch_grades()
-
     db = SupabaseRestClient(settings.base)
+
+    # Open the sync_run before attempting the live fetch. Otherwise a fetch
+    # failure (e.g. mock mode disabled and live scraping down) never gets
+    # recorded, and the TMA dashboard keeps showing a stale "success" from
+    # the last time the sync actually worked.
+    source = db.ensure_source("university_platform", "university", "University Platform")
+    run_id = db.start_sync_run(source)
+
+    try:
+        records = moodle.fetch_grades()
+    except Exception as exc:
+        db.finish_sync_run(run_id, "failed", SyncStats(), str(exc))
+        raise
+
     mode = db.get_reminder_mode()
-    return sync_grades(db, settings, records, mode, moodle.is_mocked)
+    return sync_grades(db, settings, records, mode, moodle.is_mocked, run_id=run_id)
 
 
 def status_cmd(settings: Settings) -> None:

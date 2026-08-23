@@ -79,9 +79,12 @@ class SettingsLegacyGuardTest(unittest.TestCase):
 
 # ── MoodleClient mock fallback ────────────────────────────────────────────────
 class MoodleClientMockFallbackTest(unittest.TestCase):
-    def _make_settings(self) -> object:
+    def _make_settings(self, allow_mock: bool = True) -> object:
+        env = {**BASE_ENV}
+        if allow_mock:
+            env["AITU_SYNC_MOCK_MODE"] = "true"
         with (
-            patch.dict(os.environ, BASE_ENV, clear=True),
+            patch.dict(os.environ, env, clear=True),
             patch.object(university_scraper, "load_dotenv", lambda _: None),
         ):
             return university_scraper.load_settings()
@@ -100,8 +103,19 @@ class MoodleClientMockFallbackTest(unittest.TestCase):
         titles = {r["course_title"] for r in records}
         self.assertIn("Discrete Mathematics", titles)
 
+    def test_refuses_mock_fallback_without_explicit_opt_in(self) -> None:
+        settings = self._make_settings(allow_mock=False)
+        client = university_scraper.MoodleClient(settings)
+
+        with patch.object(client, "_form_login", return_value=False):
+            with self.assertRaises(university_scraper.SyncError) as ctx:
+                client.fetch_grades()
+
+        self.assertIn("AITU_SYNC_MOCK_MODE", str(ctx.exception))
+        self.assertFalse(client.is_mocked)
+
     def test_ws_token_attempted_first(self) -> None:
-        env = {**BASE_ENV, "UNIVERSITY_WS_TOKEN": "fake_token"}
+        env = {**BASE_ENV, "UNIVERSITY_WS_TOKEN": "fake_token", "AITU_SYNC_MOCK_MODE": "true"}
         with (
             patch.dict(os.environ, env, clear=True),
             patch.object(university_scraper, "load_dotenv", lambda _: None),
