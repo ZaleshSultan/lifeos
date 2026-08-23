@@ -25,6 +25,7 @@ from common.lifeos_sync import (  # noqa: E402
     SupabaseRestClient,
     SyncError,
     SyncStats,
+    getenv_bool,
     getenv_int,
     getenv_required,
     iso_utc,
@@ -71,6 +72,7 @@ class Settings:
     username: str
     password: str
     poll_seconds: int
+    allow_mock: bool  # Explicit opt-in for mock fallback (never automatic)
 
 
 def load_settings(env_file: Path | None = None) -> Settings:
@@ -85,6 +87,7 @@ def load_settings(env_file: Path | None = None) -> Settings:
         username=getenv_required("PLATONUS_USERNAME"),
         password=getenv_required("PLATONUS_PASSWORD"),
         poll_seconds=getenv_int("PLATONUS_SYNC_POLL_SECONDS", 3600),
+        allow_mock=getenv_bool("PLATONUS_SYNC_MOCK_MODE", False),
     )
 
 
@@ -97,6 +100,7 @@ class PlatonusClient:
         self.base_url = "https://platonus.kazatu.kz"
         self.token: str | None = None
         self.is_mocked = False
+        self._allow_mock = settings.allow_mock
 
     def _request(self, method: str, path: str, body: dict[str, Any] | None = None) -> Any:
         url = f"{self.base_url}/{path.lstrip('/')}"
@@ -139,6 +143,13 @@ class PlatonusClient:
                 continue
 
         # If all login attempts fail (due to Cloudflare, captcha, IP block, portal down, etc.), fallback to mock mode
+        if not self._allow_mock:
+            raise SyncError(
+                "Platonus authentication failed or is blocked (Cloudflare, CAPTCHA, IP "
+                "block, or portal down). Refusing to fall back to mock data automatically. "
+                "Set PLATONUS_SYNC_MOCK_MODE=true to explicitly opt into mock mode "
+                "(e.g. for local pipeline testing)."
+            )
         self.is_mocked = True
         logging.warning(
             "[WARNING] Platonus authentication failed or is blocked by portal security (e.g. Cloudflare, CAPTCHA). "
@@ -162,6 +173,12 @@ class PlatonusClient:
                 continue
 
         # Fallback to mocked data if fetch fails
+        if not self._allow_mock:
+            raise SyncError(
+                "Platonus grades request failed or is blocked. Refusing to fall back to "
+                "mock data automatically. Set PLATONUS_SYNC_MOCK_MODE=true to explicitly "
+                "opt into mock mode (e.g. for local pipeline testing)."
+            )
         self.is_mocked = True
         logging.warning(
             "[WARNING] Platonus grades request failed or is blocked. Running in resilient mock mode."
@@ -184,10 +201,11 @@ class PlatonusClient:
         return records
 
 
-def sync_grades(client: SupabaseRestClient, settings: Settings, grades: list[dict[str, Any]], mode: str) -> SyncStats:
+def sync_grades(client: SupabaseRestClient, settings: Settings, grades: list[dict[str, Any]], mode: str, run_id: str | None = None) -> SyncStats:
     """Sync the fetched grades to Supabase source_events and academic_records."""
-    source = client.ensure_source("university_platform", "university", "University Platform")
-    run_id = client.start_sync_run(source)
+    if run_id is None:
+        source = client.ensure_source("university_platform", "university", "University Platform")
+        run_id = client.start_sync_run(source)
     stats = SyncStats(seen=len(grades))
 
     try:
@@ -268,12 +286,23 @@ def sync_grades(client: SupabaseRestClient, settings: Settings, grades: list[dic
 def sync_once(settings: Settings) -> SyncStats:
     """Run single sync execution."""
     client = PlatonusClient(settings)
-    client.authenticate()
-    grades = client.fetch_grades()
-
     db_client = SupabaseRestClient(settings.base)
+
+    # Open the sync_run before attempting live auth/fetch, so a failure here
+    # (e.g. mock mode disabled and the portal is blocked) still lands in
+    # sync_runs instead of only the systemd journal.
+    source = db_client.ensure_source("university_platform", "university", "University Platform")
+    run_id = db_client.start_sync_run(source)
+
+    try:
+        client.authenticate()
+        grades = client.fetch_grades()
+    except Exception as exc:
+        db_client.finish_sync_run(run_id, "failed", SyncStats(), str(exc))
+        raise
+
     mode = db_client.get_reminder_mode()
-    return sync_grades(db_client, settings, grades, mode)
+    return sync_grades(db_client, settings, grades, mode, run_id=run_id)
 
 
 def status(settings: Settings) -> None:
