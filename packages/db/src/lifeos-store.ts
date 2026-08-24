@@ -3886,6 +3886,31 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     return data ? toStudyCourseRecord(data) : null;
   }
 
+  async getActiveSummerStudyCourse(
+    userId: string,
+    today: Date | string = new Date(),
+  ): Promise<StudyCourseRecord | null> {
+    const activeDate = isoDateFromInput(today);
+    const { data, error } = await this.client
+      .from("study_courses")
+      .select("*")
+      .eq("user_id", userId)
+      .in("status", ["planned", "active"])
+      .ilike("term", "%summer%")
+      .or(`starts_on.is.null,starts_on.lte.${activeDate}`)
+      .or(`ends_on.is.null,ends_on.gte.${activeDate}`)
+      .order("starts_on", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to load active summer study course");
+    }
+
+    return data ? toStudyCourseRecord(data) : null;
+  }
+
   async updateStudyCourseProgress(
     input: UpdateStudyCourseProgressInput,
   ): Promise<StudyCourseRecord> {
@@ -4811,7 +4836,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
         limit: 80,
       }),
       this.getActiveStudyCourse(userId, today),
-      this.getStudyCourseByCode(userId, "DISCRETE-MATH-SUMMER-2026"),
+      this.getActiveSummerStudyCourse(userId, today),
       this.getNextSeasonTransition(userId, today),
       this.listAcademicRecords(userId),
     ]);
