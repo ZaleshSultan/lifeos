@@ -107,6 +107,7 @@ class Settings:
     username: str
     password: str
     ws_token: str | None          # Optional Moodle WS token (most reliable)
+    sso_cookie: str | None        # Optional Microsoft ESTSAUTHPERSISTENT cookie
     poll_seconds: int
     allow_mock: bool              # Explicit opt-in for mock fallback (never automatic)
 
@@ -123,6 +124,7 @@ def load_settings(env_file: Path | None = None) -> Settings:
         username=getenv_required("UNIVERSITY_USERNAME"),
         password=getenv_required("UNIVERSITY_PASSWORD"),
         ws_token=os.environ.get("UNIVERSITY_WS_TOKEN", "").strip() or None,
+        sso_cookie=os.environ.get("UNIVERSITY_SSO_COOKIE", "").strip() or None,
         poll_seconds=getenv_int("UNIVERSITY_SYNC_POLL_SECONDS", 3600),
         allow_mock=getenv_bool("AITU_SYNC_MOCK_MODE", False),
     )
@@ -184,6 +186,7 @@ class MoodleClient:
         self._username = settings.username
         self._password = settings.password
         self._ws_token = settings.ws_token
+        self._sso_cookie = settings.sso_cookie
         self._allow_mock = settings.allow_mock
         self._session: Any = None
         self._moodle_user_id: int | None = None
@@ -266,6 +269,82 @@ class MoodleClient:
         return records
 
     # ── Strategy 2: Session login + HTML scraping ─────────────────────────────
+    def _sso_cookie_login(self) -> bool:
+        """
+        Authenticate via a Microsoft Entra ID (Azure AD) persistent SSO session
+        cookie (ESTSAUTHPERSISTENT), for institutions like AITU where Moodle has
+        no native username/password login at all — only "OpenID Connect".
+
+        The cookie is obtained once by the human: sign into AITU normally in a
+        browser, open devtools → Application → Cookies →
+        https://login.microsoftonline.com → copy the ESTSAUTHPERSISTENT value.
+        It is a long-lived (weeks) persistent-session cookie, not a short-lived
+        access token, which is why this can run unattended in a daemon.
+
+        Mechanics: we seed that cookie on the microsoftonline.com domain, then
+        walk the same redirect chain a browser would when Moodle bounces us to
+        Microsoft's OAuth "authorize" endpoint. Because a valid persistent
+        session cookie is already present, Microsoft's login page auto-approves
+        without prompting for credentials — but the final hop back to Moodle is
+        typically an OIDC `response_mode=form_post`: an HTML page with an
+        auto-submitting <form> (via a bit of inline JS) that POSTs the id_token
+        back to Moodle's redirect_uri. `requests` doesn't execute JS, so we
+        parse that form's hidden inputs and POST them ourselves — the same
+        submission a real browser's JS would have performed instantly.
+        """
+        if not self._sso_cookie:
+            return False
+
+        session = _requests_session()
+        session.cookies.set(
+            "ESTSAUTHPERSISTENT",
+            self._sso_cookie,
+            domain="login.microsoftonline.com",
+        )
+
+        try:
+            r = session.get(LOGIN_URL, timeout=REQUEST_TIMEOUT, allow_redirects=True)
+
+            # Replicate the browser's auto-submitting form_post hop, if present.
+            # Walk up to a few hops in case Microsoft chains more than one.
+            for _ in range(3):
+                soup = _bs4_parse(r.text)
+                form = soup.find("form")
+                if not form:
+                    break
+                action = form.get("action")
+                if not action or "microsoftonline.com" not in action and "login" not in r.url:
+                    break
+                inputs = {
+                    tag.get("name"): tag.get("value", "")
+                    for tag in soup.find_all("input")
+                    if tag.get("name")
+                }
+                if not inputs:
+                    break
+                r = session.post(
+                    action, data=inputs, timeout=REQUEST_TIMEOUT, allow_redirects=True
+                )
+
+            m = re.search(r'"userid"\s*:\s*(\d+)', r.text)
+            if not m:
+                logging.warning(
+                    "SSO cookie login did not yield a real Moodle session "
+                    "(no userid found). The ESTSAUTHPERSISTENT cookie may have "
+                    "expired — re-copy a fresh value from a signed-in browser."
+                )
+                return False
+
+            self._moodle_user_id = int(m.group(1))
+            self._session = session
+            logging.info(
+                "SSO cookie login succeeded (user_id=%s).", self._moodle_user_id
+            )
+            return True
+
+        except Exception as exc:
+            raise SyncError(f"SSO cookie login network error: {exc}") from exc
+
     def _form_login(self) -> bool:
         """
         Attempt standard Moodle form-based login.
@@ -315,6 +394,22 @@ class MoodleClient:
             m = re.search(r'"userid"\s*:\s*(\d+)', r2.text)
             if m:
                 self._moodle_user_id = int(m.group(1))
+
+            if self._moodle_user_id is None:
+                # We didn't land on the visible "wrong credentials" page, but we
+                # also never got a real session (no userid in the response). This
+                # happens on institutions where the native form silently accepts
+                # the POST without authenticating (e.g. accounts that are actually
+                # SSO/OpenID-Connect-only and have no real Moodle-native password).
+                # Treating this as "success" previously caused a false-positive
+                # empty sync (0 courses, sync_run marked success) instead of a
+                # real, surfaced failure.
+                logging.warning(
+                    "Moodle form login did not return a real session (no userid "
+                    "found). This account may be SSO/OpenID-Connect-only with no "
+                    "native Moodle password; a UNIVERSITY_WS_TOKEN is required."
+                )
+                return False
 
             self._session = session
             logging.info("Moodle session login succeeded (user_id=%s).", self._moodle_user_id)
@@ -468,7 +563,25 @@ class MoodleClient:
             except SyncError as exc:
                 logging.warning("Moodle WS API failed (%s). Falling back to session scrape.", exc)
 
-        # Strategy 2: Form login + HTML scrape
+        # Strategy 2: Microsoft SSO persistent-cookie login. Preferred over form
+        # login for institutions (like AITU) that have no native Moodle password
+        # at all — form login there produces a false-positive "success" with no
+        # real session (see _form_login's userid check).
+        if self._sso_cookie:
+            try:
+                if self._sso_cookie_login():
+                    records = self.fetch_via_scrape()
+                    logging.info(
+                        "SSO cookie + HTML scrape: fetched %d grade records.",
+                        len(records),
+                    )
+                    return records
+            except SyncError as exc:
+                logging.warning(
+                    "SSO cookie login failed (%s). Falling back to form login.", exc
+                )
+
+        # Strategy 3: Form login + HTML scrape
         try:
             if self._form_login():
                 records = self.fetch_via_scrape()
@@ -477,13 +590,13 @@ class MoodleClient:
         except SyncError as exc:
             logging.warning("Session scrape failed (%s). Falling back to mock mode.", exc)
 
-        # Strategy 3: Mock fallback — only if explicitly allowed. A live sync
+        # Strategy 4: Mock fallback — only if explicitly allowed. A live sync
         # failure must surface as a failed sync_run, never as silent mock
         # data standing in for real grades.
         reason = (
             "All live fetch strategies failed (WS token absent or invalid, "
-            "form login blocked by SSO/network). "
-            "Set UNIVERSITY_WS_TOKEN or ensure local Moodle accounts are enabled."
+            "SSO cookie absent/expired, form login blocked by SSO/network). "
+            "Set UNIVERSITY_WS_TOKEN or UNIVERSITY_SSO_COOKIE."
         )
 
         if not self._allow_mock:

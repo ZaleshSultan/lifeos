@@ -147,6 +147,115 @@ class MoodleClientMockFallbackTest(unittest.TestCase):
         self.assertGreater(len(records), 0)
 
 
+class MoodleClientSsoCookieLoginTest(unittest.TestCase):
+    def _client_with_cookie(self, cookie: str | None = "fake-estsauth-value") -> object:
+        env = {**BASE_ENV}
+        if cookie:
+            env["UNIVERSITY_SSO_COOKIE"] = cookie
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch.object(university_scraper, "load_dotenv", lambda _: None),
+        ):
+            settings = university_scraper.load_settings()
+        return university_scraper.MoodleClient(settings)
+
+    def test_no_cookie_configured_returns_false_without_network(self) -> None:
+        client = self._client_with_cookie(cookie=None)
+        with patch.object(university_scraper, "_requests_session") as mock_factory:
+            result = client._sso_cookie_login()
+        mock_factory.assert_not_called()
+        self.assertFalse(result)
+
+    def test_direct_success_no_form_post_hop(self) -> None:
+        client = self._client_with_cookie()
+        mock_session = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.text = '<html><script>var data = {"userid": 555};</script></html>'
+        mock_resp.url = f"{university_scraper.BASE_URL}/my/"
+        mock_session.get.return_value = mock_resp
+        mock_session.cookies = MagicMock()
+
+        with patch.object(university_scraper, "_requests_session", return_value=mock_session):
+            result = client._sso_cookie_login()
+
+        self.assertTrue(result)
+        self.assertEqual(client._moodle_user_id, 555)
+        mock_session.cookies.set.assert_called_once_with(
+            "ESTSAUTHPERSISTENT", "fake-estsauth-value", domain="login.microsoftonline.com"
+        )
+
+    def test_form_post_hop_is_replayed(self) -> None:
+        client = self._client_with_cookie()
+        mock_session = MagicMock()
+        mock_session.cookies = MagicMock()
+
+        get_resp = MagicMock()
+        get_resp.url = "https://login.microsoftonline.com/organizations/oauth2/authorize?x=1"
+        get_resp.text = (
+            '<html><body onload="document.forms[0].submit()">'
+            '<form action="https://lms.astanait.edu.kz/auth/oidc/index.php" method="post">'
+            '<input type="hidden" name="id_token" value="tok123">'
+            '<input type="hidden" name="state" value="abc">'
+            "</form></body></html>"
+        )
+        post_resp = MagicMock()
+        post_resp.url = f"{university_scraper.BASE_URL}/my/"
+        post_resp.text = '<html><script>var data = {"userid": 42};</script></html>'
+
+        mock_session.get.return_value = get_resp
+        mock_session.post.return_value = post_resp
+
+        with patch.object(university_scraper, "_requests_session", return_value=mock_session):
+            result = client._sso_cookie_login()
+
+        self.assertTrue(result)
+        self.assertEqual(client._moodle_user_id, 42)
+        mock_session.post.assert_called_once_with(
+            "https://lms.astanait.edu.kz/auth/oidc/index.php",
+            data={"id_token": "tok123", "state": "abc"},
+            timeout=university_scraper.REQUEST_TIMEOUT,
+            allow_redirects=True,
+        )
+
+    def test_expired_cookie_returns_false(self) -> None:
+        client = self._client_with_cookie()
+        mock_session = MagicMock()
+        mock_session.cookies = MagicMock()
+        resp = MagicMock()
+        resp.url = "https://login.microsoftonline.com/organizations/oauth2/authorize"
+        resp.text = "<html><body>Sign in</body><p>Pick an account</p></html>"
+        mock_session.get.return_value = resp
+
+        with patch.object(university_scraper, "_requests_session", return_value=mock_session):
+            result = client._sso_cookie_login()
+
+        self.assertFalse(result)
+        self.assertIsNone(client._moodle_user_id)
+
+    def test_network_error_raises_sync_error(self) -> None:
+        client = self._client_with_cookie()
+        mock_session = MagicMock()
+        mock_session.cookies = MagicMock()
+        mock_session.get.side_effect = ConnectionError("dns failure")
+
+        with patch.object(university_scraper, "_requests_session", return_value=mock_session):
+            with self.assertRaises(university_scraper.SyncError):
+                client._sso_cookie_login()
+
+    def test_fetch_grades_prefers_sso_cookie_over_form_login(self) -> None:
+        client = self._client_with_cookie()
+        with (
+            patch.object(client, "_sso_cookie_login", return_value=True) as mock_sso,
+            patch.object(client, "_form_login") as mock_form,
+            patch.object(client, "fetch_via_scrape", return_value=[{"course_title": "X"}]),
+        ):
+            records = client.fetch_grades()
+
+        mock_sso.assert_called_once()
+        mock_form.assert_not_called()
+        self.assertEqual(records, [{"course_title": "X"}])
+
+
 # ── HTML scraping helpers ─────────────────────────────────────────────────────
 def _make_soup(html: str) -> object:
     """Parse HTML using html.parser (stdlib) — no bs4 needed for tests."""
