@@ -1,10 +1,101 @@
 # LifeOS Project Audit
 
-**Date:** 2026-06-11  
-**Scope:** UX, security, architecture — based on codebase analysis for Skills integration.  
-**Status:** Informational — no code changes in this audit.
+**Date:** 2026-06-11 (original) — **re-verified 2026-08-24**
+**Scope:** UX, security, architecture — based on codebase analysis for Skills integration.
+**Status:** The 2026-06-11 findings below were checked against the actual code and
+test/typecheck runs on 2026-08-24. Items marked ✅ RESOLVED were fixed since the
+original audit; items marked still-open were re-confirmed as still present.
+Nothing in this file describes production data, live sync status, or which
+service is actually running right now — check `systemctl status lifeos-*` on
+the server for that.
+
+## 2026-08-24 re-verification summary
+
+Ran `pnpm install`, `pnpm typecheck`, `pnpm test`, `pnpm format:check` for the
+whole workspace, plus `apps/tma` and `apps/web` typecheck individually (the
+root `pnpm typecheck` script only covers `apps/bot` and `packages/**` — see
+ARCH-06), and the full Python worker suite via `workers/test_worker_suite.py`.
+
+- **TypeScript:** `apps/bot` + `packages/**` clean via root `pnpm typecheck`.
+  `apps/tma` and `apps/web` independently clean via their own `tsc --noEmit`.
+  Before this pass, root typecheck had 12 errors (stale test doubles after a
+  `createLifeEntityWithSync` atomic-RPC refactor, a missing `UserObsidianSettings`
+  field on test fixtures, an invalid `type` import modifier, a null-narrowing
+  gap, and a `Json` type mismatch) — all fixed.
+- **Vitest:** 192/192 passing (was 18 failing — same root causes as above,
+  plus two genuinely stale test fixtures: a hardcoded reminder date that had
+  since passed, and a `user_id` mismatch check that was added to
+  `/health/ingest` after the test was written).
+- **Prettier:** `format:check` was failing on 32 files before any of the
+  above fixes (pre-existing debt, confirmed against a clean baseline) — now
+  clean.
+- **Python workers:** 48/48 passing via `workers/test_worker_suite.py`
+  (previously never run end-to-end in this repo's history — the original
+  ChatGPT-assisted audit could only get `pnpm install` and `pytest` to run
+  in its sandbox, not this).
+- **AITU/Platonus mock fallback (new finding, not in original audit):** both
+  `university_scraper.py` and `platonus_sync.py` silently substituted
+  hardcoded mock grade data on any live-fetch failure, tagging it only in a
+  buried `raw_json._is_mocked` field with the `sync_run` still marked
+  `success`. Fixed: both now require an explicit `AITU_SYNC_MOCK_MODE` /
+  `PLATONUS_SYNC_MOCK_MODE` env flag; without it a live failure raises and
+  is recorded as a failed `sync_run` instead of masquerading as real data.
+- **Hardcoded course code (new finding):** `getTmaAcademicSummary()` resolved
+  the "summer course" dashboard card by looking up the literal code
+  `DISCRETE-MATH-SUMMER-2026`. That course's `endsOn` (2026-08-15 in the test
+  fixture) has already passed as of this re-verification date, meaning the
+  card may currently be stale/empty on the live dashboard. Replaced with a
+  generic `term ILIKE '%summer%'` + active-date-range query so it doesn't
+  need a code edit every term.
+
+## Status of the original 2026-06-11 findings
+
+### Security
+
+- **SEC-02 (initData replay, no `auth_date` check) — ✅ RESOLVED.** `server.ts`
+  now checks `auth_date` against `TMA_INIT_DATA_MAX_AGE_SECONDS` /
+  `TMA_INIT_DATA_MAX_FUTURE_SKEW_SECONDS`.
+- **SEC-03 (webhook secret non-timing-safe compare) — ✅ RESOLVED.** The
+  Telegram webhook secret check now uses the same `secureCompare()` helper
+  as everything else.
+- **SEC-04 (CORS wildcard) — ✅ RESOLVED (or never re-added).** No
+  `Access-Control-Allow-Origin` header is set anywhere in `apps/bot/src`
+  as of this re-check.
+- **SEC-05 (dev auth bypass) — partially addressed.** `unsafeTmaDevAuthAllowed()`
+  does check `process.env.NODE_ENV !== "production"` at request time, so the
+  bypass cannot fire in production. The originally recommended remediation
+  (fail _startup_ loudly if the bypass flag and `NODE_ENV=production` are
+  both set) was not implemented — a misconfigured production deploy would
+  just silently never hit the bypass path rather than refusing to boot.
+  Still worth doing, but the actual vulnerability is closed.
+- **SEC-01 (no web dashboard auth), SEC-06 (RLS bypass by service role),
+  SEC-07 (no rate limiting), SEC-08 (receipt upload validation) — not
+  re-checked this pass.** Original findings stand as unverified, not
+  necessarily still true.
+
+### Architecture
+
+- **ARCH-06 (root tsconfig excludes web/tma) — still true**, confirmed above.
+  Not currently hiding any real errors (both independently typecheck clean),
+  but `pnpm typecheck` at the repo root gives a false sense of full coverage.
+  Worth fixing so a future regression in web/tma doesn't slip through CI.
+- **ARCH-05 (workers outside pnpm workspace, no unified test command) —
+  still true**, though `workers/test_worker_suite.py` already exists as a
+  single entry point across all workers; it's just not wired into `pnpm test`
+  or CI.
+- **ARCH-01/02 (god modules `server.ts` ~3500 lines, `lifeos-store.ts` ~9600
+  lines) — still true**, grew rather than shrank since the original audit.
+- **ARCH-03, ARCH-04, ARCH-07 — not re-checked this pass.**
+
+### UX
+
+**Not re-checked this pass** — UX-01 through UX-06 were about the web
+dashboard and TMA nav, neither of which was touched in this session.
+Treat as unverified rather than resolved.
 
 ---
+
+## Original audit (2026-06-11, unedited below)
 
 ## Executive Summary
 
