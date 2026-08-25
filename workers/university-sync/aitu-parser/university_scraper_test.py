@@ -183,6 +183,11 @@ class MoodleClientSsoCookieLoginTest(unittest.TestCase):
         mock_session.cookies.set.assert_called_once_with(
             "ESTSAUTHPERSISTENT", "fake-estsauth-value", domain="login.microsoftonline.com"
         )
+        mock_session.get.assert_called_once_with(
+            university_scraper.OIDC_LOGIN_URL,
+            timeout=university_scraper.REQUEST_TIMEOUT,
+            allow_redirects=True,
+        )
 
     def test_form_post_hop_is_replayed(self) -> None:
         client = self._client_with_cookie()

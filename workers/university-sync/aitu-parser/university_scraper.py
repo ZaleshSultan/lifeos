@@ -60,6 +60,7 @@ from common.lifeos_sync import (  # noqa: E402
 # ── Constants ─────────────────────────────────────────────────────────────────
 BASE_URL = "https://lms.astanait.edu.kz"
 LOGIN_URL = f"{BASE_URL}/login/index.php"
+OIDC_LOGIN_URL = f"{BASE_URL}/auth/oidc/?source=loginpage"
 WS_URL = f"{BASE_URL}/webservice/rest/server.php"
 GRADE_REPORT_URL = f"{BASE_URL}/grade/report/user/index.php"
 MY_COURSES_URL = f"{BASE_URL}/my/"
@@ -156,7 +157,19 @@ def _requests_session() -> Any:
     try:
         import requests  # type: ignore
         session = requests.Session()
-        session.headers.update({"User-Agent": "LifeOS AITU Sync/1.0"})
+        # A self-identifying UA (e.g. "LifeOS AITU Sync/1.0") or the default
+        # python-requests UA both got blocked outright by AITU's edge (confirmed
+        # via manual diagnostic: default requests UA -> 403; browser-like UA ->
+        # 200 on the exact same URL, same server, no WAF/Cloudflare in play).
+        # Mimic a real browser instead.
+        session.headers.update({
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9,ru;q=0.8",
+        })
         return session
     except ImportError as exc:
         raise SyncError("'requests' library is not installed; add it to requirements.txt") from exc
@@ -303,7 +316,11 @@ class MoodleClient:
         )
 
         try:
-            r = session.get(LOGIN_URL, timeout=REQUEST_TIMEOUT, allow_redirects=True)
+            # Hit the actual "OpenID Connect" login entrypoint directly — Moodle's
+            # generic /login/index.php shows a picker page (native form + this
+            # button) rather than auto-redirecting, so GETing it alone never
+            # starts the Microsoft SSO flow at all.
+            r = session.get(OIDC_LOGIN_URL, timeout=REQUEST_TIMEOUT, allow_redirects=True)
 
             # Replicate the browser's auto-submitting form_post hop, if present.
             # Walk up to a few hops in case Microsoft chains more than one.
