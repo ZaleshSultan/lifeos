@@ -222,6 +222,60 @@ class MoodleClientSsoCookieLoginTest(unittest.TestCase):
             allow_redirects=True,
         )
 
+    def test_bsso_interrupt_urlpost_hop_then_form_post(self) -> None:
+        """Reproduces the real AITU flow: GET the OIDC entrypoint lands on a
+        Microsoft 'BssoInterrupt' page (no <form>, just a JS $Config blob with
+        a urlPost carrying &sso_reload=True); GETing that yields the real
+        form_post (code/state/session_state) that completes the login."""
+        client = self._client_with_cookie()
+        mock_session = MagicMock()
+        mock_session.cookies = MagicMock()
+
+        interrupt_resp = MagicMock()
+        interrupt_resp.url = "https://login.microsoftonline.com/organizations/oauth2/authorize?x=1"
+        interrupt_resp.text = (
+            '<html><head><meta name="PageID" content="BssoInterrupt" />'
+            "<script>$Config={\"urlPost\":\"/organizations/oauth2/authorize?"
+            "response_type=code\\u0026sso_reload=True\"};</script></head></html>"
+        )
+
+        form_post_resp = MagicMock()
+        form_post_resp.url = "https://login.microsoftonline.com/organizations/oauth2/authorize?x=2"
+        form_post_resp.text = (
+            '<html><body><form name="hiddenform" method="POST" '
+            'action="https://lms.astanait.edu.kz/auth/oidc/">'
+            '<input type="hidden" name="code" value="authcode123">'
+            '<input type="hidden" name="state" value="st1">'
+            '<input type="hidden" name="session_state" value="ss1">'
+            "</form></body></html>"
+        )
+
+        final_resp = MagicMock()
+        final_resp.url = f"{university_scraper.BASE_URL}/my/"
+        final_resp.text = '<html><script>var data = {"userid": 777};</script></html>'
+
+        mock_session.get.side_effect = [interrupt_resp, form_post_resp]
+        mock_session.post.return_value = final_resp
+
+        with patch.object(university_scraper, "_requests_session", return_value=mock_session):
+            result = client._sso_cookie_login()
+
+        self.assertTrue(result)
+        self.assertEqual(client._moodle_user_id, 777)
+        # First GET is the OIDC entrypoint, second GET is the urlPost hop.
+        self.assertEqual(mock_session.get.call_count, 2)
+        second_get_url = mock_session.get.call_args_list[1].args[0]
+        self.assertEqual(
+            second_get_url,
+            "https://login.microsoftonline.com/organizations/oauth2/authorize?response_type=code&sso_reload=True",
+        )
+        mock_session.post.assert_called_once_with(
+            "https://lms.astanait.edu.kz/auth/oidc/",
+            data={"code": "authcode123", "state": "st1", "session_state": "ss1"},
+            timeout=university_scraper.REQUEST_TIMEOUT,
+            allow_redirects=True,
+        )
+
     def test_expired_cookie_returns_false(self) -> None:
         client = self._client_with_cookie()
         mock_session = MagicMock()

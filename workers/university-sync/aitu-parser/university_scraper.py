@@ -322,26 +322,41 @@ class MoodleClient:
             # starts the Microsoft SSO flow at all.
             r = session.get(OIDC_LOGIN_URL, timeout=REQUEST_TIMEOUT, allow_redirects=True)
 
-            # Replicate the browser's auto-submitting form_post hop, if present.
-            # Walk up to a few hops in case Microsoft chains more than one.
-            for _ in range(3):
+            # Replicate what a real browser's JS does across up to a few hops:
+            #   1. A "BssoInterrupt" page (no <form>, just a JS $Config blob with
+            #      a "urlPost" field carrying &sso_reload=True) — the browser's
+            #      inline JS re-requests that URL to force Microsoft to retry
+            #      silent SSO using the persistent cookie. We GET it manually.
+            #   2. A response_mode=form_post page — an auto-submitting <form>
+            #      (code/state/session_state) targeting Moodle's redirect_uri.
+            #      We parse the hidden inputs and POST them manually.
+            for _ in range(4):
                 soup = _bs4_parse(r.text)
                 form = soup.find("form")
-                if not form:
-                    break
-                action = form.get("action")
-                if not action or "microsoftonline.com" not in action and "login" not in r.url:
-                    break
-                inputs = {
-                    tag.get("name"): tag.get("value", "")
-                    for tag in soup.find_all("input")
-                    if tag.get("name")
-                }
-                if not inputs:
-                    break
-                r = session.post(
-                    action, data=inputs, timeout=REQUEST_TIMEOUT, allow_redirects=True
-                )
+
+                if form:
+                    action = form.get("action")
+                    inputs = {
+                        tag.get("name"): tag.get("value", "")
+                        for tag in soup.find_all("input")
+                        if tag.get("name")
+                    }
+                    if not action or not inputs:
+                        break
+                    r = session.post(
+                        action, data=inputs, timeout=REQUEST_TIMEOUT, allow_redirects=True
+                    )
+                    continue
+
+                m_urlpost = re.search(r'"urlPost"\s*:\s*"([^"]+)"', r.text)
+                if m_urlpost:
+                    next_url = m_urlpost.group(1).encode().decode("unicode_escape")
+                    if next_url.startswith("/"):
+                        next_url = "https://login.microsoftonline.com" + next_url
+                    r = session.get(next_url, timeout=REQUEST_TIMEOUT, allow_redirects=True)
+                    continue
+
+                break
 
             m = re.search(r'"userid"\s*:\s*(\d+)', r.text)
             if not m:
