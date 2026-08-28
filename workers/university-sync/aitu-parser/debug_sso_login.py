@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
-Debug helper: walks the SSO cookie login flow step by step and prints each
-redirect hop's URL/status plus a body snippet, WITHOUT ever printing the
-cookie value itself. Any query-string param that looks like a token/code
-gets redacted before printing.
+Debug helper v2: walks the FULL SSO cookie login flow (interrupt -> urlPost ->
+form_post -> POST back to Moodle) and prints each hop plus the final Moodle
+response, WITHOUT ever printing the cookie value or the OAuth code itself.
 
 Run from workers/university-sync/aitu-parser/ using its own venv:
-    .venv/bin/python debug_sso_login.py
+    .venv/bin/python debug_sso_login_v2.py
 """
 import os
 import re
@@ -14,6 +13,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+
 
 def _load_env_file(path: Path) -> None:
     if not path.exists():
@@ -26,6 +26,7 @@ def _load_env_file(path: Path) -> None:
         key = key.strip()
         value = value.strip().strip('"').strip("'")
         os.environ.setdefault(key, value)
+
 
 _load_env_file(Path(__file__).with_name(".env"))
 
@@ -63,6 +64,13 @@ def redact_url(url: str) -> str:
     return base + "?" + "&".join(parts)
 
 
+def redact_body(text: str, limit: int = 2000) -> str:
+    # Redact any long opaque-looking value (likely a code/token) inline.
+    text = re.sub(r'(name="(?:code|id_token|access_token)"\s+value=")[^"]{20,}(")',
+                   r"\1<redacted>\2", text)
+    return text[:limit]
+
+
 session = requests.Session()
 session.headers.update({
     "User-Agent": (
@@ -74,78 +82,54 @@ session.headers.update({
 })
 session.cookies.set("ESTSAUTHPERSISTENT", SSO_COOKIE, domain="login.microsoftonline.com")
 
-print(f"\n>>> GET {OIDC_LOGIN_URL}")
+print(f"\n>>> [1] GET {OIDC_LOGIN_URL}")
 r = session.get(OIDC_LOGIN_URL, timeout=REQUEST_TIMEOUT, allow_redirects=True)
+print(f"    -> [{r.status_code}] {redact_url(r.url)}")
 
-print(f"\n--- Redirect chain ({len(r.history)} hops) ---")
-for hop in r.history:
-    print(f"  [{hop.status_code}] {redact_url(hop.url)}")
-print(f"  [{r.status_code}] {redact_url(r.url)}  <- final")
+hop = 1
+while hop < 6:
+    soup = BeautifulSoup(r.text, "html.parser")
+    form = soup.find("form")
 
-print(f"\n--- Final page body (first 1500 chars) ---")
-print(r.text[:1500])
-print("--- end snippet ---")
+    if form:
+        action = form.get("action")
+        inputs = {
+            tag.get("name"): tag.get("value", "")
+            for tag in soup.find_all("input")
+            if tag.get("name")
+        }
+        print(f"\n>>> [{hop+1}] Found <form action={action!r}> with inputs: "
+              f"{list(inputs.keys())} -> POSTing it")
+        r = session.post(action, data=inputs, timeout=REQUEST_TIMEOUT, allow_redirects=True)
+        print(f"    -> [{r.status_code}] {redact_url(r.url)}")
+        hop += 1
+        continue
 
-soup = BeautifulSoup(r.text, "html.parser")
-form = soup.find("form")
-if form:
-    print(f"\nFound a <form action={form.get('action')!r} method={form.get('method')!r}>")
-    for inp in form.find_all("input"):
-        name = inp.get("name")
-        val = inp.get("value", "")
-        if name and SENSITIVE_PARAM_RE.search(name):
-            print(f"  input name={name!r} value=<redacted len={len(val)}>")
-        else:
-            print(f"  input name={name!r} value={val!r}")
-else:
-    print("\nNo <form> found on final page.")
-
-    # Microsoft's "BssoInterrupt" page has no <form> - it's a JS config page
-    # (window.$Config = {...}) with a "urlPost" field the client-side JS is
-    # meant to navigate to next (often re-attempting silent SSO with
-    # sso_reload=True). Try following it manually.
-    m_page_id = re.search(r'"PageID"\s*content="([^"]+)"', r.text)
     m_urlpost = re.search(r'"urlPost"\s*:\s*"([^"]+)"', r.text)
-    if m_page_id:
-        print(f"\nPageID meta tag: {m_page_id.group(1)!r}")
     if m_urlpost:
-        raw = m_urlpost.group(1)
-        next_url = raw.encode().decode("unicode_escape")
+        next_url = m_urlpost.group(1).encode().decode("unicode_escape")
         if next_url.startswith("/"):
             next_url = "https://login.microsoftonline.com" + next_url
-        print(f"\nFound urlPost in page JS config -> following: {redact_url(next_url)}")
-        r2 = session.get(next_url, timeout=REQUEST_TIMEOUT, allow_redirects=True)
-        print(f"\n--- Redirect chain for urlPost follow-up ({len(r2.history)} hops) ---")
-        for hop in r2.history:
-            print(f"  [{hop.status_code}] {redact_url(hop.url)}")
-        print(f"  [{r2.status_code}] {redact_url(r2.url)}  <- final")
-        print(f"\n--- urlPost follow-up body (first 1500 chars) ---")
-        print(r2.text[:1500])
-        print("--- end snippet ---")
+        print(f"\n>>> [{hop+1}] Found urlPost -> GET {redact_url(next_url)}")
+        r = session.get(next_url, timeout=REQUEST_TIMEOUT, allow_redirects=True)
+        print(f"    -> [{r.status_code}] {redact_url(r.url)}")
+        hop += 1
+        continue
 
-        soup2 = BeautifulSoup(r2.text, "html.parser")
-        form2 = soup2.find("form")
-        if form2:
-            print(f"\nFound a <form action={form2.get('action')!r} method={form2.get('method')!r}>")
-            for inp in form2.find_all("input"):
-                name = inp.get("name")
-                val = inp.get("value", "")
-                if name and SENSITIVE_PARAM_RE.search(name):
-                    print(f"  input name={name!r} value=<redacted len={len(val)}>")
-                else:
-                    print(f"  input name={name!r} value={val!r}")
-        m2 = re.search(r'"userid"\s*:\s*(\d+)', r2.text)
-        print(f"\nuserid found after urlPost follow-up: {m2.group(1) if m2 else 'NO'}")
-        sys.exit(0)
-    else:
-        print("\nNo urlPost found either - dumping full $Config block if present:")
-        m_config = re.search(r"\$Config\s*=\s*(\{.*?\});", r.text, re.DOTALL)
-        if m_config:
-            snippet = m_config.group(1)[:2000]
-            # redact anything that looks like a long opaque value
-            snippet = re.sub(r'"(sCanaryTokenName|sCtx|sessionId|correlationId)"\s*:\s*"[^"]{20,}"',
-                              r'"\1": "<redacted>"', snippet)
-            print(snippet)
+    break
+
+print(f"\n=== Final response after {hop} hop(s) ===")
+print(f"URL: {redact_url(r.url)}")
+print(f"Status: {r.status_code}")
+print("--- Body (first 2500 chars, secrets redacted) ---")
+print(redact_body(r.text, 2500))
+print("--- end ---")
 
 m = re.search(r'"userid"\s*:\s*(\d+)', r.text)
-print(f"\nuserid found in final page: {m.group(1) if m else 'NO'}")
+print(f"\nuserid found: {m.group(1) if m else 'NO'}")
+
+# Look for common Moodle/OIDC error strings to explain a NO.
+for needle in ["Invalid login", "error", "Error", "AADSTS", "exception", "denied", "Session has expired"]:
+    if needle in r.text:
+        idx = r.text.find(needle)
+        print(f"Found {needle!r} in body near: ...{r.text[max(0,idx-80):idx+150]}...")
