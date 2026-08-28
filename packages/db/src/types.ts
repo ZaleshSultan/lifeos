@@ -91,6 +91,12 @@ export type StudyCourseStatus =
   | "completed"
   | "archived";
 
+export type AssessmentItemStatus =
+  | "pending"
+  | "submitted"
+  | "graded"
+  | "missed";
+
 export type HealthEntrySource = "manual" | "telegram" | "import" | "automation";
 
 export type MedicationLogStatus = "planned" | "taken" | "skipped";
@@ -403,6 +409,10 @@ export interface Database {
           completed_units: number;
           total_units: number | null;
           last_studied_on: string | null;
+          instructor_name: string | null;
+          instructor_email: string | null;
+          room: string | null;
+          external_course_key: string | null;
           metadata: Json;
           created_at: string;
           updated_at: string;
@@ -420,6 +430,10 @@ export interface Database {
           completed_units?: number;
           total_units?: number | null;
           last_studied_on?: string | null;
+          instructor_name?: string | null;
+          instructor_email?: string | null;
+          room?: string | null;
+          external_course_key?: string | null;
           metadata?: Json;
           created_at?: string;
           updated_at?: string;
@@ -1805,6 +1819,62 @@ export interface Database {
           updated_at?: string;
         }
       >;
+      course_schedules: TableDefinition<
+        {
+          id: string;
+          study_course_id: string;
+          day_of_week: string;
+          start_time: string;
+          end_time: string;
+          room: string | null;
+          session_type: string | null;
+          created_at: string;
+        },
+        {
+          id?: string;
+          study_course_id: string;
+          day_of_week: string;
+          start_time: string;
+          end_time: string;
+          room?: string | null;
+          session_type?: string | null;
+          created_at?: string;
+        }
+      >;
+      assessment_items: TableDefinition<
+        {
+          id: string;
+          study_course_id: string;
+          title: string;
+          assessment_type: string | null;
+          weight_percent: number | null;
+          max_score: number | null;
+          actual_score: number | null;
+          due_at: string | null;
+          due_source: string | null;
+          syllabus_due_at: string | null;
+          status: AssessmentItemStatus;
+          notes: string | null;
+          created_at: string;
+          updated_at: string;
+        },
+        {
+          id?: string;
+          study_course_id: string;
+          title: string;
+          assessment_type?: string | null;
+          weight_percent?: number | null;
+          max_score?: number | null;
+          actual_score?: number | null;
+          due_at?: string | null;
+          due_source?: string | null;
+          syllabus_due_at?: string | null;
+          status?: AssessmentItemStatus;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        }
+      >;
     };
     Views: {
       finance_budget_category_status: {
@@ -1925,4 +1995,10 @@ export interface SupabaseConfig {
   url: string;
   anonKey?: string;
   serviceRoleKey?: string;
+}
+
+export interface CourseMatchCandidate {
+  externalKey: string;
+  suggestedStudyCourseId: string | null;
+  confidence: "exact" | "fuzzy" | "none";
 }

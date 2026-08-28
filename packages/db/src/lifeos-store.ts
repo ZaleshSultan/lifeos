@@ -64,6 +64,7 @@ import {
 } from "@lifeos/core";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
+  AssessmentItemStatus,
   Database,
   ExternalSourceStatus,
   FinanceBudgetPeriod,
@@ -132,6 +133,10 @@ type UserObsidianSettingsRow =
   Database["public"]["Tables"]["user_obsidian_settings"]["Row"];
 type UserOAuthConnectionRow =
   Database["public"]["Tables"]["user_oauth_connections"]["Row"];
+type CourseScheduleRow =
+  Database["public"]["Tables"]["course_schedules"]["Row"];
+type AssessmentItemRow =
+  Database["public"]["Tables"]["assessment_items"]["Row"];
 
 export interface TelegramUserRecord {
   userId: string;
@@ -307,6 +312,10 @@ export interface StudyCourseRecord {
   completedUnits: number;
   totalUnits: number | null;
   lastStudiedOn: string | null;
+  instructorName: string | null;
+  instructorEmail: string | null;
+  room: string | null;
+  externalCourseKey: string | null;
   metadata: Json;
   createdAt: string;
   updatedAt: string;
@@ -322,6 +331,70 @@ export interface UpdateStudyCourseProgressInput {
   lastStudiedOn?: string | null;
   status?: StudyCourseStatus;
   metadata?: Json;
+}
+
+export interface CourseScheduleRecord {
+  id: string;
+  studyCourseId: string;
+  dayOfWeek: string;
+  startTime: string;
+  endTime: string;
+  room: string | null;
+  sessionType: string | null;
+  createdAt: string;
+}
+
+export interface CreateCourseScheduleInput {
+  studyCourseId: string;
+  dayOfWeek: string;
+  startTime: string;
+  endTime: string;
+  room?: string | null;
+  sessionType?: string | null;
+}
+
+export interface AssessmentItemRecord {
+  id: string;
+  studyCourseId: string;
+  title: string;
+  assessmentType: string | null;
+  weightPercent: number | null;
+  maxScore: number | null;
+  actualScore: number | null;
+  dueAt: string | null;
+  dueSource: string | null;
+  syllabusDueAt: string | null;
+  status: AssessmentItemStatus;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateAssessmentItemInput {
+  studyCourseId: string;
+  title: string;
+  assessmentType?: string | null;
+  weightPercent?: number | null;
+  maxScore?: number | null;
+  actualScore?: number | null;
+  dueAt?: string | null;
+  dueSource?: string | null;
+  syllabusDueAt?: string | null;
+  status?: AssessmentItemStatus;
+  notes?: string | null;
+}
+
+export interface UpdateAssessmentItemInput {
+  title?: string;
+  assessmentType?: string | null;
+  weightPercent?: number | null;
+  maxScore?: number | null;
+  actualScore?: number | null;
+  dueAt?: string | null;
+  dueSource?: string | null;
+  syllabusDueAt?: string | null;
+  status?: AssessmentItemStatus;
+  notes?: string | null;
 }
 
 export interface SourceRecord {
@@ -1339,6 +1412,23 @@ export interface LifeOSStore {
   upsertAcademicRecord(
     input: UpsertAcademicRecordInput,
   ): Promise<AcademicRecord>;
+  findStudyCourseByExternalKey(
+    userId: string,
+    externalKey: string,
+  ): Promise<StudyCourseRecord | null>;
+  createCourseSchedule(
+    input: CreateCourseScheduleInput,
+  ): Promise<CourseScheduleRecord>;
+  listCourseSchedules(studyCourseId: string): Promise<CourseScheduleRecord[]>;
+  deleteCourseSchedule(id: string): Promise<void>;
+  createAssessmentItem(
+    input: CreateAssessmentItemInput,
+  ): Promise<AssessmentItemRecord>;
+  updateAssessmentItem(
+    id: string,
+    input: UpdateAssessmentItemInput,
+  ): Promise<AssessmentItemRecord>;
+  listAssessmentItems(studyCourseId: string): Promise<AssessmentItemRecord[]>;
   getFinanceSummary(input: {
     userId: string;
     since: string;
@@ -1712,7 +1802,44 @@ function toStudyCourseRecord(row: StudyCourseRow): StudyCourseRecord {
     completedUnits: row.completed_units,
     totalUnits: row.total_units,
     lastStudiedOn: row.last_studied_on,
+    instructorName: row.instructor_name,
+    instructorEmail: row.instructor_email,
+    room: row.room,
+    externalCourseKey: row.external_course_key,
     metadata: row.metadata,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toCourseScheduleRecord(row: CourseScheduleRow): CourseScheduleRecord {
+  return {
+    id: row.id,
+    studyCourseId: row.study_course_id,
+    dayOfWeek: row.day_of_week,
+    startTime: row.start_time,
+    endTime: row.end_time,
+    room: row.room,
+    sessionType: row.session_type,
+    createdAt: row.created_at,
+  };
+}
+
+function toAssessmentItemRecord(row: AssessmentItemRow): AssessmentItemRecord {
+  return {
+    id: row.id,
+    studyCourseId: row.study_course_id,
+    title: row.title,
+    assessmentType: row.assessment_type,
+    weightPercent:
+      row.weight_percent === null ? null : Number(row.weight_percent),
+    maxScore: row.max_score === null ? null : Number(row.max_score),
+    actualScore: row.actual_score === null ? null : Number(row.actual_score),
+    dueAt: row.due_at,
+    dueSource: row.due_source,
+    syllabusDueAt: row.syllabus_due_at,
+    status: row.status as AssessmentItemStatus,
+    notes: row.notes,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -5402,6 +5529,186 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     }
 
     return toAcademicRecord(data);
+  }
+
+  async findStudyCourseByExternalKey(
+    userId: string,
+    externalKey: string,
+  ): Promise<StudyCourseRecord | null> {
+    const trimmed = externalKey.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    const { data, error } = await this.client
+      .from("study_courses")
+      .select("*")
+      .eq("user_id", userId)
+      .ilike("external_course_key", trimmed)
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to find study course by external key");
+    }
+
+    return data ? toStudyCourseRecord(data) : null;
+  }
+
+  async createCourseSchedule(
+    input: CreateCourseScheduleInput,
+  ): Promise<CourseScheduleRecord> {
+    const { data, error } = await this.client
+      .from("course_schedules")
+      .insert({
+        study_course_id: input.studyCourseId,
+        day_of_week: input.dayOfWeek,
+        start_time: input.startTime,
+        end_time: input.endTime,
+        room: input.room ?? null,
+        session_type: input.sessionType ?? null,
+      })
+      .select("*")
+      .single();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to create course schedule");
+    }
+
+    return toCourseScheduleRecord(data);
+  }
+
+  async listCourseSchedules(
+    studyCourseId: string,
+  ): Promise<CourseScheduleRecord[]> {
+    const { data, error } = await this.client
+      .from("course_schedules")
+      .select("*")
+      .eq("study_course_id", studyCourseId)
+      .order("start_time", { ascending: true });
+
+    if (error) {
+      throwSupabaseError(error, "Failed to list course schedules");
+    }
+
+    return (data ?? []).map(toCourseScheduleRecord);
+  }
+
+  async deleteCourseSchedule(id: string): Promise<void> {
+    const { error } = await this.client
+      .from("course_schedules")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+      throwSupabaseError(error, "Failed to delete course schedule");
+    }
+  }
+
+  async createAssessmentItem(
+    input: CreateAssessmentItemInput,
+  ): Promise<AssessmentItemRecord> {
+    const title = input.title.trim();
+    if (!title) {
+      throw new Error("Assessment item title is required");
+    }
+
+    const { data, error } = await this.client
+      .from("assessment_items")
+      .insert({
+        study_course_id: input.studyCourseId,
+        title,
+        assessment_type: input.assessmentType ?? null,
+        weight_percent: input.weightPercent ?? null,
+        max_score: input.maxScore ?? null,
+        actual_score: input.actualScore ?? null,
+        due_at: input.dueAt ?? null,
+        due_source: input.dueSource ?? null,
+        syllabus_due_at: input.syllabusDueAt ?? null,
+        status: input.status ?? "pending",
+        notes: input.notes ?? null,
+      })
+      .select("*")
+      .single();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to create assessment item");
+    }
+
+    return toAssessmentItemRecord(data);
+  }
+
+  async updateAssessmentItem(
+    id: string,
+    input: UpdateAssessmentItemInput,
+  ): Promise<AssessmentItemRecord> {
+    const update: Database["public"]["Tables"]["assessment_items"]["Update"] =
+      {};
+
+    if (input.title !== undefined) {
+      const title = input.title.trim();
+      if (!title) {
+        throw new Error("Assessment item title cannot be blank");
+      }
+      update.title = title;
+    }
+    if (input.assessmentType !== undefined) {
+      update.assessment_type = input.assessmentType;
+    }
+    if (input.weightPercent !== undefined) {
+      update.weight_percent = input.weightPercent;
+    }
+    if (input.maxScore !== undefined) {
+      update.max_score = input.maxScore;
+    }
+    if (input.actualScore !== undefined) {
+      update.actual_score = input.actualScore;
+    }
+    if (input.dueAt !== undefined) {
+      update.due_at = input.dueAt;
+    }
+    if (input.dueSource !== undefined) {
+      update.due_source = input.dueSource;
+    }
+    if (input.syllabusDueAt !== undefined) {
+      update.syllabus_due_at = input.syllabusDueAt;
+    }
+    if (input.status !== undefined) {
+      update.status = input.status;
+    }
+    if (input.notes !== undefined) {
+      update.notes = input.notes;
+    }
+
+    const { data, error } = await this.client
+      .from("assessment_items")
+      .update(update)
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to update assessment item");
+    }
+
+    return toAssessmentItemRecord(data);
+  }
+
+  async listAssessmentItems(
+    studyCourseId: string,
+  ): Promise<AssessmentItemRecord[]> {
+    const { data, error } = await this.client
+      .from("assessment_items")
+      .select("*")
+      .eq("study_course_id", studyCourseId)
+      .order("due_at", { ascending: true, nullsFirst: false })
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      throwSupabaseError(error, "Failed to list assessment items");
+    }
+
+    return (data ?? []).map(toAssessmentItemRecord);
   }
 
   async getFinanceSummary(input: {

@@ -267,6 +267,10 @@ export function tmaStore(events: string[] = []): LifeOSStore {
     completedUnits: 0,
     totalUnits: null,
     lastStudiedOn: null,
+    instructorName: null,
+    instructorEmail: null,
+    room: null,
+    externalCourseKey: null,
     metadata: {},
     createdAt: "2026-05-18T10:00:00.000Z",
     updatedAt: "2026-05-18T10:00:00.000Z",
@@ -729,6 +733,71 @@ export function tmaStore(events: string[] = []): LifeOSStore {
         createdAt: "2026-05-18T10:00:00.000Z",
         updatedAt: "2026-05-18T10:00:00.000Z",
       };
+    },
+    async findStudyCourseByExternalKey(userId, externalKey) {
+      if (
+        course.userId === userId &&
+        course.externalCourseKey?.toLowerCase() ===
+          externalKey.trim().toLowerCase()
+      ) {
+        return course;
+      }
+      return null;
+    },
+    async createCourseSchedule(input) {
+      return {
+        id: "schedule-1",
+        studyCourseId: input.studyCourseId,
+        dayOfWeek: input.dayOfWeek,
+        startTime: input.startTime,
+        endTime: input.endTime,
+        room: input.room ?? null,
+        sessionType: input.sessionType ?? null,
+        createdAt: "2026-05-18T10:00:00.000Z",
+      };
+    },
+    async listCourseSchedules() {
+      return [];
+    },
+    async deleteCourseSchedule() {},
+    async createAssessmentItem(input) {
+      return {
+        id: "assessment-1",
+        studyCourseId: input.studyCourseId,
+        title: input.title,
+        assessmentType: input.assessmentType ?? null,
+        weightPercent: input.weightPercent ?? null,
+        maxScore: input.maxScore ?? null,
+        actualScore: input.actualScore ?? null,
+        dueAt: input.dueAt ?? null,
+        dueSource: input.dueSource ?? null,
+        syllabusDueAt: input.syllabusDueAt ?? null,
+        status: input.status ?? "pending",
+        notes: input.notes ?? null,
+        createdAt: "2026-05-18T10:00:00.000Z",
+        updatedAt: "2026-05-18T10:00:00.000Z",
+      };
+    },
+    async updateAssessmentItem(id, input) {
+      return {
+        id,
+        studyCourseId: "course-1",
+        title: input.title ?? "Assignment",
+        assessmentType: input.assessmentType ?? null,
+        weightPercent: input.weightPercent ?? null,
+        maxScore: input.maxScore ?? null,
+        actualScore: input.actualScore ?? null,
+        dueAt: input.dueAt ?? null,
+        dueSource: input.dueSource ?? null,
+        syllabusDueAt: input.syllabusDueAt ?? null,
+        status: input.status ?? "pending",
+        notes: input.notes ?? null,
+        createdAt: "2026-05-18T10:00:00.000Z",
+        updatedAt: "2026-05-18T10:00:00.000Z",
+      };
+    },
+    async listAssessmentItems() {
+      return [];
     },
     async getFinanceSummary() {
       return {

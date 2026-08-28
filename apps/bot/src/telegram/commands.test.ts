@@ -233,6 +233,10 @@ class FakeStore implements LifeOSStore {
     completedUnits: 0,
     totalUnits: null,
     lastStudiedOn: null,
+    instructorName: null,
+    instructorEmail: null,
+    room: null,
+    externalCourseKey: null,
     metadata: {},
     createdAt: "2026-05-18T00:00:00.000Z",
     updatedAt: "2026-05-18T00:00:00.000Z",
@@ -964,6 +968,93 @@ class FakeStore implements LifeOSStore {
       createdAt: "2026-05-18T00:00:00.000Z",
       updatedAt: "2026-05-18T00:00:00.000Z",
     };
+  }
+
+  async findStudyCourseByExternalKey(
+    userId: string,
+    externalKey: string,
+  ): Promise<StudyCourseRecord | null> {
+    if (
+      this.course &&
+      this.course.userId === userId &&
+      this.course.externalCourseKey?.toLowerCase() ===
+        externalKey.trim().toLowerCase()
+    ) {
+      return this.course;
+    }
+    return null;
+  }
+
+  async createCourseSchedule(
+    input: Parameters<LifeOSStore["createCourseSchedule"]>[0],
+  ): Promise<Awaited<ReturnType<LifeOSStore["createCourseSchedule"]>>> {
+    return {
+      id: "schedule-1",
+      studyCourseId: input.studyCourseId,
+      dayOfWeek: input.dayOfWeek,
+      startTime: input.startTime,
+      endTime: input.endTime,
+      room: input.room ?? null,
+      sessionType: input.sessionType ?? null,
+      createdAt: "2026-05-18T00:00:00.000Z",
+    };
+  }
+
+  async listCourseSchedules(
+    _studyCourseId: string,
+  ): Promise<Awaited<ReturnType<LifeOSStore["listCourseSchedules"]>>> {
+    return [];
+  }
+
+  async deleteCourseSchedule(_id: string): Promise<void> {}
+
+  async createAssessmentItem(
+    input: Parameters<LifeOSStore["createAssessmentItem"]>[0],
+  ): Promise<Awaited<ReturnType<LifeOSStore["createAssessmentItem"]>>> {
+    return {
+      id: "assessment-1",
+      studyCourseId: input.studyCourseId,
+      title: input.title,
+      assessmentType: input.assessmentType ?? null,
+      weightPercent: input.weightPercent ?? null,
+      maxScore: input.maxScore ?? null,
+      actualScore: input.actualScore ?? null,
+      dueAt: input.dueAt ?? null,
+      dueSource: input.dueSource ?? null,
+      syllabusDueAt: input.syllabusDueAt ?? null,
+      status: input.status ?? "pending",
+      notes: input.notes ?? null,
+      createdAt: "2026-05-18T00:00:00.000Z",
+      updatedAt: "2026-05-18T00:00:00.000Z",
+    };
+  }
+
+  async updateAssessmentItem(
+    id: string,
+    input: Parameters<LifeOSStore["updateAssessmentItem"]>[1],
+  ): Promise<Awaited<ReturnType<LifeOSStore["updateAssessmentItem"]>>> {
+    return {
+      id,
+      studyCourseId: "course-1",
+      title: input.title ?? "Assignment",
+      assessmentType: input.assessmentType ?? null,
+      weightPercent: input.weightPercent ?? null,
+      maxScore: input.maxScore ?? null,
+      actualScore: input.actualScore ?? null,
+      dueAt: input.dueAt ?? null,
+      dueSource: input.dueSource ?? null,
+      syllabusDueAt: input.syllabusDueAt ?? null,
+      status: input.status ?? "pending",
+      notes: input.notes ?? null,
+      createdAt: "2026-05-18T00:00:00.000Z",
+      updatedAt: "2026-05-18T00:00:00.000Z",
+    };
+  }
+
+  async listAssessmentItems(
+    _studyCourseId: string,
+  ): Promise<Awaited<ReturnType<LifeOSStore["listAssessmentItems"]>>> {
+    return [];
   }
 
   async getFinanceSummary(

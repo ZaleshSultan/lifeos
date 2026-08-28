@@ -23,6 +23,9 @@ class FakeSupabaseClient {
   receipts: FakeRow[] = [];
   obsidianSettings: FakeRow[] = [];
   oauthConnections: FakeRow[] = [];
+  studyCourses: FakeRow[] = [];
+  courseSchedules: FakeRow[] = [];
+  assessmentItems: FakeRow[] = [];
   queries: FakeQueryReceipt[] = [];
 
   from(table: string): FakeQuery {
@@ -44,6 +47,12 @@ class FakeQuery {
 
   select(columns?: string): this {
     this.columns = columns;
+    return this;
+  }
+
+  insert(payload: unknown): this {
+    this.action = "insert";
+    this.payload = payload;
     return this;
   }
 
@@ -74,6 +83,19 @@ class FakeQuery {
     return this;
   }
 
+  ilike(key: string, value: string): this {
+    this.filters[key] = { $ilike: value };
+    return this;
+  }
+
+  order(_column: string, _options?: unknown): this {
+    return this;
+  }
+
+  limit(_count: number): this {
+    return this;
+  }
+
   maybeSingle(): Promise<{ data: FakeRow | null; error: null }> {
     const data =
       this.action === "select" ? (this.filteredRows()[0] ?? null) : null;
@@ -82,10 +104,16 @@ class FakeQuery {
   }
 
   single(): Promise<{ data: FakeRow; error: null }> {
-    const data =
-      this.action === "upsert"
-        ? this.upsertRow()
-        : (this.filteredRows()[0] ?? {});
+    let data: FakeRow;
+    if (this.action === "upsert") {
+      data = this.upsertRow();
+    } else if (this.action === "insert") {
+      data = this.insertRow();
+    } else if (this.action === "update") {
+      data = this.updateRow();
+    } else {
+      data = this.filteredRows()[0] ?? {};
+    }
     this.recordQuery();
     return Promise.resolve({ data, error: null });
   }
@@ -96,6 +124,9 @@ class FakeQuery {
       | null,
     onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
   ): Promise<TResult1 | TResult2> {
+    if (this.action === "delete") {
+      this.deleteRows();
+    }
     return Promise.resolve({
       data: this.action === "select" ? this.filteredRows() : null,
       error: null,
@@ -116,6 +147,36 @@ class FakeQuery {
       inFilters: { ...this.inFilters },
       payload: this.payload,
     });
+  }
+
+  private insertRow(): FakeRow {
+    const payload = (this.payload ?? {}) as FakeRow;
+    const row: FakeRow = {
+      id: (payload.id as string) ?? `gen-${Math.random().toString(36).slice(2, 9)}`,
+      created_at: "2026-08-28T18:00:00Z",
+      updated_at: "2026-08-28T18:00:00Z",
+      ...payload,
+    };
+    this.tableRows().push(row);
+    return row;
+  }
+
+  private updateRow(): FakeRow {
+    const payload = (this.payload ?? {}) as FakeRow;
+    const rows = this.filteredRows();
+    if (rows[0]) {
+      Object.assign(rows[0], payload, { updated_at: "2026-08-28T18:00:00Z" });
+      return rows[0];
+    }
+    return {};
+  }
+
+  private deleteRows(): void {
+    const toDelete = new Set(this.filteredRows());
+    const rows = this.tableRows();
+    const remaining = rows.filter((r) => !toDelete.has(r));
+    rows.length = 0;
+    rows.push(...remaining);
   }
 
   private upsertRow(): FakeRow {
@@ -178,7 +239,13 @@ class FakeQuery {
   private filteredRows(): FakeRow[] {
     return this.tableRows().filter((row) => {
       for (const [key, value] of Object.entries(this.filters)) {
-        if (row[key as keyof FakeRow] !== value) {
+        if (value && typeof value === "object" && "$ilike" in value) {
+          const rowVal = String(row[key as keyof FakeRow] ?? "");
+          const searchVal = String((value as { $ilike: string }).$ilike);
+          if (rowVal.toLowerCase() !== searchVal.toLowerCase()) {
+            return false;
+          }
+        } else if (row[key as keyof FakeRow] !== value) {
           return false;
         }
       }
@@ -212,6 +279,18 @@ class FakeQuery {
 
     if (this.table === "user_oauth_connections") {
       return this.client.oauthConnections;
+    }
+
+    if (this.table === "study_courses") {
+      return this.client.studyCourses;
+    }
+
+    if (this.table === "course_schedules") {
+      return this.client.courseSchedules;
+    }
+
+    if (this.table === "assessment_items") {
+      return this.client.assessmentItems;
     }
 
     return [];
@@ -560,3 +639,174 @@ describe("SupabaseLifeOSStore OAuth connections", () => {
     });
   });
 });
+
+describe("SupabaseLifeOSStore Academic Engine Phase 1", () => {
+  const courseId = "c1111111-1111-4111-8111-111111111111";
+
+  describe("findStudyCourseByExternalKey", () => {
+    it("finds course by case-insensitive external_course_key scoped by userId", async () => {
+      const client = new FakeSupabaseClient();
+      client.studyCourses = [
+        {
+          id: courseId,
+          user_id: "user-a",
+          code: "CS101",
+          title: "Intro to CS",
+          term: "Fall 2026",
+          starts_on: "2026-09-01",
+          ends_on: "2026-12-15",
+          status: "active",
+          progress_percent: 0,
+          completed_units: 0,
+          total_units: null,
+          last_studied_on: null,
+          instructor_name: "Dr. Smith",
+          instructor_email: "smith@aitu.kz",
+          room: "C1.1.200",
+          external_course_key: "AITU-CS-101-FALL",
+          metadata: {},
+          created_at: "2026-08-28T18:00:00Z",
+          updated_at: "2026-08-28T18:00:00Z",
+        },
+        {
+          id: "c2222222-2222-4222-8222-222222222222",
+          user_id: "user-b",
+          code: "CS101",
+          title: "Intro to CS",
+          term: "Fall 2026",
+          starts_on: "2026-09-01",
+          ends_on: "2026-12-15",
+          status: "active",
+          progress_percent: 0,
+          completed_units: 0,
+          total_units: null,
+          last_studied_on: null,
+          instructor_name: null,
+          instructor_email: null,
+          room: null,
+          external_course_key: "AITU-CS-101-FALL",
+          metadata: {},
+          created_at: "2026-08-28T18:00:00Z",
+          updated_at: "2026-08-28T18:00:00Z",
+        },
+      ];
+
+      const match = await storeWith(client).findStudyCourseByExternalKey(
+        "user-a",
+        "aitu-cs-101-fall",
+      );
+
+      expect(match).not.toBeNull();
+      expect(match?.id).toBe(courseId);
+      expect(match?.instructorName).toBe("Dr. Smith");
+      expect(match?.externalCourseKey).toBe("AITU-CS-101-FALL");
+
+      const noMatch = await storeWith(client).findStudyCourseByExternalKey(
+        "user-a",
+        "NONEXISTENT",
+      );
+      expect(noMatch).toBeNull();
+
+      const blankMatch = await storeWith(client).findStudyCourseByExternalKey(
+        "user-a",
+        "   ",
+      );
+      expect(blankMatch).toBeNull();
+    });
+  });
+
+  describe("course_schedules methods", () => {
+    it("creates, lists, and deletes course schedules", async () => {
+      const client = new FakeSupabaseClient();
+      const store = storeWith(client);
+
+      const created = await store.createCourseSchedule({
+        studyCourseId: courseId,
+        dayOfWeek: "monday",
+        startTime: "09:00:00",
+        endTime: "10:30:00",
+        room: "C1.1.200",
+        sessionType: "lecture",
+      });
+
+      expect(created.studyCourseId).toBe(courseId);
+      expect(created.dayOfWeek).toBe("monday");
+      expect(created.startTime).toBe("09:00:00");
+      expect(created.endTime).toBe("10:30:00");
+      expect(created.room).toBe("C1.1.200");
+      expect(created.sessionType).toBe("lecture");
+
+      const schedules = await store.listCourseSchedules(courseId);
+      expect(schedules).toHaveLength(1);
+      expect(schedules[0].id).toBe(created.id);
+
+      await store.deleteCourseSchedule(created.id);
+      expect(await store.listCourseSchedules(courseId)).toHaveLength(0);
+    });
+  });
+
+  describe("assessment_items methods", () => {
+    it("creates, updates, and lists assessment items", async () => {
+      const client = new FakeSupabaseClient();
+      const store = storeWith(client);
+
+      const item = await store.createAssessmentItem({
+        studyCourseId: courseId,
+        title: "Midterm Exam",
+        assessmentType: "exam",
+        weightPercent: 30,
+        maxScore: 100,
+        dueAt: "2026-10-15T10:00:00Z",
+        syllabusDueAt: "2026-10-15T10:00:00Z",
+        dueSource: "syllabus",
+        notes: "Covers chapters 1-5",
+      });
+
+      expect(item.studyCourseId).toBe(courseId);
+      expect(item.title).toBe("Midterm Exam");
+      expect(item.status).toBe("pending");
+      expect(item.weightPercent).toBe(30);
+      expect(item.maxScore).toBe(100);
+      expect(item.actualScore).toBeNull();
+
+      const updated = await store.updateAssessmentItem(item.id, {
+        actualScore: 92.5,
+        status: "graded",
+        notes: "Scored 92.5/100",
+      });
+
+      expect(updated.actualScore).toBe(92.5);
+      expect(updated.status).toBe("graded");
+      expect(updated.notes).toBe("Scored 92.5/100");
+
+      const items = await store.listAssessmentItems(courseId);
+      expect(items).toHaveLength(1);
+      expect(items[0].id).toBe(item.id);
+      expect(items[0].actualScore).toBe(92.5);
+    });
+
+    it("rejects creating assessment item with empty title", async () => {
+      const client = new FakeSupabaseClient();
+      const store = storeWith(client);
+
+      await expect(
+        store.createAssessmentItem({
+          studyCourseId: courseId,
+          title: "   ",
+        }),
+      ).rejects.toThrow("Assessment item title is required");
+    });
+
+    it("rejects updating assessment item with blank title", async () => {
+      const client = new FakeSupabaseClient();
+      const store = storeWith(client);
+
+      await expect(
+        store.updateAssessmentItem("some-id", {
+          title: "",
+        }),
+      ).rejects.toThrow("Assessment item title cannot be blank");
+    });
+  });
+});
+
