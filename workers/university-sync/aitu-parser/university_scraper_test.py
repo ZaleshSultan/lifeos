@@ -189,6 +189,29 @@ class MoodleClientSsoCookieLoginTest(unittest.TestCase):
             allow_redirects=True,
         )
 
+    def test_matches_real_moodle_camel_case_userid_key(self) -> None:
+        """Regression test: real AITU Moodle pages embed the config as
+        M.cfg = {..."userId":14505...} - camelCase, not the lowercase
+        "userid" this code originally (and wrongly, case-sensitively)
+        searched for. That mismatch silently masked a fully working login
+        as a failure in production until caught via live debugging."""
+        client = self._client_with_cookie()
+        mock_session = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.text = (
+            '<script>var M = {}; M.cfg = {"wwwroot":"https://lms.astanait.edu.kz",'
+            '"userId":14505,"siteId":1};</script>'
+        )
+        mock_resp.url = f"{university_scraper.BASE_URL}/"
+        mock_session.get.return_value = mock_resp
+        mock_session.cookies = MagicMock()
+
+        with patch.object(university_scraper, "_requests_session", return_value=mock_session):
+            result = client._sso_cookie_login()
+
+        self.assertTrue(result)
+        self.assertEqual(client._moodle_user_id, 14505)
+
     def test_form_post_hop_is_replayed(self) -> None:
         client = self._client_with_cookie()
         mock_session = MagicMock()

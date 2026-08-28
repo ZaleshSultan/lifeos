@@ -358,7 +358,7 @@ class MoodleClient:
 
                 break
 
-            m = re.search(r'"userid"\s*:\s*(\d+)', r.text)
+            m = re.search(r'"userid"\s*:\s*(\d+)', r.text, re.IGNORECASE)
             if not m:
                 logging.warning(
                     "SSO cookie login did not yield a real Moodle session "
@@ -423,7 +423,7 @@ class MoodleClient:
                 return False
 
             # Try to extract Moodle user id from the page JS (used for grade report URL)
-            m = re.search(r'"userid"\s*:\s*(\d+)', r2.text)
+            m = re.search(r'"userid"\s*:\s*(\d+)', r2.text, re.IGNORECASE)
             if m:
                 self._moodle_user_id = int(m.group(1))
 
