@@ -33,8 +33,14 @@ server.listen(config.port, config.host, () => {
           }
         })
         .catch((error: unknown) => {
+          // Note: syncFinanceExchangeRates() currently catches all its own
+          // errors internally and always resolves (never rejects), so this
+          // branch is presently unreachable. Kept as defense-in-depth in
+          // case that internal handling ever changes.
           console.error("[finance] exchange rate sync failed", {
             errorType: error instanceof Error ? error.name : typeof error,
+            errorMessage:
+              error instanceof Error ? error.message : String(error),
           });
         });
     };

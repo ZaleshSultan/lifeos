@@ -7367,6 +7367,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     } catch (error) {
       console.error("[finance] exchange rate sync failed", {
         errorType: error instanceof Error ? error.name : typeof error,
+        errorMessage: error instanceof Error ? error.message : String(error),
       });
       return 0;
     }
