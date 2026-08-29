@@ -152,7 +152,9 @@ class FakeQuery {
   private insertRow(): FakeRow {
     const payload = (this.payload ?? {}) as FakeRow;
     const row: FakeRow = {
-      id: (payload.id as string) ?? `gen-${Math.random().toString(36).slice(2, 9)}`,
+      id:
+        (payload.id as string) ??
+        `gen-${Math.random().toString(36).slice(2, 9)}`,
       created_at: "2026-08-28T18:00:00Z",
       updated_at: "2026-08-28T18:00:00Z",
       ...payload,
@@ -718,9 +720,17 @@ describe("SupabaseLifeOSStore Academic Engine Phase 1", () => {
   describe("course_schedules methods", () => {
     it("creates, lists, and deletes course schedules", async () => {
       const client = new FakeSupabaseClient();
+      client.studyCourses = [
+        {
+          id: courseId,
+          user_id: "user-a",
+          code: "CS101",
+          title: "Intro to CS",
+        },
+      ];
       const store = storeWith(client);
 
-      const created = await store.createCourseSchedule({
+      const created = await store.createCourseSchedule("user-a", {
         studyCourseId: courseId,
         dayOfWeek: "monday",
         startTime: "09:00:00",
@@ -736,21 +746,51 @@ describe("SupabaseLifeOSStore Academic Engine Phase 1", () => {
       expect(created.room).toBe("C1.1.200");
       expect(created.sessionType).toBe("lecture");
 
-      const schedules = await store.listCourseSchedules(courseId);
+      const schedules = await store.listCourseSchedules("user-a", courseId);
       expect(schedules).toHaveLength(1);
       expect(schedules[0].id).toBe(created.id);
 
-      await store.deleteCourseSchedule(created.id);
-      expect(await store.listCourseSchedules(courseId)).toHaveLength(0);
+      client.courseSchedules = [{ id: created.id, study_course_id: courseId }];
+      await store.deleteCourseSchedule("user-a", created.id);
+    });
+
+    it("rejects creating a schedule for a course the caller does not own", async () => {
+      const client = new FakeSupabaseClient();
+      client.studyCourses = [
+        {
+          id: courseId,
+          user_id: "user-a",
+          code: "CS101",
+          title: "Intro to CS",
+        },
+      ];
+      const store = storeWith(client);
+
+      await expect(
+        store.createCourseSchedule("user-b", {
+          studyCourseId: courseId,
+          dayOfWeek: "monday",
+          startTime: "09:00:00",
+          endTime: "10:30:00",
+        }),
+      ).rejects.toThrow("Study course not found");
     });
   });
 
   describe("assessment_items methods", () => {
     it("creates, updates, and lists assessment items", async () => {
       const client = new FakeSupabaseClient();
+      client.studyCourses = [
+        {
+          id: courseId,
+          user_id: "user-a",
+          code: "CS101",
+          title: "Intro to CS",
+        },
+      ];
       const store = storeWith(client);
 
-      const item = await store.createAssessmentItem({
+      const item = await store.createAssessmentItem("user-a", {
         studyCourseId: courseId,
         title: "Midterm Exam",
         assessmentType: "exam",
@@ -769,7 +809,9 @@ describe("SupabaseLifeOSStore Academic Engine Phase 1", () => {
       expect(item.maxScore).toBe(100);
       expect(item.actualScore).toBeNull();
 
-      const updated = await store.updateAssessmentItem(item.id, {
+      client.assessmentItems = [{ id: item.id, study_course_id: courseId }];
+
+      const updated = await store.updateAssessmentItem("user-a", item.id, {
         actualScore: 92.5,
         status: "graded",
         notes: "Scored 92.5/100",
@@ -779,7 +821,7 @@ describe("SupabaseLifeOSStore Academic Engine Phase 1", () => {
       expect(updated.status).toBe("graded");
       expect(updated.notes).toBe("Scored 92.5/100");
 
-      const items = await store.listAssessmentItems(courseId);
+      const items = await store.listAssessmentItems("user-a", courseId);
       expect(items).toHaveLength(1);
       expect(items[0].id).toBe(item.id);
       expect(items[0].actualScore).toBe(92.5);
@@ -787,10 +829,18 @@ describe("SupabaseLifeOSStore Academic Engine Phase 1", () => {
 
     it("rejects creating assessment item with empty title", async () => {
       const client = new FakeSupabaseClient();
+      client.studyCourses = [
+        {
+          id: courseId,
+          user_id: "user-a",
+          code: "CS101",
+          title: "Intro to CS",
+        },
+      ];
       const store = storeWith(client);
 
       await expect(
-        store.createAssessmentItem({
+        store.createAssessmentItem("user-a", {
           studyCourseId: courseId,
           title: "   ",
         }),
@@ -799,14 +849,42 @@ describe("SupabaseLifeOSStore Academic Engine Phase 1", () => {
 
     it("rejects updating assessment item with blank title", async () => {
       const client = new FakeSupabaseClient();
+      client.studyCourses = [
+        {
+          id: courseId,
+          user_id: "user-a",
+          code: "CS101",
+          title: "Intro to CS",
+        },
+      ];
+      client.assessmentItems = [{ id: "some-id", study_course_id: courseId }];
       const store = storeWith(client);
 
       await expect(
-        store.updateAssessmentItem("some-id", {
+        store.updateAssessmentItem("user-a", "some-id", {
           title: "",
         }),
       ).rejects.toThrow("Assessment item title cannot be blank");
     });
+
+    it("rejects updating an assessment item the caller does not own", async () => {
+      const client = new FakeSupabaseClient();
+      client.studyCourses = [
+        {
+          id: courseId,
+          user_id: "user-a",
+          code: "CS101",
+          title: "Intro to CS",
+        },
+      ];
+      client.assessmentItems = [{ id: "some-id", study_course_id: courseId }];
+      const store = storeWith(client);
+
+      await expect(
+        store.updateAssessmentItem("user-b", "some-id", {
+          status: "graded",
+        }),
+      ).rejects.toThrow("Study course not found");
+    });
   });
 });
-

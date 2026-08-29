@@ -744,7 +744,7 @@ export function tmaStore(events: string[] = []): LifeOSStore {
       }
       return null;
     },
-    async createCourseSchedule(input) {
+    async createCourseSchedule(_userId, input) {
       return {
         id: "schedule-1",
         studyCourseId: input.studyCourseId,
@@ -760,7 +760,7 @@ export function tmaStore(events: string[] = []): LifeOSStore {
       return [];
     },
     async deleteCourseSchedule() {},
-    async createAssessmentItem(input) {
+    async createAssessmentItem(_userId, input) {
       return {
         id: "assessment-1",
         studyCourseId: input.studyCourseId,
@@ -778,7 +778,7 @@ export function tmaStore(events: string[] = []): LifeOSStore {
         updatedAt: "2026-05-18T10:00:00.000Z",
       };
     },
-    async updateAssessmentItem(id, input) {
+    async updateAssessmentItem(_userId, id, input) {
       return {
         id,
         studyCourseId: "course-1",

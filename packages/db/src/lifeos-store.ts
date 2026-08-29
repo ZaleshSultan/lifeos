@@ -1417,18 +1417,27 @@ export interface LifeOSStore {
     externalKey: string,
   ): Promise<StudyCourseRecord | null>;
   createCourseSchedule(
+    userId: string,
     input: CreateCourseScheduleInput,
   ): Promise<CourseScheduleRecord>;
-  listCourseSchedules(studyCourseId: string): Promise<CourseScheduleRecord[]>;
-  deleteCourseSchedule(id: string): Promise<void>;
+  listCourseSchedules(
+    userId: string,
+    studyCourseId: string,
+  ): Promise<CourseScheduleRecord[]>;
+  deleteCourseSchedule(userId: string, id: string): Promise<void>;
   createAssessmentItem(
+    userId: string,
     input: CreateAssessmentItemInput,
   ): Promise<AssessmentItemRecord>;
   updateAssessmentItem(
+    userId: string,
     id: string,
     input: UpdateAssessmentItemInput,
   ): Promise<AssessmentItemRecord>;
-  listAssessmentItems(studyCourseId: string): Promise<AssessmentItemRecord[]>;
+  listAssessmentItems(
+    userId: string,
+    studyCourseId: string,
+  ): Promise<AssessmentItemRecord[]>;
   getFinanceSummary(input: {
     userId: string;
     since: string;
@@ -5531,6 +5540,68 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     return toAcademicRecord(data);
   }
 
+  private async assertStudyCourseOwnedByUser(
+    userId: string,
+    studyCourseId: string,
+  ): Promise<void> {
+    const { data, error } = await this.client
+      .from("study_courses")
+      .select("id")
+      .eq("id", studyCourseId)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to verify study course owner");
+    }
+
+    if (!data) {
+      throw new Error("Study course not found");
+    }
+  }
+
+  private async assertCourseScheduleOwnedByUser(
+    userId: string,
+    scheduleId: string,
+  ): Promise<void> {
+    const { data, error } = await this.client
+      .from("course_schedules")
+      .select("study_course_id")
+      .eq("id", scheduleId)
+      .maybeSingle();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to verify course schedule owner");
+    }
+
+    if (!data) {
+      throw new Error("Course schedule not found");
+    }
+
+    await this.assertStudyCourseOwnedByUser(userId, data.study_course_id);
+  }
+
+  private async assertAssessmentItemOwnedByUser(
+    userId: string,
+    assessmentItemId: string,
+  ): Promise<void> {
+    const { data, error } = await this.client
+      .from("assessment_items")
+      .select("study_course_id")
+      .eq("id", assessmentItemId)
+      .maybeSingle();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to verify assessment item owner");
+    }
+
+    if (!data) {
+      throw new Error("Assessment item not found");
+    }
+
+    await this.assertStudyCourseOwnedByUser(userId, data.study_course_id);
+  }
+
   async findStudyCourseByExternalKey(
     userId: string,
     externalKey: string,
@@ -5556,8 +5627,11 @@ export class SupabaseLifeOSStore implements LifeOSStore {
   }
 
   async createCourseSchedule(
+    userId: string,
     input: CreateCourseScheduleInput,
   ): Promise<CourseScheduleRecord> {
+    await this.assertStudyCourseOwnedByUser(userId, input.studyCourseId);
+
     const { data, error } = await this.client
       .from("course_schedules")
       .insert({
@@ -5579,8 +5653,11 @@ export class SupabaseLifeOSStore implements LifeOSStore {
   }
 
   async listCourseSchedules(
+    userId: string,
     studyCourseId: string,
   ): Promise<CourseScheduleRecord[]> {
+    await this.assertStudyCourseOwnedByUser(userId, studyCourseId);
+
     const { data, error } = await this.client
       .from("course_schedules")
       .select("*")
@@ -5594,7 +5671,9 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     return (data ?? []).map(toCourseScheduleRecord);
   }
 
-  async deleteCourseSchedule(id: string): Promise<void> {
+  async deleteCourseSchedule(userId: string, id: string): Promise<void> {
+    await this.assertCourseScheduleOwnedByUser(userId, id);
+
     const { error } = await this.client
       .from("course_schedules")
       .delete()
@@ -5606,8 +5685,11 @@ export class SupabaseLifeOSStore implements LifeOSStore {
   }
 
   async createAssessmentItem(
+    userId: string,
     input: CreateAssessmentItemInput,
   ): Promise<AssessmentItemRecord> {
+    await this.assertStudyCourseOwnedByUser(userId, input.studyCourseId);
+
     const title = input.title.trim();
     if (!title) {
       throw new Error("Assessment item title is required");
@@ -5639,9 +5721,12 @@ export class SupabaseLifeOSStore implements LifeOSStore {
   }
 
   async updateAssessmentItem(
+    userId: string,
     id: string,
     input: UpdateAssessmentItemInput,
   ): Promise<AssessmentItemRecord> {
+    await this.assertAssessmentItemOwnedByUser(userId, id);
+
     const update: Database["public"]["Tables"]["assessment_items"]["Update"] =
       {};
 
@@ -5695,8 +5780,11 @@ export class SupabaseLifeOSStore implements LifeOSStore {
   }
 
   async listAssessmentItems(
+    userId: string,
     studyCourseId: string,
   ): Promise<AssessmentItemRecord[]> {
+    await this.assertStudyCourseOwnedByUser(userId, studyCourseId);
+
     const { data, error } = await this.client
       .from("assessment_items")
       .select("*")

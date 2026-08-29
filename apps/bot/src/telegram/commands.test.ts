@@ -986,7 +986,8 @@ class FakeStore implements LifeOSStore {
   }
 
   async createCourseSchedule(
-    input: Parameters<LifeOSStore["createCourseSchedule"]>[0],
+    _userId: string,
+    input: Parameters<LifeOSStore["createCourseSchedule"]>[1],
   ): Promise<Awaited<ReturnType<LifeOSStore["createCourseSchedule"]>>> {
     return {
       id: "schedule-1",
@@ -1001,15 +1002,17 @@ class FakeStore implements LifeOSStore {
   }
 
   async listCourseSchedules(
+    _userId: string,
     _studyCourseId: string,
   ): Promise<Awaited<ReturnType<LifeOSStore["listCourseSchedules"]>>> {
     return [];
   }
 
-  async deleteCourseSchedule(_id: string): Promise<void> {}
+  async deleteCourseSchedule(_userId: string, _id: string): Promise<void> {}
 
   async createAssessmentItem(
-    input: Parameters<LifeOSStore["createAssessmentItem"]>[0],
+    _userId: string,
+    input: Parameters<LifeOSStore["createAssessmentItem"]>[1],
   ): Promise<Awaited<ReturnType<LifeOSStore["createAssessmentItem"]>>> {
     return {
       id: "assessment-1",
@@ -1030,8 +1033,9 @@ class FakeStore implements LifeOSStore {
   }
 
   async updateAssessmentItem(
+    _userId: string,
     id: string,
-    input: Parameters<LifeOSStore["updateAssessmentItem"]>[1],
+    input: Parameters<LifeOSStore["updateAssessmentItem"]>[2],
   ): Promise<Awaited<ReturnType<LifeOSStore["updateAssessmentItem"]>>> {
     return {
       id,
@@ -1052,6 +1056,7 @@ class FakeStore implements LifeOSStore {
   }
 
   async listAssessmentItems(
+    _userId: string,
     _studyCourseId: string,
   ): Promise<Awaited<ReturnType<LifeOSStore["listAssessmentItems"]>>> {
     return [];
