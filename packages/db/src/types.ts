@@ -1829,6 +1829,7 @@ export interface Database {
           room: string | null;
           session_type: string | null;
           created_at: string;
+          updated_at: string;
         },
         {
           id?: string;
@@ -1839,12 +1840,15 @@ export interface Database {
           room?: string | null;
           session_type?: string | null;
           created_at?: string;
+          updated_at?: string;
         }
       >;
       assessment_items: TableDefinition<
         {
           id: string;
           study_course_id: string;
+          external_id: string | null;
+          source: string;
           title: string;
           assessment_type: string | null;
           weight_percent: number | null;
@@ -1855,12 +1859,15 @@ export interface Database {
           syllabus_due_at: string | null;
           status: AssessmentItemStatus;
           notes: string | null;
+          raw_json: Json;
           created_at: string;
           updated_at: string;
         },
         {
           id?: string;
           study_course_id: string;
+          external_id?: string | null;
+          source?: string;
           title: string;
           assessment_type?: string | null;
           weight_percent?: number | null;
@@ -1871,6 +1878,7 @@ export interface Database {
           syllabus_due_at?: string | null;
           status?: AssessmentItemStatus;
           notes?: string | null;
+          raw_json?: Json;
           created_at?: string;
           updated_at?: string;
         }

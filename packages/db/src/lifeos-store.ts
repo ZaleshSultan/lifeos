@@ -342,6 +342,7 @@ export interface CourseScheduleRecord {
   room: string | null;
   sessionType: string | null;
   createdAt: string;
+  updatedAt: string;
 }
 
 export interface CreateCourseScheduleInput {
@@ -356,6 +357,8 @@ export interface CreateCourseScheduleInput {
 export interface AssessmentItemRecord {
   id: string;
   studyCourseId: string;
+  externalId: string | null;
+  source: string;
   title: string;
   assessmentType: string | null;
   weightPercent: number | null;
@@ -366,12 +369,15 @@ export interface AssessmentItemRecord {
   syllabusDueAt: string | null;
   status: AssessmentItemStatus;
   notes: string | null;
+  rawJson: Json;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface CreateAssessmentItemInput {
   studyCourseId: string;
+  externalId?: string | null;
+  source?: string;
   title: string;
   assessmentType?: string | null;
   weightPercent?: number | null;
@@ -382,9 +388,16 @@ export interface CreateAssessmentItemInput {
   syllabusDueAt?: string | null;
   status?: AssessmentItemStatus;
   notes?: string | null;
+  rawJson?: Json;
+}
+
+export interface UpsertAssessmentItemInput extends CreateAssessmentItemInput {
+  id?: string;
 }
 
 export interface UpdateAssessmentItemInput {
+  externalId?: string | null;
+  source?: string;
   title?: string;
   assessmentType?: string | null;
   weightPercent?: number | null;
@@ -395,6 +408,7 @@ export interface UpdateAssessmentItemInput {
   syllabusDueAt?: string | null;
   status?: AssessmentItemStatus;
   notes?: string | null;
+  rawJson?: Json;
 }
 
 export interface SourceRecord {
@@ -1429,11 +1443,21 @@ export interface LifeOSStore {
     userId: string,
     input: CreateAssessmentItemInput,
   ): Promise<AssessmentItemRecord>;
+  upsertAssessmentItem(
+    userId: string,
+    input: UpsertAssessmentItemInput,
+  ): Promise<AssessmentItemRecord>;
   updateAssessmentItem(
     userId: string,
     id: string,
     input: UpdateAssessmentItemInput,
   ): Promise<AssessmentItemRecord>;
+  deleteAssessmentItem(userId: string, id: string): Promise<void>;
+  findAssessmentItemByExternalId(
+    userId: string,
+    studyCourseId: string,
+    externalId: string,
+  ): Promise<AssessmentItemRecord | null>;
   listAssessmentItems(
     userId: string,
     studyCourseId: string,
@@ -1831,6 +1855,7 @@ function toCourseScheduleRecord(row: CourseScheduleRow): CourseScheduleRecord {
     room: row.room,
     sessionType: row.session_type,
     createdAt: row.created_at,
+    updatedAt: row.updated_at ?? row.created_at,
   };
 }
 
@@ -1838,6 +1863,8 @@ function toAssessmentItemRecord(row: AssessmentItemRow): AssessmentItemRecord {
   return {
     id: row.id,
     studyCourseId: row.study_course_id,
+    externalId: row.external_id,
+    source: row.source,
     title: row.title,
     assessmentType: row.assessment_type,
     weightPercent:
@@ -1849,6 +1876,7 @@ function toAssessmentItemRecord(row: AssessmentItemRow): AssessmentItemRecord {
     syllabusDueAt: row.syllabus_due_at,
     status: row.status as AssessmentItemStatus,
     notes: row.notes,
+    rawJson: row.raw_json,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -5699,6 +5727,8 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       .from("assessment_items")
       .insert({
         study_course_id: input.studyCourseId,
+        external_id: input.externalId?.trim() || null,
+        source: input.source ?? "manual",
         title,
         assessment_type: input.assessmentType ?? null,
         weight_percent: input.weightPercent ?? null,
@@ -5709,6 +5739,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
         syllabus_due_at: input.syllabusDueAt ?? null,
         status: input.status ?? "pending",
         notes: input.notes ?? null,
+        raw_json: input.rawJson ?? {},
       })
       .select("*")
       .single();
@@ -5718,6 +5749,79 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     }
 
     return toAssessmentItemRecord(data);
+  }
+
+  async findAssessmentItemByExternalId(
+    userId: string,
+    studyCourseId: string,
+    externalId: string,
+  ): Promise<AssessmentItemRecord | null> {
+    await this.assertStudyCourseOwnedByUser(userId, studyCourseId);
+
+    const trimmed = externalId.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    const { data, error } = await this.client
+      .from("assessment_items")
+      .select("*")
+      .eq("study_course_id", studyCourseId)
+      .eq("external_id", trimmed)
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      throwSupabaseError(
+        error,
+        "Failed to find assessment item by external id",
+      );
+    }
+
+    return data ? toAssessmentItemRecord(data) : null;
+  }
+
+  async upsertAssessmentItem(
+    userId: string,
+    input: UpsertAssessmentItemInput,
+  ): Promise<AssessmentItemRecord> {
+    await this.assertStudyCourseOwnedByUser(userId, input.studyCourseId);
+
+    const title = input.title.trim();
+    if (!title) {
+      throw new Error("Assessment item title is required");
+    }
+
+    const existing = input.id
+      ? null
+      : input.externalId
+        ? await this.findAssessmentItemByExternalId(
+            userId,
+            input.studyCourseId,
+            input.externalId,
+          )
+        : null;
+
+    if (input.id || existing) {
+      const targetId = input.id ?? existing!.id;
+      return this.updateAssessmentItem(userId, targetId, {
+        title,
+        externalId: input.externalId,
+        source: input.source,
+        assessmentType: input.assessmentType,
+        weightPercent: input.weightPercent,
+        maxScore: input.maxScore,
+        actualScore: input.actualScore,
+        dueAt: input.dueAt,
+        dueSource: input.dueSource,
+        syllabusDueAt: input.syllabusDueAt,
+        status: input.status,
+        notes: input.notes,
+        rawJson: input.rawJson,
+      });
+    }
+
+    return this.createAssessmentItem(userId, input);
   }
 
   async updateAssessmentItem(
@@ -5736,6 +5840,12 @@ export class SupabaseLifeOSStore implements LifeOSStore {
         throw new Error("Assessment item title cannot be blank");
       }
       update.title = title;
+    }
+    if (input.externalId !== undefined) {
+      update.external_id = input.externalId?.trim() || null;
+    }
+    if (input.source !== undefined) {
+      update.source = input.source;
     }
     if (input.assessmentType !== undefined) {
       update.assessment_type = input.assessmentType;
@@ -5764,6 +5874,9 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     if (input.notes !== undefined) {
       update.notes = input.notes;
     }
+    if (input.rawJson !== undefined) {
+      update.raw_json = input.rawJson;
+    }
 
     const { data, error } = await this.client
       .from("assessment_items")
@@ -5777,6 +5890,19 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     }
 
     return toAssessmentItemRecord(data);
+  }
+
+  async deleteAssessmentItem(userId: string, id: string): Promise<void> {
+    await this.assertAssessmentItemOwnedByUser(userId, id);
+
+    const { error } = await this.client
+      .from("assessment_items")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+      throwSupabaseError(error, "Failed to delete assessment item");
+    }
   }
 
   async listAssessmentItems(

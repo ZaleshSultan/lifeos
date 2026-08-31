@@ -886,5 +886,93 @@ describe("SupabaseLifeOSStore Academic Engine Phase 1", () => {
         }),
       ).rejects.toThrow("Study course not found");
     });
+
+    it("idempotently upserts assessment items by external_id", async () => {
+      const client = new FakeSupabaseClient();
+      client.studyCourses = [
+        {
+          id: courseId,
+          user_id: "user-a",
+          code: "CS101",
+          title: "Intro to CS",
+        },
+      ];
+      const store = storeWith(client);
+
+      // First sync: creates new item
+      const created = await store.upsertAssessmentItem("user-a", {
+        studyCourseId: courseId,
+        externalId: "moodle:item:1001",
+        source: "moodle",
+        title: "Assignment 1",
+        assessmentType: "assignment",
+        maxScore: 100,
+        actualScore: 85,
+        status: "graded",
+      });
+
+      expect(created.studyCourseId).toBe(courseId);
+      expect(created.externalId).toBe("moodle:item:1001");
+      expect(created.source).toBe("moodle");
+      expect(created.actualScore).toBe(85);
+      expect(created.status).toBe("graded");
+
+      // Verify client has exactly 1 item
+      expect(client.assessmentItems).toHaveLength(1);
+
+      // Second sync: updates existing item without creating duplicate
+      const updated = await store.upsertAssessmentItem("user-a", {
+        studyCourseId: courseId,
+        externalId: "moodle:item:1001",
+        source: "moodle",
+        title: "Assignment 1 (Updated)",
+        assessmentType: "assignment",
+        maxScore: 100,
+        actualScore: 95,
+        status: "graded",
+      });
+
+      expect(updated.id).toBe(created.id);
+      expect(updated.title).toBe("Assignment 1 (Updated)");
+      expect(updated.actualScore).toBe(95);
+
+      // Ensure no duplicate was inserted
+      expect(client.assessmentItems).toHaveLength(1);
+
+      // Find by external ID
+      const found = await store.findAssessmentItemByExternalId(
+        "user-a",
+        courseId,
+        "moodle:item:1001",
+      );
+      expect(found).not.toBeNull();
+      expect(found?.id).toBe(created.id);
+      expect(found?.actualScore).toBe(95);
+    });
+
+    it("deletes assessment item with ownership verification", async () => {
+      const client = new FakeSupabaseClient();
+      client.studyCourses = [
+        {
+          id: courseId,
+          user_id: "user-a",
+          code: "CS101",
+          title: "Intro to CS",
+        },
+      ];
+      client.assessmentItems = [
+        { id: "item-to-delete", study_course_id: courseId },
+      ];
+      const store = storeWith(client);
+
+      // Reject non-owner deletion
+      await expect(
+        store.deleteAssessmentItem("user-b", "item-to-delete"),
+      ).rejects.toThrow("Study course not found");
+
+      // Owner deletion succeeds
+      await store.deleteAssessmentItem("user-a", "item-to-delete");
+      expect(client.assessmentItems).toHaveLength(0);
+    });
   });
 });

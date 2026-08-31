@@ -754,6 +754,7 @@ export function tmaStore(events: string[] = []): LifeOSStore {
         room: input.room ?? null,
         sessionType: input.sessionType ?? null,
         createdAt: "2026-05-18T10:00:00.000Z",
+        updatedAt: "2026-05-18T10:00:00.000Z",
       };
     },
     async listCourseSchedules() {
@@ -764,6 +765,8 @@ export function tmaStore(events: string[] = []): LifeOSStore {
       return {
         id: "assessment-1",
         studyCourseId: input.studyCourseId,
+        externalId: input.externalId ?? null,
+        source: input.source ?? "manual",
         title: input.title,
         assessmentType: input.assessmentType ?? null,
         weightPercent: input.weightPercent ?? null,
@@ -774,6 +777,28 @@ export function tmaStore(events: string[] = []): LifeOSStore {
         syllabusDueAt: input.syllabusDueAt ?? null,
         status: input.status ?? "pending",
         notes: input.notes ?? null,
+        rawJson: input.rawJson ?? {},
+        createdAt: "2026-05-18T10:00:00.000Z",
+        updatedAt: "2026-05-18T10:00:00.000Z",
+      };
+    },
+    async upsertAssessmentItem(_userId, input) {
+      return {
+        id: input.id ?? "assessment-1",
+        studyCourseId: input.studyCourseId,
+        externalId: input.externalId ?? null,
+        source: input.source ?? "manual",
+        title: input.title,
+        assessmentType: input.assessmentType ?? null,
+        weightPercent: input.weightPercent ?? null,
+        maxScore: input.maxScore ?? null,
+        actualScore: input.actualScore ?? null,
+        dueAt: input.dueAt ?? null,
+        dueSource: input.dueSource ?? null,
+        syllabusDueAt: input.syllabusDueAt ?? null,
+        status: input.status ?? "pending",
+        notes: input.notes ?? null,
+        rawJson: input.rawJson ?? {},
         createdAt: "2026-05-18T10:00:00.000Z",
         updatedAt: "2026-05-18T10:00:00.000Z",
       };
@@ -782,6 +807,8 @@ export function tmaStore(events: string[] = []): LifeOSStore {
       return {
         id,
         studyCourseId: "course-1",
+        externalId: input.externalId ?? null,
+        source: input.source ?? "manual",
         title: input.title ?? "Assignment",
         assessmentType: input.assessmentType ?? null,
         weightPercent: input.weightPercent ?? null,
@@ -792,9 +819,14 @@ export function tmaStore(events: string[] = []): LifeOSStore {
         syllabusDueAt: input.syllabusDueAt ?? null,
         status: input.status ?? "pending",
         notes: input.notes ?? null,
+        rawJson: input.rawJson ?? {},
         createdAt: "2026-05-18T10:00:00.000Z",
         updatedAt: "2026-05-18T10:00:00.000Z",
       };
+    },
+    async deleteAssessmentItem() {},
+    async findAssessmentItemByExternalId() {
+      return null;
     },
     async listAssessmentItems() {
       return [];
