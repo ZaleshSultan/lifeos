@@ -244,13 +244,34 @@ describe("exchange rates", () => {
     const quotes = await fetchDailyExchangeRates(async () =>
       Response.json({
         result: "success",
-        time_last_update_utc: "2026-06-09 00:00:00",
+        // Real shape of https://open.er-api.com/v6/latest/USD's response -
+        // time_last_update_utc is an RFC 1123 string
+        // ("Sat, 29 Aug 2026 00:02:31 +0000"), NOT ISO 8601. An earlier
+        // version of this test used an ISO-like fixture here, which masked
+        // a real bug: slicing the first 10 characters of the RFC 1123
+        // string produced garbage like "Sat, 29 Au" and Postgres rejected
+        // it on every single sync attempt in production.
+        time_last_update_utc: "Tue, 09 Jun 2026 00:00:00 +0000",
+        time_last_update_unix: 1780963200,
         rates: { KZT: 450, EUR: 0.92, RUB: 90 },
       }),
     );
 
     expect(quotes.some((quote) => quote.fromCurrency === "USD")).toBe(true);
     expect(quotes.some((quote) => quote.toCurrency === "KZT")).toBe(true);
+    expect(quotes.every((quote) => quote.rateDate === "2026-06-09")).toBe(true);
+  });
+
+  it("falls back to today's date when time_last_update_unix is missing", async () => {
+    const quotes = await fetchDailyExchangeRates(async () =>
+      Response.json({
+        result: "success",
+        rates: { KZT: 450, EUR: 0.92, RUB: 90 },
+      }),
+    );
+
+    const today = new Date().toISOString().slice(0, 10);
+    expect(quotes.every((quote) => quote.rateDate === today)).toBe(true);
   });
 });
 

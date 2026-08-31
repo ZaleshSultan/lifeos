@@ -1377,7 +1377,7 @@ export async function fetchDailyExchangeRates(
 
   const body = (await response.json()) as {
     result?: string;
-    time_last_update_utc?: string;
+    time_last_update_unix?: number;
     rates?: Record<string, number>;
   };
 
@@ -1392,9 +1392,19 @@ export async function fetchDailyExchangeRates(
     EUR: body.rates.EUR ?? 0,
     RUB: body.rates.RUB ?? 0,
   };
-  const rateDate = body.time_last_update_utc
-    ? body.time_last_update_utc.slice(0, 10)
-    : new Date().toISOString().slice(0, 10);
+  // The API's time_last_update_utc field is an RFC 1123 string
+  // ("Sat, 29 Aug 2026 00:02:31 +0000"), not ISO 8601 - slicing its first
+  // 10 characters silently produced garbage like "Sat, 29 Au" instead of
+  // a date, which Postgres then rejected on every single sync attempt.
+  // time_last_update_unix is an unambiguous epoch-seconds number instead.
+  const parsedDate =
+    typeof body.time_last_update_unix === "number"
+      ? new Date(body.time_last_update_unix * 1000)
+      : null;
+  const rateDate =
+    parsedDate && !Number.isNaN(parsedDate.getTime())
+      ? parsedDate.toISOString().slice(0, 10)
+      : new Date().toISOString().slice(0, 10);
   const quotes: ExchangeRateQuote[] = [];
 
   for (const fromCurrency of supported) {
