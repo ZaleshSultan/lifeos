@@ -97,6 +97,12 @@ export type AssessmentItemStatus =
   | "graded"
   | "missed";
 
+export type AcademicTermStatus =
+  | "planned"
+  | "active"
+  | "completed"
+  | "archived";
+
 export type HealthEntrySource = "manual" | "telegram" | "import" | "automation";
 
 export type MedicationLogStatus = "planned" | "taken" | "skipped";
@@ -402,6 +408,7 @@ export interface Database {
           code: string;
           title: string;
           term: string | null;
+          term_id: string | null;
           starts_on: string | null;
           ends_on: string | null;
           status: StudyCourseStatus;
@@ -423,6 +430,7 @@ export interface Database {
           code: string;
           title: string;
           term?: string | null;
+          term_id?: string | null;
           starts_on?: string | null;
           ends_on?: string | null;
           status?: StudyCourseStatus;
@@ -1881,6 +1889,34 @@ export interface Database {
           status?: AssessmentItemStatus;
           notes?: string | null;
           raw_json?: Json;
+          created_at?: string;
+          updated_at?: string;
+        }
+      >;
+      academic_terms: TableDefinition<
+        {
+          id: string;
+          user_id: string;
+          name: string;
+          institution: string | null;
+          program: string | null;
+          starts_on: string | null;
+          ends_on: string | null;
+          timezone: string | null;
+          status: AcademicTermStatus;
+          created_at: string;
+          updated_at: string;
+        },
+        {
+          id?: string;
+          user_id: string;
+          name: string;
+          institution?: string | null;
+          program?: string | null;
+          starts_on?: string | null;
+          ends_on?: string | null;
+          timezone?: string | null;
+          status?: AcademicTermStatus;
           created_at?: string;
           updated_at?: string;
         }

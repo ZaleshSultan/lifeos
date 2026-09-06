@@ -1105,6 +1105,64 @@ class FakeStore implements LifeOSStore {
     return [];
   }
 
+  async createAcademicTerm(
+    userId: string,
+    input: Parameters<LifeOSStore["createAcademicTerm"]>[1],
+  ): Promise<Awaited<ReturnType<LifeOSStore["createAcademicTerm"]>>> {
+    return {
+      id: "term-1",
+      userId,
+      name: input.name,
+      institution: input.institution ?? null,
+      program: input.program ?? null,
+      startsOn: input.startsOn ?? null,
+      endsOn: input.endsOn ?? null,
+      timezone: input.timezone ?? null,
+      status: input.status ?? "planned",
+      createdAt: "2026-05-18T00:00:00.000Z",
+      updatedAt: "2026-05-18T00:00:00.000Z",
+    };
+  }
+
+  async updateAcademicTerm(
+    userId: string,
+    id: string,
+    input: Parameters<LifeOSStore["updateAcademicTerm"]>[2],
+  ): Promise<Awaited<ReturnType<LifeOSStore["updateAcademicTerm"]>>> {
+    return {
+      id,
+      userId,
+      name: input.name ?? "Term 1",
+      institution: input.institution ?? null,
+      program: input.program ?? null,
+      startsOn: input.startsOn ?? null,
+      endsOn: input.endsOn ?? null,
+      timezone: input.timezone ?? null,
+      status: input.status ?? "planned",
+      createdAt: "2026-05-18T00:00:00.000Z",
+      updatedAt: "2026-05-18T00:00:00.000Z",
+    };
+  }
+
+  async listAcademicTerms(
+    _userId: string,
+  ): Promise<Awaited<ReturnType<LifeOSStore["listAcademicTerms"]>>> {
+    return [];
+  }
+
+  async getActiveAcademicTerm(
+    _userId: string,
+    _today: string,
+  ): Promise<Awaited<ReturnType<LifeOSStore["getActiveAcademicTerm"]>>> {
+    return null;
+  }
+
+  async linkStudyCourseToTerm(
+    _userId: string,
+    _studyCourseId: string,
+    _termId: string,
+  ): Promise<void> {}
+
   async getFinanceSummary(
     input: Parameters<LifeOSStore["getFinanceSummary"]>[0],
   ): Promise<FinanceSummary> {

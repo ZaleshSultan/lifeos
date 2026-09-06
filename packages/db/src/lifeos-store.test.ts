@@ -26,6 +26,7 @@ class FakeSupabaseClient {
   studyCourses: FakeRow[] = [];
   courseSchedules: FakeRow[] = [];
   assessmentItems: FakeRow[] = [];
+  academicTerms: FakeRow[] = [];
   queries: FakeQueryReceipt[] = [];
 
   from(table: string): FakeQuery {
@@ -126,6 +127,9 @@ class FakeQuery {
   ): Promise<TResult1 | TResult2> {
     if (this.action === "delete") {
       this.deleteRows();
+    }
+    if (this.action === "update") {
+      this.updateRow();
     }
     return Promise.resolve({
       data: this.action === "select" ? this.filteredRows() : null,
@@ -293,6 +297,10 @@ class FakeQuery {
 
     if (this.table === "assessment_items") {
       return this.client.assessmentItems;
+    }
+
+    if (this.table === "academic_terms") {
+      return this.client.academicTerms;
     }
 
     return [];
@@ -977,4 +985,281 @@ describe("SupabaseLifeOSStore Academic Engine Phase 1", () => {
       expect(client.assessmentItems).toHaveLength(0);
     });
   });
+
+  describe("academic_terms methods", () => {
+    const termId = "t1111111-1111-4111-8111-111111111111";
+
+    it("creates, lists, and updates academic terms", async () => {
+      const client = new FakeSupabaseClient();
+      const store = storeWith(client);
+
+      const created = await store.createAcademicTerm("user-a", {
+        name: "1 триместр 2026-2027",
+        institution: "Astana IT University",
+        program: "Cybersecurity",
+        startsOn: "2026-09-01",
+        endsOn: "2026-11-20",
+        timezone: "Asia/Almaty",
+        status: "planned",
+      });
+
+      expect(created.userId).toBe("user-a");
+      expect(created.name).toBe("1 триместр 2026-2027");
+      expect(created.institution).toBe("Astana IT University");
+      expect(created.program).toBe("Cybersecurity");
+      expect(created.startsOn).toBe("2026-09-01");
+      expect(created.endsOn).toBe("2026-11-20");
+      expect(created.timezone).toBe("Asia/Almaty");
+      expect(created.status).toBe("planned");
+
+      const list = await store.listAcademicTerms("user-a");
+      expect(list).toHaveLength(1);
+      expect(list[0].id).toBe(created.id);
+
+      const updated = await store.updateAcademicTerm("user-a", created.id, {
+        status: "active",
+        program: "Information Security",
+      });
+
+      expect(updated.id).toBe(created.id);
+      expect(updated.status).toBe("active");
+      expect(updated.program).toBe("Information Security");
+    });
+
+    it("rejects creating academic term with empty name", async () => {
+      const client = new FakeSupabaseClient();
+      const store = storeWith(client);
+
+      await expect(
+        store.createAcademicTerm("user-a", {
+          name: "   ",
+        }),
+      ).rejects.toThrow("Academic term name is required");
+    });
+
+    it("rejects creating academic term with endsOn earlier than startsOn", async () => {
+      const client = new FakeSupabaseClient();
+      const store = storeWith(client);
+
+      await expect(
+        store.createAcademicTerm("user-a", {
+          name: "Invalid Term",
+          startsOn: "2026-12-01",
+          endsOn: "2026-09-01",
+        }),
+      ).rejects.toThrow("Academic term ends_on cannot be earlier than starts_on");
+    });
+
+    it("rejects updating academic term with blank name", async () => {
+      const client = new FakeSupabaseClient();
+      client.academicTerms = [
+        {
+          id: termId,
+          user_id: "user-a",
+          name: "Valid Term",
+          status: "planned",
+        },
+      ];
+      const store = storeWith(client);
+
+      await expect(
+        store.updateAcademicTerm("user-a", termId, {
+          name: "  ",
+        }),
+      ).rejects.toThrow("Academic term name cannot be blank");
+    });
+
+    it("rejects updating an academic term the caller does not own", async () => {
+      const client = new FakeSupabaseClient();
+      client.academicTerms = [
+        {
+          id: termId,
+          user_id: "user-a",
+          name: "User A Term",
+          status: "planned",
+        },
+      ];
+      const store = storeWith(client);
+
+      await expect(
+        store.updateAcademicTerm("user-b", termId, {
+          status: "completed",
+        }),
+      ).rejects.toThrow("Academic term not found");
+    });
+
+    describe("getActiveAcademicTerm", () => {
+      it("prefers explicit status='active' term over overlapping date-range term", async () => {
+        const client = new FakeSupabaseClient();
+        client.academicTerms = [
+          {
+            id: "term-explicit-active",
+            user_id: "user-a",
+            name: "Explicit Active Term",
+            starts_on: "2026-01-01",
+            ends_on: "2026-05-01",
+            status: "active",
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+          },
+          {
+            id: "term-date-range-match",
+            user_id: "user-a",
+            name: "Date Range Term",
+            starts_on: "2026-09-01",
+            ends_on: "2026-11-30",
+            status: "planned",
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+          },
+        ];
+        const store = storeWith(client);
+
+        const active = await store.getActiveAcademicTerm("user-a", "2026-09-15");
+        expect(active).not.toBeNull();
+        expect(active?.id).toBe("term-explicit-active");
+        expect(active?.name).toBe("Explicit Active Term");
+      });
+
+      it("falls back to date range when no explicit active status exists", async () => {
+        const client = new FakeSupabaseClient();
+        client.academicTerms = [
+          {
+            id: "term-planned",
+            user_id: "user-a",
+            name: "Planned Fall Term",
+            starts_on: "2026-09-01",
+            ends_on: "2026-11-30",
+            status: "planned",
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+          },
+          {
+            id: "term-completed",
+            user_id: "user-a",
+            name: "Completed Spring Term",
+            starts_on: "2026-01-15",
+            ends_on: "2026-05-15",
+            status: "completed",
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+          },
+        ];
+        const store = storeWith(client);
+
+        const active = await store.getActiveAcademicTerm("user-a", "2026-09-15");
+        expect(active).not.toBeNull();
+        expect(active?.id).toBe("term-planned");
+        expect(active?.name).toBe("Planned Fall Term");
+      });
+
+      it("returns null when neither active status nor date range matches", async () => {
+        const client = new FakeSupabaseClient();
+        client.academicTerms = [
+          {
+            id: "term-summer",
+            user_id: "user-a",
+            name: "Summer Term",
+            starts_on: "2026-06-01",
+            ends_on: "2026-07-31",
+            status: "completed",
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+          },
+          {
+            id: "term-undated",
+            user_id: "user-a",
+            name: "Undated Term",
+            starts_on: null,
+            ends_on: null,
+            status: "planned",
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+          },
+        ];
+        const store = storeWith(client);
+
+        const active = await store.getActiveAcademicTerm("user-a", "2026-09-15");
+        expect(active).toBeNull();
+      });
+    });
+
+    describe("linkStudyCourseToTerm", () => {
+      it("links study course to term when caller owns both", async () => {
+        const client = new FakeSupabaseClient();
+        client.studyCourses = [
+          {
+            id: courseId,
+            user_id: "user-a",
+            code: "CS101",
+            title: "Intro to CS",
+            term_id: null,
+          },
+        ];
+        client.academicTerms = [
+          {
+            id: termId,
+            user_id: "user-a",
+            name: "1 триместр 2026-2027",
+            status: "planned",
+          },
+        ];
+        const store = storeWith(client);
+
+        await store.linkStudyCourseToTerm("user-a", courseId, termId);
+        expect(client.studyCourses[0].term_id).toBe(termId);
+      });
+
+      it("rejects linking when caller does not own the study course", async () => {
+        const client = new FakeSupabaseClient();
+        client.studyCourses = [
+          {
+            id: courseId,
+            user_id: "user-b",
+            code: "CS101",
+            title: "Intro to CS",
+          },
+        ];
+        client.academicTerms = [
+          {
+            id: termId,
+            user_id: "user-a",
+            name: "1 триместр 2026-2027",
+            status: "planned",
+          },
+        ];
+        const store = storeWith(client);
+
+        await expect(
+          store.linkStudyCourseToTerm("user-a", courseId, termId),
+        ).rejects.toThrow("Study course not found");
+      });
+
+      it("rejects linking when caller does not own the academic term", async () => {
+        const client = new FakeSupabaseClient();
+        client.studyCourses = [
+          {
+            id: courseId,
+            user_id: "user-a",
+            code: "CS101",
+            title: "Intro to CS",
+          },
+        ];
+        client.academicTerms = [
+          {
+            id: termId,
+            user_id: "user-b",
+            name: "1 триместр 2026-2027",
+            status: "planned",
+          },
+        ];
+        const store = storeWith(client);
+
+        await expect(
+          store.linkStudyCourseToTerm("user-a", courseId, termId),
+        ).rejects.toThrow("Academic term not found");
+      });
+    });
+  });
 });
+

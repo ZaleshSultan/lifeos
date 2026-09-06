@@ -832,6 +832,43 @@ export function tmaStore(events: string[] = []): LifeOSStore {
     async listAssessmentItems() {
       return [];
     },
+    async createAcademicTerm(userId, input) {
+      return {
+        id: "term-1",
+        userId,
+        name: input.name,
+        institution: input.institution ?? null,
+        program: input.program ?? null,
+        startsOn: input.startsOn ?? null,
+        endsOn: input.endsOn ?? null,
+        timezone: input.timezone ?? null,
+        status: input.status ?? "planned",
+        createdAt: "2026-05-18T10:00:00.000Z",
+        updatedAt: "2026-05-18T10:00:00.000Z",
+      };
+    },
+    async updateAcademicTerm(userId, id, input) {
+      return {
+        id,
+        userId,
+        name: input.name ?? "Term 1",
+        institution: input.institution ?? null,
+        program: input.program ?? null,
+        startsOn: input.startsOn ?? null,
+        endsOn: input.endsOn ?? null,
+        timezone: input.timezone ?? null,
+        status: input.status ?? "planned",
+        createdAt: "2026-05-18T10:00:00.000Z",
+        updatedAt: "2026-05-18T10:00:00.000Z",
+      };
+    },
+    async listAcademicTerms() {
+      return [];
+    },
+    async getActiveAcademicTerm() {
+      return null;
+    },
+    async linkStudyCourseToTerm() {},
     async getFinanceSummary() {
       return {
         capturedSpendCount: 0,

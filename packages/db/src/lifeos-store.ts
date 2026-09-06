@@ -64,6 +64,7 @@ import {
 } from "@lifeos/core";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
+  AcademicTermStatus,
   AssessmentItemStatus,
   Database,
   ExternalSourceStatus,
@@ -137,6 +138,8 @@ type CourseScheduleRow =
   Database["public"]["Tables"]["course_schedules"]["Row"];
 type AssessmentItemRow =
   Database["public"]["Tables"]["assessment_items"]["Row"];
+type AcademicTermRow =
+  Database["public"]["Tables"]["academic_terms"]["Row"];
 
 export interface TelegramUserRecord {
   userId: string;
@@ -305,6 +308,7 @@ export interface StudyCourseRecord {
   code: string;
   title: string;
   term: string | null;
+  termId?: string | null;
   startsOn: string | null;
   endsOn: string | null;
   status: StudyCourseStatus;
@@ -411,6 +415,40 @@ export interface UpdateAssessmentItemInput {
   status?: AssessmentItemStatus;
   notes?: string | null;
   rawJson?: Json;
+}
+
+export interface AcademicTermRecord {
+  id: string;
+  userId: string;
+  name: string;
+  institution: string | null;
+  program: string | null;
+  startsOn: string | null;
+  endsOn: string | null;
+  timezone: string | null;
+  status: AcademicTermStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateAcademicTermInput {
+  name: string;
+  institution?: string | null;
+  program?: string | null;
+  startsOn?: string | null;
+  endsOn?: string | null;
+  timezone?: string | null;
+  status?: AcademicTermStatus;
+}
+
+export interface UpdateAcademicTermInput {
+  name?: string;
+  institution?: string | null;
+  program?: string | null;
+  startsOn?: string | null;
+  endsOn?: string | null;
+  timezone?: string | null;
+  status?: AcademicTermStatus;
 }
 
 export interface SourceRecord {
@@ -1464,6 +1502,25 @@ export interface LifeOSStore {
     userId: string,
     studyCourseId: string,
   ): Promise<AssessmentItemRecord[]>;
+  createAcademicTerm(
+    userId: string,
+    input: CreateAcademicTermInput,
+  ): Promise<AcademicTermRecord>;
+  updateAcademicTerm(
+    userId: string,
+    id: string,
+    input: UpdateAcademicTermInput,
+  ): Promise<AcademicTermRecord>;
+  listAcademicTerms(userId: string): Promise<AcademicTermRecord[]>;
+  getActiveAcademicTerm(
+    userId: string,
+    today: string,
+  ): Promise<AcademicTermRecord | null>;
+  linkStudyCourseToTerm(
+    userId: string,
+    studyCourseId: string,
+    termId: string,
+  ): Promise<void>;
   getFinanceSummary(input: {
     userId: string;
     since: string;
@@ -1830,6 +1887,7 @@ function toStudyCourseRecord(row: StudyCourseRow): StudyCourseRecord {
     code: row.code,
     title: row.title,
     term: row.term,
+    termId: row.term_id ?? null,
     startsOn: row.starts_on,
     endsOn: row.ends_on,
     status: row.status,
@@ -1880,6 +1938,22 @@ function toAssessmentItemRecord(row: AssessmentItemRow): AssessmentItemRecord {
     status: row.status as AssessmentItemStatus,
     notes: row.notes,
     rawJson: row.raw_json,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toAcademicTermRecord(row: AcademicTermRow): AcademicTermRecord {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    name: row.name,
+    institution: row.institution,
+    program: row.program,
+    startsOn: row.starts_on,
+    endsOn: row.ends_on,
+    timezone: row.timezone,
+    status: row.status,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -5927,6 +6001,169 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     }
 
     return (data ?? []).map(toAssessmentItemRecord);
+  }
+
+  private async assertAcademicTermOwnedByUser(
+    userId: string,
+    termId: string,
+  ): Promise<void> {
+    const { data, error } = await this.client
+      .from("academic_terms")
+      .select("id")
+      .eq("id", termId)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to verify academic term owner");
+    }
+
+    if (!data) {
+      throw new Error("Academic term not found");
+    }
+  }
+
+  async createAcademicTerm(
+    userId: string,
+    input: CreateAcademicTermInput,
+  ): Promise<AcademicTermRecord> {
+    const name = input.name.trim();
+    if (!name) {
+      throw new Error("Academic term name is required");
+    }
+
+    if (input.startsOn && input.endsOn && input.endsOn < input.startsOn) {
+      throw new Error("Academic term ends_on cannot be earlier than starts_on");
+    }
+
+    const { data, error } = await this.client
+      .from("academic_terms")
+      .insert({
+        user_id: userId,
+        name,
+        institution: input.institution?.trim() || null,
+        program: input.program?.trim() || null,
+        starts_on: input.startsOn ?? null,
+        ends_on: input.endsOn ?? null,
+        timezone: input.timezone?.trim() || null,
+        status: input.status ?? "planned",
+      })
+      .select("*")
+      .single();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to create academic term");
+    }
+
+    return toAcademicTermRecord(data);
+  }
+
+  async updateAcademicTerm(
+    userId: string,
+    id: string,
+    input: UpdateAcademicTermInput,
+  ): Promise<AcademicTermRecord> {
+    await this.assertAcademicTermOwnedByUser(userId, id);
+
+    const update: Partial<Database["public"]["Tables"]["academic_terms"]["Update"]> = {};
+
+    if (input.name !== undefined) {
+      const name = input.name.trim();
+      if (!name) {
+        throw new Error("Academic term name cannot be blank");
+      }
+      update.name = name;
+    }
+    if (input.institution !== undefined) {
+      update.institution = input.institution?.trim() || null;
+    }
+    if (input.program !== undefined) {
+      update.program = input.program?.trim() || null;
+    }
+    if (input.startsOn !== undefined) {
+      update.starts_on = input.startsOn;
+    }
+    if (input.endsOn !== undefined) {
+      update.ends_on = input.endsOn;
+    }
+    if (input.timezone !== undefined) {
+      update.timezone = input.timezone?.trim() || null;
+    }
+    if (input.status !== undefined) {
+      update.status = input.status;
+    }
+
+    if (update.starts_on && update.ends_on && update.ends_on < update.starts_on) {
+      throw new Error("Academic term ends_on cannot be earlier than starts_on");
+    }
+
+    const { data, error } = await this.client
+      .from("academic_terms")
+      .update(update)
+      .eq("id", id)
+      .eq("user_id", userId)
+      .select("*")
+      .single();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to update academic term");
+    }
+
+    return toAcademicTermRecord(data);
+  }
+
+  async listAcademicTerms(userId: string): Promise<AcademicTermRecord[]> {
+    const { data, error } = await this.client
+      .from("academic_terms")
+      .select("*")
+      .eq("user_id", userId)
+      .order("starts_on", { ascending: false, nullsFirst: false });
+
+    if (error) {
+      throwSupabaseError(error, "Failed to list academic terms");
+    }
+
+    return (data ?? []).map(toAcademicTermRecord);
+  }
+
+  async getActiveAcademicTerm(
+    userId: string,
+    today: string,
+  ): Promise<AcademicTermRecord | null> {
+    const terms = await this.listAcademicTerms(userId);
+    const explicitActive = terms.find((term) => term.status === "active");
+    if (explicitActive) {
+      return explicitActive;
+    }
+
+    const dateRangeMatch = terms.find(
+      (term) =>
+        term.startsOn !== null &&
+        term.endsOn !== null &&
+        term.startsOn <= today &&
+        today <= term.endsOn,
+    );
+
+    return dateRangeMatch ?? null;
+  }
+
+  async linkStudyCourseToTerm(
+    userId: string,
+    studyCourseId: string,
+    termId: string,
+  ): Promise<void> {
+    await this.assertStudyCourseOwnedByUser(userId, studyCourseId);
+    await this.assertAcademicTermOwnedByUser(userId, termId);
+
+    const { error } = await this.client
+      .from("study_courses")
+      .update({ term_id: termId })
+      .eq("id", studyCourseId)
+      .eq("user_id", userId);
+
+    if (error) {
+      throwSupabaseError(error, "Failed to link study course to academic term");
+    }
   }
 
   async getFinanceSummary(input: {
