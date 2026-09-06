@@ -737,6 +737,7 @@ describe("SupabaseLifeOSStore Academic Engine Phase 1", () => {
         endTime: "10:30:00",
         room: "C1.1.200",
         sessionType: "lecture",
+        instructorName: "Досумбеков А.Б.",
       });
 
       expect(created.studyCourseId).toBe(courseId);
@@ -744,6 +745,7 @@ describe("SupabaseLifeOSStore Academic Engine Phase 1", () => {
       expect(created.startTime).toBe("09:00:00");
       expect(created.endTime).toBe("10:30:00");
       expect(created.room).toBe("C1.1.200");
+      expect(created.instructorName).toBe("Досумбеков А.Б.");
       expect(created.sessionType).toBe("lecture");
 
       const schedules = await store.listCourseSchedules("user-a", courseId);

@@ -997,6 +997,7 @@ class FakeStore implements LifeOSStore {
       endTime: input.endTime,
       room: input.room ?? null,
       sessionType: input.sessionType ?? null,
+      instructorName: input.instructorName ?? null,
       createdAt: "2026-05-18T00:00:00.000Z",
       updatedAt: "2026-05-18T00:00:00.000Z",
     };

@@ -341,6 +341,7 @@ export interface CourseScheduleRecord {
   endTime: string;
   room: string | null;
   sessionType: string | null;
+  instructorName: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -352,6 +353,7 @@ export interface CreateCourseScheduleInput {
   endTime: string;
   room?: string | null;
   sessionType?: string | null;
+  instructorName?: string | null;
 }
 
 export interface AssessmentItemRecord {
@@ -1854,6 +1856,7 @@ function toCourseScheduleRecord(row: CourseScheduleRow): CourseScheduleRecord {
     endTime: row.end_time,
     room: row.room,
     sessionType: row.session_type,
+    instructorName: row.instructor_name,
     createdAt: row.created_at,
     updatedAt: row.updated_at ?? row.created_at,
   };
@@ -5669,6 +5672,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
         end_time: input.endTime,
         room: input.room ?? null,
         session_type: input.sessionType ?? null,
+        instructor_name: input.instructorName ?? null,
       })
       .select("*")
       .single();

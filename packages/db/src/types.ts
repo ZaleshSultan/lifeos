@@ -1828,6 +1828,7 @@ export interface Database {
           end_time: string;
           room: string | null;
           session_type: string | null;
+          instructor_name: string | null;
           created_at: string;
           updated_at: string;
         },
@@ -1839,6 +1840,7 @@ export interface Database {
           end_time: string;
           room?: string | null;
           session_type?: string | null;
+          instructor_name?: string | null;
           created_at?: string;
           updated_at?: string;
         }
