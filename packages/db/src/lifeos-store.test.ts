@@ -1047,7 +1047,9 @@ describe("SupabaseLifeOSStore Academic Engine Phase 1", () => {
           startsOn: "2026-12-01",
           endsOn: "2026-09-01",
         }),
-      ).rejects.toThrow("Academic term ends_on cannot be earlier than starts_on");
+      ).rejects.toThrow(
+        "Academic term ends_on cannot be earlier than starts_on",
+      );
     });
 
     it("rejects updating academic term with blank name", async () => {
@@ -1067,6 +1069,84 @@ describe("SupabaseLifeOSStore Academic Engine Phase 1", () => {
           name: "  ",
         }),
       ).rejects.toThrow("Academic term name cannot be blank");
+    });
+
+    it("rejects updating academic term with both dates passed and out of order", async () => {
+      const client = new FakeSupabaseClient();
+      client.academicTerms = [
+        {
+          id: termId,
+          user_id: "user-a",
+          name: "Valid Term",
+          status: "planned",
+          starts_on: "2026-09-01",
+          ends_on: "2026-12-20",
+        },
+      ];
+      const store = storeWith(client);
+
+      await expect(
+        store.updateAcademicTerm("user-a", termId, {
+          startsOn: "2026-12-01",
+          endsOn: "2026-09-01",
+        }),
+      ).rejects.toThrow(
+        "Academic term ends_on cannot be earlier than starts_on",
+      );
+    });
+
+    it("rejects updating only endsOn to before the term's already-stored startsOn", async () => {
+      // Regression test: updateAcademicTerm's date-order check must
+      // consider the EFFECTIVE result (existing value merged with this
+      // update), not just whichever of the two date fields happen to be
+      // present in this one call. An earlier version of this check only
+      // compared update.starts_on/update.ends_on directly, so updating
+      // only endsOn silently skipped validation (update.starts_on was
+      // undefined) and fell through to a raw Postgres constraint error
+      // instead of this friendly one.
+      const client = new FakeSupabaseClient();
+      client.academicTerms = [
+        {
+          id: termId,
+          user_id: "user-a",
+          name: "Valid Term",
+          status: "planned",
+          starts_on: "2026-09-01",
+          ends_on: "2026-12-20",
+        },
+      ];
+      const store = storeWith(client);
+
+      await expect(
+        store.updateAcademicTerm("user-a", termId, {
+          endsOn: "2026-08-01",
+        }),
+      ).rejects.toThrow(
+        "Academic term ends_on cannot be earlier than starts_on",
+      );
+    });
+
+    it("rejects updating only startsOn to after the term's already-stored endsOn", async () => {
+      const client = new FakeSupabaseClient();
+      client.academicTerms = [
+        {
+          id: termId,
+          user_id: "user-a",
+          name: "Valid Term",
+          status: "planned",
+          starts_on: "2026-09-01",
+          ends_on: "2026-12-20",
+        },
+      ];
+      const store = storeWith(client);
+
+      await expect(
+        store.updateAcademicTerm("user-a", termId, {
+          startsOn: "2027-01-15",
+        }),
+      ).rejects.toThrow(
+        "Academic term ends_on cannot be earlier than starts_on",
+      );
     });
 
     it("rejects updating an academic term the caller does not own", async () => {
@@ -1115,7 +1195,10 @@ describe("SupabaseLifeOSStore Academic Engine Phase 1", () => {
         ];
         const store = storeWith(client);
 
-        const active = await store.getActiveAcademicTerm("user-a", "2026-09-15");
+        const active = await store.getActiveAcademicTerm(
+          "user-a",
+          "2026-09-15",
+        );
         expect(active).not.toBeNull();
         expect(active?.id).toBe("term-explicit-active");
         expect(active?.name).toBe("Explicit Active Term");
@@ -1147,7 +1230,10 @@ describe("SupabaseLifeOSStore Academic Engine Phase 1", () => {
         ];
         const store = storeWith(client);
 
-        const active = await store.getActiveAcademicTerm("user-a", "2026-09-15");
+        const active = await store.getActiveAcademicTerm(
+          "user-a",
+          "2026-09-15",
+        );
         expect(active).not.toBeNull();
         expect(active?.id).toBe("term-planned");
         expect(active?.name).toBe("Planned Fall Term");
@@ -1179,7 +1265,10 @@ describe("SupabaseLifeOSStore Academic Engine Phase 1", () => {
         ];
         const store = storeWith(client);
 
-        const active = await store.getActiveAcademicTerm("user-a", "2026-09-15");
+        const active = await store.getActiveAcademicTerm(
+          "user-a",
+          "2026-09-15",
+        );
         expect(active).toBeNull();
       });
     });
@@ -1262,4 +1351,3 @@ describe("SupabaseLifeOSStore Academic Engine Phase 1", () => {
     });
   });
 });
-

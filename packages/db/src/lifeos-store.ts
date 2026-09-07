@@ -138,8 +138,7 @@ type CourseScheduleRow =
   Database["public"]["Tables"]["course_schedules"]["Row"];
 type AssessmentItemRow =
   Database["public"]["Tables"]["assessment_items"]["Row"];
-type AcademicTermRow =
-  Database["public"]["Tables"]["academic_terms"]["Row"];
+type AcademicTermRow = Database["public"]["Tables"]["academic_terms"]["Row"];
 
 export interface TelegramUserRecord {
   userId: string;
@@ -6023,6 +6022,28 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     }
   }
 
+  private async getAcademicTermOwnedByUser(
+    userId: string,
+    termId: string,
+  ): Promise<AcademicTermRecord> {
+    const { data, error } = await this.client
+      .from("academic_terms")
+      .select("*")
+      .eq("id", termId)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to verify academic term owner");
+    }
+
+    if (!data) {
+      throw new Error("Academic term not found");
+    }
+
+    return toAcademicTermRecord(data);
+  }
+
   async createAcademicTerm(
     userId: string,
     input: CreateAcademicTermInput,
@@ -6063,9 +6084,11 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     id: string,
     input: UpdateAcademicTermInput,
   ): Promise<AcademicTermRecord> {
-    await this.assertAcademicTermOwnedByUser(userId, id);
+    const existing = await this.getAcademicTermOwnedByUser(userId, id);
 
-    const update: Partial<Database["public"]["Tables"]["academic_terms"]["Update"]> = {};
+    const update: Partial<
+      Database["public"]["Tables"]["academic_terms"]["Update"]
+    > = {};
 
     if (input.name !== undefined) {
       const name = input.name.trim();
@@ -6093,7 +6116,21 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       update.status = input.status;
     }
 
-    if (update.starts_on && update.ends_on && update.ends_on < update.starts_on) {
+    // Validate against the EFFECTIVE result (existing value merged with
+    // this update), not just whichever of the two date fields happen to
+    // be present in this particular call. Updating only endsOn to a date
+    // earlier than the term's already-stored startsOn must be rejected
+    // here too, not silently fall through to a raw Postgres constraint
+    // error with no friendly message.
+    const effectiveStartsOn =
+      input.startsOn !== undefined ? input.startsOn : existing.startsOn;
+    const effectiveEndsOn =
+      input.endsOn !== undefined ? input.endsOn : existing.endsOn;
+    if (
+      effectiveStartsOn &&
+      effectiveEndsOn &&
+      effectiveEndsOn < effectiveStartsOn
+    ) {
       throw new Error("Academic term ends_on cannot be earlier than starts_on");
     }
 
