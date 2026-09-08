@@ -66,6 +66,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   AcademicTermStatus,
   AssessmentItemStatus,
+  CourseReadingStatus,
   Database,
   ExternalSourceStatus,
   FinanceBudgetPeriod,
@@ -139,6 +140,8 @@ type CourseScheduleRow =
 type AssessmentItemRow =
   Database["public"]["Tables"]["assessment_items"]["Row"];
 type AcademicTermRow = Database["public"]["Tables"]["academic_terms"]["Row"];
+type CourseReadingRow =
+  Database["public"]["Tables"]["course_readings"]["Row"];
 
 export interface TelegramUserRecord {
   userId: string;
@@ -414,6 +417,50 @@ export interface UpdateAssessmentItemInput {
   status?: AssessmentItemStatus;
   notes?: string | null;
   rawJson?: Json;
+}
+
+export interface CourseReadingRecord {
+  id: string;
+  studyCourseId: string;
+  title: string;
+  author: string | null;
+  reference: string | null;
+  sessionDate: string | null;
+  estimatedMinutes: number | null;
+  pages: string | null;
+  required: boolean;
+  status: CourseReadingStatus;
+  notes: string | null;
+  metadata: Json;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateCourseReadingInput {
+  studyCourseId: string;
+  title: string;
+  author?: string | null;
+  reference?: string | null;
+  sessionDate?: string | null;
+  estimatedMinutes?: number | null;
+  pages?: string | null;
+  required?: boolean;
+  status?: CourseReadingStatus;
+  notes?: string | null;
+  metadata?: Json;
+}
+
+export interface UpdateCourseReadingInput {
+  title?: string;
+  author?: string | null;
+  reference?: string | null;
+  sessionDate?: string | null;
+  estimatedMinutes?: number | null;
+  pages?: string | null;
+  required?: boolean;
+  status?: CourseReadingStatus;
+  notes?: string | null;
+  metadata?: Json;
 }
 
 export interface AcademicTermRecord {
@@ -1501,6 +1548,20 @@ export interface LifeOSStore {
     userId: string,
     studyCourseId: string,
   ): Promise<AssessmentItemRecord[]>;
+  createCourseReading(
+    userId: string,
+    input: CreateCourseReadingInput,
+  ): Promise<CourseReadingRecord>;
+  updateCourseReading(
+    userId: string,
+    id: string,
+    input: UpdateCourseReadingInput,
+  ): Promise<CourseReadingRecord>;
+  listCourseReadings(
+    userId: string,
+    studyCourseId: string,
+  ): Promise<CourseReadingRecord[]>;
+  deleteCourseReading(userId: string, id: string): Promise<void>;
   createAcademicTerm(
     userId: string,
     input: CreateAcademicTermInput,
@@ -1953,6 +2014,25 @@ function toAcademicTermRecord(row: AcademicTermRow): AcademicTermRecord {
     endsOn: row.ends_on,
     timezone: row.timezone,
     status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toCourseReadingRecord(row: CourseReadingRow): CourseReadingRecord {
+  return {
+    id: row.id,
+    studyCourseId: row.study_course_id,
+    title: row.title,
+    author: row.author,
+    reference: row.reference,
+    sessionDate: row.session_date,
+    estimatedMinutes: row.estimated_minutes,
+    pages: row.pages,
+    required: row.required,
+    status: row.status as CourseReadingStatus,
+    notes: row.notes,
+    metadata: row.metadata,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -6000,6 +6080,166 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     }
 
     return (data ?? []).map(toAssessmentItemRecord);
+  }
+
+  private async assertCourseReadingOwnedByUser(
+    userId: string,
+    readingId: string,
+  ): Promise<void> {
+    const { data, error } = await this.client
+      .from("course_readings")
+      .select("study_course_id")
+      .eq("id", readingId)
+      .maybeSingle();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to verify course reading owner");
+    }
+
+    if (!data) {
+      throw new Error("Course reading not found");
+    }
+
+    await this.assertStudyCourseOwnedByUser(userId, data.study_course_id);
+  }
+
+  async createCourseReading(
+    userId: string,
+    input: CreateCourseReadingInput,
+  ): Promise<CourseReadingRecord> {
+    await this.assertStudyCourseOwnedByUser(userId, input.studyCourseId);
+
+    const title = input.title.trim();
+    if (!title) {
+      throw new Error("Course reading title is required");
+    }
+
+    if (
+      input.estimatedMinutes !== undefined &&
+      input.estimatedMinutes !== null &&
+      input.estimatedMinutes < 0
+    ) {
+      throw new Error("Course reading estimated_minutes cannot be negative");
+    }
+
+    const { data, error } = await this.client
+      .from("course_readings")
+      .insert({
+        study_course_id: input.studyCourseId,
+        title,
+        author: input.author ?? null,
+        reference: input.reference ?? null,
+        session_date: input.sessionDate ?? null,
+        estimated_minutes: input.estimatedMinutes ?? null,
+        pages: input.pages ?? null,
+        required: input.required ?? true,
+        status: input.status ?? "pending",
+        notes: input.notes ?? null,
+        metadata: input.metadata ?? {},
+      })
+      .select("*")
+      .single();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to create course reading");
+    }
+
+    return toCourseReadingRecord(data);
+  }
+
+  async updateCourseReading(
+    userId: string,
+    id: string,
+    input: UpdateCourseReadingInput,
+  ): Promise<CourseReadingRecord> {
+    await this.assertCourseReadingOwnedByUser(userId, id);
+
+    const update: Database["public"]["Tables"]["course_readings"]["Update"] =
+      {};
+
+    if (input.title !== undefined) {
+      const title = input.title.trim();
+      if (!title) {
+        throw new Error("Course reading title cannot be blank");
+      }
+      update.title = title;
+    }
+    if (input.author !== undefined) {
+      update.author = input.author;
+    }
+    if (input.reference !== undefined) {
+      update.reference = input.reference;
+    }
+    if (input.sessionDate !== undefined) {
+      update.session_date = input.sessionDate;
+    }
+    if (input.estimatedMinutes !== undefined) {
+      if (input.estimatedMinutes !== null && input.estimatedMinutes < 0) {
+        throw new Error("Course reading estimated_minutes cannot be negative");
+      }
+      update.estimated_minutes = input.estimatedMinutes;
+    }
+    if (input.pages !== undefined) {
+      update.pages = input.pages;
+    }
+    if (input.required !== undefined) {
+      update.required = input.required;
+    }
+    if (input.status !== undefined) {
+      update.status = input.status;
+    }
+    if (input.notes !== undefined) {
+      update.notes = input.notes;
+    }
+    if (input.metadata !== undefined) {
+      update.metadata = input.metadata;
+    }
+
+    const { data, error } = await this.client
+      .from("course_readings")
+      .update(update)
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to update course reading");
+    }
+
+    return toCourseReadingRecord(data);
+  }
+
+  async listCourseReadings(
+    userId: string,
+    studyCourseId: string,
+  ): Promise<CourseReadingRecord[]> {
+    await this.assertStudyCourseOwnedByUser(userId, studyCourseId);
+
+    const { data, error } = await this.client
+      .from("course_readings")
+      .select("*")
+      .eq("study_course_id", studyCourseId)
+      .order("session_date", { ascending: true, nullsFirst: false })
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      throwSupabaseError(error, "Failed to list course readings");
+    }
+
+    return (data ?? []).map(toCourseReadingRecord);
+  }
+
+  async deleteCourseReading(userId: string, id: string): Promise<void> {
+    await this.assertCourseReadingOwnedByUser(userId, id);
+
+    const { error } = await this.client
+      .from("course_readings")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+      throwSupabaseError(error, "Failed to delete course reading");
+    }
   }
 
   private async assertAcademicTermOwnedByUser(

@@ -1700,6 +1700,20 @@ class FakeStore implements LifeOSStore {
   }
 
   async updateBudgetLimit(): Promise<void> {}
+
+  async createCourseReading(): Promise<never> {
+    throw new Error("not implemented");
+  }
+
+  async updateCourseReading(): Promise<never> {
+    throw new Error("not implemented");
+  }
+
+  async listCourseReadings(): Promise<[]> {
+    return [];
+  }
+
+  async deleteCourseReading(): Promise<void> {}
 }
 
 function update(text: string): TelegramUpdate {

@@ -103,6 +103,8 @@ export type AcademicTermStatus =
   | "completed"
   | "archived";
 
+export type CourseReadingStatus = "pending" | "completed" | "skipped";
+
 export type HealthEntrySource = "manual" | "telegram" | "import" | "automation";
 
 export type MedicationLogStatus = "planned" | "taken" | "skipped";
@@ -1917,6 +1919,40 @@ export interface Database {
           ends_on?: string | null;
           timezone?: string | null;
           status?: AcademicTermStatus;
+          created_at?: string;
+          updated_at?: string;
+        }
+      >;
+      course_readings: TableDefinition<
+        {
+          id: string;
+          study_course_id: string;
+          title: string;
+          author: string | null;
+          reference: string | null;
+          session_date: string | null;
+          estimated_minutes: number | null;
+          pages: string | null;
+          required: boolean;
+          status: CourseReadingStatus;
+          notes: string | null;
+          metadata: Json;
+          created_at: string;
+          updated_at: string;
+        },
+        {
+          id?: string;
+          study_course_id: string;
+          title: string;
+          author?: string | null;
+          reference?: string | null;
+          session_date?: string | null;
+          estimated_minutes?: number | null;
+          pages?: string | null;
+          required?: boolean;
+          status?: CourseReadingStatus;
+          notes?: string | null;
+          metadata?: Json;
           created_at?: string;
           updated_at?: string;
         }

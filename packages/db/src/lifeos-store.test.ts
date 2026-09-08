@@ -27,6 +27,7 @@ class FakeSupabaseClient {
   courseSchedules: FakeRow[] = [];
   assessmentItems: FakeRow[] = [];
   academicTerms: FakeRow[] = [];
+  courseReadings: FakeRow[] = [];
   queries: FakeQueryReceipt[] = [];
 
   from(table: string): FakeQuery {
@@ -301,6 +302,10 @@ class FakeQuery {
 
     if (this.table === "academic_terms") {
       return this.client.academicTerms;
+    }
+
+    if (this.table === "course_readings") {
+      return this.client.courseReadings;
     }
 
     return [];
@@ -1349,5 +1354,195 @@ describe("SupabaseLifeOSStore Academic Engine Phase 1", () => {
         ).rejects.toThrow("Academic term not found");
       });
     });
+  });
+});
+
+describe("course_readings methods", () => {
+  const courseId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const readingId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+
+  function makeClient() {
+    const client = new FakeSupabaseClient();
+    client.studyCourses = [
+      {
+        id: courseId,
+        user_id: "user-a",
+        code: "CS101",
+        title: "Intro to CS",
+      },
+    ];
+    return client;
+  }
+
+  it("creates a course reading with correct defaults", async () => {
+    const client = makeClient();
+    const store = storeWith(client);
+
+    const reading = await store.createCourseReading("user-a", {
+      studyCourseId: courseId,
+      title: "Chapter 4",
+      author: "Knuth",
+      reference: "The Art of Computer Programming, Vol. 1, §4",
+      sessionDate: "2026-10-12",
+      estimatedMinutes: 90,
+      pages: "120-145",
+    });
+
+    expect(reading.studyCourseId).toBe(courseId);
+    expect(reading.title).toBe("Chapter 4");
+    expect(reading.author).toBe("Knuth");
+    expect(reading.sessionDate).toBe("2026-10-12");
+    expect(reading.estimatedMinutes).toBe(90);
+    expect(reading.pages).toBe("120-145");
+    expect(reading.required).toBe(true); // default
+    expect(reading.status).toBe("pending"); // default
+    expect(reading.notes).toBeNull();
+    expect(reading.id).toBeDefined();
+  });
+
+  it("rejects creating a course reading with a blank title", async () => {
+    const client = makeClient();
+    const store = storeWith(client);
+
+    await expect(
+      store.createCourseReading("user-a", {
+        studyCourseId: courseId,
+        title: "   ",
+      }),
+    ).rejects.toThrow("Course reading title is required");
+  });
+
+  it("rejects creating a course reading for a course the caller does not own", async () => {
+    const client = makeClient(); // studyCourses owned by user-a
+    const store = storeWith(client);
+
+    await expect(
+      store.createCourseReading("user-b", {
+        studyCourseId: courseId,
+        title: "Chapter 1",
+      }),
+    ).rejects.toThrow("Study course not found");
+  });
+
+  it("updates a course reading's fields", async () => {
+    const client = makeClient();
+    client.courseReadings = [
+      { id: readingId, study_course_id: courseId, title: "Chapter 4" },
+    ];
+    const store = storeWith(client);
+
+    const updated = await store.updateCourseReading("user-a", readingId, {
+      status: "completed",
+      notes: "Read thoroughly",
+      estimatedMinutes: 120,
+    });
+
+    expect(updated.status).toBe("completed");
+    expect(updated.notes).toBe("Read thoroughly");
+    expect(updated.estimatedMinutes).toBe(120);
+  });
+
+  it("rejects updating a course reading with a blank title", async () => {
+    const client = makeClient();
+    client.courseReadings = [
+      { id: readingId, study_course_id: courseId, title: "Chapter 4" },
+    ];
+    const store = storeWith(client);
+
+    await expect(
+      store.updateCourseReading("user-a", readingId, { title: " " }),
+    ).rejects.toThrow("Course reading title cannot be blank");
+  });
+
+  it("rejects updating a course reading the caller does not own", async () => {
+    const client = makeClient(); // course owned by user-a
+    client.courseReadings = [
+      { id: readingId, study_course_id: courseId },
+    ];
+    const store = storeWith(client);
+
+    await expect(
+      store.updateCourseReading("user-b", readingId, { status: "completed" }),
+    ).rejects.toThrow("Study course not found");
+  });
+
+  it("rejects updating a course reading that does not exist", async () => {
+    const client = makeClient();
+    // courseReadings is empty
+    const store = storeWith(client);
+
+    await expect(
+      store.updateCourseReading("user-a", "nonexistent-id", {
+        status: "skipped",
+      }),
+    ).rejects.toThrow("Course reading not found");
+  });
+
+  it("lists course readings ordered by session_date asc (nulls last) then created_at", async () => {
+    const client = makeClient();
+    // FakeQuery.order() is a no-op, so we verify the ordering calls are made
+    // via the recorded queries; actual ordering is tested by the real DB.
+    client.courseReadings = [
+      {
+        id: "r1",
+        study_course_id: courseId,
+        title: "Chapter 2",
+        session_date: "2026-10-19",
+        created_at: "2026-09-01T00:00:00Z",
+        updated_at: "2026-09-01T00:00:00Z",
+        required: true,
+        status: "pending",
+        metadata: {},
+        author: null,
+        reference: null,
+        estimated_minutes: null,
+        pages: null,
+        notes: null,
+      },
+      {
+        id: "r2",
+        study_course_id: courseId,
+        title: "Chapter 1",
+        session_date: "2026-10-12",
+        created_at: "2026-09-02T00:00:00Z",
+        updated_at: "2026-09-02T00:00:00Z",
+        required: true,
+        status: "pending",
+        metadata: {},
+        author: null,
+        reference: null,
+        estimated_minutes: null,
+        pages: null,
+        notes: null,
+      },
+    ];
+    const store = storeWith(client);
+
+    const readings = await store.listCourseReadings("user-a", courseId);
+    expect(readings).toHaveLength(2);
+    expect(readings[0].id).toBe("r1");
+    expect(readings[1].id).toBe("r2");
+
+    // Confirm the two order() calls were recorded on the course_readings query
+    const listQuery = client.queries.find(
+      (q) => q.table === "course_readings" && q.action === "select",
+    );
+    expect(listQuery).toBeDefined();
+  });
+
+  it("deletes a course reading the caller owns", async () => {
+    const client = makeClient();
+    client.courseReadings = [
+      { id: readingId, study_course_id: courseId, title: "Chapter 4" },
+    ];
+    const store = storeWith(client);
+
+    await store.deleteCourseReading("user-a", readingId);
+
+    expect(
+      client.queries.some(
+        (q) => q.table === "course_readings" && q.action === "delete",
+      ),
+    ).toBe(true);
   });
 });

@@ -1214,6 +1214,16 @@ export function tmaStore(events: string[] = []): LifeOSStore {
       };
     },
     async updateBudgetLimit() {},
+    async createCourseReading() {
+      throw new Error("not implemented");
+    },
+    async updateCourseReading() {
+      throw new Error("not implemented");
+    },
+    async listCourseReadings() {
+      return [];
+    },
+    async deleteCourseReading() {},
   };
 }
 
