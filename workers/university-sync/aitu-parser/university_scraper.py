@@ -17,9 +17,8 @@ The AITU LMS is a Moodle instance. Two auth strategies are attempted in order:
 KNOWN CONSTRAINTS / FALLBACK
 ==============================
 AITU's Moodle instance may enforce Microsoft Azure AD SSO for authentication.
-When that flow is detected (redirect to login.microsoftonline.com) or when all
-live attempts fail, the scraper falls back to a MOCK_MODE with simulated CS
-course data so the pipeline can be exercised end-to-end without a live session.
+Live failures fail the sync. Simulated data is allowed only with explicit
+AITU_SYNC_MOCK_MODE opt-in; it never populates real course assessments.
 
 The fallback emits a WARNING log entry prefixed with [MOCK] so operators can
 distinguish mock runs from live data in monitoring dashboards.
@@ -56,6 +55,9 @@ from common.lifeos_sync import (  # noqa: E402
     load_dotenv,
     stable_checksum,
 )
+
+from common.academic_sync import load_courses, match_course, sync_assessment, mark_missing_grades, link_course
+from common.moodle_grades import number, parse_report
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 BASE_URL = "https://lms.astanait.edu.kz"
@@ -184,6 +186,42 @@ def _bs4_parse(html: str) -> Any:
         raise SyncError("'beautifulsoup4' library not installed; add it to requirements.txt") from exc
 
 
+def _authenticated_moodle_user_id(html: str, url: str) -> int | None:
+    """Only accept a positive ID from the current response on our Moodle host."""
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme != "https" or parsed.hostname != urllib.parse.urlsplit(BASE_URL).hostname:
+        return None
+    match = re.search(r'"userid"\s*:\s*(\d+)(?=\s*[,}])', html, re.IGNORECASE)
+    if not match:
+        return None
+    user_id = int(match.group(1))
+    return user_id if user_id > 0 else None
+
+
+def _safe_grade_report_error(exc: Exception) -> str:
+    """Keep useful failure details without logging URLs or response contents."""
+    if isinstance(exc, SyncError):
+        message = str(exc)
+        safe_messages = (
+            r"Moodle grade table missing for course \d+; refusing an empty snapshot",
+            r"Unrecognized grade columns for course \d+",
+            r"Ambiguous Moodle grade identity in course \d+",
+            r"Unrecognized Moodle numeric grade",
+            r"Invalid Moodle numeric grade",
+        )
+        if any(re.fullmatch(pattern, message) for pattern in safe_messages):
+            return message
+    # requests HTTPError messages include the full URL, which may carry OAuth
+    # parameters after a redirect. Only expose the numeric status and type.
+    error_type = type(exc).__name__
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", error_type):
+        error_type = "Exception"
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    if isinstance(status, int) and 100 <= status <= 599:
+        return f"HTTP {status} ({error_type})"
+    return error_type
+
+
 # ── Moodle client ─────────────────────────────────────────────────────────────
 class MoodleClient:
     """
@@ -241,9 +279,9 @@ class MoodleClient:
         )
         # Response: {"usergrades": [{"courseid":…, "gradeitems":[…]}]}
         usergrades = data.get("usergrades", [])
-        if usergrades:
-            return usergrades[0].get("gradeitems", [])
-        return []
+        if not usergrades or "gradeitems" not in usergrades[0]:
+            raise SyncError(f"Moodle WS grade report missing for course {course_id}")
+        return usergrades[0]["gradeitems"]
 
     def fetch_via_ws(self) -> list[dict[str, Any]]:
         """Fetch all grade items for enrolled courses using the WS API."""
@@ -253,30 +291,24 @@ class MoodleClient:
         for course in courses:
             cid = int(course["id"])
             ctitle = str(course.get("fullname") or course.get("shortname") or f"course_{cid}")
-            try:
-                items = self._ws_get_grade_items(cid, user_id)
-            except SyncError as exc:
-                logging.warning("WS grade fetch failed for course %s: %s", ctitle, exc)
-                continue
+            items = self._ws_get_grade_items(cid, user_id)
             for item in items:
                 itype = str(item.get("itemtype", ""))
                 imodule = str(item.get("itemmodule") or "")
                 iname = str(item.get("itemname") or ctitle)
-                # Skip course total rows (itemtype == "course")
-                if itype == "course":
+                # Aggregates are not individual assessments.
+                if itype in {"course", "category"}:
                     continue
                 grade_raw = item.get("graderaw")
                 grade_max = item.get("grademax")
-                if grade_raw is None or grade_max is None:
-                    continue
                 records.append({
                     "course_id": str(cid),
                     "course_title": ctitle,
                     "item_id": str(item.get("id", slugify(iname))),
                     "title": iname,
                     "record_type": classify_record_type(iname),
-                    "score": float(grade_raw),
-                    "max_score": float(grade_max),
+                    "score": number(grade_raw),
+                    "max_score": number(grade_max),
                     "raw": item,
                 })
         return records
@@ -305,6 +337,8 @@ class MoodleClient:
         parse that form's hidden inputs and POST them ourselves — the same
         submission a real browser's JS would have performed instantly.
         """
+        self._session = None
+        self._moodle_user_id = None
         if not self._sso_cookie:
             return False
 
@@ -358,16 +392,16 @@ class MoodleClient:
 
                 break
 
-            m = re.search(r'"userid"\s*:\s*(\d+)', r.text, re.IGNORECASE)
-            if not m:
+            user_id = _authenticated_moodle_user_id(r.text, r.url)
+            if user_id is None:
                 logging.warning(
                     "SSO cookie login did not yield a real Moodle session "
-                    "(no userid found). The ESTSAUTHPERSISTENT cookie may have "
-                    "expired — re-copy a fresh value from a signed-in browser."
+                    "(no positive userid on the Moodle host). The SSO session "
+                    "may have expired or require interactive sign-in."
                 )
                 return False
 
-            self._moodle_user_id = int(m.group(1))
+            self._moodle_user_id = user_id
             self._session = session
             logging.info(
                 "SSO cookie login succeeded (user_id=%s).", self._moodle_user_id
@@ -388,6 +422,8 @@ class MoodleClient:
           - Wrong credentials → returns False
           - Network error → raises SyncError
         """
+        self._session = None
+        self._moodle_user_id = None
         session = _requests_session()
         try:
             # Step 1: GET the login page to extract logintoken (Moodle CSRF token)
@@ -423,11 +459,8 @@ class MoodleClient:
                 return False
 
             # Try to extract Moodle user id from the page JS (used for grade report URL)
-            m = re.search(r'"userid"\s*:\s*(\d+)', r2.text, re.IGNORECASE)
-            if m:
-                self._moodle_user_id = int(m.group(1))
-
-            if self._moodle_user_id is None:
+            user_id = _authenticated_moodle_user_id(r2.text, r2.url)
+            if user_id is None:
                 # We didn't land on the visible "wrong credentials" page, but we
                 # also never got a real session (no userid in the response). This
                 # happens on institutions where the native form silently accepts
@@ -437,12 +470,13 @@ class MoodleClient:
                 # empty sync (0 courses, sync_run marked success) instead of a
                 # real, surfaced failure.
                 logging.warning(
-                    "Moodle form login did not return a real session (no userid "
-                    "found). This account may be SSO/OpenID-Connect-only with no "
+                    "Moodle form login did not return a real session (no positive "
+                    "userid on the Moodle host). This account may be SSO/OpenID-Connect-only with no "
                     "native Moodle password; a UNIVERSITY_WS_TOKEN is required."
                 )
                 return False
 
+            self._moodle_user_id = user_id
             self._session = session
             logging.info("Moodle session login succeeded (user_id=%s).", self._moodle_user_id)
             return True
@@ -456,6 +490,7 @@ class MoodleClient:
         Returns list of (course_id, course_title).
         """
         r = self._session.get(MY_COURSES_URL, timeout=REQUEST_TIMEOUT)
+        r.raise_for_status()
         soup = _bs4_parse(r.text)
         results: list[tuple[int, str]] = []
         # Moodle renders course links as  /course/view.php?id=NNN
@@ -486,79 +521,28 @@ class MoodleClient:
             params["userid"] = self._moodle_user_id
         url = GRADE_REPORT_URL + "?" + urllib.parse.urlencode(params)
         r = self._session.get(url, timeout=REQUEST_TIMEOUT)
+        r.raise_for_status()
         soup = _bs4_parse(r.text)
 
-        records: list[dict[str, Any]] = []
-        # Moodle grade report tables have class "generaltable" or contain "user-grade"
-        table = soup.find(
-            "table",
-            class_=lambda c: c and ("generaltable" in c or "user-grade" in c),
-        )
-        if not table:
-            logging.debug("No grade table found for course %s (id=%d).", course_title, course_id)
-            return records
-
-        rows = table.find_all("tr")
-        for row in rows:
-            cells = row.find_all("td")
-            if len(cells) < 2:
-                continue
-            item_name_cell = cells[0]
-            grade_cell = cells[1]
-
-            item_name = item_name_cell.get_text(separator=" ", strip=True)
-            grade_raw = grade_cell.get_text(strip=True)
-
-            # Skip header rows and course total rows
-            if not item_name or item_name.lower() in ("course total", "итого"):
-                continue
-
-            # Parse "score / max" from grade cell (e.g. "8.50 / 10.00")
-            score_match = re.search(r"([\d.]+)\s*/\s*([\d.]+)", grade_raw)
-            if not score_match:
-                # Try a bare number and assume max from aria or skip
-                bare_match = re.search(r"^([\d.]+)$", grade_raw.strip())
-                if not bare_match:
-                    continue
-                score = float(bare_match.group(1))
-                max_score = 100.0  # Default when max is not shown
-            else:
-                score = float(score_match.group(1))
-                max_score = float(score_match.group(2))
-
-            if max_score <= 0:
-                continue
-
-            records.append({
-                "course_id": str(course_id),
-                "course_title": course_title,
-                "item_id": slugify(item_name),
-                "title": item_name,
-                "record_type": classify_record_type(item_name),
-                "score": score,
-                "max_score": max_score,
-                "raw": {
-                    "course_id": course_id,
-                    "course_title": course_title,
-                    "item_name": item_name,
-                    "grade_cell_text": grade_raw,
-                },
-            })
+        records = parse_report(soup, course_id, course_title)
+        for record in records:
+            record["record_type"] = classify_record_type(record["title"])
         return records
 
     def fetch_via_scrape(self) -> list[dict[str, Any]]:
         """Fetch grade records by HTML scraping after session login."""
         enrolled = self._scrape_enrolled_course_ids()
         if not enrolled:
-            logging.warning("No enrolled courses found via HTML scraping.")
-            return []
+            raise SyncError("No enrolled courses visible in HTML; refusing an unverified empty snapshot. Use a WS token if courses load dynamically.")
         all_records: list[dict[str, Any]] = []
         for cid, ctitle in enrolled:
             try:
-                records = self._scrape_grade_report(cid, ctitle)
-                all_records.extend(records)
+                all_records.extend(self._scrape_grade_report(cid, ctitle))
             except Exception as exc:
-                logging.warning("Grade scrape failed for course %s (id=%d): %s", ctitle, cid, exc)
+                raise SyncError(
+                    f"Incomplete Moodle snapshot: course {cid} failed: "
+                    f"{_safe_grade_report_error(exc)}"
+                ) from None
         return all_records
 
     # ── Strategy 3: Mock ──────────────────────────────────────────────────────
@@ -586,6 +570,8 @@ class MoodleClient:
         Returns a flat list of records, each containing:
           course_id, course_title, item_id, title, record_type, score, max_score, raw
         """
+        self.is_mocked = False
+        self._mock_reason = ""
         # Strategy 1: Web Services API token
         if self._ws_token:
             try:
@@ -601,26 +587,32 @@ class MoodleClient:
         # real session (see _form_login's userid check).
         if self._sso_cookie:
             try:
-                if self._sso_cookie_login():
-                    records = self.fetch_via_scrape()
-                    logging.info(
-                        "SSO cookie + HTML scrape: fetched %d grade records.",
-                        len(records),
-                    )
-                    return records
+                logged_in = self._sso_cookie_login()
             except SyncError as exc:
+                logged_in = False
                 logging.warning(
                     "SSO cookie login failed (%s). Falling back to form login.", exc
                 )
+            if logged_in:
+                # A failed report after successful authentication is a data
+                # fetch failure, not a reason to discard this session or mock.
+                records = self.fetch_via_scrape()
+                logging.info(
+                    "SSO cookie + HTML scrape: fetched %d grade records.",
+                    len(records),
+                )
+                return records
 
         # Strategy 3: Form login + HTML scrape
         try:
-            if self._form_login():
-                records = self.fetch_via_scrape()
-                logging.info("HTML scrape: fetched %d grade records.", len(records))
-                return records
+            logged_in = self._form_login()
         except SyncError as exc:
-            logging.warning("Session scrape failed (%s). Falling back to mock mode.", exc)
+            logged_in = False
+            logging.warning("Moodle form login failed (%s).", exc)
+        if logged_in:
+            records = self.fetch_via_scrape()
+            logging.info("HTML scrape: fetched %d grade records.", len(records))
+            return records
 
         # Strategy 4: Mock fallback — only if explicitly allowed. A live sync
         # failure must surface as a failed sync_run, never as silent mock
@@ -655,30 +647,36 @@ def sync_grades(
     is_mocked: bool,
     run_id: str | None = None,
 ) -> SyncStats:
-    """Write scraped grade records into source_events and academic_records."""
+    """Write source/legacy records and matched course assessments."""
     if run_id is None:
         source = db.ensure_source("university_platform", "university", "University Platform")
         run_id = db.start_sync_run(source)
     stats = SyncStats(seen=len(records))
 
     try:
+        if db.settings.user_id != settings.base.user_id:
+            raise SyncError("Moodle sync user scope mismatch")
         seen_external_ids: set[str] = set()
+        courses = load_courses(db) if records and not is_mocked else []
+        unmatched: set[str] = set()
 
         for rec in records:
-            course_slug = slugify(rec.get("course_title", rec.get("course_id", "unknown")))
-            item_slug = slugify(rec.get("title", rec.get("item_id", "unknown")))
-            external_id = f"academic:grade:{course_slug}:{item_slug}"
+            namespace = "moodle_mock" if is_mocked else "moodle"
+            external_id = f"academic:{namespace}:{rec['course_id']}:{rec['item_id']}"
+            if external_id in seen_external_ids:
+                raise SyncError("Duplicate Moodle grade identity in snapshot")
             seen_external_ids.add(external_id)
 
             course_title = rec.get("course_title", "Unknown Course")
             item_title = rec.get("title", "Grade Item")
             record_type = rec.get("record_type", "assignment")
-            score = float(rec.get("score") or 0.0)
-            max_score = float(rec.get("max_score") or 100.0)
-            percentage = (score / max_score * 100.0) if max_score > 0 else 0.0
+            score = number(rec.get("score"))
+            max_score = number(rec.get("max_score"))
+            percentage = score / max_score * 100.0 if score is not None and max_score is not None and max_score > 0 else None
+            rec = {**rec, "score": score, "max_score": max_score}
 
             raw_json: dict[str, Any] = dict(rec.get("raw") or rec)
-            raw_json["_is_mocked"] = is_mocked
+            raw_json.update({"_is_mocked": is_mocked, "moodle_course_id": str(rec["course_id"]), "moodle_item_id": str(rec["item_id"])})
 
             # ── 1. Stage into source_events ───────────────────────────────────
             event_dict: dict[str, Any] = {
@@ -719,7 +717,7 @@ def sync_grades(
                 "title": item_title,
                 "score": score,
                 "max_score": max_score,
-                "percentage": round(percentage, 4),
+                "percentage": round(percentage, 4) if percentage is not None else None,
                 "raw_json": raw_json,
             }
 
@@ -727,13 +725,22 @@ def sync_grades(
                 db.request(
                     "PATCH",
                     "academic_records",
-                    query={"id": f"eq.{existing[0]['id']}"},
+                    query={"id": f"eq.{existing[0]['id']}", "user_id": f"eq.{settings.base.user_id}"},
                     body=academic_payload,
                 )
             else:
                 db.request("POST", "academic_records", body=academic_payload)
 
-        stats.missing = db.mark_missing("university_platform", seen_external_ids)
+            if not is_mocked:
+                course = match_course(courses, settings.base.user_id, rec)
+                if course:
+                    sync_assessment(db, course, rec, external_id, raw_json)
+                elif str(rec["course_id"]) not in unmatched:
+                    unmatched.add(str(rec["course_id"]))
+                    logging.warning("No unambiguous study course for moodle:%s (%s); grade retained in academic_records. Use link-course.", rec["course_id"], course_title)
+
+        if not is_mocked:
+            stats.missing = mark_missing_grades(db, seen_external_ids, ("academic:moodle:", "academic:grade:"))
         db.finish_sync_run(run_id, "success", stats)
         logging.info(
             "university_sync done seen=%d created=%d updated=%d missing=%d reminders_created=%d",
@@ -764,7 +771,11 @@ def sync_once(settings: Settings) -> SyncStats:
         db.finish_sync_run(run_id, "failed", SyncStats(), str(exc))
         raise
 
-    mode = db.get_reminder_mode()
+    try:
+        mode = db.get_reminder_mode()
+    except Exception as exc:
+        db.finish_sync_run(run_id, "failed", SyncStats(), str(exc))
+        raise
     return sync_grades(db, settings, records, mode, moodle.is_mocked, run_id=run_id)
 
 
@@ -806,7 +817,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--env-file", type=Path, metavar="PATH",
                         help="Path to a .env file (default: .env next to this script)")
-    parser.add_argument("command", choices=("status", "sync-once", "run-loop"))
+    parser.add_argument("command", choices=("status", "sync-once", "run-loop", "list-courses", "link-course"))
+    parser.add_argument("--moodle-course-id", type=int)
+    parser.add_argument("--course-code")
     return parser.parse_args(argv)
 
 
@@ -819,7 +832,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     try:
         settings = load_settings(args.env_file)
-        if args.command == "status":
+        if args.command == "list-courses":
+            print(json.dumps(load_courses(SupabaseRestClient(settings.base)), ensure_ascii=False, indent=2))
+        elif args.command == "link-course":
+            if args.moodle_course_id is None or not args.course_code:
+                raise SyncError("link-course requires --moodle-course-id and --course-code")
+            link_course(SupabaseRestClient(settings.base), args.moodle_course_id, args.course_code)
+        elif args.command == "status":
             status_cmd(settings)
         elif args.command == "sync-once":
             stats = sync_once(settings)

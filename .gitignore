@@ -41,6 +41,7 @@ replay_pid*.log
 !debug.keystore
 apps/*/build/
 apps/*/.gradle/
+apps/*/.kotlin/
 
 # Secrets
 secrets/
@@ -62,4 +63,3 @@ supabase/.temp/
 
 # Local downloaded skill repositories
 external-skills/
-

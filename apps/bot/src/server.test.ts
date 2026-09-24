@@ -1,4 +1,5 @@
 import type { AddressInfo } from "node:net";
+import { WorkoutStateError } from "@lifeos/db";
 import { createHmac } from "node:crypto";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
@@ -187,6 +188,7 @@ function workoutSummary(overrides: Partial<CurrentWorkoutSummary> = {}) {
             index: 1,
             targetReps: 10,
             targetWeightKg: null,
+              restSeconds: 90,
             completed: false,
             completedAt: null,
           },
@@ -431,6 +433,10 @@ export function tmaStore(events: string[] = []): LifeOSStore {
         created: false,
       };
     },
+    async getWorkoutProgram() { return null; },
+    async saveWorkoutProgram(_userId, program) { return program; },
+    async getWorkoutHistory() { return []; },
+    async updateWorkoutSet() { return workoutSummary(); },
     async getCurrentWorkout() {
       events.push("getCurrentWorkout");
       return workoutSummary();
@@ -451,6 +457,7 @@ export function tmaStore(events: string[] = []): LifeOSStore {
                 index: 1,
                 targetReps: 10,
                 targetWeightKg: null,
+              restSeconds: 90,
                 completed: true,
                 completedAt: "2026-05-18T10:05:00.000Z",
               },
@@ -577,6 +584,12 @@ export function tmaStore(events: string[] = []): LifeOSStore {
         nextTransition: null,
         academicRecords: [],
       } satisfies TmaAcademicSummary;
+    },
+    async getTmaStudySummary(_userId, timezone) {
+      return { timezone, courses: [], records: [] };
+    },
+    async saveStudyCalculator(): Promise<never> {
+      throw new Error("Not used by general server tests");
     },
     async upsertExternalSource(userId, source) {
       return {
@@ -3339,15 +3352,15 @@ describe("bot server", () => {
 
     const port = await listen(server);
     const completeResponse = await fetch(
-      `http://127.0.0.1:${port}/api/tma/workout/sets/set-1/complete`,
+      `http://127.0.0.1:${port}/api/tma/workout/sets/11111111-1111-4111-8111-111111111111/complete`,
       { method: "POST" },
     );
     const undoResponse = await fetch(
-      `http://127.0.0.1:${port}/api/tma/workout/sets/set-1/undo`,
+      `http://127.0.0.1:${port}/api/tma/workout/sets/11111111-1111-4111-8111-111111111111/undo`,
       { method: "POST" },
     );
     const workoutResponse = await fetch(
-      `http://127.0.0.1:${port}/api/tma/workout/workout-1/complete`,
+      `http://127.0.0.1:${port}/api/tma/workout/22222222-2222-4222-8222-222222222222/complete`,
       { method: "POST" },
     );
 
@@ -3359,6 +3372,77 @@ describe("bot server", () => {
       "undoWorkoutSet",
       "completeWorkout",
     ]);
+  });
+
+  it("saves and starts a named workout day scoped to the authenticated user", async () => {
+    const store = tmaStore();
+    const program = { title: "План", days: [{ id: "legs", title: "Ноги", exercises: [{ name: "Приседания", sets: [{ reps: 8, weightKg: 40, restSeconds: 120 }] }] }] };
+    store.saveWorkoutProgram = vi.fn(async (_userId, value) => value);
+    store.getWorkoutProgram = vi.fn(async () => program);
+    store.getOrCreateCurrentWorkout = vi.fn(store.getOrCreateCurrentWorkout);
+    const server = createBotServer({ config: { lifeosDefaultUserId: "user-1", allowUnsafeTmaDevAuth: true }, store });
+    servers.push(server);
+    const port = await listen(server);
+    const saved = await fetch(`http://127.0.0.1:${port}/api/tma/workout/program`, {
+      method: "PUT", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...program, userId: "user-2" }),
+    });
+    expect(saved.status).toBe(200);
+    expect(saved.headers.get("access-control-allow-methods")).toContain("PUT");
+    expect(store.saveWorkoutProgram).toHaveBeenCalledWith("user-1", program);
+    const started = await fetch(`http://127.0.0.1:${port}/api/tma/workout/start`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ programDayId: "legs" }),
+    });
+    expect(started.status).toBe(200);
+    expect(store.getWorkoutProgram).toHaveBeenCalledWith("user-1");
+    expect(store.getOrCreateCurrentWorkout).toHaveBeenCalledWith(expect.objectContaining({
+      userId: "user-1", title: "Ноги", manualPlan: [{ ...program.days[0].exercises[0], category: "strength", equipment: "unspecified" }],
+    }));
+    const missing = await fetch(`http://127.0.0.1:${port}/api/tma/workout/start`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ programDayId: "unknown" }),
+    });
+    expect(missing.status).toBe(404);
+    expect(store.getOrCreateCurrentWorkout).toHaveBeenCalledTimes(1);
+  });
+
+  it("validates set edits and reports completed sessions without mutating another user", async () => {
+    const store = tmaStore();
+    store.updateWorkoutSet = vi.fn(async () => workoutSummary());
+    store.getWorkoutHistory = vi.fn(async () => [{ ...workoutSummary({ mode: "completed" }), endedAt: "2026-09-24T11:00:00Z", volumeKg: 320 }]);
+    const server = createBotServer({ config: { lifeosDefaultUserId: "user-1", allowUnsafeTmaDevAuth: true }, store });
+    servers.push(server);
+    const port = await listen(server);
+    const endpoint = `http://127.0.0.1:${port}/api/tma/workout/sets/11111111-1111-4111-8111-111111111111`;
+    const request = (body: unknown) => fetch(endpoint, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    expect((await request({ reps: -1, weightKg: 40, restSeconds: 90 })).status).toBe(400);
+    expect(store.updateWorkoutSet).not.toHaveBeenCalled();
+    expect((await request({ reps: 7, weightKg: 42.5, restSeconds: 0, userId: "user-2" })).status).toBe(200);
+    expect(store.updateWorkoutSet).toHaveBeenCalledWith({ userId: "user-1", setId: "11111111-1111-4111-8111-111111111111", values: { reps: 7, weightKg: 42.5, restSeconds: 0 } });
+    store.updateWorkoutSet = vi.fn(async () => { throw new WorkoutStateError("workout_completed"); });
+    expect((await request({ reps: 7, weightKg: 40, restSeconds: 90 })).status).toBe(409);
+    const history = await fetch(`http://127.0.0.1:${port}/api/tma/workout/history`);
+    expect(history.status).toBe(200);
+    expect(store.getWorkoutHistory).toHaveBeenCalledWith("user-1");
+    await expect(history.json()).resolves.toMatchObject({ data: [{ volumeKg: 320 }] });
+  });
+
+  it("authenticates new workout routes before reading or saving data", async () => {
+    const store = tmaStore();
+    store.getWorkoutProgram = vi.fn(async () => null);
+    store.saveWorkoutProgram = vi.fn(store.saveWorkoutProgram);
+    store.getWorkoutHistory = vi.fn(async () => []);
+    store.updateWorkoutSet = vi.fn(store.updateWorkoutSet);
+    const server = createBotServer({ config: { telegramBotToken: "test-token" }, store });
+    servers.push(server);
+    const port = await listen(server);
+    for (const [method, path] of [["GET", "program"], ["PUT", "program"], ["GET", "history"], ["PATCH", "sets/not-a-uuid"]]) {
+      const result = await fetch(`http://127.0.0.1:${port}/api/tma/workout/${path}`, { method });
+      expect(result.status).toBe(401);
+    }
+    expect(store.getWorkoutProgram).not.toHaveBeenCalled();
+    expect(store.saveWorkoutProgram).not.toHaveBeenCalled();
+    expect(store.getWorkoutHistory).not.toHaveBeenCalled();
+    expect(store.updateWorkoutSet).not.toHaveBeenCalled();
   });
 
   it("completes full lifecycle: budget creation -> receipt upload -> telegram alert", async () => {

@@ -2,8 +2,7 @@ package com.lifeos.healthbridge.api
 
 import com.lifeos.healthbridge.config.BridgeConfig
 import com.lifeos.healthbridge.health.AggregatedHealthDay
-import com.lifeos.healthbridge.model.HealthMetricValue
-import com.lifeos.healthbridge.model.HealthMetricsIngestRequest
+import com.lifeos.healthbridge.model.HealthDayIngestRequest
 import com.lifeos.healthbridge.model.SyncReason
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -16,6 +15,7 @@ class LifeOsApiClient(
     private val json: Json = Json {
         ignoreUnknownKeys = true
         explicitNulls = false
+        encodeDefaults = true
     },
 ) {
     suspend fun postHealthIngest(
@@ -24,15 +24,14 @@ class LifeOsApiClient(
         day: AggregatedHealthDay,
     ) = withContext(Dispatchers.IO) {
         val body = json.encodeToString(
-            HealthMetricsIngestRequest(
+            HealthDayIngestRequest(
                 date = day.date,
+                syncReason = reason.wireValue,
                 timezone = day.timezone,
-                metrics = day.normalizedMetrics(),
-                raw = mapOf(
-                    "sync_reason" to reason.wireValue,
-                    "workout_count" to day.workouts.size.toString(),
-                    "sample_count" to day.samples.size.toString(),
-                ),
+                metrics = day.metrics,
+                workouts = day.workouts,
+                samples = day.samples,
+                missing = day.missing,
             ),
         )
         val connection = (URL("${config.apiBaseUrl}/api/health/ingest").openConnection() as HttpURLConnection)
@@ -59,22 +58,6 @@ class LifeOsApiClient(
             throw LifeOsApiException(status, responseText)
         }
     }
-}
-
-private fun AggregatedHealthDay.normalizedMetrics(): List<HealthMetricValue> = buildList {
-    fun add(type: String, value: Number?, unit: String) {
-        value?.let { add(HealthMetricValue(type = type, value = it.toDouble(), unit = unit)) }
-    }
-
-    add("sleep_minutes", metrics.sleepMinutes, "min")
-    add("sleep_score", metrics.sleepScore, "score")
-    add("resting_heart_rate", metrics.restingHeartRate, "bpm")
-    add("steps", metrics.steps, "steps")
-    add("total_energy_kcal", metrics.caloriesBurned, "kcal")
-    add("active_energy_kcal", metrics.activeEnergyKcal, "kcal")
-    add("workout_minutes", metrics.workoutMinutes, "min")
-    add("weight_kg", metrics.weightKg, "kg")
-    add("spo2_percent", metrics.spo2Avg, "percent")
 }
 
 class LifeOsApiException(

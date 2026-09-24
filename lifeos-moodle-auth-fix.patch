@@ -1,0 +1,178 @@
+diff --git a/workers/university-sync/aitu-parser/university_scraper.py b/workers/university-sync/aitu-parser/university_scraper.py
+index 57a5e3d..64031b3 100644
+--- a/workers/university-sync/aitu-parser/university_scraper.py
++++ b/workers/university-sync/aitu-parser/university_scraper.py
+@@ -186,6 +186,18 @@ def _bs4_parse(html: str) -> Any:
+         raise SyncError("'beautifulsoup4' library not installed; add it to requirements.txt") from exc
+ 
+ 
++def _authenticated_moodle_user_id(html: str, url: str) -> int | None:
++    """Only accept a positive ID from the current response on our Moodle host."""
++    parsed = urllib.parse.urlsplit(url)
++    if parsed.scheme != "https" or parsed.hostname != urllib.parse.urlsplit(BASE_URL).hostname:
++        return None
++    match = re.search(r'"userid"\s*:\s*(\d+)(?=\s*[,}])', html, re.IGNORECASE)
++    if not match:
++        return None
++    user_id = int(match.group(1))
++    return user_id if user_id > 0 else None
++
++
+ # ── Moodle client ─────────────────────────────────────────────────────────────
+ class MoodleClient:
+     """
+@@ -301,6 +313,8 @@ class MoodleClient:
+         parse that form's hidden inputs and POST them ourselves — the same
+         submission a real browser's JS would have performed instantly.
+         """
++        self._session = None
++        self._moodle_user_id = None
+         if not self._sso_cookie:
+             return False
+ 
+@@ -354,16 +368,16 @@ class MoodleClient:
+ 
+                 break
+ 
+-            m = re.search(r'"userid"\s*:\s*(\d+)', r.text, re.IGNORECASE)
+-            if not m:
++            user_id = _authenticated_moodle_user_id(r.text, r.url)
++            if user_id is None:
+                 logging.warning(
+                     "SSO cookie login did not yield a real Moodle session "
+-                    "(no userid found). The ESTSAUTHPERSISTENT cookie may have "
+-                    "expired — re-copy a fresh value from a signed-in browser."
++                    "(no positive userid on the Moodle host). The SSO session "
++                    "may have expired or require interactive sign-in."
+                 )
+                 return False
+ 
+-            self._moodle_user_id = int(m.group(1))
++            self._moodle_user_id = user_id
+             self._session = session
+             logging.info(
+                 "SSO cookie login succeeded (user_id=%s).", self._moodle_user_id
+@@ -384,6 +398,8 @@ class MoodleClient:
+           - Wrong credentials → returns False
+           - Network error → raises SyncError
+         """
++        self._session = None
++        self._moodle_user_id = None
+         session = _requests_session()
+         try:
+             # Step 1: GET the login page to extract logintoken (Moodle CSRF token)
+@@ -419,11 +435,8 @@ class MoodleClient:
+                 return False
+ 
+             # Try to extract Moodle user id from the page JS (used for grade report URL)
+-            m = re.search(r'"userid"\s*:\s*(\d+)', r2.text, re.IGNORECASE)
+-            if m:
+-                self._moodle_user_id = int(m.group(1))
+-
+-            if self._moodle_user_id is None:
++            user_id = _authenticated_moodle_user_id(r2.text, r2.url)
++            if user_id is None:
+                 # We didn't land on the visible "wrong credentials" page, but we
+                 # also never got a real session (no userid in the response). This
+                 # happens on institutions where the native form silently accepts
+@@ -433,12 +446,13 @@ class MoodleClient:
+                 # empty sync (0 courses, sync_run marked success) instead of a
+                 # real, surfaced failure.
+                 logging.warning(
+-                    "Moodle form login did not return a real session (no userid "
+-                    "found). This account may be SSO/OpenID-Connect-only with no "
++                    "Moodle form login did not return a real session (no positive "
++                    "userid on the Moodle host). This account may be SSO/OpenID-Connect-only with no "
+                     "native Moodle password; a UNIVERSITY_WS_TOKEN is required."
+                 )
+                 return False
+ 
++            self._moodle_user_id = user_id
+             self._session = session
+             logging.info("Moodle session login succeeded (user_id=%s).", self._moodle_user_id)
+             return True
+diff --git a/workers/university-sync/aitu-parser/university_scraper_test.py b/workers/university-sync/aitu-parser/university_scraper_test.py
+index 7142ef6..a325361 100644
+--- a/workers/university-sync/aitu-parser/university_scraper_test.py
++++ b/workers/university-sync/aitu-parser/university_scraper_test.py
+@@ -338,6 +338,80 @@ class MoodleClientSsoCookieLoginTest(unittest.TestCase):
+         self.assertEqual(records, [{"course_title": "X"}])
+ 
+ 
++class MoodleLoginIdentityTest(unittest.TestCase):
++    def _client(self):
++        with (
++            patch.dict(os.environ, {**BASE_ENV, "UNIVERSITY_SSO_COOKIE": "test-cookie"}, clear=True),
++            patch.object(university_scraper, "load_dotenv", lambda _: None),
++        ):
++            return university_scraper.MoodleClient(university_scraper.load_settings())
++
++    def _login(self, client, method, html, url=None):
++        session = MagicMock()
++        response = MagicMock()
++        response.url = url or f"{university_scraper.BASE_URL}/my/"
++        response.text = html
++        session.get.return_value = response
++        session.post.return_value = response
++        with patch.object(university_scraper, "_requests_session", return_value=session):
++            return getattr(client, method)()
++
++    def test_both_login_methods_reject_zero_and_missing_userid(self):
++        for method in ("_form_login", "_sso_cookie_login"):
++            for html in (
++                '<script>M.cfg={"userId":0};</script>',
++                '<script>M.cfg={"userId":"0"};</script>',
++                '<script>M.cfg={"userId":-1};</script>',
++                '<html>Sign in</html>',
++            ):
++                with self.subTest(method=method, html=html):
++                    client = self._client()
++                    self.assertFalse(self._login(client, method, html))
++                    self.assertIsNone(client._moodle_user_id)
++                    self.assertIsNone(client._session)
++
++    def test_failed_retry_clears_previous_authenticated_state(self):
++        for method in ("_form_login", "_sso_cookie_login"):
++            with self.subTest(method=method):
++                client = self._client()
++                self.assertTrue(self._login(client, method, '<script>M.cfg={"userId":14505};</script>'))
++                self.assertFalse(self._login(client, method, '<html>Sign in</html>'))
++                self.assertIsNone(client._moodle_user_id)
++                self.assertIsNone(client._session)
++
++    def test_userid_on_another_host_does_not_authenticate_moodle(self):
++        for method in ("_form_login", "_sso_cookie_login"):
++            with self.subTest(method=method):
++                client = self._client()
++                self.assertFalse(self._login(
++                    client, method, '<script>{"userid":14505}</script>',
++                    "https://example.org/redirect",
++                ))
++                self.assertIsNone(client._session)
++
++    def test_form_login_accepts_current_positive_moodle_userid(self):
++        client = self._client()
++        self.assertTrue(self._login(client, "_form_login", '<script>M.cfg={"userId":14505};</script>'))
++        self.assertEqual(client._moodle_user_id, 14505)
++
++    def test_zero_identity_never_reaches_scrape_or_implicit_mock(self):
++        client = self._client()
++        session = MagicMock()
++        response = MagicMock()
++        response.url = f"{university_scraper.BASE_URL}/my/"
++        response.text = '<script>M.cfg={"userId":0};</script>'
++        session.get.return_value = response
++        session.post.return_value = response
++        with (
++            patch.object(university_scraper, "_requests_session", return_value=session),
++            patch.object(client, "fetch_via_scrape") as scrape,
++        ):
++            with self.assertRaises(university_scraper.SyncError):
++                client.fetch_grades()
++        scrape.assert_not_called()
++        self.assertFalse(client.is_mocked)
++
++
+ class GradeReportParsingTest(unittest.TestCase):
+     """Verify that the BS4 grade-table parser handles Moodle HTML correctly."""
+ 

@@ -1,5 +1,7 @@
 # LifeOS Project Audit
 
+**2026-09-24 targeted update:** Moodle parsing and assessment persistence, master LMS worker startup, platform-scoped reconciliation and TMA grade display are now covered by regression tests. Root typecheck now includes web/TMA (ARCH-06); `test:workers`/`test:all` expose the worker suite (ARCH-05). See [scope, verification and remaining work](ACADEMIC_SYNC_COMPLETION.md). Older findings below are historical, not a fresh production audit.
+
 **Date:** 2026-06-11 (original) — **re-verified 2026-08-24**
 **Scope:** UX, security, architecture — based on codebase analysis for Skills integration.
 **Status:** The 2026-06-11 findings below were checked against the actual code and

@@ -17,6 +17,7 @@ import {
 } from "../api/hooks";
 import { recoveryModeLabels, type TmaSessionStatus } from "../api/types";
 import { ErrorPanel, LoadingPanel } from "../components/AsyncState";
+import { AcademicGrades } from "../components/AcademicGrades";
 import { IntegrationStatusCard } from "../components/IntegrationStatusCard";
 import { MetricTile } from "../components/MetricTile";
 import { ProgressRing } from "../components/ProgressRing";
@@ -25,10 +26,15 @@ import { integrationCardsForSession } from "../lib/session-status";
 
 interface HomeScreenProps {
   onOpenWorkout: () => void;
+  onOpenStudy: () => void;
   session: TmaSessionStatus;
 }
 
-export function HomeScreen({ onOpenWorkout, session }: HomeScreenProps) {
+export function HomeScreen({
+  onOpenWorkout,
+  onOpenStudy,
+  session,
+}: HomeScreenProps) {
   const query = useHomeQuery();
   const academicQuery = useAcademicQuery();
   const monthlyReviewQuery = useMonthlyReviewQuery();
@@ -253,6 +259,14 @@ export function HomeScreen({ onOpenWorkout, session }: HomeScreenProps) {
                 </div>
               </div>
             ) : null}
+            <button
+              className="min-h-11 w-full rounded-lg border border-cyan-400/25 bg-cyan-400/10 px-3 py-2 text-sm font-medium text-cyan-200 active:scale-[0.98]"
+              onClick={onOpenStudy}
+              type="button"
+            >
+              Расписание, калькулятор и оценки
+            </button>
+            <AcademicGrades records={academic.academicRecords} />
           </div>
         ) : (
           <p className="text-sm text-zinc-500">Academic data is empty.</p>
@@ -300,7 +314,10 @@ export function HomeScreen({ onOpenWorkout, session }: HomeScreenProps) {
 
       <button
         className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.03] text-sm font-semibold text-zinc-200 active:scale-[0.99]"
-        onClick={() => void query.refetch()}
+        onClick={() => {
+          void query.refetch();
+          void academicQuery.refetch();
+        }}
         type="button"
       >
         <RefreshCw className="h-4 w-4" />

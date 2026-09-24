@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   decryptSecret,
   encryptSecret,
@@ -12,6 +13,9 @@ import {
   applyModeToFocusScoring,
   buildMonthlyReviewMarkdown,
   calculateHealthIngestDaily,
+  healthIngestMetricInputs,
+  isHealthMetricSource,
+  HEALTH_METRIC_TYPES,
   explainModeReason,
   getModeLabel,
   healthModeLabel,
@@ -61,8 +65,15 @@ import {
   type ReceiptParseResult,
   type TmaReceiptDisplayStatus,
   type CurrencyCode,
+  parseWorkoutProgram,
+  parseWorkoutSet,
+  workoutVolumeKg,
+  type WorkoutProgram,
+  type WorkoutProgramSet,
 } from "@lifeos/core";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { StudyCalculatorState } from "../../core/src/study.js";
+import { loadStudyWorkspaceCourses, saveStudyCalculator, type StudyWorkspaceCourse } from "./study-workspace.js";
 import type {
   AcademicTermStatus,
   AssessmentItemStatus,
@@ -140,8 +151,7 @@ type CourseScheduleRow =
 type AssessmentItemRow =
   Database["public"]["Tables"]["assessment_items"]["Row"];
 type AcademicTermRow = Database["public"]["Tables"]["academic_terms"]["Row"];
-type CourseReadingRow =
-  Database["public"]["Tables"]["course_readings"]["Row"];
+type CourseReadingRow = Database["public"]["Tables"]["course_readings"]["Row"];
 
 export interface TelegramUserRecord {
   userId: string;
@@ -715,6 +725,7 @@ export interface WorkoutSetSummary {
   index: number;
   targetReps: number | null;
   targetWeightKg: number | null;
+  restSeconds: number;
   completed: boolean;
   completedAt: string | null;
 }
@@ -736,6 +747,17 @@ export interface CurrentWorkoutSummary {
   totalSets: number;
   restTimerEndsAt: string | null;
   exercises: WorkoutExerciseSummary[];
+}
+
+export interface WorkoutHistorySession extends CurrentWorkoutSummary {
+  endedAt: string;
+  volumeKg: number;
+}
+
+export class WorkoutStateError extends Error {
+  constructor(public readonly code: "workout_not_found" | "workout_completed") {
+    super(code);
+  }
 }
 
 export interface ObsidianSyncStatusSummary {
@@ -1318,6 +1340,12 @@ export interface TmaAcademicSummary {
   academicRecords: AcademicRecord[];
 }
 
+export interface TmaStudySummary {
+  timezone: string;
+  courses: StudyWorkspaceCourse[];
+  records: AcademicRecord[];
+}
+
 export interface LifeOSStore {
   resolveTelegramUser(
     telegramUserId: number,
@@ -1433,6 +1461,14 @@ export interface LifeOSStore {
     userId: string;
     workoutId?: string;
   }): Promise<CurrentWorkoutSummary | null>;
+  getWorkoutProgram(userId: string): Promise<WorkoutProgram | null>;
+  saveWorkoutProgram(userId: string, program: WorkoutProgram): Promise<WorkoutProgram>;
+  getWorkoutHistory(userId: string): Promise<WorkoutHistorySession[]>;
+  updateWorkoutSet(input: {
+    userId: string;
+    setId: string;
+    values: WorkoutProgramSet;
+  }): Promise<CurrentWorkoutSummary>;
   completeWorkoutSet(input: {
     userId: string;
     setId: string;
@@ -1464,6 +1500,8 @@ export interface LifeOSStore {
   getTmaFocusSummary(userId: string): Promise<TmaFocusSummary>;
   getTmaSourcesSummary(userId: string): Promise<TmaSourcesSummary>;
   getTmaAcademicSummary(userId: string): Promise<TmaAcademicSummary>;
+  getTmaStudySummary(userId: string, timezone: string): Promise<TmaStudySummary>;
+  saveStudyCalculator(userId: string, courseId: string, input: unknown): Promise<StudyCalculatorState>;
   upsertExternalSource(
     userId: string,
     source: UpsertExternalSourceInput,
@@ -4577,11 +4615,90 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     return this.buildWorkoutSummary(data);
   }
 
+  async getWorkoutProgram(userId: string): Promise<WorkoutProgram | null> {
+    const { data, error } = await this.client.from("user_settings")
+      .select("settings").eq("user_id", userId).maybeSingle();
+    if (error) throwSupabaseError(error, "Failed to load workout program");
+    const value = jsonObject(data?.settings).workout_program;
+    return value == null ? null : parseWorkoutProgram(value);
+  }
+
+  async saveWorkoutProgram(userId: string, program: WorkoutProgram): Promise<WorkoutProgram> {
+    const parsed = parseWorkoutProgram(program);
+    const { data, error: loadError } = await this.client.from("user_settings")
+      .select("settings").eq("user_id", userId).maybeSingle();
+    if (loadError) throwSupabaseError(loadError, "Failed to load workout settings");
+    const { error } = await this.client.from("user_settings").upsert({
+      user_id: userId,
+      settings: { ...jsonObject(data?.settings), workout_program: parsed as unknown as Json },
+    }, { onConflict: "user_id" });
+    if (error) throwSupabaseError(error, "Failed to save workout program");
+    return parsed;
+  }
+
+  async getWorkoutHistory(userId: string): Promise<WorkoutHistorySession[]> {
+    const { data, error } = await this.client.from("workouts").select("*")
+      .eq("user_id", userId).not("ended_at", "is", null)
+      .order("ended_at", { ascending: false }).limit(50);
+    if (error) throwSupabaseError(error, "Failed to load workout history");
+    if (data.length === 0) return [];
+    const sets: WorkoutSetRow[] = [];
+    for (let offset = 0; ; offset += 500) {
+      const { data: page, error: setError } = await this.client.from("workout_sets")
+        .select("*").eq("user_id", userId).in("workout_id", data.map((workout) => workout.id))
+        .order("id", { ascending: true }).range(offset, offset + 499);
+      if (setError) throwSupabaseError(setError, "Failed to load workout history sets");
+      sets.push(...page);
+      if (page.length < 500) break;
+    }
+    sets.sort((a, b) => a.created_at.localeCompare(b.created_at) || a.set_index - b.set_index);
+    const exerciseIds = [...new Set(sets.map((set) => set.exercise_id).filter(Boolean))] as string[];
+    const exerciseById = await this.loadExercises(userId, exerciseIds);
+    return data.map((row) => {
+      const summary = this.summarizeWorkout(row, sets.filter((set) => set.workout_id === row.id), exerciseById);
+      return {
+        ...summary,
+        endedAt: row.ended_at!,
+        volumeKg: workoutVolumeKg(summary.exercises.flatMap((exercise) => exercise.sets)),
+      };
+    });
+  }
+
+  private async editableWorkoutForSet(userId: string, setId: string): Promise<string> {
+    const { data: set, error: setError } = await this.client.from("workout_sets")
+      .select("workout_id").eq("user_id", userId).eq("id", setId).maybeSingle();
+    if (setError) throwSupabaseError(setError, "Failed to load workout set");
+    if (!set) throw new WorkoutStateError("workout_not_found");
+    const { data: workout, error } = await this.client.from("workouts")
+      .select("id, ended_at").eq("user_id", userId).eq("id", set.workout_id).maybeSingle();
+    if (error) throwSupabaseError(error, "Failed to load workout for editing");
+    if (!workout) throw new WorkoutStateError("workout_not_found");
+    if (workout.ended_at) throw new WorkoutStateError("workout_completed");
+    return workout.id;
+  }
+
+  async updateWorkoutSet(input: {
+    userId: string;
+    setId: string;
+    values: WorkoutProgramSet;
+  }): Promise<CurrentWorkoutSummary> {
+    const values = parseWorkoutSet(input.values);
+    const workoutId = await this.editableWorkoutForSet(input.userId, input.setId);
+    const { error } = await this.client.from("workout_sets").update({
+      reps: values.reps, weight_kg: values.weightKg, rest_seconds: values.restSeconds,
+    }).eq("user_id", input.userId).eq("id", input.setId).eq("workout_id", workoutId);
+    if (error) throwSupabaseError(error, "Failed to update workout set");
+    const workout = await this.getCurrentWorkout({ userId: input.userId, workoutId });
+    if (!workout) throw new WorkoutStateError("workout_not_found");
+    return workout;
+  }
+
   async completeWorkoutSet(input: {
     userId: string;
     setId: string;
     completedAt: string;
   }): Promise<CurrentWorkoutSummary> {
+    await this.editableWorkoutForSet(input.userId, input.setId);
     const { data, error } = await this.client
       .from("workout_sets")
       .update({
@@ -4613,6 +4730,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     userId: string;
     setId: string;
   }): Promise<CurrentWorkoutSummary> {
+    await this.editableWorkoutForSet(input.userId, input.setId);
     const { data, error } = await this.client
       .from("workout_sets")
       .update({
@@ -4647,7 +4765,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
   }): Promise<CurrentWorkoutSummary> {
     const { data: existing, error: existingError } = await this.client
       .from("workouts")
-      .select("id, started_at")
+      .select("id, started_at, ended_at")
       .eq("user_id", input.userId)
       .eq("id", input.workoutId)
       .single();
@@ -4659,10 +4777,11 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       );
     }
 
+    const completedAt = existing.ended_at ?? input.completedAt;
     const durationMinutes = Math.max(
       1,
       Math.ceil(
-        (new Date(input.completedAt).getTime() -
+        (new Date(completedAt).getTime() -
           new Date(existing.started_at).getTime()) /
           60000,
       ),
@@ -4671,7 +4790,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     const { error } = await this.client
       .from("workouts")
       .update({
-        ended_at: input.completedAt,
+        ended_at: completedAt,
         duration_minutes: durationMinutes,
       })
       .eq("user_id", input.userId)
@@ -4693,7 +4812,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     const entity = await this.upsertWorkoutLifeEntity({
       userId: input.userId,
       workout,
-      completedAt: input.completedAt,
+      completedAt,
     });
 
     await this.enqueueObsidianSync({
@@ -4702,7 +4821,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       payload: {
         entityType: "workout",
         workoutId: workout.id,
-        completedAt: input.completedAt,
+        completedAt,
       },
     });
 
@@ -4752,17 +4871,46 @@ export class SupabaseLifeOSStore implements LifeOSStore {
 
   async getTmaHealthSummary(userId: string): Promise<TmaHealthSummary> {
     const today = localDateFor("Asia/Qyzylorda");
-    const [mode, todayMetrics, week, sources, latest] = await Promise.all([
-      this.resolveCurrentMode(userId),
-      this.getHealthMetricDay(userId, today),
-      this.getHealthMetricWeek(userId, today),
-      this.getHealthMetricSources(userId),
-      this.getLatestHealthDaily(userId),
-    ]);
-    const metrics = todayMetrics.metrics;
-    const hasMetrics = Object.keys(metrics).length > 0;
+    const [mode, todayMetrics, week, sources, latest, latestMetric] =
+      await Promise.all([
+        this.resolveCurrentMode(userId),
+        this.getHealthMetricDay(userId, today),
+        this.getHealthMetricWeek(userId, today),
+        this.getHealthMetricSources(userId),
+        this.getLatestHealthDaily(userId, today),
+        this.client
+          .from("health_metrics")
+          .select("metric_date")
+          .eq("user_id", userId)
+          .lte("metric_date", today)
+          .order("metric_date", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+    if (latestMetric.error) {
+      throwSupabaseError(
+        latestMetric.error,
+        "Failed to load latest health metric date",
+      );
+    }
+    const date =
+      Object.keys(todayMetrics.metrics).length > 0
+        ? today
+        : ([latest?.log_date, latestMetric.data?.metric_date]
+            .filter((value): value is string => Boolean(value))
+            .sort()
+            .at(-1) ?? today);
+    const dayMetrics =
+      date === today
+        ? todayMetrics
+        : await this.getHealthMetricDay(userId, date);
+    // Every card and sample count must describe the displayed date.
+    const daily = latest?.log_date === date ? latest : null;
+    const metrics = dayMetrics.metrics;
+    const hasNormalizedMetrics = Object.keys(metrics).length > 0;
+    const hasMetrics = hasNormalizedMetrics || daily !== null;
 
-    if (!hasMetrics && !latest) {
+    if (!hasMetrics) {
       return {
         date: today,
         lifeMode: mode.mode,
@@ -4799,57 +4947,74 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       };
     }
 
-    const samplesCount = latest
-      ? await this.getHealthSampleCount(latest.id)
+    const samplesCount = daily
+      ? await this.getHealthSampleCount(userId, daily.id)
       : 0;
 
     return {
-      date: hasMetrics ? today : (latest?.log_date ?? today),
+      date,
       lifeMode: mode.mode,
       lifeModeLabel: mode.label,
       recommendation: healthRecommendationForMode(mode.mode),
-      recoveryMode: latest?.recovery_mode ?? "baseline",
-      dataCompletenessScore: hasMetrics
-        ? Math.round(
-            ((REQUIRED_TODAY_HEALTH_METRICS.length -
-              Object.values(todayMetrics.missingMetrics).filter(Boolean)
-                .length) /
-              REQUIRED_TODAY_HEALTH_METRICS.length) *
-              100,
-          )
-        : Number(latest?.data_completeness_score ?? 0),
+      recoveryMode: daily?.recovery_mode ?? "baseline",
+      dataCompletenessScore:
+        daily?.data_completeness_score ??
+        (hasNormalizedMetrics
+          ? Math.round(
+              ((REQUIRED_TODAY_HEALTH_METRICS.length -
+                Object.values(dayMetrics.missingMetrics).filter(Boolean)
+                  .length) /
+                REQUIRED_TODAY_HEALTH_METRICS.length) *
+                100,
+            )
+          : 0),
       sleepMinutes:
-        metricValue(metrics, "sleep_minutes") ?? latest?.sleep_minutes ?? null,
-      deepSleepMinutes: latest?.deep_sleep_minutes ?? null,
-      remSleepMinutes: latest?.rem_sleep_minutes ?? null,
-      awakeMinutes: latest?.awake_minutes ?? null,
+        metricValue(metrics, "sleep_minutes") ?? daily?.sleep_minutes ?? null,
+      deepSleepMinutes: daily?.deep_sleep_minutes ?? null,
+      remSleepMinutes: daily?.rem_sleep_minutes ?? null,
+      awakeMinutes: daily?.awake_minutes ?? null,
       restingHeartRate:
         metricValue(metrics, "resting_heart_rate") ??
-        numberOrNull(latest?.resting_heart_rate ?? null),
-      hrvMs: numberOrNull(latest?.hrv_ms ?? null),
+        numberOrNull(daily?.resting_heart_rate ?? null),
+      hrvMs: numberOrNull(daily?.hrv_ms ?? null),
       spo2Avg:
         metricValue(metrics, "spo2_percent") ??
-        numberOrNull(latest?.spo2_avg ?? null),
-      steps: metricValue(metrics, "steps") ?? latest?.steps ?? null,
+        numberOrNull(daily?.spo2_avg ?? null),
+      steps: metricValue(metrics, "steps") ?? daily?.steps ?? null,
       activeEnergyKcal:
         metricValue(metrics, "active_energy_kcal") ??
-        numberOrNull(latest?.active_energy_kcal ?? null),
-      missingMetrics: hasMetrics
-        ? todayMetrics.missingMetrics
-        : jsonBooleanRecord(latest?.missing_metrics),
+        numberOrNull(daily?.active_energy_kcal ?? null),
+      missingMetrics: {
+        ...jsonBooleanRecord(daily?.missing_metrics),
+        ...(hasNormalizedMetrics ? dayMetrics.missingMetrics : {}),
+      },
       samplesCount,
       hasMetrics,
-      sourceLabel: todayMetrics.sourceLabel,
-      latestSource: todayMetrics.latestSource,
+      sourceLabel: dayMetrics.sourceLabel ?? healthSourceLabel(daily?.source),
+      latestSource: dayMetrics.latestSource ?? daily?.source ?? null,
       averageHeartRate: metricValue(metrics, "average_heart_rate"),
-      totalEnergyKcal: metricValue(metrics, "total_energy_kcal"),
-      workoutMinutes: metricValue(metrics, "workout_minutes"),
+      totalEnergyKcal:
+        metricValue(metrics, "total_energy_kcal") ??
+        numberOrNull(daily?.calories_burned ?? null),
+      workoutMinutes:
+        metricValue(metrics, "workout_minutes") ??
+        numberOrNull(daily?.workout_minutes ?? null),
       distanceM: metricValue(metrics, "distance_m"),
-      weightKg: metricValue(metrics, "weight_kg"),
-      sleepScore: metricValue(metrics, "sleep_score"),
-      stressScore: metricValue(metrics, "stress_score"),
-      moodScore: metricValue(metrics, "mood_score"),
-      energyScore: metricValue(metrics, "energy_score"),
+      weightKg:
+        metricValue(metrics, "weight_kg") ??
+        numberOrNull(daily?.weight_kg ?? null),
+      sleepScore:
+        metricValue(metrics, "sleep_score") ??
+        numberOrNull(daily?.sleep_score ?? null),
+      stressScore:
+        metricValue(metrics, "stress_score") ??
+        numberOrNull(daily?.stress_score ?? null),
+      moodScore:
+        metricValue(metrics, "mood_score") ??
+        numberOrNull(daily?.mood_score ?? null),
+      energyScore:
+        metricValue(metrics, "energy_score") ??
+        numberOrNull(daily?.energy_score ?? null),
       weekly: week,
       trends: week.trends,
       sources,
@@ -5037,35 +5202,41 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     const day = await this.getHealthMetricDay(input.userId, input.date);
     const metricValues = day.metrics;
 
-    await this.ingestHealthPayload({
-      userId: input.userId,
-      date: input.date,
-      syncReason: "manual",
-      source: input.source,
-      timezone: input.timezone ?? "Asia/Qyzylorda",
-      metrics: {
-        sleepMinutes: metricValues.sleep_minutes,
-        sleepScore: metricValues.sleep_score,
-        restingHeartRate: metricValues.resting_heart_rate,
-        spo2Avg: metricValues.spo2_percent,
-        steps: metricValues.steps,
-        caloriesBurned: metricValues.total_energy_kcal,
-        activeEnergyKcal: metricValues.active_energy_kcal,
-        workoutMinutes: metricValues.workout_minutes,
-        weightKg: metricValues.weight_kg,
-        moodScore: metricValues.mood_score,
-        energyScore: metricValues.energy_score,
-        stressScore: metricValues.stress_score,
+    await this.persistHealthPayload(
+      {
+        userId: input.userId,
+        date: input.date,
+        syncReason: "manual",
+        source: input.source,
+        timezone: input.timezone ?? "Asia/Qyzylorda",
+        metrics: {
+          sleepMinutes: metricValues.sleep_minutes,
+          sleepScore: metricValues.sleep_score,
+          restingHeartRate: metricValues.resting_heart_rate,
+          averageHeartRate: metricValues.average_heart_rate,
+          distanceMeters: metricValues.distance_m,
+          spo2Avg: metricValues.spo2_percent,
+          steps: metricValues.steps,
+          caloriesBurned: metricValues.total_energy_kcal,
+          activeEnergyKcal: metricValues.active_energy_kcal,
+          workoutMinutes: metricValues.workout_minutes,
+          weightKg: metricValues.weight_kg,
+          moodScore: metricValues.mood_score,
+          energyScore: metricValues.energy_score,
+          stressScore: metricValues.stress_score,
+        },
+        workouts: [],
+        samples: [],
+        missing: healthMissingMetrics(metricValues),
+        raw: {
+          normalizedHealthMetrics: day.records,
+          device: input.device ?? null,
+          raw: input.raw ?? {},
+        },
       },
-      workouts: [],
-      samples: [],
-      missing: healthMissingMetrics(metricValues),
-      raw: {
-        normalizedHealthMetrics: day.records,
-        device: input.device ?? null,
-        raw: input.raw ?? {},
-      },
-    });
+      false,
+      day.records,
+    );
 
     return {
       date: input.date,
@@ -5184,6 +5355,18 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       nextTransition,
       academicRecords: records,
     };
+  }
+
+  async getTmaStudySummary(userId: string, timezone: string): Promise<TmaStudySummary> {
+    const [courses, records] = await Promise.all([
+      loadStudyWorkspaceCourses(this.client, userId),
+      this.listAcademicRecords(userId),
+    ]);
+    return { timezone, courses, records };
+  }
+
+  async saveStudyCalculator(userId: string, courseId: string, input: unknown): Promise<StudyCalculatorState> {
+    return saveStudyCalculator(this.client, userId, courseId, input);
   }
 
   async upsertExternalSource(
@@ -5676,19 +5859,70 @@ export class SupabaseLifeOSStore implements LifeOSStore {
   }
 
   async listAcademicRecords(userId: string): Promise<AcademicRecord[]> {
-    const { data, error } = await this.client
-      .from("academic_records")
-      .select("*")
-      .eq("user_id", userId)
-      .order("occurs_at", { ascending: true, nullsFirst: false })
-      .order("due_at", { ascending: true, nullsFirst: false })
-      .limit(50);
+    const records: AcademicRecord[] = [];
+    let afterId: string | undefined;
+    while (true) {
+      // A sync changes updated_at. Page by immutable ID so those updates do
+      // not move existing rows across pages; sort for display after loading.
+      let query = this.client
+        .from("academic_records")
+        .select("*")
+        .eq("user_id", userId)
+        .order("id", { ascending: true })
+        .limit(100);
+      if (afterId !== undefined) {
+        query = query.gt("id", afterId);
+      }
+      const { data, error } = await query;
+      if (error) {
+        throwSupabaseError(error, "Failed to list academic records");
+      }
+      if (data.length === 0) {
+        break;
+      }
+      afterId = data[data.length - 1].id;
 
-    if (error) {
-      throwSupabaseError(error, "Failed to list academic records");
+      // Bound the status lookup as well as the records query.
+      const sourceIds = [
+        ...new Set(
+          data.flatMap((row) =>
+            row.source_event_id ? [row.source_event_id] : [],
+          ),
+        ),
+      ];
+      const activeIds = new Set<string>();
+      if (sourceIds.length > 0) {
+        const { data: sources, error: sourceError } = await this.client
+          .from("source_events")
+          .select("id,status")
+          .eq("user_id", userId)
+          .in("id", sourceIds);
+        if (sourceError) {
+          throwSupabaseError(
+            sourceError,
+            "Failed to load academic source status",
+          );
+        }
+        for (const source of sources) {
+          if (source.status === "active") {
+            activeIds.add(source.id);
+          }
+        }
+      }
+      // Keep manual records, but not retired or foreign-source LMS records.
+      records.push(
+        ...data
+          .filter(
+            (row) => !row.source_event_id || activeIds.has(row.source_event_id),
+          )
+          .map(toAcademicRecord),
+      );
     }
-
-    return data.map(toAcademicRecord);
+    return records.sort(
+      (left, right) =>
+        right.updatedAt.localeCompare(left.updatedAt) ||
+        left.id.localeCompare(right.id),
+    );
   }
 
   async upsertAcademicRecord(
@@ -9144,6 +9378,14 @@ export class SupabaseLifeOSStore implements LifeOSStore {
   async ingestHealthPayload(
     payload: HealthIngestPayload,
   ): Promise<HealthIngestResult> {
+    return this.persistHealthPayload(payload, true);
+  }
+
+  private async persistHealthPayload(
+    payload: HealthIngestPayload,
+    mirrorMetrics: boolean,
+    normalizedMetricRecords: HealthMetricRecord[] = [],
+  ): Promise<HealthIngestResult> {
     const startedAt = new Date().toISOString();
     const computed = calculateHealthIngestDaily(payload);
     const metrics = payload.metrics;
@@ -9154,6 +9396,178 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       missing: payload.missing,
     }) as Json;
     const missingMetrics = payload.missing as Json;
+    const dailyCorrections: Partial<HealthDailyRow> = {};
+    const previous = await this.client
+      .from("health_daily")
+      .select("*")
+      .eq("user_id", payload.userId)
+      .eq("log_date", payload.date)
+      .maybeSingle();
+    if (previous.error)
+      throwSupabaseError(
+        previous.error,
+        "Failed to load health correction source",
+      );
+    const previousDaily = previous.data;
+    const previousMetadata = jsonObject(previousDaily?.metadata);
+    const fieldSources = jsonObject(previousMetadata.fieldSources as Json);
+    const dailyColumns: Partial<
+      Record<HealthMetricType, keyof HealthDailyRow>
+    > = {
+      steps: "steps",
+      sleep_minutes: "sleep_minutes",
+      sleep_score: "sleep_score",
+      resting_heart_rate: "resting_heart_rate",
+      active_energy_kcal: "active_energy_kcal",
+      total_energy_kcal: "calories_burned",
+      workout_minutes: "workout_minutes",
+      weight_kg: "weight_kg",
+      spo2_percent: "spo2_avg",
+      stress_score: "stress_score",
+      mood_score: "mood_score",
+      energy_score: "energy_score",
+    };
+    for (const column of [
+      ...Object.values(dailyColumns),
+      "deep_sleep_minutes",
+      "rem_sleep_minutes",
+      "awake_minutes",
+      "hrv_ms",
+    ] as Array<keyof HealthDailyRow>) {
+      if (
+        previousDaily?.[column] != null &&
+        typeof fieldSources[column] !== "string"
+      ) {
+        fieldSources[column] = previousDaily.source ?? "unknown";
+      }
+    }
+    const wasWatch = (column: string) =>
+      fieldSources[column] === "xiaomi_health_connect" ||
+      fieldSources[column] === "health_connect";
+    const winningSource = (
+      records: HealthMetricRecord[],
+      type: HealthMetricType,
+    ) =>
+      records
+        .filter((record) => record.metricType === type)
+        .sort(
+          (a, b) =>
+            (HEALTH_SOURCE_PRIORITY[b.source] ?? 0) -
+              (HEALTH_SOURCE_PRIORITY[a.source] ?? 0) ||
+            b.updatedAt.localeCompare(a.updatedAt),
+        )[0]?.source;
+
+    if (mirrorMetrics) {
+      const source = isHealthMetricSource(payload.source ?? "")
+        ? (payload.source as HealthMetricSource)
+        : payload.source === "health_connect"
+          ? "xiaomi_health_connect"
+          : "api";
+      const rows = healthIngestMetricInputs(metrics).map((metric) => ({
+        user_id: payload.userId,
+        metric_date: payload.date,
+        metric_type: metric.type,
+        value: metric.value,
+        unit: metric.unit,
+        source,
+        raw_json: {
+          timezone: payload.timezone,
+          ingestSource: payload.source,
+        } as Json,
+      }));
+      // An explicit correction from the watch invalidates its old value only.
+      // Omitted fields without a missing flag are partial updates, not deletions.
+      const missingTypes =
+        source === "xiaomi_health_connect"
+          ? HEALTH_METRIC_TYPES.filter(
+              (type) =>
+                payload.missing[type] === true &&
+                !rows.some((row) => row.metric_type === type),
+            )
+          : [];
+      const missingStages =
+        source === "xiaomi_health_connect" &&
+        payload.missing.sleep_stages === true &&
+        metrics.deepSleepMinutes === undefined &&
+        metrics.remSleepMinutes === undefined &&
+        metrics.awakeMinutes === undefined;
+      const missingHrv =
+        source === "xiaomi_health_connect" &&
+        payload.missing.hrv_ms === true &&
+        metrics.hrvMs === undefined;
+      if (missingTypes.length > 0) {
+        const { error } = await this.client
+          .from("health_metrics")
+          .delete()
+          .eq("user_id", payload.userId)
+          .eq("metric_date", payload.date)
+          .eq("source", source)
+          .in("metric_type", missingTypes);
+        if (error)
+          throwSupabaseError(error, "Failed to clear missing watch metrics");
+      }
+      if (rows.length > 0) {
+        const { error } = await this.client
+          .from("health_metrics")
+          .upsert(rows, {
+            onConflict: "user_id,metric_date,metric_type,source",
+          });
+        if (error) {
+          throwSupabaseError(error, "Failed to mirror health metrics");
+        }
+      }
+      if (missingTypes.length > 0) {
+        const remaining = await this.getHealthMetricDay(
+          payload.userId,
+          payload.date,
+        );
+        for (const type of missingTypes) {
+          const column = dailyColumns[type];
+          if (
+            column &&
+            (remaining.metrics[type] !== undefined || wasWatch(column))
+          ) {
+            Object.assign(dailyCorrections, {
+              [column]: remaining.metrics[type] ?? null,
+            });
+            fieldSources[column] =
+              winningSource(remaining.records, type) ?? source;
+          }
+        }
+      }
+      for (const [column, value] of [
+        ["deep_sleep_minutes", metrics.deepSleepMinutes],
+        ["rem_sleep_minutes", metrics.remSleepMinutes],
+        ["awake_minutes", metrics.awakeMinutes],
+      ] as const) {
+        if (
+          wasWatch(column) &&
+          value === undefined &&
+          (missingStages || payload.missing[column] === true)
+        ) {
+          dailyCorrections[column] = null;
+        }
+      }
+      if (wasWatch("hrv_ms") && missingHrv) dailyCorrections.hrv_ms = null;
+    }
+    for (const metric of healthIngestMetricInputs(metrics)) {
+      const column = dailyColumns[metric.type];
+      if (column)
+        fieldSources[column] = mirrorMetrics
+          ? (payload.source ?? "health_ingest")
+          : (winningSource(normalizedMetricRecords, metric.type) ??
+            payload.source ??
+            "health_ingest");
+    }
+    for (const [column, value] of [
+      ["deep_sleep_minutes", metrics.deepSleepMinutes],
+      ["rem_sleep_minutes", metrics.remSleepMinutes],
+      ["awake_minutes", metrics.awakeMinutes],
+      ["hrv_ms", metrics.hrvMs],
+    ] as const) {
+      if (value !== undefined)
+        fieldSources[column] = payload.source ?? "health_ingest";
+    }
 
     const { data: healthDaily, error: healthDailyError } = await this.client
       .from("health_daily")
@@ -9180,15 +9594,18 @@ export class SupabaseLifeOSStore implements LifeOSStore {
           mood_score: metrics.moodScore,
           energy_score: metrics.energyScore,
           stress_score: metrics.stressScore,
+          ...dailyCorrections,
           source: payload.source,
           timezone: payload.timezone,
           missing_metrics: missingMetrics,
           metadata: {
+            ...previousMetadata,
+            fieldSources,
             syncReason: payload.syncReason,
             workoutsCount: payload.workouts.length,
             samplesCount: payload.samples.length,
             missing: payload.missing,
-          },
+          } as Json,
           raw_payload: rawPayload,
         },
         {
@@ -9245,21 +9662,43 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     }
 
     if (payload.samples.length > 0) {
-      const { error } = await this.client.from("health_samples").insert(
-        payload.samples.map((sample) => ({
+      const sampleRows = payload.samples.map((sample) => {
+        const source = sample.source ?? payload.source ?? "health_ingest";
+        const sampledAt = new Date(sample.sampledAt).toISOString();
+        // The measurement identity excludes its value so corrections replace it.
+        const hash = createHash("sha256")
+          .update(
+            JSON.stringify([
+              payload.userId,
+              source,
+              sample.sampleType,
+              sampledAt,
+              sample.unit,
+            ]),
+          )
+          .digest("hex");
+        const id = `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+        return {
+          id,
           user_id: payload.userId,
           health_daily_id: healthDaily.id,
           sample_type: sample.sampleType,
-          sampled_at: sample.sampledAt,
+          sampled_at: sampledAt,
           value: sample.value,
           unit: sample.unit,
-          source: sample.source ?? payload.source ?? "health_ingest",
+          source,
           metadata: (sample.metadata ?? {}) as Json,
-        })),
-      );
+        };
+      });
+      const uniqueSamples = [
+        ...new Map(sampleRows.map((row) => [row.id, row])).values(),
+      ];
+      const { error } = await this.client
+        .from("health_samples")
+        .upsert(uniqueSamples, { onConflict: "id" });
 
       if (error) {
-        throwSupabaseError(error, "Failed to insert health samples");
+        throwSupabaseError(error, "Failed to upsert health samples");
       }
     }
 
@@ -9636,7 +10075,15 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     const exerciseIds = [
       ...new Set(sets.map((set) => set.exercise_id).filter(Boolean)),
     ] as string[];
-    const exerciseById = await this.loadExercises(exerciseIds);
+    const exerciseById = await this.loadExercises(workout.user_id, exerciseIds);
+    return this.summarizeWorkout(workout, sets, exerciseById);
+  }
+
+  private summarizeWorkout(
+    workout: WorkoutRow,
+    sets: WorkoutSetRow[],
+    exerciseById: Map<string, FitnessExerciseRow>,
+  ): CurrentWorkoutSummary {
     const grouped = new Map<string, WorkoutExerciseSummary>();
 
     for (const set of sets) {
@@ -9650,6 +10097,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
         index: set.set_index,
         targetReps: set.reps,
         targetWeightKg: numberOrNull(set.weight_kg),
+        restSeconds: set.rest_seconds ?? 90,
         completed: set.completed,
         completedAt: set.completed_at,
       };
@@ -9669,7 +10117,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     const totalSets = sets.length;
     const completedSets = sets.filter((set) => set.completed).length;
     const latestCompleted = sets
-      .filter((set) => set.completed_at && set.rest_seconds)
+      .filter((set) => set.completed && set.completed_at)
       .sort((a, b) =>
         String(b.completed_at).localeCompare(String(a.completed_at)),
       )
@@ -9686,7 +10134,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       completedSets,
       totalSets,
       restTimerEndsAt:
-        latestCompleted?.completed_at && latestCompleted.rest_seconds
+        !workout.ended_at && latestCompleted?.completed_at && latestCompleted.rest_seconds
           ? addSeconds(
               latestCompleted.completed_at,
               latestCompleted.rest_seconds,
@@ -9697,31 +10145,36 @@ export class SupabaseLifeOSStore implements LifeOSStore {
   }
 
   private async loadExercises(
+    userId: string,
     exerciseIds: string[],
   ): Promise<Map<string, FitnessExerciseRow>> {
     if (exerciseIds.length === 0) {
       return new Map();
     }
 
-    const { data, error } = await this.client
-      .from("fitness_exercises")
-      .select("*")
-      .in("id", exerciseIds);
-
-    if (error) {
-      throwSupabaseError(error, "Failed to load exercises");
+    const result = new Map<string, FitnessExerciseRow>();
+    for (let offset = 0; offset < exerciseIds.length; offset += 100) {
+      const { data, error } = await this.client
+        .from("fitness_exercises")
+        .select("*")
+        .eq("user_id", userId)
+        .in("id", exerciseIds.slice(offset, offset + 100));
+      if (error) throwSupabaseError(error, "Failed to load exercises");
+      for (const exercise of data) result.set(exercise.id, exercise);
     }
-
-    return new Map(data.map((exercise) => [exercise.id, exercise]));
+    return result;
   }
 
   private async getLatestHealthDaily(
     userId: string,
+    endDate?: string,
   ): Promise<HealthDailyRow | null> {
-    const { data, error } = await this.client
+    let query = this.client
       .from("health_daily")
       .select("*")
-      .eq("user_id", userId)
+      .eq("user_id", userId);
+    if (endDate) query = query.lte("log_date", endDate);
+    const { data, error } = await query
       .order("log_date", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -9733,11 +10186,15 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     return data;
   }
 
-  private async getHealthSampleCount(healthDailyId: string): Promise<number> {
+  private async getHealthSampleCount(
+    userId: string,
+    healthDailyId: string,
+  ): Promise<number> {
     const { count, error } = await this.client
       .from("health_samples")
       .select("id", { count: "exact", head: true })
-      .eq("health_daily_id", healthDailyId);
+      .eq("health_daily_id", healthDailyId)
+      .eq("user_id", userId);
 
     if (error) {
       throwSupabaseError(error, "Failed to count health samples");
@@ -9892,6 +10349,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
           metadata,
         })
         .eq("id", existing.id)
+        .eq("user_id", input.userId)
         .select("*")
         .single();
 

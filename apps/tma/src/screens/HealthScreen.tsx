@@ -10,6 +10,7 @@ import { useHealthQuery } from "../api/hooks";
 import { ErrorPanel, LoadingPanel } from "../components/AsyncState";
 import { MetricTile } from "../components/MetricTile";
 import { ProgressRing } from "../components/ProgressRing";
+import { HealthBridgeConnection } from "../components/HealthBridgeConnection";
 import { formatMinutes } from "../lib/format";
 
 export function HealthScreen() {
@@ -67,6 +68,8 @@ export function HealthScreen() {
         </div>
       </section>
 
+      <HealthBridgeConnection />
+
       {!health.hasMetrics ? (
         <section className="rounded-xl border border-amber-400/20 bg-amber-400/[0.08] p-4 text-sm text-amber-100 shadow-panel">
           No Xiaomi Watch data yet. Connect Mi Fitness -&gt; Health Connect or
@@ -84,20 +87,20 @@ export function HealthScreen() {
           label="Resting HR"
           tone="mint"
           value={
-            health.restingHeartRate ? `${health.restingHeartRate} bpm` : "n/a"
+            health.restingHeartRate != null ? `${health.restingHeartRate} bpm` : "n/a"
           }
         />
         <MetricTile
           label="Active kcal"
           tone="rose"
           value={
-            health.activeEnergyKcal ? `${health.activeEnergyKcal} kcal` : "n/a"
+            health.activeEnergyKcal != null ? `${health.activeEnergyKcal} kcal` : "n/a"
           }
         />
         <MetricTile
           label="Steps"
           tone="amber"
-          value={health.steps ? health.steps.toLocaleString() : "n/a"}
+          value={health.steps?.toLocaleString() ?? "n/a"}
         />
       </section>
 
@@ -153,7 +156,7 @@ export function HealthScreen() {
           <div className="rounded-lg bg-white/[0.04] p-3">
             <div className="text-zinc-500">Avg RHR</div>
             <div className="mt-1 font-semibold text-white">
-              {health.weekly?.avgRestingHeartRate
+              {health.weekly?.avgRestingHeartRate != null
                 ? `${health.weekly.avgRestingHeartRate} bpm`
                 : "n/a"}
             </div>

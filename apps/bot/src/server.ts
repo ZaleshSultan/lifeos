@@ -28,6 +28,7 @@ import {
   type CurrencyCode,
 } from "@lifeos/core";
 import type { LifeOSStore, TelegramUserRecord } from "@lifeos/db";
+import { StudyWorkspaceError } from "@lifeos/db";
 import type { BotConfig } from "./config.js";
 import { handleTelegramUpdate } from "./telegram/commands.js";
 import type { TelegramClient, TelegramUpdate } from "./telegram/types.js";
@@ -40,6 +41,7 @@ import {
   type SyncthingConfig,
 } from "./syncthing.js";
 import { pipeline } from "node:stream/promises";
+import { handleWorkoutRoute } from "./workout-routes.js";
 
 type TmaSessionState = "unregistered" | "pending" | "active" | "blocked";
 
@@ -241,7 +243,7 @@ function writeJson(
   response.writeHead(statusCode, {
     "content-type": "application/json; charset=utf-8",
     "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,POST,DELETE,OPTIONS",
+    "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
     "access-control-allow-headers":
       "authorization,content-type,x-telegram-init-data,x-telegram-bot-api-secret-token",
   });
@@ -251,7 +253,7 @@ function writeJson(
 function writeNoContent(response: ServerResponse): void {
   response.writeHead(204, {
     "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,POST,DELETE,OPTIONS",
+    "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
     "access-control-allow-headers":
       "authorization,content-type,x-telegram-init-data,x-telegram-bot-api-secret-token",
   });
@@ -2815,6 +2817,31 @@ async function handleRequest(
       return;
     }
 
+    if (request.method === "GET" && requestUrl.pathname === "/api/tma/study") {
+      writeJson(response, 200, tmaData(await store.getTmaStudySummary(auth.user.userId, auth.user.timezone)));
+      return;
+    }
+
+    const studyCalculatorMatch = requestUrl.pathname.match(/^\/api\/tma\/study\/courses\/([^/]+)\/calculator$/);
+    if (request.method === "PUT" && studyCalculatorMatch) {
+      const courseId = studyCalculatorMatch[1];
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(courseId)) {
+        writeJson(response, 400, { error: "invalid_study_course_id" });
+        return;
+      }
+      const body = await readJsonBody(request);
+      try {
+        const state = await store.saveStudyCalculator(auth.user.userId, courseId, body);
+        writeJson(response, 200, tmaData(state));
+      } catch (error) {
+        if (!(error instanceof StudyWorkspaceError)) throw error;
+        const status = error.code === "study_course_not_found" ? 404
+          : error.code === "study_calculator_conflict" ? 409 : 400;
+        writeJson(response, status, { error: error.code });
+      }
+      return;
+    }
+
     if (
       request.method === "GET" &&
       requestUrl.pathname === "/api/tma/academic"
@@ -2961,7 +2988,7 @@ async function handleRequest(
           "content-security-policy": "default-src 'none'; sandbox",
           "x-content-type-options": "nosniff",
           "access-control-allow-origin": "*",
-          "access-control-allow-methods": "GET,POST,DELETE,OPTIONS",
+          "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
           "access-control-allow-headers":
             "authorization,content-type,x-telegram-init-data,x-telegram-bot-api-secret-token",
         });
@@ -3228,83 +3255,10 @@ async function handleRequest(
       return;
     }
 
-    if (
-      request.method === "GET" &&
-      requestUrl.pathname === "/api/tma/workout/current"
-    ) {
-      const workout = await store.getCurrentWorkout({
-        userId: auth.user.userId,
-      });
-
-      writeJson(response, 200, tmaData(workout));
-      return;
-    }
-
-    if (
-      request.method === "POST" &&
-      requestUrl.pathname === "/api/tma/workout/start"
-    ) {
-      const mode = await store.resolveCurrentMode(auth.user.userId);
-      await store.getOrCreateCurrentWorkout({
-        userId: auth.user.userId,
-        now: new Date().toISOString(),
-        lifeMode: mode.mode,
-      });
-      const workout = await store.getCurrentWorkout({
-        userId: auth.user.userId,
-      });
-
-      if (!workout) {
-        writeJson(response, 500, {
-          error: "workout_start_failed",
-        });
-        return;
-      }
-
-      writeJson(response, 200, tmaData(workout));
-      return;
-    }
-
-    const completeSetMatch = requestUrl.pathname.match(
-      /^\/api\/tma\/workout\/sets\/([^/]+)\/complete$/,
-    );
-
-    if (request.method === "POST" && completeSetMatch?.[1]) {
-      const workout = await store.completeWorkoutSet({
-        userId: auth.user.userId,
-        setId: decodeURIComponent(completeSetMatch[1]),
-        completedAt: new Date().toISOString(),
-      });
-      writeJson(response, 200, tmaData(workout));
-      return;
-    }
-
-    const undoSetMatch = requestUrl.pathname.match(
-      /^\/api\/tma\/workout\/sets\/([^/]+)\/undo$/,
-    );
-
-    if (request.method === "POST" && undoSetMatch?.[1]) {
-      const workout = await store.undoWorkoutSet({
-        userId: auth.user.userId,
-        setId: decodeURIComponent(undoSetMatch[1]),
-      });
-      writeJson(response, 200, tmaData(workout));
-      return;
-    }
-
-    const completeWorkoutMatch = requestUrl.pathname.match(
-      /^\/api\/tma\/workout\/([^/]+)\/complete$/,
-    );
-
-    if (request.method === "POST" && completeWorkoutMatch?.[1]) {
-      const workout = await store.completeWorkout({
-        userId: auth.user.userId,
-        workoutId: decodeURIComponent(completeWorkoutMatch[1]),
-        completedAt: new Date().toISOString(),
-      });
-      writeJson(response, 200, tmaData(workout));
-      return;
-    }
+    if (await handleWorkoutRoute({
+      request, response, pathname: requestUrl.pathname,
+      userId: auth.user.userId, store, readJsonBody, writeJson,
+    })) return;
 
     if (request.method === "GET" && requestUrl.pathname === "/api/tma/health") {
       writeJson(

@@ -338,95 +338,78 @@ class MoodleClientSsoCookieLoginTest(unittest.TestCase):
         self.assertEqual(records, [{"course_title": "X"}])
 
 
-# ── HTML scraping helpers ─────────────────────────────────────────────────────
-def _make_soup(html: str) -> object:
-    """Parse HTML using html.parser (stdlib) — no bs4 needed for tests."""
-    try:
-        from bs4 import BeautifulSoup  # type: ignore
-        return BeautifulSoup(html, "html.parser")
-    except ImportError:
-        # Fallback: use stdlib xml.etree can't do HTML well, so use html.parser
-        # via a minimal shim that satisfies the scraper's soup.find / find_all API.
-        import html as _html
-        import html.parser as _htmlparser
-        import re as _re
+class MoodleLoginIdentityTest(unittest.TestCase):
+    def _client(self):
+        with (
+            patch.dict(os.environ, {**BASE_ENV, "UNIVERSITY_SSO_COOKIE": "test-cookie"}, clear=True),
+            patch.object(university_scraper, "load_dotenv", lambda _: None),
+        ):
+            return university_scraper.MoodleClient(university_scraper.load_settings())
 
-        class _Tag:
-            def __init__(self, tag: str, attrs: dict, children: list, text: str = "") -> None:
-                self.name = tag
-                self.attrs = attrs
-                self._children = children
-                self._text = text
+    def _login(self, client, method, html, url=None):
+        session = MagicMock()
+        response = MagicMock()
+        response.url = url or f"{university_scraper.BASE_URL}/my/"
+        response.text = html
+        session.get.return_value = response
+        session.post.return_value = response
+        with patch.object(university_scraper, "_requests_session", return_value=session):
+            return getattr(client, method)()
 
-            def get(self, key: str, default: object = None) -> object:
-                return self.attrs.get(key, default)
+    def test_both_login_methods_reject_zero_and_missing_userid(self):
+        for method in ("_form_login", "_sso_cookie_login"):
+            for html in (
+                '<script>M.cfg={"userId":0};</script>',
+                '<script>M.cfg={"userId":"0"};</script>',
+                '<script>M.cfg={"userId":-1};</script>',
+                '<html>Sign in</html>',
+            ):
+                with self.subTest(method=method, html=html):
+                    client = self._client()
+                    self.assertFalse(self._login(client, method, html))
+                    self.assertIsNone(client._moodle_user_id)
+                    self.assertIsNone(client._session)
 
-            def _all_text(self) -> str:
-                """Recursively collect all text from this node and its descendants."""
-                parts = [self._text]
-                for c in self._children:
-                    parts.append(c._all_text())
-                return "".join(parts)
+    def test_failed_retry_clears_previous_authenticated_state(self):
+        for method in ("_form_login", "_sso_cookie_login"):
+            with self.subTest(method=method):
+                client = self._client()
+                self.assertTrue(self._login(client, method, '<script>M.cfg={"userId":14505};</script>'))
+                self.assertFalse(self._login(client, method, '<html>Sign in</html>'))
+                self.assertIsNone(client._moodle_user_id)
+                self.assertIsNone(client._session)
 
-            def get_text(self, separator: str = "", strip: bool = False) -> str:
-                t = self._all_text()
-                return t.strip() if strip else t
+    def test_userid_on_another_host_does_not_authenticate_moodle(self):
+        for method in ("_form_login", "_sso_cookie_login"):
+            with self.subTest(method=method):
+                client = self._client()
+                self.assertFalse(self._login(
+                    client, method, '<script>{"userid":14505}</script>',
+                    "https://example.org/redirect",
+                ))
+                self.assertIsNone(client._session)
 
-            def find(self, tag: str, class_: object = None, **kw: object) -> object:
-                for c in self.find_all(tag, class_=class_, **kw):
-                    return c
-                return None
+    def test_form_login_accepts_current_positive_moodle_userid(self):
+        client = self._client()
+        self.assertTrue(self._login(client, "_form_login", '<script>M.cfg={"userId":14505};</script>'))
+        self.assertEqual(client._moodle_user_id, 14505)
 
-            def find_all(self, tag: str, class_: object = None, **kw: object) -> list:
-                results = []
-                for c in self._children:
-                    if c.name == tag:
-                        if class_ is None:
-                            results.append(c)
-                        elif callable(class_):
-                            # attrs['class'] from stdlib html.parser is a plain
-                            # string (e.g. "generaltable"), not a list.
-                            raw = c.attrs.get("class", "")
-                            cls = raw if isinstance(raw, str) else " ".join(raw)
-                            if class_(cls):
-                                results.append(c)
-                        elif isinstance(class_, str):
-                            raw = c.attrs.get("class", "")
-                            cls = raw if isinstance(raw, str) else " ".join(raw)
-                            if class_ in cls:
-                                results.append(c)
-                    results.extend(c.find_all(tag, class_=class_, **kw))
-                return results
-
-            def __getitem__(self, key: str) -> object:
-                return self.attrs[key]
-
-        class _Parser(_htmlparser.HTMLParser):
-            def __init__(self) -> None:
-                super().__init__()
-                self._stack: list[_Tag] = [_Tag("root", {}, [])]
-
-            def handle_starttag(self, tag: str, attrs: list) -> None:
-                node = _Tag(tag, dict(attrs), [])
-                self._stack[-1]._children.append(node)
-                self._stack.append(node)
-
-            def handle_endtag(self, tag: str) -> None:
-                if len(self._stack) > 1:
-                    self._stack.pop()
-
-            def handle_data(self, data: str) -> None:
-                if self._stack:
-                    self._stack[-1]._text += data
-
-            def root(self) -> _Tag:
-                return self._stack[0]
-
-        p = _Parser()
-        p.feed(html)
-        root = p.root()
-        root.name = "html"
-        return root
+    def test_zero_identity_never_reaches_scrape_or_implicit_mock(self):
+        client = self._client()
+        session = MagicMock()
+        response = MagicMock()
+        response.url = f"{university_scraper.BASE_URL}/my/"
+        response.text = '<script>M.cfg={"userId":0};</script>'
+        session.get.return_value = response
+        session.post.return_value = response
+        with (
+            patch.object(university_scraper, "_requests_session", return_value=session),
+            patch.object(client, "fetch_via_scrape") as scrape,
+        ):
+            with self.assertRaises(university_scraper.SyncError):
+                client.fetch_grades()
+        scrape.assert_not_called()
+        self.assertFalse(client.is_mocked)
 
 
 class GradeReportParsingTest(unittest.TestCase):
@@ -459,9 +442,8 @@ class GradeReportParsingTest(unittest.TestCase):
         mock_session.get.return_value = mock_resp
         client._session = mock_session
 
-        # Patch _bs4_parse with our stdlib-based shim so bs4 isn't required
-        with patch.object(university_scraper, "_bs4_parse", _make_soup):
-            records = client._scrape_grade_report(42, "Test Course")
+        # Exercise the production BeautifulSoup parser.
+        records = client._scrape_grade_report(42, "Test Course")
 
         # Should have 2 records (Homework + Midterm), not the total row
         self.assertEqual(len(records), 2)
@@ -469,7 +451,7 @@ class GradeReportParsingTest(unittest.TestCase):
         self.assertEqual(records[0]["max_score"], 10.0)
         self.assertEqual(records[1]["record_type"], "midterm")
 
-    def test_skips_rows_without_score(self) -> None:
+    def test_preserves_rows_without_score(self) -> None:
         html = """
         <html><body>
         <table class="generaltable">
@@ -492,9 +474,10 @@ class GradeReportParsingTest(unittest.TestCase):
         mock_session.get.return_value = mock_resp
         client._session = mock_session
 
-        with patch.object(university_scraper, "_bs4_parse", _make_soup):
-            records = client._scrape_grade_report(1, "Some Course")
-        self.assertEqual(records, [])
+        records = client._scrape_grade_report(1, "Some Course")
+        self.assertEqual(len(records), 1)
+        self.assertIsNone(records[0]["score"])
+        self.assertIsNone(records[0]["max_score"])
 
 
 if __name__ == "__main__":

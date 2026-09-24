@@ -663,6 +663,11 @@ class FakeStore implements LifeOSStore {
     this.fitnessLogs.push(input);
   }
 
+  async getWorkoutProgram() { return null; }
+  async saveWorkoutProgram(_userId: string, program: Parameters<LifeOSStore["saveWorkoutProgram"]>[1]) { return program; }
+  async getWorkoutHistory() { return []; }
+  async updateWorkoutSet() { return this.getCurrentWorkout(); }
+
   async getCurrentWorkout(): Promise<CurrentWorkoutSummary> {
     return {
       id: this.workout.id,
@@ -684,6 +689,7 @@ class FakeStore implements LifeOSStore {
               index: 1,
               targetReps: 10,
               targetWeightKg: null,
+              restSeconds: 90,
               completed: false,
               completedAt: null,
             },
@@ -773,6 +779,14 @@ class FakeStore implements LifeOSStore {
       nextTransition: null,
       academicRecords: [],
     };
+  }
+
+  async getTmaStudySummary() {
+    return { timezone: "UTC", courses: [], records: [] };
+  }
+
+  async saveStudyCalculator(): Promise<never> {
+    throw new Error("Not used by Telegram command tests");
   }
 
   async upsertExternalSource(

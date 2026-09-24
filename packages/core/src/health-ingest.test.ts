@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   calculateHealthIngestDaily,
+  healthIngestMetricInputs,
   parseHealthIngestPayload,
   parseHealthMetricsIngestPayload,
 } from "./health-ingest.js";
@@ -17,6 +18,8 @@ describe("health ingest", () => {
         rem_sleep_minutes: 80,
         awake_minutes: 20,
         resting_heart_rate: 58,
+        average_heart_rate: 74,
+        distance_meters: 3200,
         spo2_avg: 97,
       },
       workouts: [
@@ -44,6 +47,8 @@ describe("health ingest", () => {
     expect(payload.metrics.sleepMinutes).toBe(480);
     expect(payload.metrics.deepSleepMinutes).toBe(90);
     expect(payload.metrics.spo2Avg).toBe(97);
+    expect(payload.metrics.averageHeartRate).toBe(74);
+    expect(payload.metrics.distanceMeters).toBe(3200);
     expect(payload.missing).toEqual({
       stress: true,
       sleep_stages: false,
@@ -65,6 +70,8 @@ describe("health ingest", () => {
         remSleepMinutes: 70,
         awakeMinutes: 15,
         restingHeartRate: 60,
+        averageHeartRate: 75,
+        distanceMeters: 0,
         hrvMs: 42,
         spo2Avg: 96,
         activeEnergyKcal: 500,
@@ -86,6 +93,8 @@ describe("health ingest", () => {
     expect(payload.metrics.remSleepMinutes).toBe(70);
     expect(payload.metrics.awakeMinutes).toBe(15);
     expect(payload.metrics.spo2Avg).toBe(96);
+    expect(payload.metrics.averageHeartRate).toBe(75);
+    expect(payload.metrics.distanceMeters).toBe(0);
     expect(payload.missing.stress).toBe(true);
     expect(payload.raw).toEqual({ provider: "test" });
   });
@@ -98,6 +107,22 @@ describe("health ingest", () => {
         sync_reason: "unknown",
       }),
     ).toThrow("sync_reason");
+  });
+
+  it("mirrors only measured scalar metrics and retains real zeros", () => {
+    expect(
+      healthIngestMetricInputs({
+        steps: 0,
+        averageHeartRate: 76,
+        restingHeartRate: undefined,
+        hrvMs: 42,
+        deepSleepMinutes: 50,
+        distanceMeters: Number.NaN,
+      }),
+    ).toEqual([
+      { type: "steps", value: 0, unit: "steps" },
+      { type: "average_heart_rate", value: 76, unit: "bpm" },
+    ]);
   });
 
   it("calculates recovery mode and completeness", () => {

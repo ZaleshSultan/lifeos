@@ -1,0 +1,435 @@
+diff --git a/scripts/diagnose_moodle_course.py b/scripts/diagnose_moodle_course.py
+new file mode 100644
+index 0000000..44c62a2
+--- /dev/null
++++ b/scripts/diagnose_moodle_course.py
+@@ -0,0 +1,156 @@
++#!/usr/bin/env python3
++"""Read one Moodle grade report; emit structural diagnostics, never DB writes.
++
++Run from the LifeOS repository root with the AITU worker's Python environment.
++No cookie/token values, response HTML, table text or URL query strings are output.
++"""
++from __future__ import annotations
++
++import argparse
++from collections import Counter
++import json
++import logging
++from pathlib import Path
++import re
++import sys
++from typing import Any
++from urllib.parse import urlencode, urlsplit
++
++
++KNOWN_CLASSES = {
++    "user-grade", "generaltable", "item", "grade", "range", "weight", "percentage",
++    "feedback", "column-itemname", "column-grade", "column-range", "column-weight",
++    "category", "categoryitem", "courseitem", "categorytotal", "coursetotal",
++    "heading", "hidden", "odd", "even", "b1t", "b1b", "b1l", "b1r",
++}
++PARSER_REASONS = (
++    ("Moodle grade table missing for course ", "grade_table_missing"),
++    ("Unrecognized grade columns for course ", "grade_columns_unrecognized"),
++    ("Ambiguous Moodle grade identity in course ", "ambiguous_item_identity"),
++    ("Unrecognized Moodle numeric grade", "numeric_grade_unrecognized"),
++    ("Invalid Moodle numeric grade", "numeric_grade_invalid"),
++)
++
++
++def safe_error(exc: Exception) -> dict[str, Any]:
++    # Never print str(HTTPError), URLs, traceback locals or arbitrary server text.
++    result: dict[str, Any] = {"error_type": type(exc).__name__}
++    for prefix, reason in PARSER_REASONS:
++        if str(exc).startswith(prefix):
++            result["reason"] = reason
++            break
++    response = getattr(exc, "response", None)
++    status = getattr(response, "status_code", None)
++    if type(status) is int:
++        result["http_status"] = status
++    return result
++
++
++def classes(tag: Any) -> list[str]:
++    return [value for value in tag.get("class", [])
++            if value in KNOWN_CLASSES or re.fullmatch(r"(?:level|column-c)\d{1,2}", value)]
++
++
++def structural_summary(scraper: Any, response: Any, course_id: int) -> dict[str, Any]:
++    parsed_url = urlsplit(response.url)
++    result: dict[str, Any] = {
++        "course_id": course_id,
++        "http_status": response.status_code,
++        "on_moodle_host": parsed_url.hostname == urlsplit(scraper.BASE_URL).hostname,
++        "at_grade_report": parsed_url.path == "/grade/report/user/index.php",
++        "at_login": parsed_url.path.startswith(("/login", "/auth/")),
++        "redirect_count": len(response.history),
++    }
++    if response.status_code >= 400:
++        result["reason"] = "http_error"
++        return result
++    if not result["on_moodle_host"]:
++        result["reason"] = "redirected_away_from_moodle"
++        return result
++    soup = scraper._bs4_parse(response.text)
++    result["table_count"] = len(soup.select("table"))
++    result["grade_table_count"] = len(soup.select("table.user-grade, table.generaltable"))
++    result["login_form_present"] = bool(soup.select_one('input[name="username"], input[name="password"]'))
++    table = soup.select_one("table.user-grade") or soup.select_one("table.generaltable")
++    if table is not None:
++        rows = table.select("tr")
++        result["row_count"] = len(rows)
++        result["row_samples"] = []
++        ids: list[str] = []
++        title_groups: dict[str, int] = {}
++        title_counts: Counter[int] = Counter()
++        for index, row in enumerate(rows):
++            cells = row.find_all(["th", "td"], recursive=False)
++            cell_samples = []
++            for cell in cells[:10]:
++                cell_id = str(cell.get("id", ""))
++                safe_id = cell_id if re.fullmatch(r"row_(?:\d+_)*\d+(?:_[a-z]{1,10})?", cell_id) else None
++                if safe_id:
++                    ids.append(safe_id)
++                cell_samples.append({"tag": cell.name, "classes": classes(cell), "row_id": safe_id})
++            item = row.select_one("th.item, td.item, th.column-itemname, td.column-itemname")
++            group = None
++            if item is not None:
++                # Expose repeated-title groups without publishing assignment names.
++                title = " ".join(item.get_text(" ", strip=True).casefold().split())
++                group = title_groups.setdefault(title, len(title_groups) + 1)
++                title_counts[group] += 1
++            if index < 16:
++                result["row_samples"].append({
++                    "row": index + 1, "classes": classes(row), "cell_count": len(cells),
++                    "title_group": group, "cells": cell_samples,
++                })
++        result["repeated_row_ids"] = {key: count for key, count in Counter(ids).items() if count > 1}
++        result["repeated_title_groups"] = {key: count for key, count in title_counts.items() if count > 1}
++    try:
++        records = scraper.parse_report(soup, course_id, "diagnostic course")
++        result.update({"parse_ok": True, "record_count": len(records)})
++    except Exception as exc:
++        result.update({"parse_ok": False, **safe_error(exc)})
++    return result
++
++
++def diagnose(scraper: Any, settings: Any, course_id: int) -> dict[str, Any]:
++    result: dict[str, Any] = {"course_id": course_id, "read_only": True, "phase": "login"}
++    client = scraper.MoodleClient(settings)
++    try:
++        # Inspect the exact SSO strategy already confirmed in the user's log.
++        if not settings.sso_cookie:
++            return {**result, "authenticated": False, "reason": "sso_cookie_not_configured"}
++        if not client._sso_cookie_login():
++            return {**result, "authenticated": False, "reason": "sso_session_not_established"}
++        result.update({"authenticated": True, "phase": "grade_report"})
++        params = {"id": course_id, "userid": client._moodle_user_id}
++        response = client._session.get(
++            scraper.GRADE_REPORT_URL + "?" + urlencode(params), timeout=scraper.REQUEST_TIMEOUT,
++        )
++        result.update(structural_summary(scraper, response, course_id))
++        return result
++    except Exception as exc:
++        return {**result, **safe_error(exc)}
++
++
++def main() -> int:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("course_id", type=int)
++    args = parser.parse_args()
++    if args.course_id <= 0:
++        parser.error("course_id must be positive")
++    repo = Path.cwd()
++    worker_dir = repo / "workers" / "university-sync" / "aitu-parser"
++    if not (worker_dir / "university_scraper.py").is_file():
++        parser.error("Run this script from the LifeOS repository root: cd ~/lifeos")
++    sys.path.insert(0, str(worker_dir))
++    logging.disable(logging.CRITICAL)
++    try:
++        import university_scraper as scraper
++        settings = scraper.load_settings()
++        result = diagnose(scraper, settings, args.course_id)
++    except Exception as exc:
++        result = {"phase": "configuration", **safe_error(exc)}
++    print(json.dumps(result, ensure_ascii=False, indent=2))
++    return 0 if result.get("parse_ok") else 1
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/scripts/diagnose_moodle_course_test.py b/scripts/diagnose_moodle_course_test.py
+new file mode 100644
+index 0000000..9cfb268
+--- /dev/null
++++ b/scripts/diagnose_moodle_course_test.py
+@@ -0,0 +1,60 @@
++from __future__ import annotations
++
++import importlib.util
++import json
++from pathlib import Path
++import sys
++from types import SimpleNamespace
++import unittest
++from unittest.mock import MagicMock, patch
++
++ROOT = Path(__file__).resolve().parents[1]
++sys.path.insert(0, str(ROOT / "workers" / "university-sync" / "aitu-parser"))
++import university_scraper as scraper
++
++SPEC = importlib.util.spec_from_file_location("diagnose_moodle_course", Path(__file__).with_name("diagnose_moodle_course.py"))
++diagnostic = importlib.util.module_from_spec(SPEC)
++SPEC.loader.exec_module(diagnostic)
++
++
++class MoodleDiagnosticTest(unittest.TestCase):
++    def test_response_secrets_and_table_text_are_not_in_output(self):
++        secret = "PRIVATE_TEST_SENTINEL"
++        response = SimpleNamespace(
++            url=f"{scraper.GRADE_REPORT_URL}?code={secret}#token={secret}",
++            status_code=200, history=[], text=f'''
++              <input name="sesskey" value="{secret}"><script>{secret}</script>
++              <table class="user-grade">
++                <tr><th>Grade item</th><th>Grade</th></tr>
++                <tr><th class="item {secret}" id="row_55_901">{secret}</th><td class="grade">-</td></tr>
++              </table>''',
++        )
++        report = diagnostic.structural_summary(scraper, response, 2482)
++        self.assertTrue(report["parse_ok"])
++        self.assertEqual(report["record_count"], 1)
++        self.assertNotIn(secret, json.dumps(report))
++
++    def test_exception_url_never_printed(self):
++        exc = RuntimeError("HTTP error https://example.org/?code=PRIVATE_TEST_SENTINEL")
++        report = diagnostic.safe_error(exc)
++        self.assertEqual(report, {"error_type": "RuntimeError"})
++
++    def test_missing_table_gets_actionable_code(self):
++        response = SimpleNamespace(url=scraper.GRADE_REPORT_URL, status_code=200, history=[], text="<html>No grades</html>")
++        report = diagnostic.structural_summary(scraper, response, 2482)
++        self.assertEqual(report["reason"], "grade_table_missing")
++        self.assertFalse(report["parse_ok"])
++
++    def test_denied_report_is_not_parsed(self):
++        response = SimpleNamespace(url=scraper.GRADE_REPORT_URL, status_code=403, history=[], text="SECRET")
++        with patch.object(scraper, "parse_report") as parse:
++            report = diagnostic.structural_summary(scraper, response, 2482)
++        parse.assert_not_called()
++        self.assertEqual(report["reason"], "http_error")
++
++    def test_diagnostic_does_not_construct_database_client(self):
++        with patch.object(scraper, "SupabaseRestClient") as db, patch.object(scraper, "MoodleClient") as client:
++            client.return_value._sso_cookie_login.return_value = False
++            result = diagnostic.diagnose(scraper, SimpleNamespace(sso_cookie="test"), 2482)
++        db.assert_not_called()
++        self.assertFalse(result["authenticated"])
+diff --git a/workers/test_worker_suite.py b/workers/test_worker_suite.py
+index cbadeea..3a83fa6 100644
+--- a/workers/test_worker_suite.py
++++ b/workers/test_worker_suite.py
+@@ -18,6 +18,7 @@ TEST_FILES = (
+     ROOT / "university-sync" / "aitu-parser" / "university_scraper_test.py",
+     ROOT / "university-sync" / "aitu-parser" / "academic_pipeline_test.py",
+     ROOT / "university-sync" / "lms_grades_worker_test.py",
++    ROOT.parent / "scripts" / "diagnose_moodle_course_test.py",
+ )
+ 
+ 
+diff --git a/workers/university-sync/aitu-parser/academic_pipeline_test.py b/workers/university-sync/aitu-parser/academic_pipeline_test.py
+index 10b74af..c349756 100644
+--- a/workers/university-sync/aitu-parser/academic_pipeline_test.py
++++ b/workers/university-sync/aitu-parser/academic_pipeline_test.py
+@@ -3,7 +3,9 @@ from __future__ import annotations
+ 
+ import copy
+ import sys
++import traceback
+ import unittest
++from dataclasses import replace
+ from pathlib import Path
+ from unittest.mock import MagicMock, patch
+ 
+@@ -106,9 +108,86 @@ class ActualMoodleLayoutTest(unittest.TestCase):
+ 
+     def test_partial_scrape_is_failure(self):
+         client = scraper.MoodleClient(SETTINGS)
+-        with patch.object(client, "_scrape_enrolled_course_ids", return_value=[(1, "A"), (2, "B")]), patch.object(client, "_scrape_grade_report", side_effect=[[RECORD], SyncError("HTTP 500")]):
+-            with self.assertRaises(SyncError):
++        with patch.object(client, "_scrape_enrolled_course_ids", return_value=[(1, "A"), (2, "B")]), patch.object(client, "_scrape_grade_report", side_effect=[[RECORD], SyncError("Unrecognized grade columns for course 2")]):
++            with self.assertRaises(SyncError) as caught:
+                 client.fetch_via_scrape()
++        self.assertEqual(str(caught.exception), "Incomplete Moodle snapshot: course 2 failed: Unrecognized grade columns for course 2")
++
++    def test_snapshot_failure_does_not_expose_request_url_or_unknown_error_text(self):
++        from requests.exceptions import HTTPError
++
++        secret_url = "https://login.example/authorize?code=secret-code&state=secret-state"
++        response = MagicMock(status_code=403)
++        for failure, expected in (
++            (HTTPError(f"403 Client Error for url: {secret_url}", response=response), "HTTP 403 (HTTPError)"),
++            (ConnectionError(f"Request failed: {secret_url}"), "ConnectionError"),
++            (SyncError(f"Unexpected HTML from {secret_url}"), "SyncError"),
++        ):
++            with self.subTest(error_type=type(failure).__name__):
++                client = scraper.MoodleClient(SETTINGS)
++                with patch.object(client, "_scrape_enrolled_course_ids", return_value=[(2482, "Course")]), patch.object(client, "_scrape_grade_report", side_effect=failure):
++                    try:
++                        client.fetch_via_scrape()
++                    except SyncError as exc:
++                        message = str(exc)
++                        rendered = "".join(traceback.format_exception(exc))
++                    else:
++                        self.fail("An incomplete snapshot must raise")
++                self.assertEqual(message, f"Incomplete Moodle snapshot: course 2482 failed: {expected}")
++                self.assertNotIn(secret_url, rendered)
++                self.assertNotIn("secret-code", rendered)
++                self.assertNotIn("secret-state", rendered)
++
++    def test_safe_parser_failure_details_are_preserved(self):
++        for message in (
++            "Moodle grade table missing for course 2482; refusing an empty snapshot",
++            "Unrecognized grade columns for course 2482",
++            "Ambiguous Moodle grade identity in course 2482",
++            "Unrecognized Moodle numeric grade",
++            "Invalid Moodle numeric grade",
++        ):
++            with self.subTest(message=message):
++                self.assertEqual(scraper._safe_grade_report_error(SyncError(message)), message)
++
++    def test_authenticated_scrape_failure_never_falls_back_to_login_or_mock(self):
++        for strategy in ("sso", "form"):
++            with self.subTest(strategy=strategy):
++                client = scraper.MoodleClient(replace(SETTINGS, sso_cookie="test-cookie" if strategy == "sso" else None, allow_mock=True))
++                session = object()
++                client._session = session
++                client._moodle_user_id = 14505
++                failure = SyncError("Incomplete Moodle snapshot: course 2482 failed: HTTP 403 (HTTPError)")
++                with (
++                    patch.object(client, "_sso_cookie_login", return_value=True) as sso,
++                    patch.object(client, "_form_login", return_value=True) as form,
++                    patch.object(client, "fetch_via_scrape", side_effect=failure),
++                    patch.object(client, "_mock_grades") as mock,
++                ):
++                    with self.assertRaises(SyncError) as caught:
++                        client.fetch_grades()
++                self.assertIs(caught.exception, failure)
++                if strategy == "sso":
++                    sso.assert_called_once()
++                    form.assert_not_called()
++                else:
++                    sso.assert_not_called()
++                    form.assert_called_once()
++                mock.assert_not_called()
++                self.assertFalse(client.is_mocked)
++                self.assertIs(client._session, session)
++                self.assertEqual(client._moodle_user_id, 14505)
++
++    def test_failed_sso_login_still_tries_form_login(self):
++        for result in (False, SyncError("SSO connection failed")):
++            with self.subTest(result=type(result).__name__):
++                client = scraper.MoodleClient(replace(SETTINGS, sso_cookie="test-cookie"))
++                with (
++                    patch.object(client, "_sso_cookie_login", side_effect=result if isinstance(result, Exception) else None, return_value=False),
++                    patch.object(client, "_form_login", return_value=True) as form,
++                    patch.object(client, "fetch_via_scrape", return_value=[RECORD]),
++                ):
++                    self.assertEqual(client.fetch_grades(), [RECORD])
++                form.assert_called_once()
+ 
+     def test_ws_preserves_unknown_and_skips_aggregates(self):
+         client = scraper.MoodleClient(SETTINGS)
+diff --git a/workers/university-sync/aitu-parser/university_scraper.py b/workers/university-sync/aitu-parser/university_scraper.py
+index 64031b3..9f0cce3 100644
+--- a/workers/university-sync/aitu-parser/university_scraper.py
++++ b/workers/university-sync/aitu-parser/university_scraper.py
+@@ -198,6 +198,30 @@ def _authenticated_moodle_user_id(html: str, url: str) -> int | None:
+     return user_id if user_id > 0 else None
+ 
+ 
++def _safe_grade_report_error(exc: Exception) -> str:
++    """Keep useful failure details without logging URLs or response contents."""
++    if isinstance(exc, SyncError):
++        message = str(exc)
++        safe_messages = (
++            r"Moodle grade table missing for course \d+; refusing an empty snapshot",
++            r"Unrecognized grade columns for course \d+",
++            r"Ambiguous Moodle grade identity in course \d+",
++            r"Unrecognized Moodle numeric grade",
++            r"Invalid Moodle numeric grade",
++        )
++        if any(re.fullmatch(pattern, message) for pattern in safe_messages):
++            return message
++    # requests HTTPError messages include the full URL, which may carry OAuth
++    # parameters after a redirect. Only expose the numeric status and type.
++    error_type = type(exc).__name__
++    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", error_type):
++        error_type = "Exception"
++    status = getattr(getattr(exc, "response", None), "status_code", None)
++    if isinstance(status, int) and 100 <= status <= 599:
++        return f"HTTP {status} ({error_type})"
++    return error_type
++
++
+ # ── Moodle client ─────────────────────────────────────────────────────────────
+ class MoodleClient:
+     """
+@@ -515,7 +539,10 @@ class MoodleClient:
+             try:
+                 all_records.extend(self._scrape_grade_report(cid, ctitle))
+             except Exception as exc:
+-                raise SyncError(f"Incomplete Moodle snapshot: course {cid} failed") from exc
++                raise SyncError(
++                    f"Incomplete Moodle snapshot: course {cid} failed: "
++                    f"{_safe_grade_report_error(exc)}"
++                ) from None
+         return all_records
+ 
+     # ── Strategy 3: Mock ──────────────────────────────────────────────────────
+@@ -560,26 +587,32 @@ class MoodleClient:
+         # real session (see _form_login's userid check).
+         if self._sso_cookie:
+             try:
+-                if self._sso_cookie_login():
+-                    records = self.fetch_via_scrape()
+-                    logging.info(
+-                        "SSO cookie + HTML scrape: fetched %d grade records.",
+-                        len(records),
+-                    )
+-                    return records
++                logged_in = self._sso_cookie_login()
+             except SyncError as exc:
++                logged_in = False
+                 logging.warning(
+                     "SSO cookie login failed (%s). Falling back to form login.", exc
+                 )
++            if logged_in:
++                # A failed report after successful authentication is a data
++                # fetch failure, not a reason to discard this session or mock.
++                records = self.fetch_via_scrape()
++                logging.info(
++                    "SSO cookie + HTML scrape: fetched %d grade records.",
++                    len(records),
++                )
++                return records
+ 
+         # Strategy 3: Form login + HTML scrape
+         try:
+-            if self._form_login():
+-                records = self.fetch_via_scrape()
+-                logging.info("HTML scrape: fetched %d grade records.", len(records))
+-                return records
++            logged_in = self._form_login()
+         except SyncError as exc:
+-            logging.warning("Session scrape failed (%s).", exc)
++            logged_in = False
++            logging.warning("Moodle form login failed (%s).", exc)
++        if logged_in:
++            records = self.fetch_via_scrape()
++            logging.info("HTML scrape: fetched %d grade records.", len(records))
++            return records
+ 
+         # Strategy 4: Mock fallback — only if explicitly allowed. A live sync
+         # failure must surface as a failed sync_run, never as silent mock

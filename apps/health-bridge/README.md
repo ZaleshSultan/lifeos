@@ -18,7 +18,7 @@ metric to Health Connect before the bridge can read it.
 - WorkManager worker structure
 - Basic Compose `MainActivity`
 - `SecureConfigStore` placeholder implementation backed by private `SharedPreferences`
-- Previous-day Health Connect aggregation in `Asia/Qyzylorda`
+- Previous-day Health Connect aggregation in the phone's local timezone
 - `LifeOsApiClient` for `POST /api/health/ingest`
 - Schedules:
   - `00:01` nightly previous-day sync
@@ -34,6 +34,7 @@ Declared Health Connect read permissions:
 - `android.permission.health.READ_DISTANCE`
 - `android.permission.health.READ_EXERCISE`
 - `android.permission.health.READ_HEART_RATE`
+- `android.permission.health.READ_RESTING_HEART_RATE`
 - `android.permission.health.READ_HEART_RATE_VARIABILITY`
 - `android.permission.health.READ_OXYGEN_SATURATION`
 - `android.permission.health.READ_SLEEP`
@@ -59,6 +60,7 @@ Then from this folder:
 
 ```bash
 ./gradlew :app:assembleDebug
+./gradlew :app:testDebugUnitTest
 ./gradlew :app:lintDebug
 ```
 
@@ -92,6 +94,40 @@ The bridge stores only the per-user health session token on the Android phone an
 
 If Mi Fitness does not publish a metric to Health Connect, use `/health_log` or
 the documented JSON/CSV import fallback.
+
+## Data semantics
+
+- Resting heart rate comes only from `RestingHeartRateRecord`; ordinary heart
+  rate is stored separately as `average_heart_rate`. No resting reading means
+  missing, never a substituted daily average.
+- HRV is the mean of actual RMSSD records; oxygen saturation is the mean of
+  actual SpO2 records. Both remain missing when Mi Fitness exports no readings.
+- Every record query follows all page tokens. A failed page aborts the sync;
+  a partial day is never silently submitted.
+- Sleep uses published asleep/light/deep/REM stage intervals, clipped to the
+  previous local day and merged to avoid duplicate overlap. Awake/unknown time
+  is excluded. Sessions with no stages do not become fabricated sleep totals;
+  `sleep_minutes` remains missing. Stage-specific totals stay missing if that
+  stage is absent from the available records.
+- Daily workout minutes merge overlapping sessions and clip to the day. The
+  original session timestamps, title, source, type code and stable Health
+  Connect record ID are retained in each workout.
+- Heart rate detail sends at most one real reading per minute, choosing the
+  earliest timestamp (then source) deterministically. Its original timestamp
+  and value are preserved. Daily average HR still uses Health Connect's
+  aggregate of all readings. This keeps a normal daily JSON request below the
+  backend's 1 MiB limit without sending fabricated samples.
+- The bridge sends one object payload with metrics, workouts, samples and
+  missing flags. The signed token determines the owner; no client user ID is
+  sent. Backend retries upsert workouts and samples instead of duplicating
+  them, and mirror daily scalar metrics for the mini-app and weekly trends.
+
+After installing an updated debug build, grant the new resting-heart-rate
+permission again. Validate manual sync while the bridge is open on the phone;
+scheduled background access remains a separate device/provider verification
+step, and requires Android Health Connect background-read support/permission.
+
+Reference: [Health Connect reads and pagination](https://developer.android.com/health-and-fitness/health-connect/read-data).
 
 ## TODOs Before Production
 

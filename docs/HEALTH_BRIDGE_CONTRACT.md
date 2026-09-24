@@ -26,7 +26,7 @@ The backend verifies the Bearer token as a signed HS256 JWT using `LIFEOS_HEALTH
   "user_id": "00000000-0000-0000-0000-000000000000",
   "date": "2026-05-17",
   "sync_reason": "nightly_00_01",
-  "source": "health_connect",
+  "source": "xiaomi_health_connect",
   "timezone": "Asia/Qyzylorda",
   "metrics": {
     "sleep_minutes": 480,
@@ -37,8 +37,10 @@ The backend verifies the Bearer token as a signed HS256 JWT using `LIFEOS_HEALTH
     "active_energy_kcal": 620,
     "calories_burned": 2300,
     "resting_heart_rate": 58,
+    "average_heart_rate": 76,
     "hrv_ms": 45,
     "spo2_avg": 97,
+    "distance_meters": 6200,
     "mood_score": 7,
     "energy_score": 6,
     "stress_score": 3
@@ -78,7 +80,11 @@ The backend accepts both snake_case and camelCase field names for compatibility.
 - Store explicit missing metric flags in `missing_metrics`.
 - Insert `health_sync_runs`.
 - Upsert `health_workouts` when `external_id` is present.
-- Insert `health_samples`.
+- Upsert `health_samples` with stable identity by owner, source, sample type,
+  instant and unit; retries preserve one row and corrected values update it.
+- Mirror supported scalar metrics into `health_metrics` for mini-app daily
+  and weekly summaries. `average_heart_rate` is separate from resting HR;
+  `distance_meters` maps to the existing `distance_m` metric type.
 - Create or update `life_entities` with `entity_type = health_daily`.
 - Enqueue `obsidian_sync_queue`.
 

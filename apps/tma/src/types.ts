@@ -1,5 +1,6 @@
 export type ScreenId =
   | "home"
+  | "study"
   | "workout"
   | "health"
   | "focus"

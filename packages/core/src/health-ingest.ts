@@ -18,9 +18,11 @@ export interface HealthIngestMetrics {
   remSleepMinutes?: number;
   awakeMinutes?: number;
   restingHeartRate?: number;
+  averageHeartRate?: number;
   hrvMs?: number;
   spo2Avg?: number;
   steps?: number;
+  distanceMeters?: number;
   caloriesBurned?: number;
   activeEnergyKcal?: number;
   workoutMinutes?: number;
@@ -117,6 +119,35 @@ export interface HealthMetricsIngestPayload {
   timezone?: string | null;
   metrics: HealthMetricInput[];
   raw?: Record<string, unknown>;
+}
+
+/** Only measured scalar values belong in the normalized metric table. */
+export function healthIngestMetricInputs(
+  metrics: HealthIngestMetrics,
+): HealthMetricInput[] {
+  const fields: Array<[keyof HealthIngestMetrics, HealthMetricType, string]> = [
+    ["steps", "steps", "steps"],
+    ["sleepMinutes", "sleep_minutes", "min"],
+    ["sleepScore", "sleep_score", "score"],
+    ["restingHeartRate", "resting_heart_rate", "bpm"],
+    ["averageHeartRate", "average_heart_rate", "bpm"],
+    ["activeEnergyKcal", "active_energy_kcal", "kcal"],
+    ["caloriesBurned", "total_energy_kcal", "kcal"],
+    ["workoutMinutes", "workout_minutes", "min"],
+    ["distanceMeters", "distance_m", "m"],
+    ["weightKg", "weight_kg", "kg"],
+    ["spo2Avg", "spo2_percent", "%"],
+    ["stressScore", "stress_score", "score"],
+    ["moodScore", "mood_score", "score"],
+    ["energyScore", "energy_score", "score"],
+  ];
+
+  return fields.flatMap(([key, type, unit]) => {
+    const value = metrics[key];
+    return typeof value === "number" && Number.isFinite(value)
+      ? [{ type, value, unit }]
+      : [];
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -259,6 +290,9 @@ export function parseHealthIngestPayload(input: unknown): HealthIngestPayload {
       restingHeartRate:
         numberField(metricsRecord, "resting_heart_rate") ??
         numberField(metricsRecord, "restingHeartRate"),
+      averageHeartRate:
+        numberField(metricsRecord, "average_heart_rate") ??
+        numberField(metricsRecord, "averageHeartRate"),
       hrvMs:
         numberField(metricsRecord, "hrv_ms") ??
         numberField(metricsRecord, "hrvMs"),
@@ -266,6 +300,9 @@ export function parseHealthIngestPayload(input: unknown): HealthIngestPayload {
         numberField(metricsRecord, "spo2_avg") ??
         numberField(metricsRecord, "spo2Avg"),
       steps: numberField(metricsRecord, "steps"),
+      distanceMeters:
+        numberField(metricsRecord, "distance_meters") ??
+        numberField(metricsRecord, "distanceMeters"),
       caloriesBurned:
         numberField(metricsRecord, "calories_burned") ??
         numberField(metricsRecord, "caloriesBurned"),

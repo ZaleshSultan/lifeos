@@ -1,0 +1,105 @@
+diff --git a/scripts/diagnose_moodle_course.py b/scripts/diagnose_moodle_course.py
+index 44c62a2..ce87fc9 100644
+--- a/scripts/diagnose_moodle_course.py
++++ b/scripts/diagnose_moodle_course.py
+@@ -21,6 +21,7 @@ KNOWN_CLASSES = {
+     "user-grade", "generaltable", "item", "grade", "range", "weight", "percentage",
+     "feedback", "column-itemname", "column-grade", "column-range", "column-weight",
+     "category", "categoryitem", "courseitem", "categorytotal", "coursetotal",
++    "baggt", "baggb",
+     "heading", "hidden", "odd", "even", "b1t", "b1b", "b1l", "b1r",
+ }
+ PARSER_REASONS = (
+diff --git a/scripts/diagnose_moodle_course_test.py b/scripts/diagnose_moodle_course_test.py
+index 9cfb268..ca131b5 100644
+--- a/scripts/diagnose_moodle_course_test.py
++++ b/scripts/diagnose_moodle_course_test.py
+@@ -26,7 +26,7 @@ class MoodleDiagnosticTest(unittest.TestCase):
+               <input name="sesskey" value="{secret}"><script>{secret}</script>
+               <table class="user-grade">
+                 <tr><th>Grade item</th><th>Grade</th></tr>
+-                <tr><th class="item {secret}" id="row_55_901">{secret}</th><td class="grade">-</td></tr>
++                <tr><th class="item {secret}" id="row_901_55">{secret}</th><td class="grade">-</td></tr>
+               </table>''',
+         )
+         report = diagnostic.structural_summary(scraper, response, 2482)
+diff --git a/workers/common/moodle_grades.py b/workers/common/moodle_grades.py
+index 62a640d..5e1e805 100644
+--- a/workers/common/moodle_grades.py
++++ b/workers/common/moodle_grades.py
+@@ -54,7 +54,7 @@ def parse_report(soup: Any, course_id: int, course_title: str) -> list[dict[str,
+         cells = row.find_all(["th", "td"], recursive=False)
+         if not row.find("td", recursive=False):
+             continue
+-        if row.select_one(".category, .categoryitem, .courseitem, .categorytotal, .coursetotal") or set(row.get("class", [])) & {"category", "categoryitem", "courseitem"}:
++        if row.select_one(".category, .categoryitem, .courseitem, .categorytotal, .coursetotal, .baggt, .baggb") or set(row.get("class", [])) & {"category", "categoryitem", "courseitem", "baggt", "baggb"}:
+             continue
+         item_cell = row.select_one("th.item, td.item, th.column-itemname, td.column-itemname")
+         if item_cell is None:
+@@ -92,7 +92,9 @@ def parse_report(soup: Any, course_id: int, course_title: str) -> list[dict[str,
+         for element in (item_cell, row):
+             match = re.search(r"(?:^|_)row_((?:\d+_)*\d+)(?:_|$)", element.get("id", ""))
+             if match:
+-                identity = match.group(1).split("_")[-1]
++                # Moodle emits row_<grade-item-id>_<user-id>. The final
++                # number is shared by every assessment in this user's report.
++                identity = match.group(1).split("_")[0]
+                 break
+         if identity is None:
+             link = item_cell.select_one('a[href*="/mod/"]')
+diff --git a/workers/university-sync/aitu-parser/academic_pipeline_test.py b/workers/university-sync/aitu-parser/academic_pipeline_test.py
+index c349756..ed762e8 100644
+--- a/workers/university-sync/aitu-parser/academic_pipeline_test.py
++++ b/workers/university-sync/aitu-parser/academic_pipeline_test.py
+@@ -80,9 +80,9 @@ class ActualMoodleLayoutTest(unittest.TestCase):
+ 
+     def test_th_title_weight_column_ungraded_real_zero_and_totals(self):
+         rows = '''
+-          <tr><th class="item" id="row_55_901">Assignment 1</th><td class="weight">-</td><td class="grade">-</td><td class="range">0–10</td></tr>
+-          <tr><th class="item" id="row_55_902">Assignment 1</th><td class="weight">-</td><td class="grade">0,00</td><td class="range">0–20</td></tr>
+-          <tr><th class="item" id="row_55_903">Задание 2</th><td class="weight">-</td><td class="grade">8,50</td><td class="range">0–10</td></tr>
++          <tr><th class="item" id="row_901_55">Assignment 1</th><td class="weight">-</td><td class="grade">-</td><td class="range">0–10</td></tr>
++          <tr><th class="item" id="row_902_55">Assignment 1</th><td class="weight">-</td><td class="grade">0,00</td><td class="range">0–20</td></tr>
++          <tr><th class="item" id="row_903_55">Задание 2</th><td class="weight">-</td><td class="grade">8,50</td><td class="range">0–10</td></tr>
+           <tr><th class="item category">Register Term</th><td>-</td><td class="grade">0</td><td class="range">0–100</td></tr>
+           <tr><th class="item courseitem">Course total</th><td>-</td><td class="grade">0</td><td class="range">0–100</td></tr>'''
+         records = self.parse(rows)
+@@ -98,6 +98,38 @@ class ActualMoodleLayoutTest(unittest.TestCase):
+         renamed_grade = self.parse('<tr><td>Задание 1</td><td>-</td><td>5</td><td>-</td></tr>')
+         self.assertEqual(records[0]["item_id"], renamed_grade[0]["item_id"])
+ 
++    def test_aitu_row_identity_is_item_id_followed_by_user_id(self):
++        # Structure and row IDs from the user's course-2482 diagnostic.
++        # Titles/grade values are synthetic; no private response HTML is stored.
++        html = '''
++          <tr><th class="level3 item b1b column-itemname" id="row_48613_14505">Work 1</th>
++            <td class="level3 item b1b column-weight">-</td>
++            <td class="level3 item b1b column-grade">-</td>
++            <td class="level3 item b1b column-range">0–10</td></tr>
++          <tr><th class="level3 item b1b column-itemname" id="row_48614_14505">Work 2</th>
++            <td class="level3 item b1b column-weight">-</td>
++            <td class="level3 item b1b column-grade">0</td>
++            <td class="level3 item b1b column-range">0–20</td></tr>'''
++        records = self.parse(html)
++        self.assertEqual([record["item_id"] for record in records], ["48613", "48614"])
++        self.assertEqual([record["score"] for record in records], [None, 0])
++        another_user = self.parse(html.replace("_14505", "_22222"))
++        self.assertEqual([record["item_id"] for record in another_user], ["48613", "48614"])
++
++    def test_moodle_aggregate_css_markers_are_not_assessments(self):
++        # Moodle user-report renders totals as baggt/baggb, not necessarily
++        # with the categoryitem/courseitem class names used in our old fixture.
++        for marker in ("baggt", "baggb"):
++            with self.subTest(marker=marker):
++                rows = f'''
++                  <tr><th class="level2 {marker} column-itemname" id="row_48612_14505">Register Term</th>
++                    <td class="column-weight">-</td><td class="column-grade">0</td><td class="column-range">0–100</td></tr>
++                  <tr><th class="item column-itemname" id="row_48613_14505">Assignment</th>
++                    <td class="column-weight">-</td><td class="column-grade">-</td><td class="column-range">0–10</td></tr>'''
++                records = self.parse(rows)
++                self.assertEqual([record["item_id"] for record in records], ["48613"])
++                self.assertIsNone(records[0]["score"])
++
+     def test_ambiguous_fallback_fails_instead_of_overwriting(self):
+         with self.assertRaises(SyncError):
+             self.parse('<tr><td>Same</td><td>1</td></tr><tr><td>Same</td><td>2</td></tr>')

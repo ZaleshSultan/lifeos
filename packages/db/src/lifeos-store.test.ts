@@ -14,6 +14,8 @@ interface FakeQueryReceipt {
   columns?: string;
   filters: Record<string, unknown>;
   inFilters: Record<string, unknown[]>;
+  greaterThanFilters: Record<string, string>;
+  limit?: number;
   payload?: unknown;
 }
 
@@ -28,7 +30,14 @@ class FakeSupabaseClient {
   assessmentItems: FakeRow[] = [];
   academicTerms: FakeRow[] = [];
   courseReadings: FakeRow[] = [];
+  academicRecords: FakeRow[] = [];
+  sourceEvents: FakeRow[] = [];
+  userSettings: FakeRow[] = [];
+  workouts: FakeRow[] = [];
+  workoutSets: FakeRow[] = [];
+  fitnessExercises: FakeRow[] = [];
   queries: FakeQueryReceipt[] = [];
+  selectErrors: Record<string, string> = {};
 
   from(table: string): FakeQuery {
     return new FakeQuery(this, table);
@@ -39,6 +48,15 @@ class FakeQuery {
   private action = "select";
   private readonly filters: Record<string, unknown> = {};
   private readonly inFilters: Record<string, unknown[]> = {};
+  private readonly greaterThanFilters: Record<string, string> = {};
+  private readonly orders: Array<{
+    column: string;
+    ascending: boolean;
+    nullsFirst: boolean;
+  }> = [];
+  private rowLimit: number | undefined;
+  private rowOffset = 0;
+  private readonly notNullColumns: string[] = [];
   private payload: unknown;
   private columns: string | undefined;
 
@@ -80,6 +98,22 @@ class FakeQuery {
     return this;
   }
 
+  is(key: string, value: unknown): this {
+    return this.eq(key, value);
+  }
+
+  not(key: string, operator: string, value: unknown): this {
+    if (operator !== "is" || value !== null) throw new Error("Unsupported filter");
+    this.notNullColumns.push(key);
+    return this;
+  }
+
+  range(start: number, end: number): this {
+    this.rowOffset = start;
+    this.rowLimit = end - start + 1;
+    return this;
+  }
+
   in(key: string, values: unknown[]): this {
     this.inFilters[key] = values;
     return this;
@@ -90,11 +124,26 @@ class FakeQuery {
     return this;
   }
 
-  order(_column: string, _options?: unknown): this {
+  gt(key: string, value: string): this {
+    this.greaterThanFilters[key] = value;
     return this;
   }
 
-  limit(_count: number): this {
+  order(
+    column: string,
+    options?: { ascending?: boolean; nullsFirst?: boolean },
+  ): this {
+    const ascending = options?.ascending ?? true;
+    this.orders.push({
+      column,
+      ascending,
+      nullsFirst: options?.nullsFirst ?? !ascending,
+    });
+    return this;
+  }
+
+  limit(count: number): this {
+    this.rowLimit = count;
     return this;
   }
 
@@ -120,9 +169,15 @@ class FakeQuery {
     return Promise.resolve({ data, error: null });
   }
 
-  then<TResult1 = { data: FakeRow[] | null; error: null }, TResult2 = never>(
+  then<
+    TResult1 = { data: FakeRow[] | null; error: { message: string } | null },
+    TResult2 = never,
+  >(
     onfulfilled?:
-      | ((value: { data: FakeRow[] | null; error: null }) => TResult1)
+      | ((value: {
+          data: FakeRow[] | null;
+          error: { message: string } | null;
+        }) => TResult1)
       | null,
     onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
   ): Promise<TResult1 | TResult2> {
@@ -132,9 +187,15 @@ class FakeQuery {
     if (this.action === "update") {
       this.updateRow();
     }
+    if (this.action === "upsert") this.upsertRow();
+    const errorMessage =
+      this.client.selectErrors[
+        `${this.table}:${this.greaterThanFilters.id ?? ""}`
+      ];
     return Promise.resolve({
-      data: this.action === "select" ? this.filteredRows() : null,
-      error: null,
+      data:
+        this.action === "select" && !errorMessage ? this.filteredRows() : null,
+      error: errorMessage ? { message: errorMessage } : null,
     })
       .then((value) => {
         this.recordQuery();
@@ -150,6 +211,8 @@ class FakeQuery {
       columns: this.columns,
       filters: { ...this.filters },
       inFilters: { ...this.inFilters },
+      greaterThanFilters: { ...this.greaterThanFilters },
+      limit: this.rowLimit,
       payload: this.payload,
     });
   }
@@ -188,6 +251,7 @@ class FakeQuery {
 
   private upsertRow(): FakeRow {
     if (
+      this.table !== "user_settings" &&
       this.table !== "user_obsidian_settings" &&
       this.table !== "user_oauth_connections"
     ) {
@@ -244,7 +308,8 @@ class FakeQuery {
   }
 
   private filteredRows(): FakeRow[] {
-    return this.tableRows().filter((row) => {
+    const rows = this.tableRows().filter((row) => {
+      if (this.notNullColumns.some((column) => row[column] == null)) return false;
       for (const [key, value] of Object.entries(this.filters)) {
         if (value && typeof value === "object" && "$ilike" in value) {
           const rowVal = String(row[key as keyof FakeRow] ?? "");
@@ -263,11 +328,42 @@ class FakeQuery {
         }
       }
 
+      for (const [key, value] of Object.entries(this.greaterThanFilters)) {
+        if (String(row[key]) <= value) {
+          return false;
+        }
+      }
+
       return true;
     });
+    rows.sort((left, right) => {
+      for (const { column, ascending, nullsFirst } of this.orders) {
+        if (left[column] == null && right[column] == null) {
+          continue;
+        }
+        if (left[column] == null) {
+          return nullsFirst ? -1 : 1;
+        }
+        if (right[column] == null) {
+          return nullsFirst ? 1 : -1;
+        }
+        const difference = String(left[column] ?? "").localeCompare(
+          String(right[column] ?? ""),
+        );
+        if (difference !== 0) {
+          return ascending ? difference : -difference;
+        }
+      }
+      return 0;
+    });
+    return this.rowLimit === undefined ? rows : rows.slice(this.rowOffset, this.rowOffset + this.rowLimit);
   }
 
   private tableRows(): FakeRow[] {
+    if (this.table === "user_settings") return this.client.userSettings;
+    if (this.table === "workouts") return this.client.workouts;
+    if (this.table === "workout_sets") return this.client.workoutSets;
+    if (this.table === "fitness_exercises") return this.client.fitnessExercises;
     if (this.table === "finance_transactions") {
       return this.client.transactions;
     }
@@ -307,6 +403,12 @@ class FakeQuery {
     if (this.table === "course_readings") {
       return this.client.courseReadings;
     }
+    if (this.table === "academic_records") {
+      return this.client.academicRecords;
+    }
+    if (this.table === "source_events") {
+      return this.client.sourceEvents;
+    }
 
     return [];
   }
@@ -321,6 +423,95 @@ function storeWith(client: FakeSupabaseClient): SupabaseLifeOSStore {
     allowPlaintextOAuthTokens: true,
   });
 }
+
+const customWorkoutProgram = {
+  title: "Мой план",
+  days: [{ id: "legs", title: "Ноги", exercises: [{ name: "Приседания", sets: [{ reps: 8, weightKg: 40, restSeconds: 120 }] }] }],
+};
+
+function workoutClient(): FakeSupabaseClient {
+  const client = new FakeSupabaseClient();
+  client.workouts = [
+    { id: "workout-a", user_id: "user-a", title: "Ноги", started_at: "2026-09-24T10:00:00Z", ended_at: null },
+    { id: "workout-b", user_id: "user-b", title: "Private", started_at: "2026-09-24T10:00:00Z", ended_at: null },
+  ];
+  client.fitnessExercises = [
+    { id: "exercise-a", user_id: "user-a", name: "Приседания", category: "strength" },
+    { id: "exercise-b", user_id: "user-b", name: "Private exercise", category: "strength" },
+  ];
+  client.workoutSets = [
+    { id: "set-a", user_id: "user-a", workout_id: "workout-a", exercise_id: "exercise-a", set_index: 1, reps: 8, weight_kg: 40, rest_seconds: 120, completed: false, completed_at: null, created_at: "2026-09-24T10:00:00Z" },
+    { id: "set-b", user_id: "user-b", workout_id: "workout-b", exercise_id: "exercise-b", set_index: 1, reps: 8, weight_kg: 40, rest_seconds: 120, completed: false, completed_at: null, created_at: "2026-09-24T10:00:00Z" },
+  ];
+  return client;
+}
+
+describe("workout persistence", () => {
+  it("round-trips a program while preserving unrelated settings and another user", async () => {
+    const client = workoutClient();
+    client.userSettings = [
+      { user_id: "user-a", settings: { reminder_mode: "chill", finance_base_currency: "KZT" } },
+      { user_id: "user-b", settings: { workout_program: { ...customWorkoutProgram, title: "Other" } } },
+    ];
+    const store = storeWith(client);
+    await store.saveWorkoutProgram("user-a", customWorkoutProgram);
+    expect(await store.getWorkoutProgram("user-a")).toEqual(customWorkoutProgram);
+    expect(client.userSettings[0].settings).toEqual({ reminder_mode: "chill", finance_base_currency: "KZT", workout_program: customWorkoutProgram });
+    expect((client.userSettings[1].settings as { workout_program: { title: string } }).workout_program.title).toBe("Other");
+    expect(client.queries.filter((query) => query.action === "select").every((query) => query.filters.user_id === "user-a")).toBe(true);
+  });
+
+  it("edits recorded set values without altering the saved program or another user's set", async () => {
+    const client = workoutClient();
+    client.userSettings = [{ user_id: "user-a", settings: { workout_program: customWorkoutProgram } }];
+    const summary = await storeWith(client).updateWorkoutSet({ userId: "user-a", setId: "set-a", values: { reps: 7, weightKg: 42.5, restSeconds: 0 } });
+    expect(summary.exercises[0].sets[0]).toMatchObject({ targetReps: 7, targetWeightKg: 42.5, restSeconds: 0 });
+    expect(client.workoutSets[1].reps).toBe(8);
+    expect((client.userSettings[0].settings as { workout_program: unknown }).workout_program).toEqual(customWorkoutProgram);
+    expect(client.queries.every((query) => query.filters.user_id === "user-a")).toBe(true);
+  });
+
+  it("rejects foreign set IDs and all set mutations after a workout ends", async () => {
+    const client = workoutClient();
+    const store = storeWith(client);
+    const values = { reps: 7, weightKg: 40, restSeconds: 90 };
+    await expect(store.updateWorkoutSet({ userId: "user-a", setId: "set-b", values })).rejects.toThrow("workout_not_found");
+    client.workouts[0].ended_at = "2026-09-24T11:00:00Z";
+    await expect(store.updateWorkoutSet({ userId: "user-a", setId: "set-a", values })).rejects.toThrow("workout_completed");
+    await expect(store.completeWorkoutSet({ userId: "user-a", setId: "set-a", completedAt: "2026-09-24T11:01:00Z" })).rejects.toThrow("workout_completed");
+    await expect(store.undoWorkoutSet({ userId: "user-a", setId: "set-a" })).rejects.toThrow("workout_completed");
+    expect(client.queries.filter((query) => query.action === "update")).toHaveLength(0);
+  });
+
+  it("pages history sets, excludes active and foreign sessions, and scopes exercise names", async () => {
+    const client = workoutClient();
+    client.workouts[0].ended_at = "2026-09-24T11:00:00Z";
+    client.workouts[1].ended_at = "2026-09-24T11:00:00Z";
+    client.workouts.push({ id: "active-a", user_id: "user-a", started_at: "2026-09-24T12:00:00Z", ended_at: null });
+    const base = client.workoutSets[0];
+    client.workoutSets = Array.from({ length: 501 }, (_, i) => ({
+      ...base, id: `set-${String(i).padStart(4, "0")}`, set_index: i + 1,
+      completed: i < 2, completed_at: i < 2 ? "2026-09-24T10:05:00Z" : null,
+      exercise_id: i === 500 ? "exercise-b" : "exercise-a",
+    }));
+    const history = await storeWith(client).getWorkoutHistory("user-a");
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({ id: "workout-a", totalSets: 501, completedSets: 2, volumeKg: 640, restTimerEndsAt: null, endedAt: "2026-09-24T11:00:00Z" });
+    expect(history[0].exercises[1].name).toBe("Exercise");
+    expect(JSON.stringify(history)).not.toContain("Private");
+    expect(client.queries.filter((query) => query.table === "workout_sets")).toHaveLength(2);
+    expect(client.queries.every((query) => query.filters.user_id === "user-a")).toBe(true);
+  });
+
+  it("does not resurrect an older rest timer after completing a set with zero rest", async () => {
+    const client = workoutClient();
+    client.workoutSets[0].completed = true;
+    client.workoutSets[0].completed_at = "2026-09-24T10:10:00Z";
+    client.workoutSets.push({ ...client.workoutSets[0], id: "no-rest", set_index: 2, rest_seconds: 0, completed_at: "2026-09-24T10:10:05Z" });
+    const current = await storeWith(client).getCurrentWorkout({ userId: "user-a" });
+    expect(current?.restTimerEndsAt).toBeNull();
+  });
+});
 
 describe("SupabaseLifeOSStore tenant isolation", () => {
   it("rejects adding tags to another user's transaction", async () => {
@@ -1456,9 +1647,7 @@ describe("course_readings methods", () => {
 
   it("rejects updating a course reading the caller does not own", async () => {
     const client = makeClient(); // course owned by user-a
-    client.courseReadings = [
-      { id: readingId, study_course_id: courseId },
-    ];
+    client.courseReadings = [{ id: readingId, study_course_id: courseId }];
     const store = storeWith(client);
 
     await expect(
@@ -1480,8 +1669,7 @@ describe("course_readings methods", () => {
 
   it("lists course readings ordered by session_date asc (nulls last) then created_at", async () => {
     const client = makeClient();
-    // FakeQuery.order() is a no-op, so we verify the ordering calls are made
-    // via the recorded queries; actual ordering is tested by the real DB.
+    // Insert out of order so the fake exercises the requested DB ordering.
     client.courseReadings = [
       {
         id: "r1",
@@ -1520,10 +1708,10 @@ describe("course_readings methods", () => {
 
     const readings = await store.listCourseReadings("user-a", courseId);
     expect(readings).toHaveLength(2);
-    expect(readings[0].id).toBe("r1");
-    expect(readings[1].id).toBe("r2");
+    expect(readings[0].id).toBe("r2");
+    expect(readings[1].id).toBe("r1");
 
-    // Confirm the two order() calls were recorded on the course_readings query
+    // Confirm the course_readings query was issued.
     const listQuery = client.queries.find(
       (q) => q.table === "course_readings" && q.action === "select",
     );
@@ -1544,5 +1732,136 @@ describe("course_readings methods", () => {
         (q) => q.table === "course_readings" && q.action === "delete",
       ),
     ).toBe(true);
+  });
+});
+
+describe("academic record visibility", () => {
+  const academicRow = (index: number): FakeRow => ({
+    id: `grade-${String(index).padStart(4, "0")}`,
+    user_id: "user-a",
+    source_event_id: `event-${index}`,
+    course_title: "Computer Networks",
+    record_type: "assignment",
+    title: `Work ${index}`,
+    score: null,
+    max_score: 10,
+    percentage: null,
+    raw_json: {},
+    updated_at: "2026-09-24T00:00:00Z",
+  });
+
+  it("returns all 67 synced records instead of truncating at 50", async () => {
+    const client = new FakeSupabaseClient();
+    client.academicRecords = Array.from({ length: 67 }, (_, index) =>
+      academicRow(index),
+    );
+    client.sourceEvents = client.academicRecords.map((row) => ({
+      id: row.source_event_id as string,
+      user_id: "user-a",
+      status: "active",
+    }));
+    const records = await storeWith(client).listAcademicRecords("user-a");
+    expect(records).toHaveLength(67);
+    expect(new Set(records.map((record) => record.id)).size).toBe(67);
+  });
+
+  it("continues after retired-only pages and returns owned current and manual records in display order", async () => {
+    const client = new FakeSupabaseClient();
+    client.academicRecords = Array.from({ length: 267 }, (_, index) =>
+      academicRow(index),
+    );
+    client.sourceEvents = client.academicRecords.map((row, index) => ({
+      id: row.source_event_id as string,
+      user_id: "user-a",
+      status: index < 100 ? "missing" : "active",
+    }));
+    client.academicRecords.push(
+      {
+        ...academicRow(267),
+        source_event_id: null,
+        updated_at: "2026-09-25T00:00:00Z",
+      },
+      { ...academicRow(268), user_id: "user-b", source_event_id: null },
+      academicRow(269),
+      academicRow(270),
+    );
+    client.sourceEvents.push({
+      id: "event-269",
+      user_id: "user-b",
+      status: "active",
+    });
+    // Exercise DB ordering too, independently of fixture insertion order.
+    client.academicRecords.reverse();
+
+    const records = await storeWith(client).listAcademicRecords("user-a");
+    expect(records.map((record) => record.id)).toEqual([
+      academicRow(267).id,
+      ...Array.from({ length: 167 }, (_, index) => academicRow(index + 100).id),
+    ]);
+    for (const query of client.queries) {
+      expect(query.filters.user_id).toBe("user-a");
+      if (query.table === "source_events") {
+        expect(query.inFilters.id.length).toBeLessThanOrEqual(100);
+      }
+    }
+    expect(
+      client.queries.filter((query) => query.table === "academic_records"),
+    ).toHaveLength(4);
+  });
+
+  it("rejects a later page failure instead of returning an incomplete grade list", async () => {
+    const client = new FakeSupabaseClient();
+    client.academicRecords = Array.from({ length: 101 }, (_, index) => ({
+      ...academicRow(index),
+      source_event_id: null,
+    }));
+    client.selectErrors["academic_records:grade-0099"] = "page unavailable";
+    await expect(
+      storeWith(client).listAcademicRecords("user-a"),
+    ).rejects.toThrow("page unavailable");
+  });
+
+  it("hides retired or foreign source events and preserves manual and active records", async () => {
+    const client = new FakeSupabaseClient();
+    const base = {
+      user_id: "user-a",
+      course_title: "DB",
+      record_type: "assignment",
+      title: "Work",
+      score: null,
+      max_score: 10,
+      percentage: null,
+      raw_json: {},
+      updated_at: "2026-09-24T00:00:00Z",
+    };
+    client.academicRecords = [
+      {
+        ...base,
+        id: "manual",
+        source_event_id: null,
+        updated_at: "2026-09-24T01:00:00Z",
+      },
+      { ...base, id: "current", source_event_id: "active" },
+      { ...base, id: "old", source_event_id: "missing" },
+      { ...base, id: "foreign", source_event_id: "other-user" },
+      {
+        ...base,
+        id: "foreign-record",
+        user_id: "user-b",
+        source_event_id: null,
+      },
+    ];
+    client.sourceEvents = [
+      { id: "active", user_id: "user-a", status: "active" },
+      { id: "missing", user_id: "user-a", status: "missing" },
+      { id: "other-user", user_id: "user-b", status: "active" },
+    ];
+    const records = await storeWith(client).listAcademicRecords("user-a");
+    expect(records.map((record) => record.id)).toEqual(["manual", "current"]);
+    expect(records[1].score).toBeNull();
+    expect(
+      client.queries.find((query) => query.table === "source_events")?.filters
+        .user_id,
+    ).toBe("user-a");
   });
 });

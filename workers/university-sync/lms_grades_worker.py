@@ -50,6 +50,7 @@ from typing import Any, Callable, NamedTuple
 # parents[0] = workers/university-sync/
 # parents[1] = workers/
 sys.path.insert(0, str(Path(__file__).resolve().parent))     # university-sync/
+sys.path.insert(0, str(Path(__file__).resolve().parent / "aitu-parser"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1])) # workers/
 
 from common.lifeos_sync import (  # noqa: E402
@@ -62,7 +63,7 @@ from common.lifeos_sync import (  # noqa: E402
     load_dotenv,
     utc_now,
 )
-from aitu_parser.university_scraper import (  # noqa: E402
+from university_scraper import (  # noqa: E402
     MoodleClient,
     Settings as MoodleSettings,
     sync_grades as sync_moodle_grades,
@@ -175,17 +176,25 @@ def _handle_aitu_moodle(
     row: dict[str, Any],
 ) -> SyncStats:
     """Sync grades for a single AITU Moodle user."""
-    moodle_settings = MoodleSettings(
-        base=user_settings,
-        username=row["username"],
-        password=decrypt_field(row["encrypted_password"]),
-        ws_token=decrypt_field(row["ws_token_encrypted"]) if row.get("ws_token_encrypted") else None,
-        poll_seconds=3600,
-    )
-    client = MoodleClient(moodle_settings)
-    records = client.fetch_grades()
-    mode = db.get_reminder_mode()
-    return sync_moodle_grades(db, moodle_settings, records, mode, client.is_mocked)
+    source = db.ensure_source("university_platform", "university", "University Platform")
+    run_id = db.start_sync_run(source)
+    try:
+        moodle_settings = MoodleSettings(
+            base=user_settings,
+            username=row["username"],
+            password=decrypt_field(row["encrypted_password"]),
+            ws_token=decrypt_field(row["ws_token_encrypted"]) if row.get("ws_token_encrypted") else None,
+            sso_cookie=None,  # Never reuse the legacy owner's cookie across users.
+            poll_seconds=3600,
+            allow_mock=False,
+        )
+        client = MoodleClient(moodle_settings)
+        records = client.fetch_grades()
+        mode = db.get_reminder_mode()
+    except Exception as exc:
+        db.finish_sync_run(run_id, "failed", SyncStats(), str(exc))
+        raise
+    return sync_moodle_grades(db, moodle_settings, records, mode, client.is_mocked, run_id=run_id)
 
 
 def _handle_platonus(
@@ -194,17 +203,24 @@ def _handle_platonus(
     row: dict[str, Any],
 ) -> SyncStats:
     """Sync grades for a single Platonus user."""
-    platonus_settings = PlatonusSettings(
-        base=user_settings,
-        username=row["username"],
-        password=decrypt_field(row["encrypted_password"]),
-        poll_seconds=3600,
-    )
-    client = PlatonusClient(platonus_settings)
-    client.authenticate()
-    grades = client.fetch_grades()
-    mode = db.get_reminder_mode()
-    return sync_platonus_grades(db, platonus_settings, grades, mode)
+    source = db.ensure_source("university_platform", "university", "University Platform")
+    run_id = db.start_sync_run(source)
+    try:
+        platonus_settings = PlatonusSettings(
+            base=user_settings,
+            username=row["username"],
+            password=decrypt_field(row["encrypted_password"]),
+            poll_seconds=3600,
+            allow_mock=False,
+        )
+        client = PlatonusClient(platonus_settings)
+        client.authenticate()
+        grades = client.fetch_grades()
+        mode = db.get_reminder_mode()
+    except Exception as exc:
+        db.finish_sync_run(run_id, "failed", SyncStats(), str(exc))
+        raise
+    return sync_platonus_grades(db, platonus_settings, grades, mode, run_id=run_id)
 
 
 PLATFORM_HANDLERS: dict[str, PlatformHandler] = {
@@ -239,7 +255,7 @@ def sync_config(master_db: SupabaseRestClient, master_settings: BaseSettings, ro
     # Always stamp attempt time
     master_db.request(
         "PATCH", "user_lms_settings",
-        query={"id": f"eq.{config_id}"},
+        query={"id": f"eq.{config_id}", "user_id": f"eq.{user_id}"},
         body={"last_sync_attempt_at": now},
     )
 
@@ -254,7 +270,7 @@ def sync_config(master_db: SupabaseRestClient, master_settings: BaseSettings, ro
         )
         master_db.request(
             "PATCH", "user_lms_settings",
-            query={"id": f"eq.{config_id}"},
+            query={"id": f"eq.{config_id}", "user_id": f"eq.{user_id}"},
             body={
                 "last_sync_success_at": utc_now(),
                 "is_token_valid": True,
@@ -266,7 +282,7 @@ def sync_config(master_db: SupabaseRestClient, master_settings: BaseSettings, ro
         is_auth_err = any(k in str(exc).lower() for k in ("auth", "token", "password", "credential", "401", "403"))
         master_db.request(
             "PATCH", "user_lms_settings",
-            query={"id": f"eq.{config_id}"},
+            query={"id": f"eq.{config_id}", "user_id": f"eq.{user_id}"},
             body={"is_token_valid": not is_auth_err},
         )
     except Exception as exc:  # noqa: BLE001

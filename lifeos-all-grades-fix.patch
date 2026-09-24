@@ -1,0 +1,409 @@
+diff --git a/docs/ACADEMIC_SYNC_COMPLETION.md b/docs/ACADEMIC_SYNC_COMPLETION.md
+index 8048602..0b00cda 100644
+--- a/docs/ACADEMIC_SYNC_COMPLETION.md
++++ b/docs/ACADEMIC_SYNC_COMPLETION.md
+@@ -69,7 +69,9 @@ The command changes only `external_course_key` on one active owned course. It re
+ 
+ Verified in this workspace: 245 TypeScript tests, 78 Python worker tests, type checks for all three application areas, and both TMA and web production builds. Regression tests cover the TH/weight/grade layout, real zero versus unknown, Unicode and duplicate names, repeated sync and renames, manual-field preservation, cross-user matching, partial fetch failures, platform isolation, mock isolation and the actual master-worker imports/settings.
+ 
+-The tests use synthetic HTML fixtures and in-memory database/HTTP doubles. A live Moodle session, production Supabase/PostgREST writes, production RLS and systemd deployment were not exercised. Check a real one-shot sync after installation and confirm `assessment_items` for each explicitly linked course. The UI is limited to the latest 50 academic records from the existing endpoint; this is not yet a full course-history screen.
++The tests use synthetic HTML fixtures and in-memory database/HTTP doubles. A live Moodle session, production Supabase/PostgREST writes, production RLS and systemd deployment were not exercised in this workspace. Check a real one-shot sync after installation and confirm `assessment_items` for each explicitly linked course.
++
++The academic summary now reads records in batches of 100 using an immutable ID cursor, checks source ownership/status per batch, and returns all current records plus manual entries, newest updated first. A page containing only retired records does not stop loading. Failures on any page fail the request instead of returning a partial list. This removes the previous 50-record display limit without changing the API or schema; restart `lifeos-bot` to load the backend change. It is still a current-grades view, not a full course-history screen.
+ 
+ ## Remaining LifeOS work
+ 
+diff --git a/packages/db/src/lifeos-store.test.ts b/packages/db/src/lifeos-store.test.ts
+index 4163c0e..ff8f3b8 100644
+--- a/packages/db/src/lifeos-store.test.ts
++++ b/packages/db/src/lifeos-store.test.ts
+@@ -14,6 +14,8 @@ interface FakeQueryReceipt {
+   columns?: string;
+   filters: Record<string, unknown>;
+   inFilters: Record<string, unknown[]>;
++  greaterThanFilters: Record<string, string>;
++  limit?: number;
+   payload?: unknown;
+ }
+ 
+@@ -31,6 +33,7 @@ class FakeSupabaseClient {
+   academicRecords: FakeRow[] = [];
+   sourceEvents: FakeRow[] = [];
+   queries: FakeQueryReceipt[] = [];
++  selectErrors: Record<string, string> = {};
+ 
+   from(table: string): FakeQuery {
+     return new FakeQuery(this, table);
+@@ -41,6 +44,13 @@ class FakeQuery {
+   private action = "select";
+   private readonly filters: Record<string, unknown> = {};
+   private readonly inFilters: Record<string, unknown[]> = {};
++  private readonly greaterThanFilters: Record<string, string> = {};
++  private readonly orders: Array<{
++    column: string;
++    ascending: boolean;
++    nullsFirst: boolean;
++  }> = [];
++  private rowLimit: number | undefined;
+   private payload: unknown;
+   private columns: string | undefined;
+ 
+@@ -92,11 +102,26 @@ class FakeQuery {
+     return this;
+   }
+ 
+-  order(_column: string, _options?: unknown): this {
++  gt(key: string, value: string): this {
++    this.greaterThanFilters[key] = value;
+     return this;
+   }
+ 
+-  limit(_count: number): this {
++  order(
++    column: string,
++    options?: { ascending?: boolean; nullsFirst?: boolean },
++  ): this {
++    const ascending = options?.ascending ?? true;
++    this.orders.push({
++      column,
++      ascending,
++      nullsFirst: options?.nullsFirst ?? !ascending,
++    });
++    return this;
++  }
++
++  limit(count: number): this {
++    this.rowLimit = count;
+     return this;
+   }
+ 
+@@ -122,9 +147,15 @@ class FakeQuery {
+     return Promise.resolve({ data, error: null });
+   }
+ 
+-  then<TResult1 = { data: FakeRow[] | null; error: null }, TResult2 = never>(
++  then<
++    TResult1 = { data: FakeRow[] | null; error: { message: string } | null },
++    TResult2 = never,
++  >(
+     onfulfilled?:
+-      | ((value: { data: FakeRow[] | null; error: null }) => TResult1)
++      | ((value: {
++          data: FakeRow[] | null;
++          error: { message: string } | null;
++        }) => TResult1)
+       | null,
+     onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+   ): Promise<TResult1 | TResult2> {
+@@ -134,9 +165,14 @@ class FakeQuery {
+     if (this.action === "update") {
+       this.updateRow();
+     }
++    const errorMessage =
++      this.client.selectErrors[
++        `${this.table}:${this.greaterThanFilters.id ?? ""}`
++      ];
+     return Promise.resolve({
+-      data: this.action === "select" ? this.filteredRows() : null,
+-      error: null,
++      data:
++        this.action === "select" && !errorMessage ? this.filteredRows() : null,
++      error: errorMessage ? { message: errorMessage } : null,
+     })
+       .then((value) => {
+         this.recordQuery();
+@@ -152,6 +188,8 @@ class FakeQuery {
+       columns: this.columns,
+       filters: { ...this.filters },
+       inFilters: { ...this.inFilters },
++      greaterThanFilters: { ...this.greaterThanFilters },
++      limit: this.rowLimit,
+       payload: this.payload,
+     });
+   }
+@@ -246,7 +284,7 @@ class FakeQuery {
+   }
+ 
+   private filteredRows(): FakeRow[] {
+-    return this.tableRows().filter((row) => {
++    const rows = this.tableRows().filter((row) => {
+       for (const [key, value] of Object.entries(this.filters)) {
+         if (value && typeof value === "object" && "$ilike" in value) {
+           const rowVal = String(row[key as keyof FakeRow] ?? "");
+@@ -265,8 +303,35 @@ class FakeQuery {
+         }
+       }
+ 
++      for (const [key, value] of Object.entries(this.greaterThanFilters)) {
++        if (String(row[key]) <= value) {
++          return false;
++        }
++      }
++
+       return true;
+     });
++    rows.sort((left, right) => {
++      for (const { column, ascending, nullsFirst } of this.orders) {
++        if (left[column] == null && right[column] == null) {
++          continue;
++        }
++        if (left[column] == null) {
++          return nullsFirst ? -1 : 1;
++        }
++        if (right[column] == null) {
++          return nullsFirst ? 1 : -1;
++        }
++        const difference = String(left[column] ?? "").localeCompare(
++          String(right[column] ?? ""),
++        );
++        if (difference !== 0) {
++          return ascending ? difference : -difference;
++        }
++      }
++      return 0;
++    });
++    return this.rowLimit === undefined ? rows : rows.slice(0, this.rowLimit);
+   }
+ 
+   private tableRows(): FakeRow[] {
+@@ -1486,8 +1551,7 @@ describe("course_readings methods", () => {
+ 
+   it("lists course readings ordered by session_date asc (nulls last) then created_at", async () => {
+     const client = makeClient();
+-    // FakeQuery.order() is a no-op, so we verify the ordering calls are made
+-    // via the recorded queries; actual ordering is tested by the real DB.
++    // Insert out of order so the fake exercises the requested DB ordering.
+     client.courseReadings = [
+       {
+         id: "r1",
+@@ -1526,10 +1590,10 @@ describe("course_readings methods", () => {
+ 
+     const readings = await store.listCourseReadings("user-a", courseId);
+     expect(readings).toHaveLength(2);
+-    expect(readings[0].id).toBe("r1");
+-    expect(readings[1].id).toBe("r2");
++    expect(readings[0].id).toBe("r2");
++    expect(readings[1].id).toBe("r1");
+ 
+-    // Confirm the two order() calls were recorded on the course_readings query
++    // Confirm the course_readings query was issued.
+     const listQuery = client.queries.find(
+       (q) => q.table === "course_readings" && q.action === "select",
+     );
+@@ -1554,6 +1618,91 @@ describe("course_readings methods", () => {
+ });
+ 
+ describe("academic record visibility", () => {
++  const academicRow = (index: number): FakeRow => ({
++    id: `grade-${String(index).padStart(4, "0")}`,
++    user_id: "user-a",
++    source_event_id: `event-${index}`,
++    course_title: "Computer Networks",
++    record_type: "assignment",
++    title: `Work ${index}`,
++    score: null,
++    max_score: 10,
++    percentage: null,
++    raw_json: {},
++    updated_at: "2026-09-24T00:00:00Z",
++  });
++
++  it("returns all 67 synced records instead of truncating at 50", async () => {
++    const client = new FakeSupabaseClient();
++    client.academicRecords = Array.from({ length: 67 }, (_, index) =>
++      academicRow(index),
++    );
++    client.sourceEvents = client.academicRecords.map((row) => ({
++      id: row.source_event_id as string,
++      user_id: "user-a",
++      status: "active",
++    }));
++    const records = await storeWith(client).listAcademicRecords("user-a");
++    expect(records).toHaveLength(67);
++    expect(new Set(records.map((record) => record.id)).size).toBe(67);
++  });
++
++  it("continues after retired-only pages and returns owned current and manual records in display order", async () => {
++    const client = new FakeSupabaseClient();
++    client.academicRecords = Array.from({ length: 267 }, (_, index) =>
++      academicRow(index),
++    );
++    client.sourceEvents = client.academicRecords.map((row, index) => ({
++      id: row.source_event_id as string,
++      user_id: "user-a",
++      status: index < 100 ? "missing" : "active",
++    }));
++    client.academicRecords.push(
++      {
++        ...academicRow(267),
++        source_event_id: null,
++        updated_at: "2026-09-25T00:00:00Z",
++      },
++      { ...academicRow(268), user_id: "user-b", source_event_id: null },
++      academicRow(269),
++      academicRow(270),
++    );
++    client.sourceEvents.push({
++      id: "event-269",
++      user_id: "user-b",
++      status: "active",
++    });
++    // Exercise DB ordering too, independently of fixture insertion order.
++    client.academicRecords.reverse();
++
++    const records = await storeWith(client).listAcademicRecords("user-a");
++    expect(records.map((record) => record.id)).toEqual([
++      academicRow(267).id,
++      ...Array.from({ length: 167 }, (_, index) => academicRow(index + 100).id),
++    ]);
++    for (const query of client.queries) {
++      expect(query.filters.user_id).toBe("user-a");
++      if (query.table === "source_events") {
++        expect(query.inFilters.id.length).toBeLessThanOrEqual(100);
++      }
++    }
++    expect(
++      client.queries.filter((query) => query.table === "academic_records"),
++    ).toHaveLength(4);
++  });
++
++  it("rejects a later page failure instead of returning an incomplete grade list", async () => {
++    const client = new FakeSupabaseClient();
++    client.academicRecords = Array.from({ length: 101 }, (_, index) => ({
++      ...academicRow(index),
++      source_event_id: null,
++    }));
++    client.selectErrors["academic_records:grade-0099"] = "page unavailable";
++    await expect(
++      storeWith(client).listAcademicRecords("user-a"),
++    ).rejects.toThrow("page unavailable");
++  });
++
+   it("hides retired or foreign source events and preserves manual and active records", async () => {
+     const client = new FakeSupabaseClient();
+     const base = {
+@@ -1565,9 +1714,15 @@ describe("academic record visibility", () => {
+       max_score: 10,
+       percentage: null,
+       raw_json: {},
++      updated_at: "2026-09-24T00:00:00Z",
+     };
+     client.academicRecords = [
+-      { ...base, id: "manual", source_event_id: null },
++      {
++        ...base,
++        id: "manual",
++        source_event_id: null,
++        updated_at: "2026-09-24T01:00:00Z",
++      },
+       { ...base, id: "current", source_event_id: "active" },
+       { ...base, id: "old", source_event_id: "missing" },
+       { ...base, id: "foreign", source_event_id: "other-user" },
+diff --git a/packages/db/src/lifeos-store.ts b/packages/db/src/lifeos-store.ts
+index 9c78d11..89a50f7 100644
+--- a/packages/db/src/lifeos-store.ts
++++ b/packages/db/src/lifeos-store.ts
+@@ -5675,42 +5675,70 @@ export class SupabaseLifeOSStore implements LifeOSStore {
+   }
+ 
+   async listAcademicRecords(userId: string): Promise<AcademicRecord[]> {
+-    const { data, error } = await this.client
+-      .from("academic_records")
+-      .select("*")
+-      .eq("user_id", userId)
+-      .order("updated_at", { ascending: false })
+-      .limit(50);
+-
+-    if (error) {
+-      throwSupabaseError(error, "Failed to list academic records");
+-    }
++    const records: AcademicRecord[] = [];
++    let afterId: string | undefined;
++    while (true) {
++      // A sync changes updated_at. Page by immutable ID so those updates do
++      // not move existing rows across pages; sort for display after loading.
++      let query = this.client
++        .from("academic_records")
++        .select("*")
++        .eq("user_id", userId)
++        .order("id", { ascending: true })
++        .limit(100);
++      if (afterId !== undefined) {
++        query = query.gt("id", afterId);
++      }
++      const { data, error } = await query;
++      if (error) {
++        throwSupabaseError(error, "Failed to list academic records");
++      }
++      if (data.length === 0) {
++        break;
++      }
++      afterId = data[data.length - 1].id;
+ 
+-    const sourceIds = data.flatMap((row) =>
+-      row.source_event_id ? [row.source_event_id] : [],
+-    );
+-    if (sourceIds.length === 0) {
+-      return data.map(toAcademicRecord);
++      // Bound the status lookup as well as the records query.
++      const sourceIds = [
++        ...new Set(
++          data.flatMap((row) =>
++            row.source_event_id ? [row.source_event_id] : [],
++          ),
++        ),
++      ];
++      const activeIds = new Set<string>();
++      if (sourceIds.length > 0) {
++        const { data: sources, error: sourceError } = await this.client
++          .from("source_events")
++          .select("id,status")
++          .eq("user_id", userId)
++          .in("id", sourceIds);
++        if (sourceError) {
++          throwSupabaseError(
++            sourceError,
++            "Failed to load academic source status",
++          );
++        }
++        for (const source of sources) {
++          if (source.status === "active") {
++            activeIds.add(source.id);
++          }
++        }
++      }
++      // Keep manual records, but not retired or foreign-source LMS records.
++      records.push(
++        ...data
++          .filter(
++            (row) => !row.source_event_id || activeIds.has(row.source_event_id),
++          )
++          .map(toAcademicRecord),
++      );
+     }
+-    const { data: sources, error: sourceError } = await this.client
+-      .from("source_events")
+-      .select("id,status")
+-      .eq("user_id", userId)
+-      .in("id", sourceIds);
+-    if (sourceError) {
+-      throwSupabaseError(sourceError, "Failed to load academic source status");
+-    }
+-    const activeIds = new Set(
+-      sources
+-        .filter((source) => source.status === "active")
+-        .map((source) => source.id),
++    return records.sort(
++      (left, right) =>
++        right.updatedAt.localeCompare(left.updatedAt) ||
++        left.id.localeCompare(right.id),
+     );
+-    // Keep manual records, but do not present retired LMS rows as current grades.
+-    return data
+-      .filter(
+-        (row) => !row.source_event_id || activeIds.has(row.source_event_id),
+-      )
+-      .map(toAcademicRecord);
+   }
+ 
+   async upsertAcademicRecord(

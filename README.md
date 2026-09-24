@@ -30,6 +30,8 @@ Run checks:
 ```bash
 corepack pnpm typecheck
 corepack pnpm test
+# With the worker Python dependencies installed:
+corepack pnpm test:workers
 corepack pnpm --filter @lifeos/web build
 corepack pnpm --filter @lifeos/tma build
 ```
@@ -166,3 +168,7 @@ Start with:
 ## Status
 
 The repository now has backend foundations, Telegram webhook commands, Supabase migrations, health ingest, TMA scaffold, Obsidian worker, Android Health Connect scaffold, web dashboard scaffold, and deployment docs. Production auth, dashboard summary APIs, and full Android build hardening remain future phases.
+
+## Academic sync
+
+See [the academic sync update guide](docs/ACADEMIC_SYNC_COMPLETION.md) for Moodle grade parsing, explicit course links, worker checks, and deployment instructions.

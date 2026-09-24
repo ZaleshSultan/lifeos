@@ -20,6 +20,7 @@ from typing import Any
 # Resolve the workers/ directory path for imports
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from common.academic_sync import mark_missing_grades
 from common.lifeos_sync import (  # noqa: E402
     BaseSettings,
     SupabaseRestClient,
@@ -275,7 +276,7 @@ def sync_grades(client: SupabaseRestClient, settings: Settings, grades: list[dic
                 client.request("POST", "academic_records", body=academic_record_payload)
 
         # Mark any no-longer-reported events as missing
-        stats.missing = client.mark_missing("university_platform", seen_ids)
+        stats.missing = mark_missing_grades(client, seen_ids, ("academic:platonus:",))
         client.finish_sync_run(run_id, "success", stats)
         return stats
     except Exception as exc:

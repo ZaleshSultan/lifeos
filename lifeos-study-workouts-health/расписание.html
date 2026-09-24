@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AITU Schedule & Grade Dashboard - Sultan</title>
+    <style>
+        :root {
+            --bg-color: #0b0f19;
+            --card-bg: #151d2a;
+            --border-color: #263346;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --accent-cyan: #38bdf8;
+            --accent-warning: #f59e0b;
+            --accent-danger: #ef4444;
+            --accent-success: #10b981;
+            
+            --os-color: #ef4444;
+            --dms-color: #f59e0b;
+            --krl-color: #ec4899;
+            --cnc-color: #10b981;
+            --dld-color: #06b6d4;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            margin: 0;
+            padding: 20px;
+            line-height: 1.4;
+        }
+
+        .container { max-width: 1400px; margin: 0 auto; }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 16px;
+            margin-bottom: 20px;
+        }
+
+        h1 { margin: 0; font-size: 1.5rem; font-weight: 700; }
+        .subtitle { color: var(--text-secondary); font-size: 0.85rem; margin-top: 4px; }
+
+        .badge {
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #fff;
+            display: inline-block;
+        }
+
+        .bg-os { background-color: var(--os-color); }
+        .bg-dms { background-color: var(--dms-color); }
+        .bg-krl { background-color: var(--krl-color); }
+        .bg-cnc { background-color: var(--cnc-color); }
+        .bg-dld { background-color: var(--dld-color); }
+
+        .type-tag {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text-secondary);
+            font-weight: 600;
+            margin-left: 6px;
+        }
+
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(430px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 18px;
+            margin-bottom: 20px;
+        }
+
+        .card h2 {
+            font-size: 1.05rem;
+            margin-top: 0;
+            margin-bottom: 14px;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 8px;
+            color: var(--accent-cyan);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+            font-size: 0.83rem;
+        }
+
+        th, td {
+            padding: 7px 9px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        th {
+            color: var(--text-secondary);
+            font-weight: 600;
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .time { font-family: monospace; font-weight: 600; color: var(--accent-cyan); width: 95px; }
+        .room { font-family: monospace; font-size: 0.78rem; background: #0b0f19; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border-color); }
+
+        .calc-input {
+            width: 65px;
+            background: var(--bg-color);
+            border: 1px solid var(--border-color);
+            color: #fff;
+            padding: 4px;
+            border-radius: 4px;
+            text-align: center;
+            font-size: 0.83rem;
+        }
+
+        .calc-input:focus {
+            border-color: var(--accent-cyan);
+            outline: none;
+        }
+
+        .status-pill {
+            font-size: 0.75rem;
+            color: var(--accent-success);
+            background: rgba(16, 185, 129, 0.1);
+            padding: 3px 8px;
+            border-radius: 12px;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .att-summary {
+            font-weight: bold;
+            color: var(--accent-cyan);
+        }
+
+        .warning-text {
+            color: var(--accent-danger);
+            font-size: 0.75rem;
+            font-weight: bold;
+        }
+
+        .day-header {
+            background: rgba(255, 255, 255, 0.04);
+            font-weight: bold;
+            color: var(--accent-cyan);
+        }
+
+        .weight-tag {
+            font-size: 0.72rem;
+            color: var(--text-secondary);
+            font-weight: normal;
+        }
+
+        .section-subtitle {
+            font-size: 0.82rem;
+            font-weight: bold;
+            color: var(--accent-cyan);
+            margin: 12px 0 6px 0;
+            text-transform: uppercase;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <div>
+            <h1>AITU Academic Workload Dashboard</h1>
+            <div class="subtitle">Султан | Кибербезопасность (2 курс) | Актуальное расписание + Калькулятор</div>
+        </div>
+        <div class="status-pill">Local Storage Sync Active</div>
+    </header>
+
+    <!-- Legend -->
+    <div class="legend">
+        <span class="badge bg-os">OS 2207 - Operating Systems (5 ECTS)</span>
+        <span class="badge bg-dms">SUBD 2217 - Database Management Systems (5 ECTS)</span>
+        <span class="badge bg-krl">RL 2202 - Русский язык C1 (5 ECTS)</span>
+        <span class="badge bg-cnc">CNC 2305 - Computer Networks</span>
+        <span class="badge bg-dld">DLD 2201 - Digital Logic Design</span>
+    </div>
+
+    <!-- WEEKLY SCHEDULE MATRIX (UPDATED) -->
+    <div class="card">
+        <h2>📅 Недельное расписание занятий (Обновленное)</h2>
+        <div style="overflow-x: auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>День</th>
+                        <th>Время</th>
+                        <th>Предмет</th>
+                        <th>Тип</th>
+                        <th>Преподаватель</th>
+                        <th>Аудитория</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Monday -->
+                    <tr class="day-header"><td colspan="6">Понедельник</td></tr>
+                    <tr><td></td><td class="time">16:00 – 16:50</td><td><span class="badge bg-krl">RL 2202</span> Казахский (русский) язык 1 (С1)</td><td><span class="type-tag">Практика</span></td><td>Молдахметова З.Н.</td><td><span class="room">C1.2.225P (Главный)</span></td></tr>
+                    <tr><td></td><td class="time">17:00 – 17:50</td><td><span class="badge bg-krl">RL 2202</span> Казахский (русский) язык 1 (С1)</td><td><span class="type-tag">Практика</span></td><td>Молдахметова З.Н.</td><td><span class="room">C1.2.225P (Главный)</span></td></tr>
+
+                    <!-- Tuesday -->
+                    <tr class="day-header"><td colspan="6">Вторник</td></tr>
+                    <tr><td></td><td class="time">08:00 – 08:50</td><td><span class="badge bg-cnc">CNC 2305</span> Компьютерные сети</td><td><span class="type-tag">Лекция</span></td><td>Досумбеков Е.К.</td><td><span class="room">101L (Коркем)</span></td></tr>
+                    <tr><td></td><td class="time">09:00 – 09:50</td><td><span class="badge bg-cnc">CNC 2305</span> Компьютерные сети</td><td><span class="type-tag">Лекция</span></td><td>Досумбеков Е.К.</td><td><span class="room">101L (Коркем)</span></td></tr>
+                    <tr><td></td><td class="time">10:00 – 10:50</td><td><span class="badge bg-dld">DLD 2201</span> Цифровой логический дизайн</td><td><span class="type-tag">Лекция</span></td><td>Амиров А.Х.</td><td><span class="room">301L (Коркем)</span></td></tr>
+                    <tr><td></td><td class="time">11:00 – 11:50</td><td><span class="badge bg-dld">DLD 2201</span> Цифровой логический дизайн</td><td><span class="type-tag">Лекция</span></td><td>Амиров А.Х.</td><td><span class="room">301L (Коркем)</span></td></tr>
+                    <tr><td></td><td class="time">12:00 – 12:50</td><td><span class="badge bg-dms">SUBD 2217</span> Системы управления базами данных</td><td><span class="type-tag">Практика</span></td><td>Танкеев С.И.</td><td><span class="room">204P (Коркем)</span></td></tr>
+                    <tr><td></td><td class="time">13:05 – 13:55</td><td><span class="badge bg-dms">SUBD 2217</span> Системы управления базами данных</td><td><span class="type-tag">Практика</span></td><td>Танкеев С.И.</td><td><span class="room">204P (Коркем)</span></td></tr>
+
+                    <!-- Wednesday -->
+                    <tr class="day-header"><td colspan="6">Среда</td></tr>
+                    <tr><td></td><td class="time">10:00 – 10:50</td><td><span class="badge bg-dld">DLD 2201</span> Цифровой логический дизайн</td><td><span class="type-tag">Лекция</span></td><td>Амиров А.Х.</td><td><span class="room">301L (Коркем)</span></td></tr>
+                    <tr><td></td><td class="time">14:00 – 14:50</td><td><span class="badge bg-dld">DLD 2201</span> Цифровой логический дизайн</td><td><span class="type-tag">Лабораторная</span></td><td>Ярулин Д.С.</td><td><span class="room">C1.2.252K (Главный)</span></td></tr>
+                    <tr><td></td><td class="time">15:00 – 15:50</td><td><span class="badge bg-dld">DLD 2201</span> Цифровой логический дизайн</td><td><span class="type-tag">Лабораторная</span></td><td>Ярулин Д.С.</td><td><span class="room">C1.2.252K (Главный)</span></td></tr>
+                    <tr><td></td><td class="time">16:00 – 16:50</td><td><span class="badge bg-os">OS 2207</span> Операционные системы</td><td><span class="type-tag">Практика</span></td><td>Сейлханова Қ.Ж.</td><td><span class="room">C1.2.123 Huawei (Главный)</span></td></tr>
+                    <tr><td></td><td class="time">17:00 – 17:50</td><td><span class="badge bg-os">OS 2207</span> Операционные системы</td><td><span class="type-tag">Практика</span></td><td>Сейлханова Қ.Ж.</td><td><span class="room">C1.2.123 Huawei (Главный)</span></td></tr>
+
+                    <!-- Thursday -->
+                    <tr class="day-header"><td colspan="6">Четверг</td></tr>
+                    <tr><td></td><td class="time">08:00 – 08:50</td><td><span class="badge bg-dms">SUBD 2217</span> Системы управления базами данных</td><td><span class="type-tag">Лекция</span></td><td>Нургалиева С.А.</td><td><span class="room">Онлайн</span></td></tr>
+                    <tr><td></td><td class="time">09:00 – 09:50</td><td><span class="badge bg-dms">SUBD 2217</span> Системы управления базами данных</td><td><span class="type-tag">Лекция</span></td><td>Нургалиева С.А.</td><td><span class="room">Онлайн</span></td></tr>
+                    <tr><td></td><td class="time">16:00 – 16:50</td><td><span class="badge bg-dms">SUBD 2217</span> Системы управления базами данных</td><td><span class="type-tag">Практика</span></td><td>Танкеев С.И.</td><td><span class="room">C1.1.238K (Главный)</span></td></tr>
+                    <tr><td></td><td class="time">17:00 – 17:50</td><td><span class="badge bg-os">OS 2207</span> Операционные системы</td><td><span class="type-tag">Практика</span></td><td>Сейлханова Қ.Ж.</td><td><span class="room">C1.1.244K (Главный)</span></td></tr>
+
+                    <!-- Friday -->
+                    <tr class="day-header"><td colspan="6">Пятница</td></tr>
+                    <tr><td></td><td class="time">14:00 – 14:50</td><td><span class="badge bg-cnc">CNC 2305</span> Компьютерные сети</td><td><span class="type-tag">Практика</span></td><td>Досумбеков Е.К.</td><td><span class="room">C1.2.239K (Главный)</span></td></tr>
+                    <tr><td></td><td class="time">15:00 – 15:50</td><td><span class="badge bg-cnc">CNC 2305</span> Компьютерные сети</td><td><span class="type-tag">Практика</span></td><td>Досумбеков Е.К.</td><td><span class="room">C1.2.243K (Главный)</span></td></tr>
+                    <tr><td></td><td class="time">16:00 – 16:50</td><td><span class="badge bg-cnc">CNC 2305</span> Компьютерные сети</td><td><span class="type-tag">Практика</span></td><td>Досумбеков Е.К.</td><td><span class="room">C1.2.243K (Главный)</span></td></tr>
+
+                    <!-- Saturday -->
+                    <tr class="day-header"><td colspan="6">Суббота</td></tr>
+                    <tr><td></td><td class="time">09:00 – 09:50</td><td><span class="badge bg-os">OS 2207</span> Операционные системы</td><td><span class="type-tag">Лекция</span></td><td>learn.astanait.edu.kz</td><td><span class="room">Онлайн</span></td></tr>
+                    <tr><td></td><td class="time">10:00 – 10:50</td><td><span class="badge bg-os">OS 2207</span> Операционные системы</td><td><span class="type-tag">Лекция</span></td><td>learn.astanait.edu.kz</td><td><span class="room">Онлайн</span></td></tr>
+                    <tr><td></td><td class="time">11:00 – 11:50</td><td><span class="badge bg-krl">RL 2202</span> Казахский (русский) язык 1 (С1)</td><td><span class="type-tag">Практика</span></td><td>Молдахметова З.Н.</td><td><span class="room">Онлайн</span></td></tr>
+                    <tr><td></td><td class="time">12:00 – 12:50</td><td><span class="badge bg-krl">RL 2202</span> Казахский (русский) язык 1 (С1)</td><td><span class="type-tag">Практика</span></td><td>Молдахметова З.Н.</td><td><span class="room">Онлайн</span></td></tr>
+                    <tr><td></td><td class="time">13:05 – 13:55</td><td><span class="badge bg-krl">RL 2202</span> Казахский (русский) язык 1 (С1)</td><td><span class="type-tag">Практика</span></td><td>Молдахметова З.Н.</td><td><span class="room">Онлайн</span></td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Summary Grade Overview Card -->
+    <div class="card">
+        <h2>📊 Сводная ведомость результатов (Ввод 0–100 за всё)</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Предмет</th>
+                    <th>Код</th>
+                    <th>Аттестация 1 (30%)</th>
+                    <th>Аттестация 2 (30%)</th>
+                    <th>Экзамен (40%)</th>
+                    <th>Итоговый балл</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><span class="badge bg-os">Operating Systems</span></td>
+                    <td><code>OS 2207</code></td>
+                    <td id="sum-os-att1" class="att-summary">0.0 / 100</td>
+                    <td id="sum-os-att2" class="att-summary">0.0 / 100</td>
+                    <td><input type="number" class="calc-input" id="os-exam" min="0" max="100" placeholder="0-100" oninput="recalcAll()"></td>
+                    <td id="sum-os-total" style="font-weight: bold; font-size: 0.95rem;">--</td>
+                </tr>
+                <tr>
+                    <td><span class="badge bg-dms">Database Management Systems</span></td>
+                    <td><code>SUBD 2217</code></td>
+                    <td id="sum-dms-att1" class="att-summary">0.0 / 100</td>
+                    <td id="sum-dms-att2" class="att-summary">0.0 / 100</td>
+                    <td><input type="number" class="calc-input" id="dms-exam" min="0" max="100" placeholder="0-100" oninput="recalcAll()"></td>
+                    <td id="sum-dms-total" style="font-weight: bold; font-size: 0.95rem;">--</td>
+                </tr>
+                <tr>
+                    <td><span class="badge bg-krl">Русский язык C1</span></td>
+                    <td><code>RL 2202</code></td>
+                    <td id="sum-krl-att1" class="att-summary">0.0 / 100</td>
+                    <td id="sum-krl-att2" class="att-summary">0.0 / 100</td>
+                    <td><input type="number" class="calc-input" id="krl-exam" min="0" max="100" placeholder="0-100" oninput="recalcAll()"></td>
+                    <td id="sum-krl-total" style="font-weight: bold; font-size: 0.95rem;">--</td>
+                </tr>
+                <tr>
+                    <td><span class="badge bg-cnc">Computer Networks</span></td>
+                    <td><code>CNC 2305</code></td>
+                    <td id="sum-cnc-att1" class="att-summary">0.0 / 100</td>
+                    <td id="sum-cnc-att2" class="att-summary">0.0 / 100</td>
+                    <td><input type="number" class="calc-input" id="cnc-exam" min="0" max="100" placeholder="0-100" oninput="recalcAll()"></td>
+                    <td id="sum-cnc-total" style="font-weight: bold; font-size: 0.95rem;">--</td>
+                </tr>
+                <tr>
+                    <td><span class="badge bg-dld">Digital Logic Design</span></td>
+                    <td><code>DLD 2201</code></td>
+                    <td id="sum-dld-att1" class="att-summary">0.0 / 100</td>
+                    <td id="sum-dld-att2" class="att-summary">0.0 / 100</td>
+                    <td><input type="number" class="calc-input" id="dld-exam" min="0" max="100" placeholder="0-100" oninput="recalcAll()"></td>
+                    <td id="sum-dld-total" style="font-weight: bold; font-size: 0.95rem;">--</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Detailed Subject Assignment Input Tables -->
+    <div class="grid">
+        
+        <!-- Operating Systems (OS 2207) -->
+        <div class="card">
+            <h2><span class="badge bg-os">OS 2207</span> Operating Systems</h2>
+            
+            <div class="section-subtitle">Аттестация 1 (Ввод оценок 0–100)</div>
+            <table>
+                <thead><tr><th>Задание</th><th>Вес в Атт.</th><th>Оценка (0-100)</th></tr></thead>
+                <tbody>
+                    <tr><td>Lab 1 (Week 1)</td><td><span class="weight-tag">20%</span></td><td><input type="number" class="calc-input" id="os-a1" min="0" max="100" placeholder="0" oninput="recalcAll()"></td></tr>
+                    <tr><td>Lab 2 (Week 2)</td><td><span class="weight-tag">20%</span></td><td><input type="number" class="calc-input" id="os-a2" min="0" max="100" placeholder="0" oninput="recalcAll()"></td></tr>
+                    <tr><td>Lab 3 (Week 3)</td><td><span class="weight-tag">20%</span></td><td><input type="number" class="calc-input" id="os-a3" min="0" max="100" placeholder="0" oninput="recalcAll()"></td></tr>
+                    <tr><td>Lab 4 (Week 4)</td><td><span class="weight-tag">20%</span></td><td><input type="number" class="calc-input" id="os-a4" min="0" max="100" placeholder="0" oninput="recalcAll()"></td></tr>
+                    <tr><td><strong>Midterm Exam</strong></td><td><span class="weight-tag">20%</span></td><td><input type="number" class="calc-input" id="os-mid" min="0" max="100" placeholder="0" oninput="recalcAll()"></td></tr>
+                </tbody>
+            </table>
+
+            <div class="section-subtitle">Аттестация 2 (Ввод оценок 0–100)</div>
+            <table>
+                <thead><tr><th>Задание</th><th>Вес в Атт.</th><th>Оценка (0-100)</th></tr></thead>
+                <tbody>
+                    <tr><td>Lab 5 (Week 6)</td><td><span class="weight-tag">20%</span></td><td><input type="number" class="calc-input" id="os-a5" min="0" max="100" placeholder="0" oninput="recalcAll()"></td></tr>
+                    <tr><td>Lab 6 (Week 7)</td><td><span class="weight-tag">20%</span></td><td><input type="number" class="calc-input" id="os-a6" min="0" max="100" placeholder="0" oninput="recalcAll()"></td></tr>
+                    <tr><td>Lab 7 (Week 8)</td><td><span class="weight-tag">20%</span></td><td><input type="number" class="calc-input" id="os-a7" min="0" max="100" placeholder="0" oninput="recalcAll()"></td></tr>
+                    <tr><td>Lab 8 (Week 9)</td><td><span class="weight-tag">20%</span></td><td><input type="number" class="calc-input" id="os-a8" min="0" max="100" placeholder="0" oninput="recalcAll()"></td></tr>
+                    <tr><td><strong>Endterm Exam</strong></td><td><span class="weight-tag">20%</span></td><td><input type="number" class="calc-input" id="os-end" min="0" max="100" placeholder="0" oninput="recalcAll()"></td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Database Management Systems (SUBD 2217) -->
+        <div class="card">
+            <h2><span class="badge bg-dms">SUBD 2217</span> Database Management Systems</h2>
+            
+            <div class="section-subtitle">Аттестация 1 (Ввод оценок 0–100)</div>
+            <table>
+                <thead><tr><th>Задание</th><th>Вес в Атт.</th><th>Оценка (0-100)</th></tr></thead>
+                <tbody>
+                    <tr><td>Assignment 1: ERD Diagram</td><td><span class="weight-tag">20%</span></td><td><input type="number" class="calc-input" id="dms-a1" min="0" max="100" placeholder="0" oninput="recalcAll()"></td></tr>
+                    <tr><td>Assignment 2: Intro to DDL</td><td><span class="weight-tag">20%</span></td><td><input type="number" class="calc-input" id="dms-a2" min="0" max="100" placeholder="0" oninput="recalcAll()"></td></tr>
+                    <tr><td>Assignment 3: DML & JOINs</td><td><span class="weight-tag">20%</span></td><td><input type="number" class="calc-input" id="dms-a3" min="0" max="100" placeholder="0" oninput="recalcAll()"></td></tr>
+                    <tr><td>Learn Quiz (Moodle)</td><td><span class="weight-tag">10%</span></td><td><input type="number" class="calc-input" id="dms-q1" min="0" max="100" placeholder="0" oninput="recalcAll()"></td></tr>
+                    <tr><td><strong>Midterm Exam (Mixed)</strong></td><td><span class="weight-tag">30%</span></td><td><input type="number" class="calc-input" id="dms-mid" min="0" max="100" placeholder="0" oninput="recalcAll()"></td></tr>
+                </tbody>
+            </table>
+
+            <div class="section-subtitle">Аттестация 2 (Ввод оценок 0–100)</div>
+            <table>
+                <thead><tr><th>Задание</th><th>Вес в Атт.</th><th>Оценка (0-100)</th></tr></thead>
+                <tbody>
+                    <tr><td>Assignment 4: Subqueries</td><td><span class="weight-tag">20%</span></td><td><input type="number" class="calc-input" id="dms-a4" min="0" max="100" placeholder="0" oninput="recalcAll()"></td></tr>
+                    <tr><td>Assignment 5: Window Functions</td><td><span class="weight-tag">20%</span></td><td><input type="number" class="calc-input" id="dms-a5" min="0" max="100" placeholder="0" oninput="recalcAll()"></td></tr>
+                    <tr><td>Assignment 6: Set Ops & ACID</td><td><span class="weight-tag">20%</span></td><td><input type="number" class="calc-input" id="dms-a6" min="0" max="100" placeholder="0" oninput="recalcAll()"></td></tr>
+                    <tr><td>Learn Quiz (Moodle)</td><td><span class="weight-tag">10%</span></td><td><input type="number" class="calc-input" id="dms-q2" min="0" max="100" placeholder="0" oninput="recalcAll()"></td></tr>
+                    <tr><td><strong>Endterm Exam (Mixed)</strong></td><td><span class="weight-tag">30%</span></td><td><input type="number" class="calc-input" id="dms-end" min="0" max="100" placeholder="0" oninput="recalcAll()"></td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Russian Language C1 (RL 2202) -->
+        <div class="card">
+            <h2><span class="badge bg-krl">RL 2202</span> Русский язык С1</h2>
+            
+            <div class="section-subtitle">Аттестация 1 (Ввод оценок 0–100)</div>
+            <table>
+                <thead><tr><th>Задание</th><th>Вес в Атт.</th><th>Оценка (0-100)</th></tr></thead>
+                <tbody>
+                    <tr><td>Задание 1: Анализ языковых норм (Неделя 4)</td><td><span class="weight-tag">60%</span></td><td><input type="number" class="calc-input" id="krl-a1" min="0" max="100" placeholder="0" oninput="recalcAll()"></td></tr>
+                    <tr><td><strong>Midterm Exam (Тестирование)</strong></td><td><span class="weight-tag">40%</span></td><td><input type="number" class="calc-input" id="krl-mid" min="0" max="100" placeholder="0" oninput="recalcAll()"></td></tr>
+                </tbody>
+            </table>
+
+            <div class="section-subtitle">Аттестация 2 (Ввод оценок 0–100)</div>
+            <table>
+                <thead><tr><th>Задание</th><th>Вес в Атт.</th><th>Оценка (0-100)</th></tr></thead>
+                <tbody>
+                    <tr><td>Задание 2: Презентация «Оратор» (Недели 8-9)</td><td><span class="weight-tag">60%</span></td><td><input type="number" class="calc-input" id="krl-a2" min="0" max="100" placeholder="0" oninput="recalcAll()"></td></tr>
+                    <tr><td><strong>Endterm Exam (Тестирование)</strong></td><td><span class="weight-tag">40%</span></td><td><input type="number" class="calc-input" id="krl-end" min="0" max="100" placeholder="0" oninput="recalcAll()"></td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Computer Networks & Digital Logic Design -->
+        <div class="card">
+            <h2><span class="badge bg-cnc">CNC</span> / <span class="badge bg-dld">DLD</span> Сети и Дизайн</h2>
+            
+            <div class="section-subtitle">Computer Networks (CNC 2305)</div>
+            <table>
+                <thead><tr><th>Период</th><th>Практики/Лабы (60%)</th><th>Рубежный контроль (40%)</th></tr></thead>
+                <tbody>
+                    <tr><td>Атт 1</td><td><input type="number" class="calc-input" id="cnc-p1" min="0" max="100" placeholder="0" oninput="recalcAll()"></td><td><input type="number" class="calc-input" id="cnc-mid" min="0" max="100" placeholder="0" oninput="recalcAll()"></td></tr>
+                    <tr><td>Атт 2</td><td><input type="number" class="calc-input" id="cnc-p2" min="0" max="100" placeholder="0" oninput="recalcAll()"></td><td><input type="number" class="calc-input" id="cnc-end" min="0" max="100" placeholder="0" oninput="recalcAll()"></td></tr>
+                </tbody>
+            </table>
+
+            <div class="section-subtitle" style="margin-top: 16px;">Digital Logic Design (DLD 2201)</div>
+            <table>
+                <thead><tr><th>Период</th><th>Практики/Лабы (60%)</th><th>Рубежный контроль (40%)</th></tr></thead>
+                <tbody>
+                    <tr><td>Атт 1</td><td><input type="number" class="calc-input" id="dld-p1" min="0" max="100" placeholder="0" oninput="recalcAll()"></td><td><input type="number" class="calc-input" id="dld-mid" min="0" max="100" placeholder="0" oninput="recalcAll()"></td></tr>
+                    <tr><td>Атт 2</td><td><input type="number" class="calc-input" id="dld-p2" min="0" max="100" placeholder="0" oninput="recalcAll()"></td><td><input type="number" class="calc-input" id="dld-end" min="0" max="100" placeholder="0" oninput="recalcAll()"></td></tr>
+                </tbody>
+            </table>
+        </div>
+
+    </div>
+</div>
+
+<script>
+    const inputsList = [
+        'os-a1', 'os-a2', 'os-a3', 'os-a4', 'os-mid', 'os-a5', 'os-a6', 'os-a7', 'os-a8', 'os-end', 'os-exam',
+        'dms-a1', 'dms-a2', 'dms-a3', 'dms-q1', 'dms-mid', 'dms-a4', 'dms-a5', 'dms-a6', 'dms-q2', 'dms-end', 'dms-exam',
+        'krl-a1', 'krl-mid', 'krl-a2', 'krl-end', 'krl-exam',
+        'cnc-p1', 'cnc-mid', 'cnc-p2', 'cnc-end', 'cnc-exam',
+        'dld-p1', 'dld-mid', 'dld-p2', 'dld-end', 'dld-exam'
+    ];
+
+    function getVal(id) {
+        return parseFloat(document.getElementById(id)?.value) || 0;
+    }
+
+    function updateSummary(sub, att1, att2, exam) {
+        const att1Elem = document.getElementById(`sum-${sub}-att1`);
+        const att2Elem = document.getElementById(`sum-${sub}-att2`);
+        const totalElem = document.getElementById(`sum-${sub}-total`);
+
+        att1Elem.innerText = `${att1.toFixed(1)} / 100`;
+        att2Elem.innerText = `${att2.toFixed(1)} / 100`;
+
+        if (att1 < 25 || att2 < 25) {
+            att1Elem.classList.add('warning-text');
+            att2Elem.classList.add('warning-text');
+        } else {
+            att1Elem.classList.remove('warning-text');
+            att2Elem.classList.remove('warning-text');
+        }
+
+        const finalScore = (att1 * 0.3) + (att2 * 0.3) + (exam * 0.4);
+        totalElem.innerText = `${finalScore.toFixed(1)}%`;
+
+        if (att1 < 25 || att2 < 25) {
+            totalElem.style.color = 'var(--accent-danger)';
+            totalElem.innerText += ' (Пересдача <25%)';
+        } else {
+            totalElem.style.color = 'var(--accent-cyan)';
+        }
+    }
+
+    function recalcAll() {
+        // OS 2207
+        const osAtt1 = (getVal('os-a1') * 0.20) + (getVal('os-a2') * 0.20) + (getVal('os-a3') * 0.20) + (getVal('os-a4') * 0.20) + (getVal('os-mid') * 0.20);
+        const osAtt2 = (getVal('os-a5') * 0.20) + (getVal('os-a6') * 0.20) + (getVal('os-a7') * 0.20) + (getVal('os-a8') * 0.20) + (getVal('os-end') * 0.20);
+        updateSummary('os', osAtt1, osAtt2, getVal('os-exam'));
+
+        // SUBD 2217
+        const dmsAtt1 = (getVal('dms-a1') * 0.20) + (getVal('dms-a2') * 0.20) + (getVal('dms-a3') * 0.20) + (getVal('dms-q1') * 0.10) + (getVal('dms-mid') * 0.30);
+        const dmsAtt2 = (getVal('dms-a4') * 0.20) + (getVal('dms-a5') * 0.20) + (getVal('dms-a6') * 0.20) + (getVal('dms-q2') * 0.10) + (getVal('dms-end') * 0.30);
+        updateSummary('dms', dmsAtt1, dmsAtt2, getVal('dms-exam'));
+
+        // RL 2202
+        const krlAtt1 = (getVal('krl-a1') * 0.60) + (getVal('krl-mid') * 0.40);
+        const krlAtt2 = (getVal('krl-a2') * 0.60) + (getVal('krl-end') * 0.40);
+        updateSummary('krl', krlAtt1, krlAtt2, getVal('krl-exam'));
+
+        // CNC 2305
+        const cncAtt1 = (getVal('cnc-p1') * 0.60) + (getVal('cnc-mid') * 0.40);
+        const cncAtt2 = (getVal('cnc-p2') * 0.60) + (getVal('cnc-end') * 0.40);
+        updateSummary('cnc', cncAtt1, cncAtt2, getVal('cnc-exam'));
+
+        // DLD 2201
+        const dldAtt1 = (getVal('dld-p1') * 0.60) + (getVal('dld-mid') * 0.40);
+        const dldAtt2 = (getVal('dld-p2') * 0.60) + (getVal('dld-end') * 0.40);
+        updateSummary('dld', dldAtt1, dldAtt2, getVal('dld-exam'));
+
+        // Save state
+        inputsList.forEach(id => {
+            const input = document.getElementById(id);
+            if (input) localStorage.setItem('aitu_v3_' + id, input.value);
+        });
+    }
+
+    window.onload = function() {
+        inputsList.forEach(id => {
+            const val = localStorage.getItem('aitu_v3_' + id);
+            if (val !== null) {
+                const input = document.getElementById(id);
+                if (input) input.value = val;
+            }
+        });
+        recalcAll();
+    };
+</script>
+</body>
+</html>

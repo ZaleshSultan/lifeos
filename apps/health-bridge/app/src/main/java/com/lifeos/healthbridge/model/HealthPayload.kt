@@ -11,12 +11,14 @@ data class HealthMetrics(
     @SerialName("rem_sleep_minutes") val remSleepMinutes: Long? = null,
     @SerialName("awake_minutes") val awakeMinutes: Long? = null,
     @SerialName("resting_heart_rate") val restingHeartRate: Double? = null,
+    @SerialName("average_heart_rate") val averageHeartRate: Double? = null,
     @SerialName("hrv_ms") val hrvMs: Double? = null,
     @SerialName("spo2_avg") val spo2Avg: Double? = null,
     val steps: Long? = null,
     @SerialName("calories_burned") val caloriesBurned: Double? = null,
     @SerialName("active_energy_kcal") val activeEnergyKcal: Double? = null,
     @SerialName("workout_minutes") val workoutMinutes: Long? = null,
+    @SerialName("distance_meters") val distanceMeters: Double? = null,
     @SerialName("weight_kg") val weightKg: Double? = null,
 )
 
@@ -57,6 +59,18 @@ data class HealthMetricsIngestRequest(
     val timezone: String,
     val metrics: List<HealthMetricValue>,
     val raw: Map<String, String> = emptyMap(),
+)
+
+@Serializable
+data class HealthDayIngestRequest(
+    val date: String,
+    @SerialName("sync_reason") val syncReason: String,
+    val source: String = "xiaomi_health_connect",
+    val timezone: String,
+    val metrics: HealthMetrics,
+    val workouts: List<HealthWorkout>,
+    val samples: List<HealthSample>,
+    val missing: Map<String, Boolean>,
 )
 
 @Serializable

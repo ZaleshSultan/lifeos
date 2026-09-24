@@ -11,10 +11,12 @@ import { OnboardingStatusScreen } from "./screens/OnboardingStatusScreen";
 import { RemindersScreen } from "./screens/RemindersScreen";
 import { SourcesScreen } from "./screens/SourcesScreen";
 import { WorkoutScreen } from "./screens/WorkoutScreen";
+import { StudyScreen } from "./screens/StudyScreen";
 import type { ScreenId } from "./types";
 
 const SCREENS: ScreenId[] = [
   "home",
+  "study",
   "workout",
   "health",
   "focus",
@@ -106,10 +108,12 @@ export default function App() {
       {screen === "home" ? (
         <HomeScreen
           onOpenWorkout={() => setScreen("workout")}
+          onOpenStudy={() => setScreen("study")}
           session={sessionQuery.data}
         />
       ) : null}
       {screen === "workout" ? <WorkoutScreen /> : null}
+      {screen === "study" ? <StudyScreen /> : null}
       {screen === "health" ? <HealthScreen /> : null}
       {screen === "focus" ? <FocusScreen /> : null}
       {screen === "finance" ? <FinanceScreen /> : null}

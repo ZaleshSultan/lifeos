@@ -10,7 +10,9 @@
     "format:check": "prettier --check .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p apps/tma/tsconfig.json --noEmit && tsc -p apps/web/tsconfig.json --noEmit",
+    "test:workers": "python3 -m unittest discover -s workers -p test_worker_suite.py",
+    "test:all": "pnpm test && pnpm test:workers",
     "selfhost:build-tma": "bash scripts/build-tma-selfhost.sh",
     "selfhost:deploy": "bash scripts/deploy-selfhost.sh",
     "selfhost:status": "bash scripts/status-selfhost.sh"
