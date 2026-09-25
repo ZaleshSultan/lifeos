@@ -44,6 +44,71 @@ class ClassifyRecordTypeTest(unittest.TestCase):
         self.assertEqual(university_scraper.classify_record_type("Lab Report 3"), "assignment")
 
 
+class MoodleAssignmentWsTest(unittest.TestCase):
+    def make_client(self, token: str | None = "test-token") -> university_scraper.MoodleClient:
+        base = university_scraper.BaseSettings(
+            "https://example.supabase.co", "test-key", "user-a", "Asia/Almaty"
+        )
+        settings = university_scraper.Settings(base, "test", "test", token, None, 3600, False)
+        return university_scraper.MoodleClient(settings)
+
+    def test_indexed_course_params_and_due_date_snapshot(self) -> None:
+        client = self.make_client()
+        courses = [
+            {"id": 42, "fullname": "Operating Systems"},
+            {"id": 43, "fullname": "Networks"},
+        ]
+        response = {"courses": [
+            {"id": 42, "assignments": [
+                {"id": 901, "cmid": 1201, "course": 42, "name": "OS work", "duedate": 1893456000},
+                {"id": 902, "cmid": 1202, "course": 42, "name": "No deadline", "duedate": 0},
+            ]},
+            {"id": 43, "assignments": []},
+        ], "warnings": []}
+        with patch.object(client, "_ws_call", return_value=response) as ws_call:
+            records = client._ws_get_assignments(courses)
+
+        self.assertEqual(ws_call.call_args.args, ("mod_assign_get_assignments",))
+        self.assertEqual(ws_call.call_args.kwargs, {"courseids[0]": 42, "courseids[1]": 43})
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["assignment_id"], "901")
+        self.assertEqual(records[0]["cmid"], "1201")
+        self.assertEqual(records[0]["due_at"], "2030-01-01T00:00:00Z")
+
+    def test_empty_enrolment_never_requests_all_courses(self) -> None:
+        client = self.make_client()
+        with patch.object(client, "_ws_call") as ws_call:
+            self.assertEqual(client._ws_get_assignments([]), [])
+        ws_call.assert_not_called()
+
+    def test_denied_or_partial_assignment_ws_is_unavailable_without_secret_log(self) -> None:
+        client = self.make_client()
+        with (
+            patch.object(client, "_ws_get_userid", return_value=55),
+            patch.object(client, "_ws_get_enrolled_courses", return_value=[{"id": 42}]),
+            patch.object(client, "_ws_call", side_effect=university_scraper.SyncError(
+                "Moodle WS error [accessexception]: token=secret denied"
+            )),
+            self.assertLogs(level="WARNING") as logs,
+        ):
+            self.assertIsNone(client.fetch_assignments())
+        self.assertIn("mod_assign_get_assignments failed (accessexception)", "\n".join(logs.output))
+        self.assertNotIn("secret", "\n".join(logs.output))
+
+        with patch.object(client, "_ws_call", return_value={
+            "courses": [{"id": 42, "assignments": []}],
+            "warnings": [{"item": "module", "itemid": 901, "message": "denied"}],
+        }):
+            with self.assertRaises(university_scraper.SyncError):
+                client._ws_get_assignments([{"id": 42}])
+
+    def test_missing_token_keeps_deadline_feed_unavailable(self) -> None:
+        client = self.make_client(token=None)
+        with patch.object(client, "_ws_call") as ws_call:
+            self.assertIsNone(client.fetch_assignments())
+        ws_call.assert_not_called()
+
+
 # ── Settings load ─────────────────────────────────────────────────────────────
 BASE_ENV = {
     "SUPABASE_URL": "https://example.supabase.co",

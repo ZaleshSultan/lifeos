@@ -100,6 +100,11 @@ def parse_report(soup: Any, course_id: int, course_title: str) -> list[dict[str,
         match = re.fullmatch(r"\s*[\d.,]+\s*[-–—]\s*([\d.,]+)\s*", raw_range)
         if match:
             maximum = number(match.group(1))
+        link = item_cell.select_one('a[href*="/mod/"]')
+        module_match = re.search(
+            r"/mod/([a-z]+)/view\.php\?[^#]*\bid=(\d+)",
+            link.get("href", "") if link else "",
+        )
         identity = None
         for element in (item_cell, row):
             match = re.search(r"(?:^|_)row_((?:\d+_)*\d+)(?:_|$)", element.get("id", ""))
@@ -109,19 +114,19 @@ def parse_report(soup: Any, course_id: int, course_title: str) -> list[dict[str,
                 identity = match.group(1).split("_")[0]
                 break
         if identity is None:
-            link = item_cell.select_one('a[href*="/mod/"]')
-            if link:
-                match = re.search(r"/mod/([a-z]+)/view\.php\?[^#]*\bid=(\d+)", link.get("href", ""))
-                if match:
-                    identity = f"mod-{match.group(1)}-{match.group(2)}"
+            if module_match:
+                identity = f"mod-{module_match.group(1)}-{module_match.group(2)}"
         identity = identity or title_identity(title)
         if identity in identities:
             raise SyncError(f"Ambiguous Moodle grade identity in course {course_id}")
         identities.add(identity)
+        raw = {"course_id": course_id, "item_id": identity, "course_title": course_title,
+               "item_name": title, "grade_cell_text": raw_grade_cell, "range_cell_text": raw_range}
+        if module_match:
+            raw.update({"moodle_module": module_match.group(1), "moodle_cmid": module_match.group(2)})
         records.append({
             "course_id": str(course_id), "course_title": course_title,
             "item_id": identity, "title": title, "score": score, "max_score": maximum,
-            "raw": {"course_id": course_id, "item_id": identity, "course_title": course_title,
-                    "item_name": title, "grade_cell_text": raw_grade_cell, "range_cell_text": raw_range},
+            "raw": raw,
         })
     return records

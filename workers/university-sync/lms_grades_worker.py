@@ -175,7 +175,7 @@ def _handle_aitu_moodle(
     user_settings: BaseSettings,
     row: dict[str, Any],
 ) -> SyncStats:
-    """Sync grades for a single AITU Moodle user."""
+    """Sync grades and available assignment deadlines for one Moodle user."""
     source = db.ensure_source("university_platform", "university", "University Platform")
     run_id = db.start_sync_run(source)
     try:
@@ -190,11 +190,15 @@ def _handle_aitu_moodle(
         )
         client = MoodleClient(moodle_settings)
         records = client.fetch_grades()
+        assignments = client.fetch_assignments()
         mode = db.get_reminder_mode()
     except Exception as exc:
         db.finish_sync_run(run_id, "failed", SyncStats(), str(exc))
         raise
-    return sync_moodle_grades(db, moodle_settings, records, mode, client.is_mocked, run_id=run_id)
+    return sync_moodle_grades(
+        db, moodle_settings, records, mode, client.is_mocked,
+        run_id=run_id, assignments=assignments,
+    )
 
 
 def _handle_platonus(

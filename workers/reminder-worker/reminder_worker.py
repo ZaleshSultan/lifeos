@@ -643,6 +643,12 @@ def format_telegram_message(
     notification_kind = str(metadata.get("notification_kind") or "reminder")
     if notification_kind == "instant_academic":
         return str(reminder.get("message") or "").strip() or "Уведомление"
+    if notification_kind == "academic_assignment_deadline":
+        course_title = str(metadata.get("course_title") or "Moodle").strip()
+        return (
+            f"⏰ Дедлайн задания по «{course_title}»: {message}\n"
+            f"Сдать до {local_time_label(event_at, timezone_name)}."
+        )
     if notification_kind == "deadline":
         try:
             remaining = parse_datetime(event_at) - datetime.now(timezone.utc)

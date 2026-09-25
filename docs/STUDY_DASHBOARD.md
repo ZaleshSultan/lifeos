@@ -26,6 +26,13 @@ scraper excludes that menu before reading the score. Existing rows receive the
 correct score and percentage on the next successful sync. No database migration
 is required.
 
+Assignment deadlines come from Moodle Web Services
+`mod_assign_get_assignments`. Configure `UNIVERSITY_WS_TOKEN` with access to that
+function to sync due dates and schedule reminders. When the function or token
+is unavailable, grade scraping through the existing SSO session continues;
+previously synced deadline reminders are left untouched until a complete
+assignment snapshot is available.
+
 ## Import the supplied HTML
 
 Save the supplied `расписание.html` locally, for example `~/lifeos/расписание.html`.

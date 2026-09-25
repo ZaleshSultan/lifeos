@@ -111,6 +111,25 @@ class CapturingTelegram:
 
 
 class ReminderWorkerTest(unittest.TestCase):
+    def test_moodle_assignment_deadline_message_is_in_russian_and_local_time(self) -> None:
+        reminder = {
+            "message": "OS work",
+            "remind_at": "2029-12-31T22:00:00Z",
+            "metadata_json": {
+                "notification_kind": "academic_assignment_deadline",
+                "course_title": "Operating Systems",
+                "event_at": "2030-01-01T00:00:00Z",
+            },
+        }
+
+        message = reminder_worker.format_telegram_message(reminder, {}, "Asia/Qyzylorda")
+
+        self.assertEqual(
+            message,
+            "⏰ Дедлайн задания по «Operating Systems»: OS work\n"
+            "Сдать до 2030-01-01 05:00 (Asia/Qyzylorda).",
+        )
+
     def test_due_reminder_query_filters_pending_telegram_rows(self) -> None:
         client = CapturingSupabaseClient()
 

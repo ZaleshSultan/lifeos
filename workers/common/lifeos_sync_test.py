@@ -280,6 +280,39 @@ class ReminderPolicyTest(unittest.TestCase):
             created = client.enqueue_instant_notification(event, "academic_grade_posted", "Оценка выставлена", "normal")
         self.assertFalse(created)
 
+    def test_moodle_assignment_uses_task_schedule_and_russian_notification_kind(self) -> None:
+        event = {
+            "id": "source-event-assignment-1",
+            "source_key": "university_platform",
+            "external_id": "assignment:moodle:42:901",
+            "event_type": "task",
+            "title": "OS work",
+            "description": "Дедлайн задания по курсу «Operating Systems»",
+            "due_at": "2099-06-08T12:00:00Z",
+            "status": "active",
+            "raw_json": {"course_title": "Operating Systems"},
+        }
+        now = datetime(2099, 6, 1, 12, 0, tzinfo=timezone.utc)
+        schedule = build_reminder_schedule(event, "normal", "Asia/Qyzylorda", now)
+
+        self.assertTrue(schedule)
+        self.assertTrue(all(item["metadata_json"]["notification_kind"] == "academic_assignment_deadline" for item in schedule))
+        self.assertTrue(all(item["metadata_json"]["course_title"] == "Operating Systems" for item in schedule))
+        self.assertEqual(len({item["dedup_key"] for item in schedule}), len(schedule))
+        self.assertEqual(build_reminder_schedule({**event, "status": "completed"}, "normal", "Asia/Qyzylorda", now), [])
+        self.assertEqual(build_reminder_schedule({**event, "due_at": "2099-05-01T12:00:00Z"}, "normal", "Asia/Qyzylorda", now), [])
+
+    def test_cancel_future_reminders_is_scoped_to_owner(self) -> None:
+        client = InMemoryReminderClient()
+        client.reminders = [
+            {"id": "mine", "user_id": "user-1", "source_event_id": "event-a", "status": "pending", "remind_at": "2099-06-08T12:00:00Z"},
+            {"id": "other", "user_id": "user-2", "source_event_id": "event-a", "status": "pending", "remind_at": "2099-06-08T12:00:00Z"},
+        ]
+
+        self.assertEqual(client.cancel_future_reminders("event-a"), 1)
+        self.assertEqual(client.reminders[0]["status"], "cancelled")
+        self.assertEqual(client.reminders[1]["status"], "pending")
+
 
 if __name__ == "__main__":
     unittest.main()

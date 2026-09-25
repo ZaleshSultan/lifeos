@@ -36,6 +36,7 @@ import time
 import unicodedata
 import urllib.parse
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -53,11 +54,14 @@ from common.lifeos_sync import (  # noqa: E402
     iso_utc,
     load_base_settings,
     load_dotenv,
+    parse_datetime,
     stable_checksum,
+    timezone_for,
+    utc_now,
 )
 
 from common.academic_sync import load_courses, match_course, sync_assessment, mark_missing_grades, link_course
-from common.moodle_grades import number, parse_report
+from common.moodle_grades import normalize_title, number, parse_report
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 BASE_URL = "https://lms.astanait.edu.kz"
@@ -246,6 +250,14 @@ def _safe_grade_report_error(exc: Exception) -> str:
     return error_type
 
 
+def _safe_assignment_ws_error(exc: Exception) -> str:
+    if isinstance(exc, SyncError):
+        match = re.match(r"Moodle WS error \[([a-z0-9_]{1,64})\]:", str(exc))
+        if match:
+            return match.group(1)
+    return _safe_grade_report_error(exc)
+
+
 # ── Moodle client ─────────────────────────────────────────────────────────────
 class MoodleClient:
     """
@@ -306,6 +318,68 @@ class MoodleClient:
         if not usergrades or "gradeitems" not in usergrades[0]:
             raise SyncError(f"Moodle WS grade report missing for course {course_id}")
         return usergrades[0]["gradeitems"]
+
+    def _ws_get_assignments(self, courses: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Read a complete assignment snapshot for the enrolled courses."""
+        enrolled: dict[int, str] = {}
+        for course in courses:
+            course_id = int(course["id"])
+            if course_id <= 0 or course_id in enrolled:
+                raise SyncError("Invalid Moodle assignment course snapshot")
+            enrolled[course_id] = str(
+                course.get("fullname") or course.get("shortname") or f"course_{course_id}"
+            )
+        if not enrolled:
+            return []
+
+        # Moodle REST expects indexed form fields, not a Python list value.
+        course_params = {f"courseids[{index}]": course_id for index, course_id in enumerate(enrolled)}
+        data = self._ws_call("mod_assign_get_assignments", **course_params)
+        if not isinstance(data, dict) or not isinstance(data.get("courses"), list) or data.get("warnings"):
+            raise SyncError("Incomplete Moodle assignment snapshot")
+
+        records: list[dict[str, Any]] = []
+        seen_courses: set[int] = set()
+        seen_assignments: set[tuple[int, int]] = set()
+        for course in data["courses"]:
+            if not isinstance(course, dict):
+                raise SyncError("Invalid Moodle assignment course")
+            course_id = int(course["id"])
+            if course_id not in enrolled or course_id in seen_courses:
+                raise SyncError("Unexpected Moodle assignment course")
+            seen_courses.add(course_id)
+            assignments = course.get("assignments")
+            if not isinstance(assignments, list):
+                raise SyncError("Invalid Moodle assignment list")
+            for assignment in assignments:
+                if not isinstance(assignment, dict):
+                    raise SyncError("Invalid Moodle assignment")
+                assignment_id = int(assignment["id"])
+                if assignment_id <= 0 or int(assignment.get("course", course_id)) != course_id:
+                    raise SyncError("Invalid Moodle assignment identity")
+                identity = (course_id, assignment_id)
+                if identity in seen_assignments:
+                    raise SyncError("Duplicate Moodle assignment identity")
+                seen_assignments.add(identity)
+                due_timestamp = int(assignment.get("duedate") or 0)
+                if due_timestamp <= 0:
+                    continue
+                title = str(assignment.get("name") or "").strip()
+                if not title:
+                    raise SyncError("Moodle assignment title is missing")
+                due_at = datetime.fromtimestamp(due_timestamp, timezone.utc)
+                cmid = int(assignment.get("cmid") or 0)
+                records.append({
+                    "course_id": str(course_id),
+                    "course_title": enrolled[course_id],
+                    "assignment_id": str(assignment_id),
+                    "cmid": str(cmid) if cmid > 0 else None,
+                    "title": title,
+                    "due_at": iso_utc(due_at),
+                })
+        if seen_courses != set(enrolled):
+            raise SyncError("Incomplete Moodle assignment course snapshot")
+        return records
 
     def fetch_via_ws(self) -> list[dict[str, Any]]:
         """Fetch all grade items for enrolled courses using the WS API."""
@@ -661,8 +735,209 @@ class MoodleClient:
         logging.warning("[MOCK] %s", self._mock_reason)
         return self._mock_grades()
 
+    def fetch_assignments(self) -> list[dict[str, Any]] | None:
+        """Return due assignments, or None when the optional WS feed is unavailable."""
+        if self.is_mocked:
+            return None
+        if not self._ws_token:
+            logging.info("Moodle assignment deadlines unavailable: no WS token configured.")
+            return None
+        try:
+            user_id = self._ws_get_userid()
+            courses = self._ws_get_enrolled_courses(user_id)
+            records = self._ws_get_assignments(courses)
+        except Exception as exc:
+            # No partial snapshot may cancel existing deadlines. In particular,
+            # a token without mod_assign_get_assignments must not fail grades.
+            logging.warning(
+                "Moodle assignment deadlines unavailable: mod_assign_get_assignments failed (%s); grade sync continues.",
+                _safe_assignment_ws_error(exc),
+            )
+            return None
+        logging.info("Moodle WS API: fetched %d due assignments.", len(records))
+        return records
+
 
 # ── Sync pipeline ─────────────────────────────────────────────────────────────
+def _positive_moodle_id(value: Any) -> str | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return str(parsed) if parsed > 0 else None
+
+
+def _grade_for_assignment(
+    assignment: dict[str, Any], grades: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    """Link only Moodle's module instance ID or course module ID."""
+    matches: list[dict[str, Any]] = []
+    for grade in grades:
+        if str(grade.get("course_id")) != str(assignment["course_id"]):
+            continue
+        raw = grade.get("raw")
+        if not isinstance(raw, dict):
+            continue
+        instance_match = (
+            raw.get("itemmodule") == "assign"
+            and _positive_moodle_id(raw.get("iteminstance")) == assignment["assignment_id"]
+        )
+        cmid_match = (
+            raw.get("moodle_module") == "assign"
+            and assignment.get("cmid")
+            and _positive_moodle_id(raw.get("moodle_cmid")) == assignment["cmid"]
+        )
+        if instance_match or cmid_match:
+            matches.append(grade)
+    return matches[0] if len(matches) == 1 else None
+
+
+def _has_unique_scored_grade_title(
+    assignment: dict[str, Any],
+    grades: list[dict[str, Any]],
+    assignment_title_counts: dict[tuple[str, str], int],
+) -> bool:
+    """Suppress a duplicate alert by title, without creating a grade relation."""
+    key = (assignment["course_id"], normalize_title(assignment["title"]))
+    if assignment_title_counts[key] != 1:
+        return False
+    candidates = []
+    for grade in grades:
+        if str(grade.get("course_id")) != key[0] or normalize_title(str(grade.get("title") or "")) != key[1]:
+            continue
+        raw = grade.get("raw") if isinstance(grade.get("raw"), dict) else {}
+        if raw.get("itemmodule") not in (None, "", "assign"):
+            continue
+        if str(grade.get("record_type") or "assignment") != "assignment":
+            continue
+        candidates.append(grade)
+    if len(candidates) != 1:
+        return False
+    raw = candidates[0].get("raw") if isinstance(candidates[0].get("raw"), dict) else {}
+    # A different explicit module identity overrules a title coincidence.
+    return (
+        not _positive_moodle_id(raw.get("iteminstance"))
+        and not _positive_moodle_id(raw.get("moodle_cmid"))
+        and candidates[0].get("score") is not None
+    )
+
+
+def _assignment_baseline_at(db: SupabaseRestClient) -> datetime | None:
+    """The first completed assignment snapshot, including an empty one."""
+    rows = db.request("GET", "sync_runs", query={
+        "select": "finished_at",
+        "user_id": f"eq.{db.settings.user_id}",
+        "source_key": "eq.university_platform",
+        "status": "eq.success",
+        "metadata_json->>moodle_assignments_synced": "eq.true",
+        "order": "finished_at.asc",
+        "limit": "1",
+    }) or []
+    return parse_datetime(rows[0].get("finished_at")) if rows else None
+
+
+def _mark_missing_assignments(db: SupabaseRestClient, seen: set[str]) -> int:
+    """Retire only Moodle assignment deadlines after a complete WS snapshot."""
+    rows = db.request("GET", "source_events", query={
+        "select": "id,external_id,status",
+        "user_id": f"eq.{db.settings.user_id}",
+        "source_key": "eq.university_platform",
+        "event_type": "eq.task",
+    }) or []
+    missing = [row for row in rows
+               if str(row.get("external_id") or "").startswith("assignment:moodle:")
+               and row.get("status") != "missing" and row["external_id"] not in seen]
+    for row in missing:
+        db.request("PATCH", "source_events", query={
+            "id": f"eq.{row['id']}", "user_id": f"eq.{db.settings.user_id}"},
+            body={"status": "missing", "last_synced_at": utc_now()})
+        db.cancel_future_reminders(str(row["id"]))
+    return len(missing)
+
+
+def sync_assignments(
+    db: SupabaseRestClient,
+    settings: Settings,
+    assignments: list[dict[str, Any]],
+    grades: list[dict[str, Any]],
+    mode: str,
+    baseline_at: datetime | None,
+) -> SyncStats:
+    """Persist deadlines and announce only post-baseline, still-relevant tasks."""
+    if db.settings.user_id != settings.base.user_id:
+        raise SyncError("Moodle assignment sync user scope mismatch")
+    prepared: list[tuple[dict[str, Any], datetime, str]] = []
+    seen: set[str] = set()
+    title_counts: dict[tuple[str, str], int] = {}
+    for assignment in assignments:
+        course_id = _positive_moodle_id(assignment.get("course_id"))
+        assignment_id = _positive_moodle_id(assignment.get("assignment_id"))
+        due_at = parse_datetime(str(assignment.get("due_at") or ""))
+        title = str(assignment.get("title") or "").strip()
+        if not course_id or not assignment_id or not due_at or not title:
+            raise SyncError("Invalid Moodle assignment deadline")
+        record = {**assignment, "course_id": course_id, "assignment_id": assignment_id, "title": title}
+        external_id = f"assignment:moodle:{course_id}:{assignment_id}"
+        if external_id in seen:
+            raise SyncError("Duplicate Moodle assignment identity in snapshot")
+        seen.add(external_id)
+        prepared.append((record, due_at, external_id))
+        key = (course_id, normalize_title(title))
+        title_counts[key] = title_counts.get(key, 0) + 1
+
+    stats = SyncStats(seen=len(prepared))
+    for assignment, due_at, external_id in prepared:
+        course_title = str(assignment.get("course_title") or "Курс Moodle").strip()
+        grade = _grade_for_assignment(assignment, grades)
+        graded = bool(grade and grade.get("score") is not None)
+        related_grade_id = (
+            f"academic:moodle:{assignment['course_id']}:{grade['item_id']}" if grade else None
+        )
+        cmid = _positive_moodle_id(assignment.get("cmid"))
+        event = {
+            "source_key": "university_platform",
+            "external_id": external_id,
+            "event_type": "task",
+            "title": assignment["title"],
+            "description": f"Дедлайн задания по курсу «{course_title}»",
+            "due_at": iso_utc(due_at),
+            "status": "completed" if graded else "active",
+            "source_url": f"{BASE_URL}/mod/assign/view.php?id={cmid}" if cmid else None,
+            "raw_json": {
+                "moodle_course_id": assignment["course_id"],
+                "moodle_assignment_id": assignment["assignment_id"],
+                "moodle_cmid": cmid,
+                "course_title": course_title,
+                "related_grade_external_id": related_grade_id,
+            },
+        }
+        synced_event, created, reminder_stats = db.upsert_event(event, mode)
+        stats.created += int(created)
+        stats.updated += int(not created)
+        stats.reminders_created += reminder_stats.created
+        stats.reminders_updated += reminder_stats.updated
+        stats.reminders_cancelled += reminder_stats.cancelled
+
+        # An insert can succeed while the instant reminder fails. Retry for
+        # every post-bootstrap event; the user-scoped dedup key prevents repeats.
+        first_seen_at = parse_datetime(synced_event.get("created_at"))
+        if (baseline_at and first_seen_at and first_seen_at > baseline_at
+                and due_at > datetime.now(timezone.utc) and not graded
+                and not (grade is None and _has_unique_scored_grade_title(assignment, grades, title_counts))):
+            local_due = due_at.astimezone(timezone_for(settings.base.timezone_name))
+            message = (
+                f"Новое задание по «{course_title}»: {assignment['title']}. "
+                f"Дедлайн {local_due:%d.%m.%Y %H:%M} ({settings.base.timezone_name})."
+            )
+            if db.enqueue_instant_notification(synced_event, "assignment_added", message, mode):
+                stats.reminders_created += 1
+
+    stats.missing = _mark_missing_assignments(db, seen)
+    return stats
+
+
 def sync_grades(
     db: SupabaseRestClient,
     settings: Settings,
@@ -670,8 +945,9 @@ def sync_grades(
     mode: str,
     is_mocked: bool,
     run_id: str | None = None,
+    assignments: list[dict[str, Any]] | None = None,
 ) -> SyncStats:
-    """Write source/legacy records and matched course assessments."""
+    """Write grades and, when WS is available, assignment deadlines."""
     if run_id is None:
         source = db.ensure_source("university_platform", "university", "University Platform")
         run_id = db.start_sync_run(source)
@@ -802,12 +1078,22 @@ def sync_grades(
 
         if not is_mocked:
             stats.missing = mark_missing_grades(db, seen_external_ids, ("academic:moodle:", "academic:grade:"))
-        db.finish_sync_run(
-            run_id,
-            "success",
-            stats,
-            metadata={"moodle_grades_synced": True} if not is_mocked else None,
-        )
+        if assignments is not None and not is_mocked:
+            assignment_stats = sync_assignments(
+                db, settings, assignments, records, mode, _assignment_baseline_at(db)
+            )
+            stats.seen += assignment_stats.seen
+            stats.created += assignment_stats.created
+            stats.updated += assignment_stats.updated
+            stats.missing += assignment_stats.missing
+            stats.reminders_created += assignment_stats.reminders_created
+            stats.reminders_updated += assignment_stats.reminders_updated
+            stats.reminders_cancelled += assignment_stats.reminders_cancelled
+        metadata = {"moodle_grades_synced": True} if not is_mocked else None
+        if assignments is not None and not is_mocked:
+            assert metadata is not None
+            metadata["moodle_assignments_synced"] = True
+        db.finish_sync_run(run_id, "success", stats, metadata=metadata)
         logging.info(
             "university_sync done seen=%d created=%d updated=%d missing=%d reminders_created=%d",
             stats.seen, stats.created, stats.updated, stats.missing, stats.reminders_created,
@@ -833,6 +1119,7 @@ def sync_once(settings: Settings) -> SyncStats:
 
     try:
         records = moodle.fetch_grades()
+        assignments = moodle.fetch_assignments()
     except Exception as exc:
         db.finish_sync_run(run_id, "failed", SyncStats(), str(exc))
         raise
@@ -842,7 +1129,10 @@ def sync_once(settings: Settings) -> SyncStats:
     except Exception as exc:
         db.finish_sync_run(run_id, "failed", SyncStats(), str(exc))
         raise
-    return sync_grades(db, settings, records, mode, moodle.is_mocked, run_id=run_id)
+    return sync_grades(
+        db, settings, records, mode, moodle.is_mocked,
+        run_id=run_id, assignments=assignments,
+    )
 
 
 def status_cmd(settings: Settings) -> None:

@@ -7,6 +7,7 @@ import sys
 import traceback
 import unittest
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -22,6 +23,9 @@ COURSE = {"id": "course-a", "user_id": "user-a", "code": "DMS52-EN",
           "title": "Системы управления базами данных", "status": "active", "external_course_key": "moodle:42"}
 RECORD = {"course_id": "42", "course_title": "Database Management Systems | Teacher",
           "item_id": "901", "title": "Assignment 1", "record_type": "assignment", "score": None, "max_score": 10}
+ASSIGNMENT = {"course_id": "42", "course_title": RECORD["course_title"],
+              "assignment_id": "77", "cmid": "1201", "title": "Assignment 1",
+              "due_at": "2099-10-01T10:00:00Z"}
 
 
 class MemoryDb(SupabaseRestClient):
@@ -33,6 +37,11 @@ class MemoryDb(SupabaseRestClient):
         self.finished = []
         self.cancelled = []
         self.queries = []
+        self.clock = datetime(2026, 9, 25, 9, 0, tzinfo=timezone.utc)
+
+    def tick(self):
+        self.clock += timedelta(seconds=1)
+        return self.clock.isoformat().replace("+00:00", "Z")
 
     def request(self, method, table, query=None, body=None, prefer=None):
         self.queries.append((method, table, query, copy.deepcopy(body)))
@@ -76,13 +85,15 @@ class MemoryDb(SupabaseRestClient):
         row = next(row for row in self.tables["sync_runs"] if row["id"] == run_id)
         row["status"] = status
         row["metadata_json"] = copy.deepcopy(kwargs.get("metadata") or {})
+        row["finished_at"] = self.tick()
 
     def upsert_event(self, event, mode):
         rows = self.tables["source_events"]
         found = next((row for row in rows if row["external_id"] == event["external_id"]), None)
         created = found is None
         if created:
-            found = {"id": f"event-{len(rows)}", "user_id": self.settings.user_id}
+            found = {"id": f"event-{len(rows)}", "user_id": self.settings.user_id,
+                     "created_at": self.tick()}
             rows.append(found)
         found.update(copy.deepcopy(event))
         return found, created, ReminderSyncStats()
@@ -133,6 +144,15 @@ class ActualMoodleLayoutTest(unittest.TestCase):
         self.assertEqual([record["score"] for record in records], [None, 0])
         another_user = self.parse(html.replace("_14505", "_22222"))
         self.assertEqual([record["item_id"] for record in another_user], ["48613", "48614"])
+
+    def test_html_link_preserves_assignment_cmid_even_with_grade_row_id(self):
+        records = self.parse('''
+          <tr><th class="item" id="row_901_55">
+            <a href="/mod/assign/view.php?id=1201">Assignment 1</a></th>
+            <td class="grade">7</td><td class="range">0–10</td></tr>''')
+        self.assertEqual(records[0]["item_id"], "901")
+        self.assertEqual(records[0]["raw"]["moodle_module"], "assign")
+        self.assertEqual(records[0]["raw"]["moodle_cmid"], "1201")
 
     def test_moodle_aggregate_css_markers_are_not_assessments(self):
         # Moodle user-report renders totals as baggt/baggb, not necessarily
@@ -285,6 +305,183 @@ class ActualMoodleLayoutTest(unittest.TestCase):
         with patch.object(client, "_ws_get_userid", return_value=55), patch.object(client, "_ws_get_enrolled_courses", return_value=[{"id": 42}, {"id": 43}]), patch.object(client, "_ws_get_grade_items", side_effect=[[], SyncError("denied")]):
             with self.assertRaises(SyncError):
                 client.fetch_via_ws()
+
+
+class AssignmentDeadlinePersistenceTest(unittest.TestCase):
+    def test_assignment_ws_permission_failure_does_not_fail_grade_sync(self):
+        db = MemoryDb()
+        settings = replace(SETTINGS, ws_token="test-token")
+        with (
+            patch.object(scraper, "SupabaseRestClient", return_value=db),
+            patch.object(scraper.MoodleClient, "fetch_grades", return_value=[RECORD]),
+            patch.object(scraper.MoodleClient, "_ws_get_userid", return_value=55),
+            patch.object(scraper.MoodleClient, "_ws_get_enrolled_courses", return_value=[{"id": 42}]),
+            patch.object(scraper.MoodleClient, "_ws_call", side_effect=SyncError("access denied")),
+            patch.object(db, "get_reminder_mode", return_value="normal"),
+        ):
+            result = scraper.sync_once(settings)
+
+        self.assertEqual(result.seen, 1)
+        self.assertEqual(db.tables["sync_runs"][-1]["status"], "success")
+        self.assertEqual([row["event_type"] for row in db.tables["source_events"]], ["academic_grade"])
+        self.assertNotIn("moodle_assignments_synced", db.tables["sync_runs"][-1]["metadata_json"])
+
+    def test_existing_grade_history_does_not_announce_first_assignment_snapshot(self):
+        db = MemoryDb()
+        scraper.sync_grades(db, SETTINGS, [RECORD], "normal", False)
+        historical = [
+            {**ASSIGNMENT, "assignment_id": str(1000 + index), "title": f"Work {index}"}
+            for index in range(25)
+        ]
+
+        initial = scraper.sync_grades(db, SETTINGS, [RECORD], "normal", False, assignments=historical)
+
+        self.assertEqual(initial.reminders_created, 0)
+        self.assertEqual(len([row for row in db.tables["source_events"] if row["event_type"] == "task"]), 25)
+        self.assertEqual(db.tables["reminders"], [])
+        self.assertTrue(db.tables["sync_runs"][-1]["metadata_json"]["moodle_assignments_synced"])
+
+        new_assignment = {**ASSIGNMENT, "assignment_id": "2000", "title": "New work"}
+        first = scraper.sync_grades(db, SETTINGS, [RECORD], "normal", False, assignments=[*historical, new_assignment])
+        repeated = scraper.sync_grades(db, SETTINGS, [RECORD], "normal", False, assignments=[*historical, new_assignment])
+
+        self.assertEqual((first.reminders_created, repeated.reminders_created), (1, 0))
+        self.assertEqual(len(db.tables["reminders"]), 1)
+        reminder = db.tables["reminders"][0]
+        self.assertEqual(reminder["dedup_key"], "assignment_added:assignment:moodle:42:2000")
+        self.assertEqual(reminder["metadata_json"]["notification_kind"], "instant_academic")
+        self.assertIsNone(reminder["source_event_id"])
+        self.assertIn("Новое задание по «Database Management Systems | Teacher»", reminder["message"])
+        self.assertIn("Asia/Almaty", reminder["message"])
+
+    def test_empty_first_snapshot_enables_later_assignment_notification(self):
+        db = MemoryDb()
+        scraper.sync_grades(db, SETTINGS, [], "normal", False, assignments=[])
+
+        result = scraper.sync_grades(db, SETTINGS, [], "normal", False, assignments=[ASSIGNMENT])
+
+        self.assertEqual(result.reminders_created, 1)
+        self.assertEqual(db.tables["source_events"][0]["event_type"], "task")
+        self.assertEqual(db.tables["source_events"][0]["due_at"], ASSIGNMENT["due_at"])
+
+    def test_unavailable_snapshot_keeps_deadlines_but_complete_empty_snapshot_retires_them(self):
+        db = MemoryDb()
+        scraper.sync_grades(db, SETTINGS, [RECORD], "normal", False, assignments=[ASSIGNMENT])
+        task = next(row for row in db.tables["source_events"] if row["event_type"] == "task")
+        grade = next(row for row in db.tables["source_events"] if row["event_type"] == "academic_grade")
+
+        scraper.sync_grades(db, SETTINGS, [RECORD], "normal", False, assignments=None)
+        self.assertEqual(task["status"], "active")
+        self.assertEqual(db.cancelled, [])
+
+        result = scraper.sync_grades(db, SETTINGS, [RECORD], "normal", False, assignments=[])
+        self.assertEqual(result.missing, 1)
+        self.assertEqual(task["status"], "missing")
+        self.assertEqual(grade["status"], "active")
+        self.assertEqual(db.cancelled, [task["id"]])
+
+    def test_rescheduled_deadline_updates_one_task_without_second_instant(self):
+        db = MemoryDb()
+        scraper.sync_grades(db, SETTINGS, [], "normal", False, assignments=[])
+        scraper.sync_grades(db, SETTINGS, [], "normal", False, assignments=[ASSIGNMENT])
+        changed_due = "2099-10-03T10:00:00Z"
+
+        changed = scraper.sync_grades(
+            db, SETTINGS, [], "normal", False,
+            assignments=[{**ASSIGNMENT, "due_at": changed_due}],
+        )
+
+        self.assertEqual(changed.reminders_created, 0)
+        self.assertEqual(len(db.tables["source_events"]), 1)
+        self.assertEqual(db.tables["source_events"][0]["due_at"], changed_due)
+        self.assertEqual(len(db.tables["reminders"]), 1)
+
+    def test_graded_assignment_links_exact_ws_or_html_identity_and_has_one_instant_alert(self):
+        for raw in (
+            {"itemmodule": "assign", "iteminstance": 77},
+            {"moodle_module": "assign", "moodle_cmid": "1201"},
+        ):
+            with self.subTest(raw=raw):
+                db = MemoryDb()
+                scraper.sync_grades(db, SETTINGS, [], "normal", False, assignments=[])
+                grade = {**RECORD, "item_id": "999", "title": "Assignment 1", "score": 9,
+                         "raw": raw}
+
+                result = scraper.sync_grades(db, SETTINGS, [grade], "normal", False, assignments=[ASSIGNMENT])
+
+                self.assertEqual(result.reminders_created, 1)
+                self.assertEqual(len(db.tables["reminders"]), 1)
+                self.assertTrue(db.tables["reminders"][0]["dedup_key"].startswith("academic_grade_posted:"))
+                task = next(row for row in db.tables["source_events"] if row["event_type"] == "task")
+                self.assertEqual(task["status"], "completed")
+                self.assertEqual(task["raw_json"]["related_grade_external_id"], "academic:moodle:42:999")
+                self.assertEqual(task["source_url"], "https://lms.astanait.edu.kz/mod/assign/view.php?id=1201")
+
+    def test_unique_title_suppresses_second_instant_without_inventing_a_relation(self):
+        db = MemoryDb()
+        scraper.sync_grades(db, SETTINGS, [], "normal", False, assignments=[])
+        grade = {**RECORD, "score": 8, "raw": {}}
+
+        scraper.sync_grades(db, SETTINGS, [grade], "normal", False, assignments=[ASSIGNMENT])
+
+        self.assertEqual(len(db.tables["reminders"]), 1)
+        task = next(row for row in db.tables["source_events"] if row["event_type"] == "task")
+        self.assertIsNone(task["raw_json"]["related_grade_external_id"])
+        self.assertEqual(task["status"], "active")
+
+    def test_ambiguous_title_does_not_suppress_assignment_alert(self):
+        db = MemoryDb()
+        scraper.sync_grades(db, SETTINGS, [], "normal", False, assignments=[])
+        grades = [
+            {**RECORD, "item_id": "901", "score": 8, "raw": {}},
+            {**RECORD, "item_id": "902", "score": None, "raw": {}},
+        ]
+
+        scraper.sync_grades(db, SETTINGS, grades, "normal", False, assignments=[ASSIGNMENT])
+
+        self.assertEqual(len(db.tables["reminders"]), 2)
+        self.assertEqual(
+            {row["dedup_key"].split(":", 1)[0] for row in db.tables["reminders"]},
+            {"academic_grade_posted", "assignment_added"},
+        )
+
+    def test_overdue_assignment_never_gets_new_assignment_alert(self):
+        db = MemoryDb()
+        scraper.sync_grades(db, SETTINGS, [], "normal", False, assignments=[])
+
+        result = scraper.sync_grades(
+            db, SETTINGS, [], "normal", False,
+            assignments=[{**ASSIGNMENT, "due_at": "2020-01-01T10:00:00Z"}],
+        )
+
+        self.assertEqual(result.reminders_created, 0)
+        self.assertEqual(db.tables["reminders"], [])
+
+    def test_failed_assignment_notification_insert_retries_after_event_was_saved(self):
+        class FailOnceDb(MemoryDb):
+            fail_next_assignment_notification = False
+
+            def request(self, method, table, query=None, body=None, prefer=None):
+                if (self.fail_next_assignment_notification and method == "POST"
+                        and table == "reminders" and body["dedup_key"].startswith("assignment_added:")):
+                    self.fail_next_assignment_notification = False
+                    raise SyncError("temporary reminder insert failure")
+                return super().request(method, table, query, body, prefer)
+
+        db = FailOnceDb()
+        scraper.sync_grades(db, SETTINGS, [], "normal", False, assignments=[])
+        db.fail_next_assignment_notification = True
+
+        with self.assertRaises(SyncError):
+            scraper.sync_grades(db, SETTINGS, [], "normal", False, assignments=[ASSIGNMENT])
+        self.assertEqual(db.tables["reminders"], [])
+        task = db.tables["source_events"][0]
+        self.assertEqual(task["event_type"], "task")
+
+        retry = scraper.sync_grades(db, SETTINGS, [], "normal", False, assignments=[ASSIGNMENT])
+        self.assertEqual(retry.reminders_created, 1)
+        self.assertEqual(len(db.tables["reminders"]), 1)
+        self.assertEqual(db.tables["reminders"][0]["dedup_key"], "assignment_added:assignment:moodle:42:77")
 
 
 class AcademicPersistenceTest(unittest.TestCase):

@@ -22,6 +22,7 @@ class MasterWorkerTest(unittest.TestCase):
         db.start_sync_run.return_value = "run-a"
         with patch.object(worker, "decrypt_field", side_effect=lambda value: value), patch.object(worker, "MoodleClient") as client, patch.object(worker, "sync_moodle_grades") as sync:
             client.return_value.fetch_grades.return_value = []
+            client.return_value.fetch_assignments.return_value = None
             client.return_value.is_mocked = False
             worker._handle_aitu_moodle(db, BASE, ROW)
         settings = client.call_args.args[0]
@@ -29,6 +30,7 @@ class MasterWorkerTest(unittest.TestCase):
         self.assertIsNone(settings.sso_cookie)
         self.assertEqual(settings.base.user_id, "user-a")
         self.assertEqual(sync.call_args.kwargs["run_id"], "run-a")
+        self.assertIsNone(sync.call_args.kwargs["assignments"])
 
     def test_platonus_settings_construct_and_reuse_run(self):
         db = MagicMock()

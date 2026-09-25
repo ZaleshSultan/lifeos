@@ -335,7 +335,17 @@ def _reminder_row(
 ) -> JsonObject:
     external_id = str(event.get("external_id") or event.get("id") or title)
     dedup_key = f"{source_key}:{external_id}:{policy_key}"
-    notification_kind = "deadline" if high_priority else "reminder"
+    is_moodle_assignment = (
+        event.get("event_type") == "task"
+        and source_key == "university_platform"
+        and external_id.startswith("assignment:moodle:")
+    )
+    notification_kind = (
+        "academic_assignment_deadline" if is_moodle_assignment
+        else "deadline" if high_priority else "reminder"
+    )
+    raw_json = event.get("raw_json")
+    course_title = raw_json.get("course_title") if isinstance(raw_json, dict) else None
     return {
         "dedup_key": dedup_key,
         "reminder_policy_key": policy_key,
@@ -350,6 +360,7 @@ def _reminder_row(
             "event_at": iso_utc(target),
             "priority": "high" if high_priority else "normal",
             "notification_kind": notification_kind,
+            **({"course_title": course_title} if is_moodle_assignment and course_title else {}),
             "reminder_mode": mode,
             "reminder_policy_key": policy_key,
             "dedup_key": dedup_key,
@@ -706,6 +717,7 @@ class SupabaseRestClient:
             "PATCH",
             "reminders",
             {
+                "user_id": f"eq.{self.settings.user_id}",
                 "source_event_id": f"eq.{source_event_id}",
                 "status": "eq.pending",
                 "remind_at": f"gte.{utc_now()}",
