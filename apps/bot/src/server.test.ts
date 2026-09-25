@@ -3376,7 +3376,7 @@ describe("bot server", () => {
 
   it("saves and starts a named workout day scoped to the authenticated user", async () => {
     const store = tmaStore();
-    const program = { title: "План", days: [{ id: "legs", title: "Ноги", exercises: [{ name: "Приседания", sets: [{ reps: 8, weightKg: 40, restSeconds: 120 }] }] }] };
+    const program = { title: "План", days: [{ id: "legs", title: "Ноги", exercises: [{ name: "Приседания", gifUrl: "https://example.com/squat.gif", sets: [{ reps: 8, weightKg: 40, restSeconds: 120 }] }] }] };
     store.saveWorkoutProgram = vi.fn(async (_userId, value) => value);
     store.getWorkoutProgram = vi.fn(async () => program);
     store.getOrCreateCurrentWorkout = vi.fn(store.getOrCreateCurrentWorkout);
@@ -3389,6 +3389,7 @@ describe("bot server", () => {
     });
     expect(saved.status).toBe(200);
     expect(saved.headers.get("access-control-allow-methods")).toContain("PUT");
+    await expect(saved.json()).resolves.toMatchObject({ data: program });
     expect(store.saveWorkoutProgram).toHaveBeenCalledWith("user-1", program);
     const started = await fetch(`http://127.0.0.1:${port}/api/tma/workout/start`, {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ programDayId: "legs" }),

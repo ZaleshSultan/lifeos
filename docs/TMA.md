@@ -67,6 +67,9 @@ Implemented backend routes:
 - `POST /api/tma/integrations/google/disconnect`
 - `GET /api/tma/home`
 - `GET /api/tma/workout/current`
+- `GET /api/tma/workout/program`
+- `PUT /api/tma/workout/program`
+- `GET /api/tma/workout/history`
 - `POST /api/tma/workout/start`
 - `POST /api/tma/workout/sets/:setId/complete`
 - `POST /api/tma/workout/sets/:setId/undo`
@@ -107,6 +110,8 @@ Google uses token-free session status from `user_oauth_connections`; the
 frontend never receives `access_token` or `refresh_token`.
 
 `GET /api/tma/workout/current` only returns an existing active workout. It does not create a default workout. Starting a workout is explicit through Telegram `/workout` or `POST /api/tma/workout/start`.
+
+Each exercise in a saved workout program may have an optional `gifUrl` with an http(s) link. The program lives in `user_settings.settings.workout_program`; the URL is copied into the workout's existing plan snapshot when that day starts, so current and historical sessions show the GIF that belonged to that workout. Both fields are already JSONB, so this requires no schema migration.
 
 Course and sources screens are backed by Supabase rows. The TMA should show empty states when rows are absent, not hardcoded course or workout defaults.
 

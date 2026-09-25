@@ -6,6 +6,7 @@ export interface WorkoutProgramSet {
 
 export interface WorkoutProgramExercise {
   name: string;
+  gifUrl?: string | null;
   sets: WorkoutProgramSet[];
 }
 
@@ -41,6 +42,40 @@ function list(value: unknown, maximum: number, label: string): unknown[] {
     throw new WorkoutInputError(`${label} must contain 1–${maximum} entries`);
   }
   return value;
+}
+
+export function parseWorkoutGifUrl(value: unknown): string | null {
+  if (value === null) return null;
+  if (typeof value !== "string") {
+    throw new WorkoutInputError(
+      "GIF URL must contain 1–2048 characters or be null",
+    );
+  }
+  const gifUrl = value.trim();
+  if (!gifUrl || gifUrl.length > 2048 || /[\u0000-\u001f\u007f]/.test(gifUrl)) {
+    throw new WorkoutInputError(
+      "GIF URL must contain 1–2048 characters or be null",
+    );
+  }
+  let url: URL;
+  try {
+    url = new URL(gifUrl);
+  } catch {
+    throw new WorkoutInputError(
+      "GIF URL must be an http(s) URL without credentials",
+    );
+  }
+  if (
+    (url.protocol !== "http:" && url.protocol !== "https:") ||
+    !url.hostname ||
+    url.username ||
+    url.password
+  ) {
+    throw new WorkoutInputError(
+      "GIF URL must be an http(s) URL without credentials",
+    );
+  }
+  return gifUrl;
 }
 
 export function parseWorkoutSet(value: unknown): WorkoutProgramSet {
@@ -111,6 +146,9 @@ export function parseWorkoutProgram(value: unknown): WorkoutProgram {
       seenExercises.add(key);
       return {
         name,
+        ...(exercise.gifUrl === undefined
+          ? {}
+          : { gifUrl: parseWorkoutGifUrl(exercise.gifUrl) }),
         sets: list(exercise.sets, 20, "Sets").map(parseWorkoutSet),
       };
     });

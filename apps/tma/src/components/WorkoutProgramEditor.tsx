@@ -16,6 +16,7 @@ import {
 interface ExerciseDraft {
   key: string;
   name: string;
+  gifUrl: string;
   sets: (SetDraft & { key: string })[];
 }
 interface DayDraft {
@@ -32,7 +33,7 @@ function blankSet(): SetDraft & { key: string } {
   return { key: key(), reps: "", weightKg: "", restSeconds: "90" };
 }
 function blankExercise(): ExerciseDraft {
-  return { key: key(), name: "", sets: [blankSet()] };
+  return { key: key(), name: "", gifUrl: "", sets: [blankSet()] };
 }
 function blankDay(index: number): DayDraft {
   return { id: key(), title: `День ${index}`, exercises: [blankExercise()] };
@@ -44,6 +45,7 @@ function programDays(program: WorkoutProgram | null): DayDraft[] {
       exercises: day.exercises.map((exercise) => ({
         key: key(),
         name: exercise.name,
+        gifUrl: exercise.gifUrl ?? "",
         sets: exercise.sets.map((set) => ({
           key: key(),
           reps: String(set.reps),
@@ -117,6 +119,7 @@ export function WorkoutProgramEditor({
                 throw new Error(`Укажи название упражнения в «${day.title}».`);
               return {
                 name: exercise.name.trim(),
+                gifUrl: exercise.gifUrl.trim() || null,
                 sets: exercise.sets.map(parseSetDraft),
               };
             }),
@@ -130,7 +133,7 @@ export function WorkoutProgramEditor({
         setValidation(
           error instanceof Error && !error.message.startsWith("{")
             ? error.message
-            : "Не удалось сохранить программу.",
+            : workoutErrorMessage(error),
         );
     }
   }
@@ -254,6 +257,24 @@ export function WorkoutProgramEditor({
               <Trash2 className="h-4 w-4" />
             </button>
           </div>
+          <label className="block space-y-1 text-sm text-zinc-400">
+            <span>Ссылка на GIF (необязательно)</span>
+            <input
+              className={workoutInputClass}
+              type="url"
+              inputMode="url"
+              maxLength={2048}
+              placeholder="https://example.com/exercise.gif"
+              spellCheck={false}
+              value={exercise.gifUrl}
+              onChange={(event) =>
+                changeExercise(exercise.key, (item) => ({
+                  ...item,
+                  gifUrl: event.target.value,
+                }))
+              }
+            />
+          </label>
           {exercise.sets.map((set, setIndex) => (
             <div
               key={set.key}

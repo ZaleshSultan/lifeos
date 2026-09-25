@@ -461,6 +461,57 @@ describe("workout persistence", () => {
     expect(client.queries.filter((query) => query.action === "select").every((query) => query.filters.user_id === "user-a")).toBe(true);
   });
 
+  it("returns a workout's GIF snapshot after the saved program changes", async () => {
+    const client = workoutClient();
+    const store = storeWith(client);
+    const gifUrl = "https://example.com/squat.gif";
+    const exercise = customWorkoutProgram.days[0].exercises[0];
+    const day = customWorkoutProgram.days[0];
+    const withGif = {
+      ...customWorkoutProgram,
+      days: [{ ...day, exercises: [{ ...exercise, gifUrl }] }],
+    };
+    await store.saveWorkoutProgram("user-a", withGif);
+    expect(await store.getWorkoutProgram("user-a")).toEqual(withGif);
+
+    client.workouts[0].ended_at = "2026-09-24T11:00:00Z";
+    const started = await store.getOrCreateCurrentWorkout({
+      userId: "user-a",
+      title: day.title,
+      now: "2026-09-25T10:00:00Z",
+      manualPlan: [{ ...withGif.days[0].exercises[0], category: "strength", equipment: "unspecified" }],
+    });
+    expect(started.created).toBe(true);
+    const workoutRow = client.workouts.find((row) => row.id === started.id)!;
+    expect(workoutRow.metadata).toMatchObject({
+      parsedPlan: [{ name: exercise.name, gifUrl }],
+    });
+    workoutRow.ended_at = null;
+    // The fake client does not persist array inserts into workout_sets.
+    client.workoutSets.push({
+      ...client.workoutSets[0],
+      id: "new-set",
+      workout_id: started.id,
+      created_at: "2026-09-25T10:00:00Z",
+    });
+    expect((await store.getCurrentWorkout({ userId: "user-a" }))?.exercises[0].gifUrl).toBe(gifUrl);
+
+    await store.saveWorkoutProgram("user-a", customWorkoutProgram);
+    workoutRow.ended_at = "2026-09-25T11:00:00Z";
+    const history = await store.getWorkoutHistory("user-a");
+    expect(history.find((session) => session.id === started.id)?.exercises[0].gifUrl).toBe(gifUrl);
+    expect(await store.getWorkoutProgram("user-a")).toEqual(customWorkoutProgram);
+  });
+
+  it("omits malformed GIF links from older workout metadata", async () => {
+    const client = workoutClient();
+    client.workouts[0].metadata = {
+      parsedPlan: [{ name: "Приседания", gifUrl: "javascript:alert(1)" }],
+    };
+    const current = await storeWith(client).getCurrentWorkout({ userId: "user-a" });
+    expect(current?.exercises[0]).not.toHaveProperty("gifUrl");
+  });
+
   it("edits recorded set values without altering the saved program or another user's set", async () => {
     const client = workoutClient();
     client.userSettings = [{ user_id: "user-a", settings: { workout_program: customWorkoutProgram } }];

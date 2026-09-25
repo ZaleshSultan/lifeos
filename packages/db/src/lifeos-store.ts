@@ -65,6 +65,7 @@ import {
   type ReceiptParseResult,
   type TmaReceiptDisplayStatus,
   type CurrencyCode,
+  parseWorkoutGifUrl,
   parseWorkoutProgram,
   parseWorkoutSet,
   workoutVolumeKg,
@@ -734,6 +735,7 @@ export interface WorkoutExerciseSummary {
   id: string;
   name: string;
   note: string | null;
+  gifUrl?: string | null;
   sets: WorkoutSetSummary[];
 }
 
@@ -1844,6 +1846,7 @@ export interface LifeOSStore {
 
 export type WorkoutPlan = ReadonlyArray<{
   name: string;
+  gifUrl?: string | null;
   category: string;
   equipment: string;
   sets: ReadonlyArray<{
@@ -2560,6 +2563,25 @@ function jsonObject(value: Json | null | undefined): Record<string, unknown> {
   }
 
   return value as Record<string, unknown>;
+}
+
+function workoutGifUrls(metadata: Json): Map<string, string> {
+  const parsedPlan = jsonObject(metadata).parsedPlan;
+  const urls = new Map<string, string>();
+  if (!Array.isArray(parsedPlan)) return urls;
+  for (const entry of parsedPlan) {
+    const exercise = jsonObject(entry);
+    if (typeof exercise.name !== "string" || typeof exercise.gifUrl !== "string") {
+      continue;
+    }
+    try {
+      const gifUrl = parseWorkoutGifUrl(exercise.gifUrl);
+      if (gifUrl) urls.set(exercise.name, gifUrl);
+    } catch {
+      // Older workout metadata may contain a malformed link; omit it from the API.
+    }
+  }
+  return urls;
 }
 
 function receiptDisplayStatus(
@@ -10085,6 +10107,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     exerciseById: Map<string, FitnessExerciseRow>,
   ): CurrentWorkoutSummary {
     const grouped = new Map<string, WorkoutExerciseSummary>();
+    const gifUrls = workoutGifUrls(workout.metadata);
 
     for (const set of sets) {
       const exercise = set.exercise_id
@@ -10109,6 +10132,9 @@ export class SupabaseLifeOSStore implements LifeOSStore {
           id: exerciseKey,
           name: exercise?.name ?? "Exercise",
           note: exercise?.category ?? null,
+          ...(exercise && gifUrls.has(exercise.name)
+            ? { gifUrl: gifUrls.get(exercise.name) }
+            : {}),
           sets: [summarySet],
         });
       }

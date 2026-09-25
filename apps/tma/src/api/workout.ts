@@ -15,7 +15,11 @@ export interface WorkoutProgram {
   days: {
     id: string;
     title: string;
-    exercises: { name: string; sets: WorkoutSetInput[] }[];
+    exercises: {
+      name: string;
+      gifUrl?: string | null;
+      sets: WorkoutSetInput[];
+    }[];
   }[];
 }
 
@@ -164,6 +168,11 @@ export function workoutErrorMessage(error: unknown): string {
       return "Запись не найдена. Обнови экран.";
     if (body.error?.includes("completed") || body.error?.includes("closed"))
       return "Тренировка уже завершена. Обнови экран.";
+    if (
+      body.error === "invalid_workout_input" &&
+      body.message?.startsWith("GIF URL")
+    )
+      return "Проверь ссылку на GIF: http:// или https://, до 2048 символов, без данных входа.";
     if (body.error?.includes("invalid"))
       return "Проверь названия, повторы, вес и время отдыха.";
     return "Не удалось сохранить. Обнови экран и попробуй ещё раз.";

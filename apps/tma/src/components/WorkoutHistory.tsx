@@ -3,6 +3,7 @@ import { useWorkoutHistoryQuery, workoutErrorMessage } from "../api/workout";
 import { exerciseProgress } from "../lib/workout";
 import { formatDateTime } from "../lib/format";
 import { ErrorPanel, LoadingPanel } from "./AsyncState";
+import { WorkoutExerciseGif } from "./WorkoutExerciseGif";
 import { workoutInputClass, workoutPanelClass } from "./WorkoutSetFields";
 
 export function WorkoutHistory() {
@@ -128,6 +129,7 @@ export function WorkoutHistory() {
                   <h3 className="break-words text-sm font-semibold">
                     {item.name}
                   </h3>
+                  <WorkoutExerciseGif gifUrl={item.gifUrl} name={item.name} />
                   <ul className="mt-2 space-y-1 text-sm text-zinc-400">
                     {item.sets.map((set) => (
                       <li

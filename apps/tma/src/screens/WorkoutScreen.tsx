@@ -16,6 +16,7 @@ import {
   type WorkoutSetInput,
 } from "../api/workout";
 import { ErrorPanel, LoadingPanel } from "../components/AsyncState";
+import { WorkoutExerciseGif } from "../components/WorkoutExerciseGif";
 import { WorkoutHistory } from "../components/WorkoutHistory";
 import { WorkoutProgramEditor } from "../components/WorkoutProgramEditor";
 import {
@@ -355,6 +356,10 @@ export function WorkoutScreen() {
               <h3 className="mb-1 break-words text-lg font-semibold">
                 {exercise.name}
               </h3>
+              <WorkoutExerciseGif
+                gifUrl={exercise.gifUrl}
+                name={exercise.name}
+              />
               {exercise.sets.map((set) => (
                 <RecordedSet
                   key={set.id}

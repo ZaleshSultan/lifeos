@@ -105,6 +105,7 @@ export interface WorkoutExercise {
   id: string;
   name: string;
   note?: string | null;
+  gifUrl?: string | null;
   sets: WorkoutSet[];
 }
 

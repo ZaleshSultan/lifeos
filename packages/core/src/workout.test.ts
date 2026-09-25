@@ -28,6 +28,57 @@ describe("workout programs", () => {
     ).toBe(0);
   });
 
+  it("keeps legacy exercises unchanged and accepts an optional GIF URL or null", () => {
+    expect(parseWorkoutProgram(program)).toEqual(program);
+    const exercise = program.days[0].exercises[0];
+    const withGif = {
+      ...program,
+      days: [
+        {
+          ...program.days[0],
+          exercises: [
+            { ...exercise, gifUrl: " https://example.com/squat.gif " },
+          ],
+        },
+      ],
+    };
+    expect(parseWorkoutProgram(withGif).days[0].exercises[0].gifUrl).toBe(
+      "https://example.com/squat.gif",
+    );
+    const withoutGif = {
+      ...withGif,
+      days: [
+        { ...withGif.days[0], exercises: [{ ...exercise, gifUrl: null }] },
+      ],
+    };
+    expect(
+      parseWorkoutProgram(withoutGif).days[0].exercises[0].gifUrl,
+    ).toBeNull();
+  });
+
+  it.each([
+    "",
+    "./squat.gif",
+    "javascript:alert(1)",
+    "data:image/gif;base64,AA==",
+    "https://exam\nple.com/squat.gif",
+    "https://user:secret@example.com/squat.gif",
+    `https://example.com/${"x".repeat(2049)}`,
+    123,
+  ])("rejects invalid GIF URL %j", (gifUrl) => {
+    expect(() =>
+      parseWorkoutProgram({
+        ...program,
+        days: [
+          {
+            ...program.days[0],
+            exercises: [{ ...program.days[0].exercises[0], gifUrl }],
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
   it.each([
     { ...set, reps: 1.5 },
     { ...set, reps: 0 },

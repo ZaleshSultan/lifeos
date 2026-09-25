@@ -67,6 +67,15 @@ describe("workout screen", () => {
     expect(html).not.toContain("disabled=");
     expect(html).toContain('aria-label="Приседания, подход 1: Вес, кг"');
     expect(html.match(/value="0"/g)).toHaveLength(2);
+    expect(html).not.toContain("<img");
+  });
+
+  it("shows a saved exercise GIF beside the active workout", () => {
+    state.session!.exercises[0].gifUrl = "https://example.com/squat.gif";
+    const html = renderToStaticMarkup(createElement(WorkoutScreen));
+    expect(html).toContain('src="https://example.com/squat.gif"');
+    expect(html).toContain('alt="Техника упражнения: Приседания"');
+    expect(html).toContain('loading="lazy"');
   });
 
   it("blocks input while saving and displays a failed set mutation", () => {
