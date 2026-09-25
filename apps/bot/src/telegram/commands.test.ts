@@ -7,11 +7,13 @@ import type {
   LifeModeResolution,
 } from "@lifeos/core";
 import type {
+  BankLineRecord,
   CreateLifeCaptureInput,
   CreateLifeEntityInput,
   CreateTaskInput,
   CurrentWorkoutSummary,
   DailyLogRecord,
+  FinanceReceiptRecord,
   FinanceSummary,
   HealthIngestResult,
   HealthSyncStatusSummary,
@@ -34,9 +36,10 @@ import type {
   TmaSourcesSummary,
   WorkoutRecord,
 } from "@lifeos/db";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { handleTelegramUpdate } from "./commands.js";
 import type {
+  AnswerCallbackQueryInput,
   SendMessageInput,
   TelegramBotRuntime,
   TelegramUpdate,
@@ -58,6 +61,13 @@ class FakeStore implements LifeOSStore {
   readonly financeTransactions: Array<
     Awaited<ReturnType<LifeOSStore["createFinanceTransaction"]>>
   > = [];
+  readonly bankLines: BankLineRecord[] = [];
+  readonly receipts: FinanceReceiptRecord[] = [];
+  readonly reconciliations: Array<{
+    userId: string;
+    lineId: string;
+    receiptId: string;
+  }> = [];
   readonly financeParseRuns: Array<
     Parameters<LifeOSStore["recordFinanceParseRun"]>[0]
   > = [];
@@ -219,6 +229,7 @@ class FakeStore implements LifeOSStore {
     startedAt: "2026-05-18T00:00:00.000Z",
     created: true,
   };
+  hasCurrentWorkout = true;
 
   course: StudyCourseRecord | null = {
     id: "course-1",
@@ -666,9 +677,12 @@ class FakeStore implements LifeOSStore {
   async getWorkoutProgram() { return null; }
   async saveWorkoutProgram(_userId: string, program: Parameters<LifeOSStore["saveWorkoutProgram"]>[1]) { return program; }
   async getWorkoutHistory() { return []; }
-  async updateWorkoutSet() { return this.getCurrentWorkout(); }
+  async updateWorkoutSet() { return (await this.getCurrentWorkout())!; }
 
-  async getCurrentWorkout(): Promise<CurrentWorkoutSummary> {
+  async getCurrentWorkout(): Promise<CurrentWorkoutSummary | null> {
+    if (!this.hasCurrentWorkout) {
+      return null;
+    }
     return {
       id: this.workout.id,
       title: this.workout.title ?? "Workout",
@@ -700,16 +714,16 @@ class FakeStore implements LifeOSStore {
   }
 
   async completeWorkoutSet(): Promise<CurrentWorkoutSummary> {
-    return this.getCurrentWorkout();
+    return (await this.getCurrentWorkout())!;
   }
 
   async undoWorkoutSet(): Promise<CurrentWorkoutSummary> {
-    return this.getCurrentWorkout();
+    return (await this.getCurrentWorkout())!;
   }
 
   async completeWorkout(): Promise<CurrentWorkoutSummary> {
     return {
-      ...(await this.getCurrentWorkout()),
+      ...(await this.getCurrentWorkout())!,
       mode: "completed",
       progressPercent: 100,
       completedSets: 1,
@@ -1429,10 +1443,10 @@ class FakeStore implements LifeOSStore {
     throw new Error("not used");
   }
 
-  async listReceipts(): Promise<
+  async listReceipts(userId: string): Promise<
     Awaited<ReturnType<LifeOSStore["listReceipts"]>>
   > {
-    return [];
+    return this.receipts.filter((receipt) => receipt.userId === userId);
   }
 
   async getReceipt(
@@ -1681,13 +1695,19 @@ class FakeStore implements LifeOSStore {
     return this.healthSummary.sources;
   }
 
-  async listUnmatchedBankLines(): Promise<
+  async listUnmatchedBankLines(userId: string): Promise<
     Awaited<ReturnType<LifeOSStore["listUnmatchedBankLines"]>>
   > {
-    return [];
+    return this.bankLines.filter((line) => line.userId === userId);
   }
 
-  async reconcileBankLine(): Promise<void> {}
+  async reconcileBankLine(
+    userId: string,
+    lineId: string,
+    receiptId: string,
+  ): Promise<void> {
+    this.reconciliations.push({ userId, lineId, receiptId });
+  }
 
   async getActiveBudgetsWithPeriods(): Promise<
     Awaited<ReturnType<LifeOSStore["getActiveBudgetsWithPeriods"]>>
@@ -1748,20 +1768,98 @@ function update(text: string): TelegramUpdate {
   };
 }
 
+function callbackUpdate(
+  data: string,
+  options: {
+    senderId?: number;
+    chatId?: number;
+    chatType?: string;
+    includeMessage?: boolean;
+  } = {},
+): TelegramUpdate {
+  return {
+    update_id: 2,
+    callback_query: {
+      id: "callback-1",
+      from: { id: options.senderId ?? 30 },
+      message:
+        options.includeMessage === false
+          ? undefined
+          : {
+              message_id: 11,
+              chat: {
+                id: options.chatId ?? 30,
+                type: options.chatType ?? "private",
+              },
+            },
+      data,
+    },
+  };
+}
+
+function testBankLine(
+  overrides: Partial<BankLineRecord> = {},
+): BankLineRecord {
+  return {
+    id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    userId: "user-1",
+    amount: 1200,
+    currency: "KZT",
+    description: "Обед",
+    bookingDate: "2026-05-18",
+    status: "unmatched",
+    matchedEntityId: null,
+    shortId: "aaaaaaaa",
+    merchant: null,
+    source: "bank",
+    createdAt: "2026-05-18T12:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function testReceipt(
+  overrides: Partial<FinanceReceiptRecord> = {},
+): FinanceReceiptRecord {
+  return {
+    id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    userId: "user-1",
+    storagePath: "receipts/test.jpg",
+    fileName: "test.jpg",
+    mimeType: "image/jpeg",
+    ocrJson: {},
+    parsedJson: {},
+    ocrText: null,
+    openRouterModel: null,
+    processedAt: "2026-05-18T12:00:00.000Z",
+    status: "linked",
+    transactionId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    errorMessage: null,
+    items: [],
+    createdAt: "2026-05-18T12:00:00.000Z",
+    ...overrides,
+  };
+}
+
 function runtime(store = new FakeStore()): TelegramBotRuntime & {
   sent: SendMessageInput[];
+  answered: AnswerCallbackQueryInput[];
   store: FakeStore;
 } {
   const sent: SendMessageInput[] = [];
+  const answered: AnswerCallbackQueryInput[] = [];
 
   return {
     sent,
+    answered,
     store,
     tmaUrl: "https://lifeos.example/tma",
     now: () => new Date("2026-05-18T12:00:00.000Z"),
     telegram: {
       async sendMessage(input) {
         sent.push(input);
+      },
+      async answerCallbackQuery(input) {
+        answered.push(input);
       },
       async getFileUrl() {
         return "https://api.telegram.org/file/bot/test";
@@ -1822,7 +1920,81 @@ describe("Telegram commands", () => {
     const createdUser = store.user as TelegramUserRecord | null;
     expect(createdUser?.status).toBe("pending");
     expect(createdUser?.telegramUserId).toBe(30);
-    expect(context.sent.at(-1)?.text).toContain("access request created");
+    expect(context.sent.at(-1)?.text).toContain("Запрос на доступ к LifeOS создан");
+    expect(context.sent.at(-1)?.replyMarkup).toBeUndefined();
+  });
+
+  it("shows a persistent menu to active users and keeps slash commands available", async () => {
+    const store = new FakeStore();
+    store.user = { ...store.user!, telegramUserId: 30 };
+    const context = runtime(store);
+
+    await handleTelegramUpdate(update("/start"), context);
+
+    const markup = context.sent.at(-1)?.replyMarkup;
+    expect(markup && "keyboard" in markup ? markup : null).toMatchObject({
+      resize_keyboard: true,
+      is_persistent: true,
+      keyboard: [
+        [{ text: "Сегодня" }, { text: "Учёба" }],
+        [{ text: "Тренировки" }, { text: "Финансы" }],
+        [{ text: "Напоминания" }, { text: "Банк" }],
+      ],
+    });
+
+    await handleTelegramUpdate(update("Учёба"), context);
+    expect(context.sent.at(-1)?.text).toContain("Курс:");
+    const studyMarkup = context.sent.at(-1)?.replyMarkup;
+    expect(
+      studyMarkup && "inline_keyboard" in studyMarkup
+        ? studyMarkup.inline_keyboard[0]?.[0]?.web_app?.url
+        : undefined,
+    ).toBe("https://lifeos.example/tma?screen=study");
+    await handleTelegramUpdate(update("/study"), context);
+    expect(context.sent.at(-1)?.text).toContain("Курс:");
+    await handleTelegramUpdate(update("/course"), context);
+    expect(context.sent.at(-1)?.text).toContain("Курс:");
+    expect(store.captures).toHaveLength(0);
+  });
+
+  it("does not offer private navigation to a pending user", async () => {
+    const store = new FakeStore();
+    store.user = { ...store.user!, telegramUserId: 30, status: "pending" };
+    const context = runtime(store);
+
+    await handleTelegramUpdate(update("/start"), context);
+
+    expect(context.sent.at(-1)?.text).toContain("ожидает подтверждения");
+    expect(context.sent.at(-1)?.replyMarkup).toBeUndefined();
+  });
+
+  it("does not route menu labels to private finance handlers in groups", async () => {
+    const store = new FakeStore();
+    store.bankLines.push(testBankLine());
+    const listLines = vi.spyOn(store, "listUnmatchedBankLines");
+    const context = runtime(store);
+    const incoming = update("Банк");
+    incoming.message!.chat = { id: -100, type: "group" };
+
+    await handleTelegramUpdate(incoming, context);
+
+    expect(listLines).not.toHaveBeenCalled();
+  });
+
+  it("does not show bank amounts or buttons for slash commands in groups", async () => {
+    const store = new FakeStore();
+    store.bankLines.push(testBankLine());
+    const listLines = vi.spyOn(store, "listUnmatchedBankLines");
+    const context = runtime(store);
+    const incoming = update("/bank unmatched");
+    incoming.message!.chat = { id: -100, type: "group" };
+
+    await handleTelegramUpdate(incoming, context);
+
+    expect(listLines).not.toHaveBeenCalled();
+    expect(context.sent.at(-1)?.text).toContain("личном чате");
+    expect(context.sent.at(-1)?.text).not.toContain("1200");
+    expect(context.sent.at(-1)?.replyMarkup).toBeUndefined();
   });
 
   it("blocks pending users from protected commands", async () => {
@@ -1854,7 +2026,7 @@ describe("Telegram commands", () => {
     expect(store.pendingProfiles).toHaveLength(0);
     expect(store.telegramProfiles[0]?.status).toBe("active");
     expect(context.sent.at(-1)?.chatId).toBe(456);
-    expect(context.sent.at(-1)?.text).toContain("approved");
+    expect(context.sent.at(-1)?.text).toContain("одобрен");
   });
 
   it("blocks non-admin approval attempts", async () => {
@@ -2336,7 +2508,11 @@ describe("Telegram commands", () => {
 
     await handleTelegramUpdate(update("/workout Push day"), context);
 
-    const button = context.sent.at(-1)?.replyMarkup?.inline_keyboard[0]?.[0];
+    const markup = context.sent.at(-1)?.replyMarkup;
+    const button =
+      markup && "inline_keyboard" in markup
+        ? markup.inline_keyboard[0]?.[0]
+        : undefined;
 
     expect(button?.web_app?.url).toBe(
       "https://lifeos.example/tma?workoutId=workout-1",
@@ -2344,12 +2520,53 @@ describe("Telegram commands", () => {
     expect(button?.web_app?.url).not.toContain("Push");
   });
 
+  it("opens the workout menu without starting a workout", async () => {
+    const store = new FakeStore();
+    store.hasCurrentWorkout = false;
+    const createWorkout = vi.spyOn(store, "getOrCreateCurrentWorkout");
+    const context = runtime(store);
+
+    await handleTelegramUpdate(update("Тренировки"), context);
+
+    expect(createWorkout).not.toHaveBeenCalled();
+    expect(context.sent.at(-1)?.text).toContain("Активной тренировки нет");
+    const markup = context.sent.at(-1)?.replyMarkup;
+    expect(markup && "inline_keyboard" in markup ? markup.inline_keyboard : null)
+      .toEqual(
+        expect.arrayContaining([
+          [{ text: "Начать тренировку", callback_data: "workout_start" }],
+        ]),
+      );
+  });
+
+  it("starts a workout only after the explicit inline button is pressed", async () => {
+    const store = new FakeStore();
+    store.user = { ...store.user!, telegramUserId: 30 };
+    const createWorkout = vi.spyOn(store, "getOrCreateCurrentWorkout");
+    const context = runtime(store);
+
+    await handleTelegramUpdate(callbackUpdate("workout_start"), context);
+
+    expect(context.answered).toEqual([
+      { callbackQueryId: "callback-1", showAlert: false },
+    ]);
+    expect(createWorkout).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "user-1" }),
+    );
+    expect(context.sent.at(-1)?.text).toContain("Тренировка начата");
+    expect(context.sent.at(-1)?.text).not.toContain("workout-1");
+  });
+
   it("opens mode settings from TMA_URL", async () => {
     const context = runtime();
 
     await handleTelegramUpdate(update("/mode"), context);
 
-    const button = context.sent.at(-1)?.replyMarkup?.inline_keyboard[0]?.[0];
+    const markup = context.sent.at(-1)?.replyMarkup;
+    const button =
+      markup && "inline_keyboard" in markup
+        ? markup.inline_keyboard[0]?.[0]
+        : undefined;
 
     expect(button?.web_app?.url).toBe("https://lifeos.example/tma?screen=mode");
   });
@@ -2536,7 +2753,7 @@ describe("Telegram commands", () => {
     expect(context.sent.at(-1)?.text).toContain("connected");
 
     await handleTelegramUpdate(update("/reminders"), context);
-    expect(context.sent.at(-1)?.text).toContain("Upcoming reminders");
+    expect(context.sent.at(-1)?.text).toContain("Предстоящие напоминания");
     expect(context.sent.at(-1)?.text).toContain("Review graph theory");
   });
 
@@ -2698,7 +2915,7 @@ describe("Telegram commands", () => {
 
     expect(context.sent.at(-1)?.text).toContain("Discrete Mathematics");
     expect(context.sent.at(-1)?.text).toContain("DISCRETE-MATH-SUMMER-2026");
-    expect(context.sent.at(-1)?.text).toContain("Progress: <b>0%</b>");
+    expect(context.sent.at(-1)?.text).toContain("Прогресс: <b>0%</b>");
   });
 
   it("updates active study course progress", async () => {
@@ -2714,8 +2931,8 @@ describe("Telegram commands", () => {
         lastStudiedOn: "2026-05-18",
       },
     ]);
-    expect(context.sent.at(-1)?.text).toContain("Course progress updated.");
-    expect(context.sent.at(-1)?.text).toContain("Progress: <b>42%</b>");
+    expect(context.sent.at(-1)?.text).toContain("Прогресс курса обновлён.");
+    expect(context.sent.at(-1)?.text).toContain("Прогресс: <b>42%</b>");
   });
 
   it("records an active study course topic", async () => {
@@ -2742,7 +2959,183 @@ describe("Telegram commands", () => {
       },
     ]);
     expect(context.store.syncEntityIds).toEqual(["entity-1"]);
-    expect(context.sent.at(-1)?.text).toContain("Course topic saved.");
+    expect(context.sent.at(-1)?.text).toContain("Тема курса сохранена.");
+  });
+
+  it("matches a bank line to a receipt through two acknowledged buttons", async () => {
+    const store = new FakeStore();
+    store.user = { ...store.user!, telegramUserId: 30 };
+    store.bankLines.push(testBankLine());
+    store.receipts.push(testReceipt());
+    const listLines = vi.spyOn(store, "listUnmatchedBankLines");
+    const listReceipts = vi.spyOn(store, "listReceipts");
+    const context = runtime(store);
+
+    const bankMenu = update("Банк");
+    bankMenu.message!.chat.id = 30;
+    await handleTelegramUpdate(bankMenu, context);
+    const bankMarkup = context.sent.at(-1)?.replyMarkup;
+    expect(
+      bankMarkup && "inline_keyboard" in bankMarkup
+        ? bankMarkup.inline_keyboard[0]?.[0]?.callback_data
+        : undefined,
+    ).toBe("bank_match:aaaaaaaa");
+
+    await handleTelegramUpdate(callbackUpdate("bank_match:aaaaaaaa"), context);
+    const receiptMarkup = context.sent.at(-1)?.replyMarkup;
+    const receiptCallback =
+      receiptMarkup && "inline_keyboard" in receiptMarkup
+        ? receiptMarkup.inline_keyboard[0]?.[0]?.callback_data
+        : undefined;
+    expect(receiptCallback).toBe("bank_match:aaaaaaaa:bbbbbbbbbbbb");
+    expect(context.sent.at(-1)?.text).toContain("Выберите чек");
+    expect(
+      receiptMarkup && "inline_keyboard" in receiptMarkup
+        ? receiptMarkup.inline_keyboard[0]?.[0]?.text
+        : undefined,
+    ).toContain("bbbbbbbbbbbb");
+    expect(Buffer.byteLength(receiptCallback ?? "", "utf8")).toBeLessThanOrEqual(64);
+
+    await handleTelegramUpdate(callbackUpdate(receiptCallback!), context);
+
+    expect(context.answered).toEqual([
+      { callbackQueryId: "callback-1", showAlert: false },
+      { callbackQueryId: "callback-1", showAlert: false },
+    ]);
+    expect(store.reconciliations).toEqual([
+      {
+        userId: "user-1",
+        lineId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        receiptId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      },
+    ]);
+    expect(listLines.mock.calls).toEqual([
+      ["user-1", "user-1"],
+      ["user-1", "user-1"],
+      ["user-1", "user-1"],
+    ]);
+    expect(listReceipts.mock.calls).toEqual([["user-1"], ["user-1"]]);
+    expect(context.sent.at(-1)?.text).toContain("сопоставлена с чеком");
+  });
+
+  it("acknowledges stale bank buttons without changing data", async () => {
+    const store = new FakeStore();
+    store.user = { ...store.user!, telegramUserId: 30 };
+    const context = runtime(store);
+
+    await handleTelegramUpdate(callbackUpdate("bank_match:aaaaaaaa"), context);
+
+    expect(context.answered).toHaveLength(1);
+    expect(context.sent.at(-1)?.text).toContain("уже сопоставлена или недоступна");
+    expect(store.reconciliations).toHaveLength(0);
+  });
+
+  it("offers the TMA receipt upload when no selectable receipt exists", async () => {
+    const store = new FakeStore();
+    store.user = { ...store.user!, telegramUserId: 30 };
+    store.bankLines.push(testBankLine());
+    const context = runtime(store);
+
+    await handleTelegramUpdate(callbackUpdate("bank_match:aaaaaaaa"), context);
+
+    const markup = context.sent.at(-1)?.replyMarkup;
+    expect(
+      markup && "inline_keyboard" in markup
+        ? markup.inline_keyboard[0]?.[0]?.web_app?.url
+        : undefined,
+    ).toBe("https://lifeos.example/tma?screen=finance");
+  });
+
+  it("does not resolve another user's receipt selector", async () => {
+    const store = new FakeStore();
+    store.user = { ...store.user!, telegramUserId: 30 };
+    store.bankLines.push(testBankLine());
+    store.receipts.push(testReceipt({ userId: "user-2" }));
+    const context = runtime(store);
+
+    await handleTelegramUpdate(
+      callbackUpdate("bank_match:aaaaaaaa:bbbbbbbbbbbb"),
+      context,
+    );
+
+    expect(context.answered).toHaveLength(1);
+    expect(store.reconciliations).toHaveLength(0);
+    expect(context.sent.at(-1)?.text).toContain("Чек недоступен");
+  });
+
+  it("continues an authorized match if Telegram rejects the callback acknowledgement", async () => {
+    const store = new FakeStore();
+    store.user = { ...store.user!, telegramUserId: 30 };
+    store.bankLines.push(testBankLine());
+    store.receipts.push(testReceipt());
+    const context = runtime(store);
+    context.telegram.answerCallbackQuery = async () => {
+      throw new Error("expired callback");
+    };
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      await handleTelegramUpdate(
+        callbackUpdate("bank_match:aaaaaaaa:bbbbbbbbbbbb"),
+        context,
+      );
+    } finally {
+      warning.mockRestore();
+    }
+
+    expect(store.reconciliations).toHaveLength(1);
+    expect(context.sent.at(-1)?.text).toContain("сопоставлена с чеком");
+  });
+
+  it.each([
+    ["group", callbackUpdate("bank_match:aaaaaaaa", { chatType: "group", chatId: -100 })],
+    ["another private chat", callbackUpdate("bank_match:aaaaaaaa", { chatId: 31 })],
+    ["missing message", callbackUpdate("bank_match:aaaaaaaa", { includeMessage: false })],
+  ])("acknowledges %s bank callbacks without loading private data", async (_name, incoming) => {
+    const store = new FakeStore();
+    store.user = { ...store.user!, telegramUserId: 30 };
+    store.bankLines.push(testBankLine());
+    const listLines = vi.spyOn(store, "listUnmatchedBankLines");
+    const context = runtime(store);
+
+    await handleTelegramUpdate(incoming, context);
+
+    expect(context.answered).toMatchObject([
+      { callbackQueryId: "callback-1", showAlert: true },
+    ]);
+    expect(context.sent).toHaveLength(0);
+    expect(listLines).not.toHaveBeenCalled();
+  });
+
+  it("rejects a callback from a user other than the resolved profile", async () => {
+    const store = new FakeStore();
+    store.user = { ...store.user!, telegramUserId: 30 };
+    store.bankLines.push(testBankLine());
+    const listLines = vi.spyOn(store, "listUnmatchedBankLines");
+    const context = runtime(store);
+
+    await handleTelegramUpdate(
+      callbackUpdate("bank_match:aaaaaaaa", { senderId: 31, chatId: 31 }),
+      context,
+    );
+
+    expect(context.answered).toMatchObject([
+      { callbackQueryId: "callback-1", showAlert: true },
+    ]);
+    expect(context.sent).toHaveLength(0);
+    expect(listLines).not.toHaveBeenCalled();
+    expect(store.reconciliations).toHaveLength(0);
+  });
+
+  it("acknowledges unsupported callback data", async () => {
+    const context = runtime();
+
+    await handleTelegramUpdate(callbackUpdate("unknown:action"), context);
+
+    expect(context.answered).toMatchObject([
+      { callbackQueryId: "callback-1", showAlert: true },
+    ]);
+    expect(context.sent).toHaveLength(0);
   });
 
   it("treats slash-prefixed file paths as implicit captures", async () => {

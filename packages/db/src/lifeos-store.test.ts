@@ -38,9 +38,19 @@ class FakeSupabaseClient {
   fitnessExercises: FakeRow[] = [];
   queries: FakeQueryReceipt[] = [];
   selectErrors: Record<string, string> = {};
+  rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  rpcError: { message: string } | null = null;
 
   from(table: string): FakeQuery {
     return new FakeQuery(this, table);
+  }
+
+  rpc(name: string, args: Record<string, unknown>): Promise<{
+    data: null;
+    error: { message: string } | null;
+  }> {
+    this.rpcCalls.push({ name, args });
+    return Promise.resolve({ data: null, error: this.rpcError });
   }
 }
 
@@ -615,6 +625,31 @@ describe("SupabaseLifeOSStore tenant isolation", () => {
       errorSpy.mockRestore();
     }
 
+    expect(
+      client.queries.some(
+        (query) =>
+          query.table === "finance_transactions" && query.action === "update",
+      ),
+    ).toBe(false);
+  });
+
+  it("delegates bank reconciliation to the atomic receipt RPC", async () => {
+    const client = new FakeSupabaseClient();
+    client.transactions = [{ id: txA, user_id: "user-a", status: "draft" }];
+    client.receipts = [{ id: receiptA, user_id: "user-a", status: "linked" }];
+
+    await storeWith(client).reconcileBankLine("user-a", txA, receiptA);
+
+    expect(client.rpcCalls).toEqual([
+      {
+        name: "reconcile_bank_receipt",
+        args: {
+          p_user_id: "user-a",
+          p_bank_transaction_id: txA,
+          p_receipt_id: receiptA,
+        },
+      },
+    ]);
     expect(
       client.queries.some(
         (query) =>

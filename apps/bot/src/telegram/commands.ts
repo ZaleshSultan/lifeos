@@ -37,8 +37,10 @@ import type {
 } from "@lifeos/db";
 import type {
   TelegramBotRuntime,
+  TelegramCallbackQuery,
   TelegramMessage,
   TelegramPhotoSize,
+  TelegramReplyKeyboardMarkup,
   TelegramUpdate,
 } from "./types.js";
 import { triggerFinanceAlerts } from "./alerts.js";
@@ -46,6 +48,31 @@ import { triggerFinanceAlerts } from "./alerts.js";
 interface ParsedCommand {
   command: string;
   args: string;
+}
+
+const MAIN_MENU_COMMANDS = new Map<string, ParsedCommand>([
+  ["Сегодня", { command: "today", args: "" }],
+  ["Учёба", { command: "study", args: "" }],
+  ["Тренировки", { command: "workout_menu", args: "" }],
+  ["Финансы", { command: "finance", args: "" }],
+  ["Напоминания", { command: "reminders", args: "" }],
+  ["Банк", { command: "bank", args: "unmatched" }],
+]);
+
+const MAIN_MENU_KEYBOARD: TelegramReplyKeyboardMarkup = {
+  keyboard: [
+    [{ text: "Сегодня" }, { text: "Учёба" }],
+    [{ text: "Тренировки" }, { text: "Финансы" }],
+    [{ text: "Напоминания" }, { text: "Банк" }],
+  ],
+  resize_keyboard: true,
+  is_persistent: true,
+};
+
+function mainMenuForChat(
+  message: TelegramMessage,
+): TelegramReplyKeyboardMarkup | undefined {
+  return message.chat.type === "private" ? MAIN_MENU_KEYBOARD : undefined;
 }
 
 interface HealthSignalArgs {
@@ -91,6 +118,7 @@ const HELP_TEXT = [
   "/mode auto",
   "/mode clear",
   "/course",
+  "/study — учебный курс",
   "/course progress [number]",
   "/course topic [text]",
   "/review review notes",
@@ -631,6 +659,36 @@ function buildWorkoutUrl(tmaUrl: string, workoutId: string): string | null {
   }
 }
 
+function buildWorkoutScreenUrl(tmaUrl: string): string | null {
+  try {
+    const url = new URL(tmaUrl);
+    url.searchParams.set("screen", "workout");
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function buildStudyScreenUrl(tmaUrl: string): string | null {
+  try {
+    const url = new URL(tmaUrl);
+    url.searchParams.set("screen", "study");
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function buildFinanceScreenUrl(tmaUrl: string): string | null {
+  try {
+    const url = new URL(tmaUrl);
+    url.searchParams.set("screen", "finance");
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 function buildModeUrl(tmaUrl: string): string | null {
   try {
     const url = new URL(tmaUrl);
@@ -726,23 +784,30 @@ function formatCourseProgress(value: number): string {
 }
 
 function formatStudyCourse(course: StudyCourseRecord): string {
+  const statusLabels: Record<StudyCourseRecord["status"], string> = {
+    planned: "запланирован",
+    active: "активен",
+    paused: "на паузе",
+    completed: "завершён",
+    archived: "в архиве",
+  };
   const units =
     course.totalUnits === null
       ? ""
-      : `Units: <b>${course.completedUnits}/${course.totalUnits}</b>`;
+      : `Зачётные единицы: <b>${course.completedUnits}/${course.totalUnits}</b>`;
 
   return [
-    `Course: <b>${escapeHtml(course.title)}</b>`,
-    `Code: <code>${escapeHtml(course.code)}</code>`,
-    course.term ? `Term: ${escapeHtml(course.term)}` : "",
+    `Курс: <b>${escapeHtml(course.title)}</b>`,
+    `Код: <code>${escapeHtml(course.code)}</code>`,
+    course.term ? `Семестр: ${escapeHtml(course.term)}` : "",
     course.startsOn && course.endsOn
-      ? `Dates: <code>${escapeHtml(course.startsOn)}</code> to <code>${escapeHtml(course.endsOn)}</code>`
+      ? `Даты: <code>${escapeHtml(course.startsOn)}</code> — <code>${escapeHtml(course.endsOn)}</code>`
       : "",
-    `Status: <b>${escapeHtml(course.status)}</b>`,
-    `Progress: <b>${formatCourseProgress(course.progressPercent)}%</b>`,
+    `Статус: <b>${statusLabels[course.status]}</b>`,
+    `Прогресс: <b>${formatCourseProgress(course.progressPercent)}%</b>`,
     units,
     course.lastStudiedOn
-      ? `Last studied: <code>${escapeHtml(course.lastStudiedOn)}</code>`
+      ? `Последнее занятие: <code>${escapeHtml(course.lastStudiedOn)}</code>`
       : "",
   ]
     .filter(Boolean)
@@ -895,7 +960,7 @@ function formatUpcomingReminders(
   timezone: string,
 ): string {
   if (reminders.length === 0) {
-    return "No upcoming reminders.";
+    return "Предстоящих напоминаний нет.";
   }
 
   return reminders
@@ -1450,17 +1515,15 @@ function bootstrapProfileSql(userId: string, telegramUserId: number): string {
 function bootstrapHint(message: TelegramMessage, runtime: TelegramBotRuntime) {
   if (!message.from?.id || !runtime.defaultUserId) {
     return [
-      "Create or update a profile row in Supabase, then try again.",
-      message.from?.id
-        ? `Telegram user id: <code>${message.from.id}</code>`
-        : "",
+      "Создайте или обновите профиль в Supabase и попробуйте снова.",
+      message.from?.id ? `Telegram ID: <code>${message.from.id}</code>` : "",
     ]
       .filter(Boolean)
       .join("\n");
   }
 
   return [
-    "Run this SQL after the auth.users row exists:",
+    "Выполните этот SQL после создания строки auth.users:",
     `<pre>${escapeHtml(
       bootstrapProfileSql(runtime.defaultUserId, message.from.id),
     )}</pre>`,
@@ -1481,13 +1544,13 @@ async function notifyAdminsOfPendingUser(
   const username = message.from?.username ? `@${message.from.username}` : "";
   const displayName = telegramDisplayName(message) ?? "";
   const text = [
-    "New LifeOS access request.",
-    `Telegram id: <code>${telegramUserId}</code>`,
-    displayName ? `Name: ${escapeHtml(displayName)}` : "",
-    username ? `Username: ${escapeHtml(username)}` : "",
+    "Новый запрос на доступ к LifeOS.",
+    `Telegram ID: <code>${telegramUserId}</code>`,
+    displayName ? `Имя: ${escapeHtml(displayName)}` : "",
+    username ? `Имя пользователя: ${escapeHtml(username)}` : "",
     "",
-    `Approve: <code>/approve ${telegramUserId}</code>`,
-    `Block: <code>/block ${telegramUserId}</code>`,
+    `Подтвердить: <code>/approve ${telegramUserId}</code>`,
+    `Заблокировать: <code>/block ${telegramUserId}</code>`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -1518,7 +1581,7 @@ async function handleStartCommand(
   if (!telegramUserId) {
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
-      text: "LifeOS bot is online, but I could not identify your Telegram user id.",
+      text: "Бот LifeOS работает, но не смог определить ваш Telegram ID.",
     });
     return;
   }
@@ -1527,8 +1590,8 @@ async function handleStartCommand(
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
       text: [
-        "LifeOS bot is online.",
-        "Database is not configured, so I cannot link this Telegram account yet.",
+        "Бот LifeOS работает.",
+        "База данных не настроена, поэтому я пока не могу подключить аккаунт Telegram.",
         bootstrapHint(message, runtime),
       ].join("\n"),
     });
@@ -1541,7 +1604,7 @@ async function handleStartCommand(
     if (existing.status === "pending") {
       await runtime.telegram.sendMessage({
         chatId: message.chat.id,
-        text: "Your LifeOS access request is already waiting for approval.",
+        text: "Ваш запрос на доступ к LifeOS ожидает подтверждения.",
       });
       return;
     }
@@ -1549,18 +1612,15 @@ async function handleStartCommand(
     if (existing.status === "blocked") {
       await runtime.telegram.sendMessage({
         chatId: message.chat.id,
-        text: "LifeOS access is blocked.",
+        text: "Доступ к LifeOS заблокирован.",
       });
       return;
     }
 
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
-      text: [
-        "LifeOS bot is online.",
-        `Linked profile: <code>${existing.userId}</code>`,
-        "Use /help to see commands.",
-      ].join("\n"),
+      text: "Бот LifeOS работает. Выберите раздел ниже или отправьте /help.",
+      replyMarkup: mainMenuForChat(message),
     });
     return;
   }
@@ -1572,7 +1632,7 @@ async function handleStartCommand(
 
   if (canBootstrap && runtime.defaultUserId) {
     try {
-      const linked = await runtime.store.linkDefaultTelegramUser({
+      await runtime.store.linkDefaultTelegramUser({
         userId: runtime.defaultUserId,
         telegramUserId,
         displayName: telegramDisplayName(message),
@@ -1580,19 +1640,18 @@ async function handleStartCommand(
 
       await runtime.telegram.sendMessage({
         chatId: message.chat.id,
-        text: [
-          "LifeOS bot is online.",
-          `Linked this Telegram account to <code>${linked.userId}</code>.`,
-          "Use /help to see commands.",
-        ].join("\n"),
+        text: "Аккаунт Telegram подключён к LifeOS. Выберите раздел ниже или отправьте /help.",
+        replyMarkup: mainMenuForChat(message),
       });
       return;
     } catch (error) {
       await runtime.telegram.sendMessage({
         chatId: message.chat.id,
         text: [
-          "LifeOS bot is online, but automatic linking failed.",
-          error instanceof Error ? escapeHtml(error.message) : "Unknown error",
+          "Бот LifeOS работает, но подключить аккаунт автоматически не удалось.",
+          error instanceof Error
+            ? escapeHtml(error.message)
+            : "Неизвестная ошибка",
           bootstrapHint(message, runtime),
         ].join("\n"),
       });
@@ -1602,11 +1661,11 @@ async function handleStartCommand(
 
   await runtime.telegram.sendMessage({
     chatId: message.chat.id,
-    text: "Creating your LifeOS access request...",
+    text: "Создаю запрос на доступ к LifeOS...",
   });
 
   try {
-    const pending = await runtime.store.createPendingTelegramUser({
+    await runtime.store.createPendingTelegramUser({
       telegramUserId,
       displayName: telegramDisplayName(message),
       username: telegramUsername(message),
@@ -1617,18 +1676,20 @@ async function handleStartCommand(
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
       text: [
-        "LifeOS access request created.",
-        `Telegram user id: <code>${telegramUserId}</code>`,
-        `Status: <b>${pending.status}</b>`,
-        "An admin needs to approve it before commands are available.",
+        "Запрос на доступ к LifeOS создан.",
+        `Telegram ID: <code>${telegramUserId}</code>`,
+        "Статус: <b>ожидает подтверждения</b>",
+        "После подтверждения администратором команды станут доступны.",
       ].join("\n"),
     });
   } catch (error) {
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
       text: [
-        "LifeOS bot is online, but signup failed.",
-        error instanceof Error ? escapeHtml(error.message) : "Unknown error",
+        "Бот LifeOS работает, но создать запрос не удалось.",
+        error instanceof Error
+          ? escapeHtml(error.message)
+          : "Неизвестная ошибка",
         bootstrapHint(message, runtime),
       ].join("\n"),
     });
@@ -1718,7 +1779,8 @@ async function handleApproveCommand(
   await runtime.telegram
     .sendMessage({
       chatId: telegramUserId,
-      text: "Your LifeOS access has been approved. Use /help to see commands.",
+      text: "Доступ к LifeOS одобрен. Выберите раздел ниже или отправьте /help.",
+      replyMarkup: MAIN_MENU_KEYBOARD,
     })
     .catch((error: unknown) => {
       console.warn("[telegram] approval notification failed", {
@@ -2527,6 +2589,48 @@ function parseWorkoutCommandArgs(args: string): ParsedWorkoutCommandArgs {
   };
 }
 
+async function handleWorkoutMenuCommand(
+  _args: string,
+  message: TelegramMessage,
+  runtime: TelegramBotRuntime,
+  user: TelegramUserRecord | null,
+): Promise<void> {
+  const workout = await runtime.store!.getCurrentWorkout({
+    userId: user!.userId,
+  });
+  const workoutUrl = runtime.tmaUrl
+    ? workout
+      ? buildWorkoutUrl(runtime.tmaUrl, workout.id)
+      : buildWorkoutScreenUrl(runtime.tmaUrl)
+    : null;
+  const buttons = [
+    ...(workoutUrl
+      ? [
+          [
+            {
+              text: workout ? "Открыть тренировку" : "Открыть тренировки",
+              web_app: { url: workoutUrl },
+            },
+          ],
+        ]
+      : []),
+    ...(!workout
+      ? [[{ text: "Начать тренировку", callback_data: "workout_start" }]]
+      : []),
+  ];
+
+  await runtime.telegram.sendMessage({
+    chatId: message.chat.id,
+    text: workout
+      ? [
+          `Текущая тренировка: <b>${escapeHtml(workout.title)}</b>`,
+          `Прогресс: <b>${workout.progressPercent}%</b>`,
+        ].join("\n")
+      : "Активной тренировки нет. Начните новую или откройте раздел тренировок.",
+    replyMarkup: buttons.length ? { inline_keyboard: buttons } : undefined,
+  });
+}
+
 async function handleWorkoutCommand(
   args: string,
   message: TelegramMessage,
@@ -2600,11 +2704,10 @@ async function handleWorkoutCommand(
   await runtime.telegram.sendMessage({
     chatId: message.chat.id,
     text: [
-      workout.created ? "Workout started." : "Current workout loaded.",
-      `Mode: <b>${escapeHtml(mode.label)}</b>`,
-      `Workout id: <code>${workout.id}</code>`,
+      workout.created ? "Тренировка начата." : "Текущая тренировка открыта.",
+      `Режим: <b>${escapeHtml(mode.label)}</b>`,
       ...parsedWorkout.summaryLines.map(
-        (line) => `Parsed: <code>${escapeHtml(line)}</code>`,
+        (line) => `Запись: <code>${escapeHtml(line)}</code>`,
       ),
     ].join("\n"),
     replyMarkup: workoutUrl
@@ -2612,7 +2715,7 @@ async function handleWorkoutCommand(
           inline_keyboard: [
             [
               {
-                text: "Open workout",
+                text: "Открыть тренировку",
                 web_app: {
                   url: workoutUrl,
                 },
@@ -2825,12 +2928,22 @@ async function handleCourseCommand(
       user!.userId,
       today,
     );
+    const studyUrl = runtime.tmaUrl
+      ? buildStudyScreenUrl(runtime.tmaUrl)
+      : null;
 
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
       text: course
         ? formatStudyCourse(course)
-        : `No active study course for <code>${escapeHtml(today)}</code>.`,
+        : `На <code>${escapeHtml(today)}</code> нет активного учебного курса.`,
+      replyMarkup: studyUrl
+        ? {
+            inline_keyboard: [
+              [{ text: "Открыть учёбу", web_app: { url: studyUrl } }],
+            ],
+          }
+        : undefined,
     });
     return;
   }
@@ -2846,7 +2959,7 @@ async function handleCourseCommand(
     if (!course) {
       await runtime.telegram.sendMessage({
         chatId: message.chat.id,
-        text: `No active study course for <code>${escapeHtml(today)}</code>.`,
+        text: `На <code>${escapeHtml(today)}</code> нет активного учебного курса.`,
       });
       return;
     }
@@ -2860,7 +2973,7 @@ async function handleCourseCommand(
 
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
-      text: ["Course progress updated.", formatStudyCourse(updated)].join(
+      text: ["Прогресс курса обновлён.", formatStudyCourse(updated)].join(
         "\n\n",
       ),
     });
@@ -2886,12 +2999,12 @@ async function handleCourseCommand(
     if (!course) {
       await runtime.telegram.sendMessage({
         chatId: message.chat.id,
-        text: `No active study course for <code>${escapeHtml(today)}</code>.`,
+        text: `На <code>${escapeHtml(today)}</code> нет активного учебного курса.`,
       });
       return;
     }
 
-    const entity = await createEntityAndQueueSync(runtime.store!, message, {
+    await createEntityAndQueueSync(runtime.store!, message, {
       userId: user!.userId,
       entityType: "review",
       domain: "study",
@@ -2914,10 +3027,9 @@ async function handleCourseCommand(
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
       text: [
-        "Course topic saved.",
-        `Course: <b>${escapeHtml(course.title)}</b>`,
-        `Topic: ${escapeHtml(topic)}`,
-        `Entity id: <code>${escapeHtml(entity.id)}</code>`,
+        "Тема курса сохранена.",
+        `Курс: <b>${escapeHtml(course.title)}</b>`,
+        `Тема: ${escapeHtml(topic)}`,
       ].join("\n"),
     });
     return;
@@ -3027,7 +3139,7 @@ async function handleRemindersCommand(
   await runtime.telegram.sendMessage({
     chatId: message.chat.id,
     text: [
-      `Upcoming reminders (${escapeHtml(user!.timezone || LOCAL_TIMEZONE)}):`,
+      `Предстоящие напоминания (${escapeHtml(user!.timezone || LOCAL_TIMEZONE)}):`,
       formatUpcomingReminders(reminders, user!.timezone || LOCAL_TIMEZONE),
     ].join("\n"),
   });
@@ -3048,16 +3160,16 @@ async function handleTodayCommand(
     }),
   ]);
   const lines = entities.map((entity, index) => {
-    return `${index + 1}. ${entity.entityType}: ${escapeHtml(entity.title)}`;
+    return `${index + 1}. ${escapeHtml(entity.title)}`;
   });
 
   await runtime.telegram.sendMessage({
     chatId: message.chat.id,
     text: [
-      `Mode: <b>${escapeHtml(mode.label)}</b>`,
+      `Режим: <b>${escapeHtml(mode.label)}</b>`,
       lines.length
-        ? `Today:\n${lines.join("\n")}`
-        : "No LifeOS entries captured today yet.",
+        ? `Сегодня:\n${lines.join("\n")}`
+        : "На сегодня записей пока нет.",
     ].join("\n\n"),
   });
 }
@@ -3277,7 +3389,7 @@ function makeFinanceSummaryHandler(
 
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
-      text: ["Finance:", ...financeSummaryLines(summary, period)].join("\n"),
+      text: ["Финансы:", ...financeSummaryLines(summary, period)].join("\n"),
     });
   };
 }
@@ -3507,11 +3619,13 @@ const COMMAND_REGISTRY: Record<string, CommandConfig> = {
   },
   remind: { handler: handleRemindCommand, requiresUser: true },
   workout: { handler: handleWorkoutCommand, requiresUser: true },
+  workout_menu: { handler: handleWorkoutMenuCommand, requiresUser: true },
 
   mode: { handler: handleModeCommand, requiresUser: true },
   reminder_mode: { handler: handleReminderModeCommand, requiresUser: true },
   reminder: { handler: handleReminderCommand, requiresUser: true },
   course: { handler: handleCourseCommand, requiresUser: true },
+  study: { handler: handleCourseCommand, requiresUser: true },
   sources: { handler: handleSourcesCommand, requiresUser: true },
   google_sync: {
     handler: makeSyncSourceHandler(["google_calendar", "google_tasks"]),
@@ -3762,6 +3876,14 @@ async function handleBankCommand(
   runtime: TelegramBotRuntime,
   user: TelegramUserRecord | null,
 ): Promise<void> {
+  if (message.chat.type !== "private" || message.chat.id !== message.from?.id) {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "Банковские операции доступны только в личном чате с ботом.",
+    });
+    return;
+  }
+
   const trimmed = args.trim().toLowerCase();
   const parts = args.trim().split(/\s+/);
   const subcommand = parts[0]?.toLowerCase() ?? "";
@@ -3776,7 +3898,7 @@ async function handleBankCommand(
       if (lines.length === 0) {
         await runtime.telegram.sendMessage({
           chatId: message.chat.id,
-          text: "No unmatched bank transactions found. All clear! ✅",
+          text: "Банковских операций без чека нет.",
         });
         return;
       }
@@ -3788,9 +3910,7 @@ async function handleBankCommand(
       const lineTexts = page.map((line, index) => formatBankLine(line, index));
 
       const footer =
-        remaining > 0
-          ? `\n\n<i>${remaining} more unmatched transaction${remaining === 1 ? "" : "s"}.</i>`
-          : "";
+        remaining > 0 ? `\n\n<i>Ещё операций без чека: ${remaining}.</i>` : "";
 
       const inlineButtons = page.map((line) => ({
         text: `${line.shortId} — ${formatMoney(line.amount, line.currency)}`,
@@ -3800,12 +3920,12 @@ async function handleBankCommand(
       await runtime.telegram.sendMessage({
         chatId: message.chat.id,
         text: [
-          `<b>Unmatched bank transactions</b> (${lines.length} total):`,
+          `<b>Банковские операции без чека</b> (${lines.length}):`,
           "",
           ...lineTexts,
           footer,
           "",
-          "Match with: <code>/bank match &lt;short_id&gt; &lt;entity_id&gt;</code>",
+          "Выберите операцию ниже или отправьте <code>/bank match &lt;номер&gt; &lt;id чека&gt;</code>.",
         ].join("\n"),
         replyMarkup:
           inlineButtons.length > 0
@@ -3821,7 +3941,7 @@ async function handleBankCommand(
       );
       await runtime.telegram.sendMessage({
         chatId: message.chat.id,
-        text: "Failed to list unmatched bank transactions.",
+        text: "Не удалось загрузить банковские операции.",
       });
     }
     return;
@@ -3834,7 +3954,7 @@ async function handleBankCommand(
     if (!lineShortId || !entityId) {
       await runtime.telegram.sendMessage({
         chatId: message.chat.id,
-        text: "Usage: /bank match [short_id] [entity_id]",
+        text: "Использование: /bank match [номер операции] [id чека]",
       });
       return;
     }
@@ -3849,9 +3969,8 @@ async function handleBankCommand(
       await runtime.telegram.sendMessage({
         chatId: message.chat.id,
         text: [
-          "✅ Bank line matched.",
-          `Line: <code>${escapeHtml(lineShortId)}</code>`,
-          `Linked to: <code>${escapeHtml(entityId)}</code>`,
+          "✅ Операция сопоставлена с чеком.",
+          `Операция: <code>${escapeHtml(lineShortId)}</code>`,
         ].join("\n"),
       });
     } catch (error) {
@@ -3861,9 +3980,7 @@ async function handleBankCommand(
       );
       await runtime.telegram.sendMessage({
         chatId: message.chat.id,
-        text: escapeHtml(
-          error instanceof Error ? error.message : "Bank match failed.",
-        ),
+        text: "Не удалось сопоставить операцию с чеком. Проверьте данные и попробуйте ещё раз.",
       });
     }
     return;
@@ -3872,11 +3989,241 @@ async function handleBankCommand(
   await runtime.telegram.sendMessage({
     chatId: message.chat.id,
     text: [
-      "Bank commands:",
-      "/bank unmatched — list unmatched transactions",
-      "/bank match [short_id] [entity_id] — match a transaction",
+      "Банковские операции:",
+      "/bank unmatched — операции без чека",
+      "/bank match [номер операции] [id чека] — сопоставить с чеком",
     ].join("\n"),
   });
+}
+
+const BANK_MATCH_CALLBACK_PATTERN =
+  /^bank_match:([0-9a-f]{8})(?::([0-9a-f]{12}))?$/i;
+const MATCHABLE_RECEIPT_STATUSES = new Set([
+  "linked",
+  "parsed",
+  "partial",
+  "needs_review",
+]);
+
+function receiptSelector(receiptId: string): string {
+  return receiptId.replaceAll("-", "").slice(0, 12).toLowerCase();
+}
+
+async function handleBankMatchCallback(
+  lineShortId: string,
+  receiptShortId: string | undefined,
+  message: TelegramMessage,
+  runtime: TelegramBotRuntime,
+  user: TelegramUserRecord,
+): Promise<void> {
+  const lines = await runtime.store!.listUnmatchedBankLines(
+    user.userId,
+    user.userId,
+  );
+  const matchingLines = lines.filter(
+    (line) =>
+      line.userId === user.userId &&
+      line.status === "unmatched" &&
+      line.shortId.toLowerCase() === lineShortId.toLowerCase(),
+  );
+
+  if (matchingLines.length !== 1) {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "Операция уже сопоставлена или недоступна. Обновите список кнопкой «Банк».",
+    });
+    return;
+  }
+
+  const line = matchingLines[0]!;
+  const receipts = (await runtime.store!.listReceipts(user.userId)).filter(
+    (receipt) =>
+      receipt.userId === user.userId &&
+      MATCHABLE_RECEIPT_STATUSES.has(receipt.status) &&
+      /^[0-9a-f]{12}$/.test(receiptSelector(receipt.id)),
+  );
+
+  if (receiptShortId) {
+    const matchingReceipts = receipts.filter(
+      (receipt) => receiptSelector(receipt.id) === receiptShortId.toLowerCase(),
+    );
+
+    if (matchingReceipts.length !== 1) {
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: "Чек недоступен или номер неоднозначен. Выберите операцию заново кнопкой «Банк».",
+      });
+      return;
+    }
+
+    await runtime.store!.reconcileBankLine(
+      user.userId,
+      line.id,
+      matchingReceipts[0]!.id,
+    );
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: `✅ Операция <code>${escapeHtml(line.shortId)}</code> сопоставлена с чеком.`,
+    });
+    return;
+  }
+
+  const receiptSelectorCounts = new Map<string, number>();
+  for (const receipt of receipts) {
+    const selector = receiptSelector(receipt.id);
+    receiptSelectorCounts.set(
+      selector,
+      (receiptSelectorCounts.get(selector) ?? 0) + 1,
+    );
+  }
+  const choices = receipts
+    .filter(
+      (receipt) => receiptSelectorCounts.get(receiptSelector(receipt.id)) === 1,
+    )
+    .slice(0, 5);
+
+  if (choices.length === 0) {
+    const financeUrl = runtime.tmaUrl
+      ? buildFinanceScreenUrl(runtime.tmaUrl)
+      : null;
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "Подходящих чеков нет. Добавьте чек в разделе «Финансы» мини-приложения и снова откройте «Банк».",
+      replyMarkup: financeUrl
+        ? {
+            inline_keyboard: [
+              [{ text: "Открыть финансы", web_app: { url: financeUrl } }],
+            ],
+          }
+        : undefined,
+    });
+    return;
+  }
+
+  await runtime.telegram.sendMessage({
+    chatId: message.chat.id,
+    text: [
+      "Выберите чек для банковской операции:",
+      formatBankLine(line, 0),
+    ].join("\n"),
+    replyMarkup: {
+      inline_keyboard: choices.map((receipt, index) => {
+        const createdAt = DateTime.fromISO(receipt.createdAt).setZone(
+          user.timezone || LOCAL_TIMEZONE,
+        );
+        const date = createdAt.isValid
+          ? createdAt.toFormat("dd.LL.yyyy")
+          : "без даты";
+        return [
+          {
+            text: `Чек ${index + 1} · ${receiptSelector(receipt.id)} · ${date}`,
+            callback_data: `bank_match:${line.shortId}:${receiptSelector(receipt.id)}`,
+          },
+        ];
+      }),
+    },
+  });
+}
+
+async function handleTelegramCallbackQuery(
+  callback: TelegramCallbackQuery,
+  runtime: TelegramBotRuntime,
+): Promise<void> {
+  const callbackQueryId = callback.id;
+
+  if (!callbackQueryId) {
+    return;
+  }
+
+  const answer = (text?: string) =>
+    runtime.telegram.answerCallbackQuery({
+      callbackQueryId,
+      text,
+      showAlert: Boolean(text),
+    });
+  const telegramUserId = callback.from?.id;
+  const message = callback.message;
+
+  if (
+    typeof telegramUserId !== "number" ||
+    !Number.isSafeInteger(telegramUserId) ||
+    telegramUserId <= 0 ||
+    message?.chat?.type !== "private" ||
+    message.chat.id !== telegramUserId
+  ) {
+    await answer("Кнопка доступна только в личном чате с ботом.");
+    return;
+  }
+
+  const data = callback.data;
+  const bankMatch =
+    typeof data === "string" ? BANK_MATCH_CALLBACK_PATTERN.exec(data) : null;
+
+  if (data !== "workout_start" && !bankMatch) {
+    await answer("Эта кнопка недоступна. Откройте раздел заново.");
+    return;
+  }
+
+  if (!runtime.store) {
+    await answer("Сервис временно недоступен.");
+    return;
+  }
+
+  let user: TelegramUserRecord | null;
+  try {
+    user = await runtime.store.resolveTelegramUser(telegramUserId);
+  } catch (error) {
+    console.error("[ERROR] Telegram callback authorization failed", {
+      errorType: error instanceof Error ? error.name : typeof error,
+    });
+    await answer("Не удалось проверить доступ. Попробуйте позже.");
+    return;
+  }
+
+  if (
+    !user ||
+    user.status !== "active" ||
+    user.telegramUserId !== telegramUserId
+  ) {
+    await answer("Доступ недоступен. Отправьте /start в личном чате.");
+    return;
+  }
+
+  try {
+    await answer();
+  } catch (error) {
+    console.warn("[telegram] callback acknowledgement failed", {
+      errorType: error instanceof Error ? error.name : typeof error,
+    });
+  }
+
+  try {
+    if (bankMatch) {
+      await handleBankMatchCallback(
+        bankMatch[1]!,
+        bankMatch[2],
+        message,
+        runtime,
+        user,
+      );
+      return;
+    }
+
+    await handleWorkoutCommand(
+      "",
+      { ...message, from: callback.from, text: "/workout" },
+      runtime,
+      user,
+    );
+  } catch (error) {
+    console.error("[ERROR] Telegram callback handler failed", {
+      errorType: error instanceof Error ? error.name : typeof error,
+    });
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "Не удалось обработать кнопку. Попробуйте ещё раз.",
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -3961,6 +4308,11 @@ export async function handleTelegramUpdate(
   update: TelegramUpdate,
   runtime: TelegramBotRuntime,
 ): Promise<void> {
+  if (update.callback_query) {
+    await handleTelegramCallbackQuery(update.callback_query, runtime);
+    return;
+  }
+
   const message = update.message;
 
   if (!message) {
@@ -3991,13 +4343,18 @@ export async function handleTelegramUpdate(
     return;
   }
 
-  const parsed = parseCommand(message.text);
+  const menuCommand =
+    message.chat.type === "private"
+      ? MAIN_MENU_COMMANDS.get(message.text.trim())
+      : undefined;
+  const parsed = menuCommand ?? parseCommand(message.text);
 
   if (!parsed) {
     return;
   }
 
   if (
+    !menuCommand &&
     !message.text.trim().startsWith("/") &&
     looksLikeQuickFinanceInput(message.text)
   ) {
@@ -4006,6 +4363,7 @@ export async function handleTelegramUpdate(
   }
 
   if (
+    !menuCommand &&
     !message.text.trim().startsWith("/") &&
     looksLikeFinanceQuestion(message.text)
   ) {

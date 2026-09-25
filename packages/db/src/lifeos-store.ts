@@ -10891,16 +10891,11 @@ export class SupabaseLifeOSStore implements LifeOSStore {
         throw new Error(`No receipt matches ID for this user: ${entityId}`);
       }
 
-      const { error } = await this.client
-        .from("finance_transactions")
-        .update({
-          status: "confirmed" as FinanceTransactionStatus,
-          receipt_id: entityId,
-          confirmed_at: new Date().toISOString(),
-        })
-        .eq("id", fullId)
-        .eq("user_id", userId)
-        .eq("status", "draft");
+      const { error } = await this.client.rpc("reconcile_bank_receipt", {
+        p_user_id: userId,
+        p_bank_transaction_id: fullId,
+        p_receipt_id: entityId,
+      });
 
       if (error) {
         throwSupabaseError(error, "Failed to reconcile bank line");

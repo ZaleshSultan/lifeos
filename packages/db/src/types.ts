@@ -2047,6 +2047,14 @@ export interface Database {
           updated_at: string;
         };
       };
+      reconcile_bank_receipt: {
+        Args: {
+          p_user_id: string;
+          p_bank_transaction_id: string;
+          p_receipt_id: string;
+        };
+        Returns: undefined;
+      };
     };
     Enums: {
       lifeos_project_status: LifeOSProjectStatus;

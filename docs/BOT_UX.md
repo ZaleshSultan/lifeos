@@ -18,6 +18,8 @@ The Telegram bot is the fastest input surface for LifeOS.
 - `/spend` - expense capture.
 - `/finance` - finance summary.
 - `/workout` - current workout creation/fetch plus TMA open button.
+- `/study` - alias for `/course`, showing the active study course.
+- `/bank unmatched` - unmatched bank transactions with inline matching buttons.
 - `/pending` - admin-only pending user list.
 - `/approve <telegram_id>` - admin-only approval.
 - `/block <telegram_id>` - admin-only block.
@@ -84,6 +86,20 @@ path-free Obsidian status card in the TMA dashboard.
 - `/workout` creates or loads the active workout, ensures default exercises/sets exist, and sends a TMA button.
 - User resolution is by Telegram user id through `profiles.telegram_user_id`.
 - Unknown users should receive a pending approval registration message.
+
+## Telegram Buttons
+
+Active users receive a persistent reply keyboard after `/start` (and after
+approval) in private chat. It opens Today, Study, Workouts, Finance, Reminders,
+and Bank. The Workouts button only reads the current workout; its inline
+"Начать тренировку" button explicitly starts one. Slash commands continue to
+work.
+
+Bank details and matching are available only in the user's private chat.
+Matching uses two inline steps: choose an unmatched bank line, then a receipt.
+Each callback is acknowledged with `answerCallbackQuery`. The bot uses the
+clicking user's `callback_query.from.id` and reloads both records under their
+`user_id` before reconciling.
 
 ## Health Mode Labels
 

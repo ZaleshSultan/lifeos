@@ -38,13 +38,15 @@ export interface TelegramUpdate {
   update_id: number;
   message?: TelegramMessage;
   edited_message?: TelegramMessage;
-  callback_query?: {
-    id?: string;
-    from?: TelegramUser;
-    message?: TelegramMessage;
-    data?: string;
-  };
+  callback_query?: TelegramCallbackQuery;
   my_chat_member?: Record<string, unknown>;
+}
+
+export interface TelegramCallbackQuery {
+  id?: string;
+  from?: TelegramUser;
+  message?: TelegramMessage;
+  data?: string;
 }
 
 export interface TelegramInlineKeyboardButton {
@@ -60,14 +62,27 @@ export interface TelegramInlineKeyboardMarkup {
   inline_keyboard: TelegramInlineKeyboardButton[][];
 }
 
+export interface TelegramReplyKeyboardMarkup {
+  keyboard: Array<Array<{ text: string }>>;
+  resize_keyboard?: boolean;
+  is_persistent?: boolean;
+}
+
+export interface AnswerCallbackQueryInput {
+  callbackQueryId: string;
+  text?: string;
+  showAlert?: boolean;
+}
+
 export interface SendMessageInput {
   chatId: number;
   text: string;
-  replyMarkup?: TelegramInlineKeyboardMarkup;
+  replyMarkup?: TelegramInlineKeyboardMarkup | TelegramReplyKeyboardMarkup;
 }
 
 export interface TelegramClient {
   sendMessage(input: SendMessageInput): Promise<void>;
+  answerCallbackQuery(input: AnswerCallbackQueryInput): Promise<void>;
   getFileUrl(fileId: string): Promise<string>;
 }
 

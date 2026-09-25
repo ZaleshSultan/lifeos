@@ -10,6 +10,7 @@ describe("Telegram push alerts integration", () => {
       sendMessage: async (input) => {
         sentMessages.push(input);
       },
+      answerCallbackQuery: async () => {},
       getFileUrl: async () => "https://api.telegram.org/file/bot/test",
     };
 
@@ -47,6 +48,7 @@ describe("Telegram push alerts integration", () => {
       sendMessage: async (input) => {
         sentMessages.push(input);
       },
+      answerCallbackQuery: async () => {},
       getFileUrl: async () => "https://api.telegram.org/file/bot/test",
     };
 
@@ -71,6 +73,7 @@ describe("Telegram push alerts integration", () => {
       sendMessage: async (input) => {
         sentMessages.push(input);
       },
+      answerCallbackQuery: async () => {},
       getFileUrl: async () => "https://api.telegram.org/file/bot/test",
     };
 

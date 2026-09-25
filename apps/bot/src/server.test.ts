@@ -1299,8 +1299,9 @@ async function startWebhookServer(
     store?: LifeOSStore;
     telegram?: TelegramClient;
   } = {},
-): Promise<{ port: number; sent: SendMessageInput[] }> {
+): Promise<{ port: number; sent: SendMessageInput[]; answered: string[] }> {
   const sent: SendMessageInput[] = [];
+  const answered: string[] = [];
   const server = createBotServer({
     config: {
       telegramWebhookPath: "/telegram/webhook",
@@ -1313,6 +1314,9 @@ async function startWebhookServer(
       ({
         async sendMessage(input) {
           sent.push(input);
+        },
+        async answerCallbackQuery(input) {
+          answered.push(input.callbackQueryId);
         },
         async getFileUrl() {
           return "https://api.telegram.org/file/bot/test";
@@ -1327,6 +1331,7 @@ async function startWebhookServer(
   return {
     port: await listen(server),
     sent,
+    answered,
   };
 }
 
@@ -1627,6 +1632,7 @@ describe("bot server", () => {
       async sendMessage(input) {
         sent.push(input);
       },
+      async answerCallbackQuery() {},
       async getFileUrl() {
         return "https://api.telegram.org/file/bot/test";
       },
@@ -1668,7 +1674,57 @@ describe("bot server", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(sent.at(0)?.text).toContain("LifeOS bot is online");
+    expect(sent.at(0)?.text).toContain("Бот LifeOS работает");
+  });
+
+  it("routes and acknowledges bank callback queries from the clicking user", async () => {
+    const resolveTelegramUser = vi.fn(async (telegramUserId: number) =>
+      activeTelegramUser({ telegramUserId }),
+    );
+    const listUnmatchedBankLines = vi.fn(async () => [
+      {
+        id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        userId: "user-1",
+        amount: 1200,
+        currency: "KZT",
+        description: "Обед",
+        bookingDate: "2026-05-18",
+        status: "unmatched" as const,
+        matchedEntityId: null,
+        shortId: "aaaaaaaa",
+        merchant: null,
+        source: "bank",
+        createdAt: "2026-05-18T12:00:00.000Z",
+      },
+    ]);
+    const listReceipts = vi.fn(async () => []);
+    const store = {
+      resolveTelegramUser,
+      listUnmatchedBankLines,
+      listReceipts,
+    } as unknown as LifeOSStore;
+    const { port, sent, answered } = await startWebhookServer({ store });
+
+    const response = await postTelegramWebhook(port, {
+      update_id: 200,
+      callback_query: {
+        id: "callback-200",
+        from: { id: 30, first_name: "Test" },
+        data: "bank_match:aaaaaaaa",
+        message: {
+          message_id: 201,
+          from: { id: 999, is_bot: true },
+          chat: { id: 30, type: "private" },
+        },
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(answered).toEqual(["callback-200"]);
+    expect(resolveTelegramUser).toHaveBeenCalledWith(30);
+    expect(listUnmatchedBankLines).toHaveBeenCalledWith("user-1", "user-1");
+    expect(listReceipts).toHaveBeenCalledWith("user-1");
+    expect(sent.at(-1)?.text).toContain("Подходящих чеков нет");
   });
 
   it.each([
@@ -1910,6 +1966,7 @@ describe("bot server", () => {
       },
       telegram: {
         async sendMessage() {},
+        async answerCallbackQuery() {},
         async getFileUrl() {
           return "https://api.telegram.org/file/bot/test";
         },

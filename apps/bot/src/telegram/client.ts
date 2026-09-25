@@ -1,4 +1,8 @@
-import type { SendMessageInput, TelegramClient } from "./types.js";
+import type {
+  AnswerCallbackQueryInput,
+  SendMessageInput,
+  TelegramClient,
+} from "./types.js";
 
 interface TelegramSendMessagePayload {
   chat_id: number;
@@ -45,6 +49,30 @@ export class TelegramHttpClient implements TelegramClient {
       const body = await response.text();
       throw new Error(
         `Telegram sendMessage failed: ${response.status} ${body}`,
+      );
+    }
+  }
+
+  async answerCallbackQuery(input: AnswerCallbackQueryInput): Promise<void> {
+    const response = await this.fetchImpl(
+      `https://api.telegram.org/bot${this.token}/answerCallbackQuery`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          callback_query_id: input.callbackQueryId,
+          text: input.text,
+          show_alert: input.showAlert,
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(
+        `Telegram answerCallbackQuery failed: ${response.status} ${body}`,
       );
     }
   }

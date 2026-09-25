@@ -1492,17 +1492,18 @@ async function handleTelegramWebhook(
     context.updateType = detectTelegramUpdateType(update);
     context.command = telegramCommand(update);
 
-    if (!telegramMessageText(update)) {
+    if (
+      context.updateType !== "message" &&
+      context.updateType !== "callback_query"
+    ) {
       telegramOk(response);
       return;
     }
 
-    if (context.updateType !== "message") {
-      telegramOk(response);
-      return;
-    }
-
-    if (!telegramMessageChatId(update)) {
+    if (
+      context.updateType === "message" &&
+      (!telegramMessageText(update) || !telegramMessageChatId(update))
+    ) {
       telegramOk(response);
       return;
     }
