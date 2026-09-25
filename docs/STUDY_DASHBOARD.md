@@ -4,6 +4,28 @@ The mini-app's study dashboard combines the existing LMS grade records, a weekly
 timetable from `course_schedules`, and a manual grade scenario. Supabase remains
 the source of truth. A scenario never overwrites a real Moodle score.
 
+## Diagnose missing Moodle scores
+
+From the repository root, run the read-only aggregate check with the AITU
+worker environment:
+
+```bash
+workers/university-sync/aitu-parser/.venv/bin/python scripts/diagnose_moodle_scores.py
+```
+
+For a multi-user worker configuration, pass `--env-file workers/university-sync/.env`
+and `--user-id <LifeOS user UUID>`. The command reads active Moodle source events,
+their `academic_records` rows and the last ten university sync runs. It prints
+only counts and statuses; it never prints grade text, titles, user IDs, error
+messages or credentials. A successful recent run with `db_score_null > 0` means
+those scores were already absent at the database boundary. The
+`null_score_html_contains_digit` count flags rows for parser review; a digit in
+a grade cell alone does not prove that Moodle displayed a numeric score.
+Moodle can append an action menu to a numeric grade in the same HTML cell; the
+scraper excludes that menu before reading the score. Existing rows receive the
+correct score and percentage on the next successful sync. No database migration
+is required.
+
 ## Import the supplied HTML
 
 Save the supplied `расписание.html` locally, for example `~/lifeos/расписание.html`.

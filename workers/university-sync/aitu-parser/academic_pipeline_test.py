@@ -130,6 +130,36 @@ class ActualMoodleLayoutTest(unittest.TestCase):
                 self.assertEqual([record["item_id"] for record in records], ["48613"])
                 self.assertIsNone(records[0]["score"])
 
+    def test_grade_action_menu_does_not_hide_score_or_invent_unknown_grade(self):
+        rows = '''
+          <tr><th class="item" id="row_901_55">Work 1</th>
+            <td class="grade column-grade"><div class="d-flex align-items-center">
+              <div>8,50</div><div class="ps-1 d-flex align-items-center">
+                <div class="action-menu moodle-actionmenu"><button>Actions</button>
+                  <a href="#analysis">Grade analysis</a></div>
+              </div></div></td><td class="range">0–10</td></tr>
+          <tr><th class="item" id="row_902_55">Work 2</th>
+            <td class="grade column-grade"><div class="d-flex align-items-center">
+              <div>-</div><div class="ps-1 d-flex align-items-center">
+                <div class="action-menu moodle-actionmenu"><button>Actions</button>
+                  <a href="#analysis">Grade analysis 2026</a></div>
+              </div></div></td><td class="range">0–20</td></tr>'''
+        records = [
+            {**record, "record_type": scraper.classify_record_type(record["title"])}
+            for record in self.parse(rows)
+        ]
+        self.assertEqual([record["score"] for record in records], [8.5, None])
+        self.assertEqual([record["max_score"] for record in records], [10, 20])
+        self.assertIn("Actions Grade analysis", records[0]["raw"]["grade_cell_text"])
+
+        db = MemoryDb()
+        scraper.sync_grades(db, SETTINGS, records, "normal", False)
+        self.assertEqual(db.tables["academic_records"][0]["score"], 8.5)
+        self.assertEqual(db.tables["academic_records"][0]["max_score"], 10)
+        self.assertEqual(db.tables["academic_records"][0]["percentage"], 85.0)
+        self.assertIsNone(db.tables["academic_records"][1]["score"])
+        self.assertIsNone(db.tables["academic_records"][1]["percentage"])
+
     def test_ambiguous_fallback_fails_instead_of_overwriting(self):
         with self.assertRaises(SyncError):
             self.parse('<tr><td>Same</td><td>1</td></tr><tr><td>Same</td><td>2</td></tr>')

@@ -1,6 +1,7 @@
 """Moodle grade-report parsing. Unknown grades/ranges stay unknown."""
 from __future__ import annotations
 
+from copy import deepcopy
 import hashlib
 import math
 import re
@@ -29,6 +30,16 @@ def normalize_title(value: str) -> str:
 def title_identity(title: str) -> str:
     # Unicode-safe fallback, independent of row order and grade changes.
     return "title-" + hashlib.sha256(normalize_title(title).encode()).hexdigest()[:24]
+
+
+def grade_value_text(cell: Any) -> str:
+    """Read the displayed grade without Moodle's action menu beside it."""
+    if cell.select_one(".action-menu.moodle-actionmenu") is None:
+        return cell.get_text(" ", strip=True)
+    value_cell = deepcopy(cell)
+    for menu in value_cell.select(".action-menu.moodle-actionmenu"):
+        menu.decompose()
+    return value_cell.get_text(" ", strip=True)
 
 
 def parse_report(soup: Any, course_id: int, course_title: str) -> list[dict[str, Any]]:
@@ -72,7 +83,8 @@ def parse_report(soup: Any, course_id: int, course_title: str) -> list[dict[str,
         title = item_cell.get_text(" ", strip=True)
         if normalize_title(title) in {"", "-", "course total", "итого", "итоговая оценка за курс"}:
             continue
-        raw_grade = grade_cell.get_text(" ", strip=True)
+        raw_grade = grade_value_text(grade_cell)
+        raw_grade_cell = grade_cell.get_text(" ", strip=True)
         # Scale/text grades cannot be represented numerically; preserve as unknown.
         score = None
         maximum = None
@@ -110,6 +122,6 @@ def parse_report(soup: Any, course_id: int, course_title: str) -> list[dict[str,
             "course_id": str(course_id), "course_title": course_title,
             "item_id": identity, "title": title, "score": score, "max_score": maximum,
             "raw": {"course_id": course_id, "item_id": identity, "course_title": course_title,
-                    "item_name": title, "grade_cell_text": raw_grade, "range_cell_text": raw_range},
+                    "item_name": title, "grade_cell_text": raw_grade_cell, "range_cell_text": raw_range},
         })
     return records

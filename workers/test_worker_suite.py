@@ -19,6 +19,7 @@ TEST_FILES = (
     ROOT / "university-sync" / "aitu-parser" / "academic_pipeline_test.py",
     ROOT / "university-sync" / "lms_grades_worker_test.py",
     ROOT.parent / "scripts" / "diagnose_moodle_course_test.py",
+    ROOT.parent / "scripts" / "diagnose_moodle_scores_test.py",
     ROOT.parent / "scripts" / "import_study_dashboard_test.py",
 )
 
