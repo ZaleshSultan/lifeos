@@ -608,6 +608,10 @@ def next_quiet_end(value: datetime, settings: Settings) -> datetime:
 
 def quiet_hour_deferral(reminder: JsonObject, settings: Settings) -> str | None:
     metadata = reminder_metadata(reminder)
+    if metadata.get("notification_kind") == "instant_academic":
+        # A newly posted grade or assignment is a fact to deliver immediately;
+        # waiting until morning would make the "new" notice stale.
+        return None
     mode = str(metadata.get("reminder_mode") or "normal")
     if mode in {"duolingo", "war"}:
         return None
@@ -637,6 +641,8 @@ def format_telegram_message(
     source_label = str(metadata.get("source_label") or "Manual")
     priority = str(metadata.get("priority") or "normal")
     notification_kind = str(metadata.get("notification_kind") or "reminder")
+    if notification_kind == "instant_academic":
+        return str(reminder.get("message") or "").strip() or "Уведомление"
     if notification_kind == "deadline":
         try:
             remaining = parse_datetime(event_at) - datetime.now(timezone.utc)

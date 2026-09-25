@@ -154,6 +154,30 @@ def classify_record_type(item_name: str) -> str:
     return "assignment"
 
 
+def grade_posted_message(course_title: str, item_title: str, score: float, max_score: float | None) -> str:
+    grade = f"{score:.15g}"
+    if max_score is not None:
+        grade += f"/{max_score:.15g}"
+    return f"Оценка по «{course_title}»: {item_title} — {grade}"
+
+
+def moodle_grade_notifications_enabled(db: SupabaseRestClient) -> bool:
+    """Only announce grades after a completed Moodle grade snapshot exists."""
+    successful_run = db.request(
+        "GET",
+        "sync_runs",
+        query={
+            "select": "id",
+            "user_id": f"eq.{db.settings.user_id}",
+            "source_key": "eq.university_platform",
+            "status": "eq.success",
+            "metadata_json->>moodle_grades_synced": "eq.true",
+            "limit": "1",
+        },
+    )
+    return bool(successful_run)
+
+
 def _requests_session() -> Any:
     """Import and return a requests.Session, raising SyncError if not installed."""
     try:
@@ -656,6 +680,7 @@ def sync_grades(
     try:
         if db.settings.user_id != settings.base.user_id:
             raise SyncError("Moodle sync user scope mismatch")
+        notify_new_grades = not is_mocked and moodle_grade_notifications_enabled(db)
         seen_external_ids: set[str] = set()
         courses = load_courses(db) if records and not is_mocked else []
         unmatched: set[str] = set()
@@ -702,12 +727,24 @@ def sync_grades(
                 "GET",
                 "academic_records",
                 query={
-                    "select": "id",
+                    "select": "id,score,raw_json",
                     "user_id": f"eq.{db.settings.user_id}",
                     "source_event_id": f"eq.{source_event_id}",
                     "limit": "1",
                 },
             )
+
+            newly_graded = score is not None and (
+                not existing or existing[0].get("score") is None
+            )
+            previous_raw = existing[0].get("raw_json") if existing else None
+            retry_pending = isinstance(previous_raw, dict) and previous_raw.get("_grade_notification_pending") is True
+            notify_grade = score is not None and (retry_pending or (notify_new_grades and newly_graded))
+            academic_raw_json = dict(raw_json)
+            if notify_grade:
+                # The academic row is written before the reminder. If a later
+                # write fails, the next sync can still retry the notification.
+                academic_raw_json["_grade_notification_pending"] = True
 
             academic_payload: dict[str, Any] = {
                 "user_id": settings.base.user_id,
@@ -718,18 +755,25 @@ def sync_grades(
                 "score": score,
                 "max_score": max_score,
                 "percentage": round(percentage, 4) if percentage is not None else None,
-                "raw_json": raw_json,
+                "raw_json": academic_raw_json,
             }
 
             if existing:
+                academic_record_id = str(existing[0]["id"])
                 db.request(
                     "PATCH",
                     "academic_records",
-                    query={"id": f"eq.{existing[0]['id']}", "user_id": f"eq.{settings.base.user_id}"},
+                    query={"id": f"eq.{academic_record_id}", "user_id": f"eq.{settings.base.user_id}"},
                     body=academic_payload,
                 )
             else:
-                db.request("POST", "academic_records", body=academic_payload)
+                inserted = db.request(
+                    "POST", "academic_records", query={"select": "id"},
+                    body=academic_payload, prefer="return=representation",
+                )
+                if not inserted:
+                    raise SyncError("Inserted academic record was not returned")
+                academic_record_id = str(inserted[0]["id"])
 
             if not is_mocked:
                 course = match_course(courses, settings.base.user_id, rec)
@@ -739,9 +783,31 @@ def sync_grades(
                     unmatched.add(str(rec["course_id"]))
                     logging.warning("No unambiguous study course for moodle:%s (%s); grade retained in academic_records. Use link-course.", rec["course_id"], course_title)
 
+            if notify_grade:
+                stats.reminders_created += int(db.enqueue_instant_notification(
+                    synced_event,
+                    "academic_grade_posted",
+                    grade_posted_message(course_title, item_title, score, max_score),
+                    mode,
+                ))
+                db.request(
+                    "PATCH", "academic_records",
+                    query={
+                        "id": f"eq.{academic_record_id}",
+                        "user_id": f"eq.{settings.base.user_id}",
+                        "source_event_id": f"eq.{source_event_id}",
+                    },
+                    body={"raw_json": raw_json},
+                )
+
         if not is_mocked:
             stats.missing = mark_missing_grades(db, seen_external_ids, ("academic:moodle:", "academic:grade:"))
-        db.finish_sync_run(run_id, "success", stats)
+        db.finish_sync_run(
+            run_id,
+            "success",
+            stats,
+            metadata={"moodle_grades_synced": True} if not is_mocked else None,
+        )
         logging.info(
             "university_sync done seen=%d created=%d updated=%d missing=%d reminders_created=%d",
             stats.seen, stats.created, stats.updated, stats.missing, stats.reminders_created,

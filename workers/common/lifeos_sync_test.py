@@ -250,6 +250,36 @@ class ReminderPolicyTest(unittest.TestCase):
         self.assertEqual(result.created, 0)
         self.assertEqual(client.reminders, [])
 
+    def test_instant_academic_notification_deduplicates_and_survives_reconciliation(self) -> None:
+        client = InMemoryReminderClient()
+        event = {
+            "id": "source-event-grade-1",
+            "source_key": "university_platform",
+            "external_id": "academic:moodle:42:901",
+            "event_type": "academic_grade",
+            "title": "Assignment 1",
+            "status": "active",
+        }
+        message = "Оценка по «Алгоритмы»: Задание 1 — 0/10"
+
+        first = client.enqueue_instant_notification(event, "academic_grade_posted", message, "normal")
+        second = client.enqueue_instant_notification(event, "academic_grade_posted", message, "normal")
+        reconciliation = client._sync_reminders(event, "normal")
+
+        self.assertTrue(first)
+        self.assertFalse(second)
+        self.assertEqual(reconciliation.cancelled, 0)
+        self.assertEqual(len(client.reminders), 1)
+        self.assertIsNone(client.reminders[0]["source_event_id"])
+        self.assertEqual(client.reminders[0]["status"], "pending")
+
+    def test_instant_notification_unique_insert_race_is_a_duplicate(self) -> None:
+        client = InMemoryReminderClient()
+        event = {"source_key": "university_platform", "external_id": "academic:moodle:42:901"}
+        with patch.object(client, "request", side_effect=[[], SyncError("23505 duplicate key")]):
+            created = client.enqueue_instant_notification(event, "academic_grade_posted", "Оценка выставлена", "normal")
+        self.assertFalse(created)
+
 
 if __name__ == "__main__":
     unittest.main()

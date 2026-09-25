@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import fnmatch
 import sys
 import traceback
 import unittest
@@ -12,7 +13,7 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, str(Path(__file__).parent))
 import university_scraper as scraper
 from common.academic_sync import link_course, mark_missing_grades, match_course
-from common.lifeos_sync import BaseSettings, ReminderSyncStats, SyncError
+from common.lifeos_sync import BaseSettings, ReminderSyncStats, SupabaseRestClient, SyncError
 from common.moodle_grades import parse_report
 
 BASE = BaseSettings("https://example.supabase.co", "test-key", "user-a", "Asia/Almaty")
@@ -23,12 +24,12 @@ RECORD = {"course_id": "42", "course_title": "Database Management Systems | Teac
           "item_id": "901", "title": "Assignment 1", "record_type": "assignment", "score": None, "max_score": 10}
 
 
-class MemoryDb:
+class MemoryDb(SupabaseRestClient):
     """Small REST fake: apply query filters to writes as well as reads."""
     def __init__(self):
         self.settings = BASE
         self.tables = {"study_courses": [copy.deepcopy(COURSE)], "academic_records": [],
-                       "assessment_items": [], "source_events": []}
+                       "assessment_items": [], "source_events": [], "sync_runs": [], "reminders": []}
         self.finished = []
         self.cancelled = []
         self.queries = []
@@ -36,8 +37,16 @@ class MemoryDb:
     def request(self, method, table, query=None, body=None, prefer=None):
         self.queries.append((method, table, query, copy.deepcopy(body)))
         rows = self.tables[table]
-        matches = [row for row in rows if all(str(row.get(key)) == value[3:]
-                   for key, value in (query or {}).items() if value.startswith("eq."))]
+        def value_for(row, key):
+            if key.startswith("metadata_json->>"):
+                value = (row.get("metadata_json") or {}).get(key.split("->>", 1)[1])
+                return str(value).lower() if isinstance(value, bool) else str(value)
+            return str(row.get(key))
+        matches = [row for row in rows if all(
+            value_for(row, key) == value[3:] if value.startswith("eq.") else
+            fnmatch.fnmatchcase(value_for(row, key), value[5:]) if value.startswith("like.") else True
+            for key, value in (query or {}).items()
+        )]
         if method == "GET":
             return copy.deepcopy(matches)
         if method == "POST":
@@ -54,10 +63,19 @@ class MemoryDb:
         return {"id": "source-a"}
 
     def start_sync_run(self, source):
-        return "run-a"
+        run_id = f"run-{len(self.tables['sync_runs'])}"
+        self.tables["sync_runs"].append({
+            "id": run_id, "user_id": self.settings.user_id,
+            "source_key": "university_platform", "status": "running",
+        })
+        return run_id
 
-    def finish_sync_run(self, *args):
+    def finish_sync_run(self, *args, **kwargs):
         self.finished.append(args)
+        run_id, status = args[:2]
+        row = next(row for row in self.tables["sync_runs"] if row["id"] == run_id)
+        row["status"] = status
+        row["metadata_json"] = copy.deepcopy(kwargs.get("metadata") or {})
 
     def upsert_event(self, event, mode):
         rows = self.tables["source_events"]
@@ -270,6 +288,103 @@ class ActualMoodleLayoutTest(unittest.TestCase):
 
 
 class AcademicPersistenceTest(unittest.TestCase):
+    def test_existing_ungraded_item_gets_one_notification_when_zero_is_posted(self):
+        db = MemoryDb()
+        scraper.sync_grades(db, SETTINGS, [RECORD], "normal", False)
+        self.assertEqual(db.tables["reminders"], [])
+
+        graded = {**RECORD, "score": 0}
+        stats = scraper.sync_grades(db, SETTINGS, [graded], "normal", False)
+        self.assertEqual(stats.reminders_created, 1)
+        self.assertEqual(len(db.tables["reminders"]), 1)
+        reminder = db.tables["reminders"][0]
+        self.assertEqual(reminder["dedup_key"], "academic_grade_posted:academic:moodle:42:901")
+        self.assertEqual(
+            reminder["message"],
+            "Оценка по «Database Management Systems | Teacher»: Assignment 1 — 0/10",
+        )
+        self.assertEqual(reminder["metadata_json"]["notification_kind"], "instant_academic")
+        self.assertIsNone(reminder["source_event_id"])
+        self.assertNotIn("_grade_notification_pending", db.tables["academic_records"][0]["raw_json"])
+
+        repeated = scraper.sync_grades(db, SETTINGS, [graded], "normal", False)
+        self.assertEqual(repeated.reminders_created, 0)
+        self.assertEqual(len(db.tables["reminders"]), 1)
+        self.assertEqual(db.tables["reminders"][0]["status"], "pending")
+
+    def test_newly_discovered_graded_item_after_initial_sync_notifies_once_without_maximum(self):
+        db = MemoryDb()
+        scraper.sync_grades(db, SETTINGS, [RECORD], "normal", False)
+        new_grade = {**RECORD, "item_id": "902", "title": "Quiz 1", "score": 8.5, "max_score": None}
+
+        first = scraper.sync_grades(db, SETTINGS, [RECORD, new_grade], "normal", False)
+        second = scraper.sync_grades(db, SETTINGS, [RECORD, new_grade], "normal", False)
+
+        self.assertEqual((first.reminders_created, second.reminders_created), (1, 0))
+        self.assertEqual(len(db.tables["reminders"]), 1)
+        self.assertEqual(
+            db.tables["reminders"][0]["message"],
+            "Оценка по «Database Management Systems | Teacher»: Quiz 1 — 8.5",
+        )
+
+    def test_first_moodle_sync_does_not_announce_a_batch_after_platonus_or_partial_run(self):
+        db = MemoryDb()
+        db.tables["sync_runs"].append({
+            "id": "old-university-run", "user_id": "user-a",
+            "source_key": "university_platform", "status": "success", "metadata_json": {},
+        })
+        db.tables["source_events"].append({
+            "id": "old-partial-moodle-event", "user_id": "user-a",
+            "source_key": "university_platform", "event_type": "academic_grade",
+            "external_id": "academic:moodle:42:old", "status": "active",
+        })
+        graded = [
+            {**RECORD, "item_id": str(1000 + index), "title": f"Work {index}", "score": float(index)}
+            for index in range(25)
+        ]
+
+        first = scraper.sync_grades(db, SETTINGS, graded, "normal", False)
+        repeated = scraper.sync_grades(db, SETTINGS, graded, "normal", False)
+
+        self.assertEqual((first.reminders_created, repeated.reminders_created), (0, 0))
+        self.assertEqual(db.tables["reminders"], [])
+        self.assertTrue(db.tables["sync_runs"][-1]["metadata_json"]["moodle_grades_synced"])
+
+    def test_empty_initial_snapshot_still_enables_later_new_grade(self):
+        db = MemoryDb()
+        scraper.sync_grades(db, SETTINGS, [], "normal", False)
+
+        stats = scraper.sync_grades(db, SETTINGS, [{**RECORD, "score": 7}], "normal", False)
+
+        self.assertEqual(stats.reminders_created, 1)
+        self.assertEqual(len(db.tables["reminders"]), 1)
+
+    def test_failed_reminder_insert_retries_after_academic_row_was_saved(self):
+        class FailOnceDb(MemoryDb):
+            fail_next_reminder = False
+
+            def request(self, method, table, query=None, body=None, prefer=None):
+                if self.fail_next_reminder and method == "POST" and table == "reminders":
+                    self.fail_next_reminder = False
+                    raise SyncError("temporary reminder insert failure")
+                return super().request(method, table, query, body, prefer)
+
+        db = FailOnceDb()
+        scraper.sync_grades(db, SETTINGS, [RECORD], "normal", False)
+        db.fail_next_reminder = True
+        graded = {**RECORD, "score": 9}
+
+        with self.assertRaises(SyncError):
+            scraper.sync_grades(db, SETTINGS, [graded], "normal", False)
+        self.assertEqual(db.tables["academic_records"][0]["score"], 9)
+        self.assertTrue(db.tables["academic_records"][0]["raw_json"]["_grade_notification_pending"])
+        self.assertEqual(db.tables["reminders"], [])
+
+        retry = scraper.sync_grades(db, SETTINGS, [graded], "normal", False)
+        self.assertEqual(retry.reminders_created, 1)
+        self.assertEqual(len(db.tables["reminders"]), 1)
+        self.assertNotIn("_grade_notification_pending", db.tables["academic_records"][0]["raw_json"])
+
     def test_repeated_sync_rename_grade_removal_and_manual_fields(self):
         db = MemoryDb()
         scraper.sync_grades(db, SETTINGS, [RECORD], "normal", False)

@@ -263,6 +263,38 @@ class ReminderWorkerTest(unittest.TestCase):
             "2026-05-19T03:00:00Z",
         )
 
+    def test_instant_academic_notice_uses_russian_text_even_in_quiet_hours(self) -> None:
+        message = "Оценка по «Алгоритмы»: Задание 1 — 0/10"
+        reminder = {
+            "message": message,
+            "remind_at": "2026-05-18T18:30:00Z",
+            "metadata_json": {
+                "notification_kind": "instant_academic",
+                "reminder_mode": "normal",
+            },
+        }
+        settings = reminder_worker.Settings(
+            supabase_url="https://example.supabase.co",
+            service_role_key="service-role",
+            telegram_bot_token="bot-token",
+            poll_seconds=30,
+            batch_size=20,
+            local_timezone="Asia/Qyzylorda",
+        )
+        original_datetime = reminder_worker.datetime
+        self.addCleanup(setattr, reminder_worker, "datetime", original_datetime)
+
+        class FixedDateTime(original_datetime):
+            @classmethod
+            def now(cls, tz=None):
+                value = cls(2026, 5, 18, 18, 30, tzinfo=reminder_worker.timezone.utc)
+                return value if tz else value.replace(tzinfo=None)
+
+        reminder_worker.datetime = FixedDateTime
+        self.assertTrue(reminder_worker.is_quiet_time(FixedDateTime.now(reminder_worker.timezone.utc), settings))
+        self.assertIsNone(reminder_worker.quiet_hour_deferral(reminder, settings))
+        self.assertEqual(reminder_worker.format_telegram_message(reminder, {}), message)
+
     def test_truncate_error_redacts_sensitive_tokens(self) -> None:
         error = Exception(
             "Authorization: Bearer abc.secret.token access_token=verysecret "

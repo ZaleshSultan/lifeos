@@ -428,7 +428,12 @@ class SupabaseRestClient:
         return str(rows[0]["id"])
 
     def finish_sync_run(
-        self, run_id: str, status: str, stats: SyncStats, error: str | None = None
+        self,
+        run_id: str,
+        status: str,
+        stats: SyncStats,
+        error: str | None = None,
+        metadata: JsonObject | None = None,
     ) -> None:
         self.request(
             "PATCH",
@@ -446,6 +451,7 @@ class SupabaseRestClient:
                     "reminders_created": stats.reminders_created,
                     "reminders_updated": stats.reminders_updated,
                     "reminders_cancelled": stats.reminders_cancelled,
+                    **(metadata or {}),
                 },
             },
         )
@@ -608,6 +614,66 @@ class SupabaseRestClient:
                 stats.cancelled,
             )
         return stats
+
+    def enqueue_instant_notification(
+        self,
+        event: JsonObject,
+        notification_key: str,
+        message: str,
+        mode: str,
+    ) -> bool:
+        """Queue a one-time fact notification, independently of deadline schedules."""
+        external_id = str(event.get("external_id") or "").strip()
+        source_key = str(event.get("source_key") or "").strip()
+        message = message.strip()
+        if not external_id or not source_key or not notification_key or not message:
+            raise SyncError("Instant notification requires a source, key, and message")
+
+        dedup_key = f"{notification_key}:{external_id}"
+        existing = self.request(
+            "GET",
+            "reminders",
+            {
+                "select": "id",
+                "user_id": f"eq.{self.settings.user_id}",
+                "dedup_key": f"eq.{dedup_key}",
+                "limit": "1",
+            },
+        )
+        if existing:
+            return False
+
+        payload = {
+            "user_id": self.settings.user_id,
+            # Scheduled-reminder reconciliation only owns rows with source_event_id.
+            # Linking this row would cancel it at the next sync before Telegram sends it.
+            "source_event_id": None,
+            "channel": "telegram",
+            "remind_at": utc_now(),
+            "status": "pending",
+            "message": message,
+            "dedup_key": dedup_key,
+            "reminder_policy_key": notification_key,
+            "metadata_json": {
+                "source": source_key,
+                "source_label": SOURCE_LABELS.get(source_key, source_key),
+                "provider": source_key,
+                "external_id": external_id,
+                "notification_kind": "instant_academic",
+                "reminder_mode": reminder_mode(mode),
+                "reminder_policy_key": notification_key,
+                "dedup_key": dedup_key,
+            },
+        }
+        try:
+            self.request("POST", "reminders", body=payload)
+        except SyncError as exc:
+            # A second worker may have inserted the same user-scoped key after
+            # our read. The existing unique index makes that a harmless repeat.
+            if "23505" in str(exc):
+                return False
+            raise
+        return True
 
     @staticmethod
     def _reminder_changed(existing: JsonObject, desired: JsonObject) -> bool:
