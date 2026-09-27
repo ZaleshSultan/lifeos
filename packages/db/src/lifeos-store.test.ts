@@ -1266,6 +1266,96 @@ describe("SupabaseLifeOSStore Academic Engine Phase 1", () => {
       await store.deleteAssessmentItem("user-a", "item-to-delete");
       expect(client.assessmentItems).toHaveLength(0);
     });
+
+    it("lists all assessment items across courses sorted with nulls last and course details", async () => {
+      const client = new FakeSupabaseClient();
+      client.studyCourses = [
+        {
+          id: "course-1",
+          user_id: "user-a",
+          code: "CS101",
+          title: "Computer Science 1",
+        },
+        {
+          id: "course-2",
+          user_id: "user-a",
+          code: "MATH201",
+          title: "Linear Algebra",
+        },
+        {
+          id: "course-other",
+          user_id: "user-b",
+          code: "BIO101",
+          title: "Biology",
+        },
+      ];
+      client.assessmentItems = [
+        {
+          id: "item-3",
+          study_course_id: "course-1",
+          title: "Undated Task",
+          due_at: null,
+          created_at: "2026-01-01T00:00:00Z",
+          status: "pending",
+          actual_score: null,
+          max_score: 100,
+        },
+        {
+          id: "item-1",
+          study_course_id: "course-2",
+          title: "Math Quiz",
+          due_at: "2026-02-01T10:00:00Z",
+          created_at: "2026-01-02T00:00:00Z",
+          status: "graded",
+          actual_score: 95,
+          max_score: 100,
+        },
+        {
+          id: "item-2",
+          study_course_id: "course-1",
+          title: "CS Project",
+          due_at: "2026-03-01T15:00:00Z",
+          created_at: "2026-01-03T00:00:00Z",
+          status: "submitted",
+          actual_score: null,
+          max_score: 100,
+        },
+        {
+          id: "item-other",
+          study_course_id: "course-other",
+          title: "Bio Lab",
+          due_at: "2026-01-15T10:00:00Z",
+          created_at: "2026-01-01T00:00:00Z",
+          status: "pending",
+          actual_score: null,
+          max_score: 100,
+        },
+      ];
+      const store = storeWith(client);
+
+      const items = await store.listAllAssessmentItems("user-a");
+      expect(items).toHaveLength(3);
+
+      // Soonest first
+      expect(items[0].id).toBe("item-1");
+      expect(items[0].courseTitle).toBe("Linear Algebra");
+      expect(items[0].courseCode).toBe("MATH201");
+      expect(items[0].dueAt).toBe("2026-02-01T10:00:00Z");
+      expect(items[0].status).toBe("graded");
+      expect(items[0].actualScore).toBe(95);
+
+      expect(items[1].id).toBe("item-2");
+      expect(items[1].courseTitle).toBe("Computer Science 1");
+      expect(items[1].dueAt).toBe("2026-03-01T15:00:00Z");
+
+      // No due date last
+      expect(items[2].id).toBe("item-3");
+      expect(items[2].courseTitle).toBe("Computer Science 1");
+      expect(items[2].dueAt).toBeNull();
+
+      // Empty states
+      expect(await store.listAllAssessmentItems("user-nonexistent")).toEqual([]);
+    });
   });
 
   describe("academic_terms methods", () => {

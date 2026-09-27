@@ -8,6 +8,7 @@ import type {
 } from "@lifeos/core";
 import type {
   BankLineRecord,
+  CourseAssessmentItemRecord,
   CreateLifeCaptureInput,
   CreateLifeEntityInput,
   CreateTaskInput,
@@ -77,6 +78,7 @@ class FakeStore implements LifeOSStore {
     Awaited<ReturnType<LifeOSStore["generateMonthlyReview"]>>
   > = [];
   reminderMode: "chill" | "normal" | "duolingo" | "war" = "normal";
+  allAssessmentItems: CourseAssessmentItemRecord[] = [];
   readonly sources: SourceRecord[] = [
     {
       id: "source-manual",
@@ -1131,6 +1133,12 @@ class FakeStore implements LifeOSStore {
     _studyCourseId: string,
   ): Promise<Awaited<ReturnType<LifeOSStore["listAssessmentItems"]>>> {
     return [];
+  }
+
+  async listAllAssessmentItems(
+    _userId: string,
+  ): Promise<Awaited<ReturnType<LifeOSStore["listAllAssessmentItems"]>>> {
+    return this.allAssessmentItems;
   }
 
   async createAcademicTerm(
@@ -2960,6 +2968,109 @@ describe("Telegram commands", () => {
     ]);
     expect(context.store.syncEntityIds).toEqual(["entity-1"]);
     expect(context.sent.at(-1)?.text).toContain("Тема курса сохранена.");
+  });
+
+  it("replies with empty state when /deadlines has no items", async () => {
+    const context = runtime();
+    context.store.allAssessmentItems = [];
+
+    await handleTelegramUpdate(update("/deadlines"), context);
+
+    expect(context.sent.at(-1)?.text).toBe("No deadlines found.");
+  });
+
+  it("lists deadlines across courses with details and score or status", async () => {
+    const context = runtime();
+    context.store.allAssessmentItems = [
+      {
+        id: "item-1",
+        studyCourseId: "course-1",
+        courseTitle: "Algorithms and Data Structures",
+        courseCode: "CS201",
+        externalId: "ext-1",
+        source: "moodle",
+        title: "Homework 1: Graph Traversal",
+        assessmentType: "assignment",
+        weightPercent: 15,
+        maxScore: 100,
+        actualScore: null,
+        dueAt: "2026-10-15T18:00:00.000Z",
+        dueSource: "moodle",
+        syllabusDueAt: null,
+        status: "pending",
+        notes: null,
+        rawJson: {},
+        createdAt: "2026-09-01T00:00:00.000Z",
+        updatedAt: "2026-09-01T00:00:00.000Z",
+      },
+      {
+        id: "item-2",
+        studyCourseId: "course-2",
+        courseTitle: "Calculus II",
+        courseCode: "MATH102",
+        externalId: "ext-2",
+        source: "moodle",
+        title: "Midterm Exam",
+        assessmentType: "exam",
+        weightPercent: 30,
+        maxScore: 100,
+        actualScore: 94.5,
+        dueAt: "2026-10-20T10:00:00.000Z",
+        dueSource: "moodle",
+        syllabusDueAt: null,
+        status: "graded",
+        notes: null,
+        rawJson: {},
+        createdAt: "2026-09-02T00:00:00.000Z",
+        updatedAt: "2026-09-02T00:00:00.000Z",
+      },
+      {
+        id: "item-3",
+        studyCourseId: "course-1",
+        courseTitle: "Algorithms and Data Structures",
+        courseCode: "CS201",
+        externalId: "ext-3",
+        source: "manual",
+        title: "Term Project Proposal",
+        assessmentType: "project",
+        weightPercent: 20,
+        maxScore: null,
+        actualScore: null,
+        dueAt: null,
+        dueSource: null,
+        syllabusDueAt: null,
+        status: "pending",
+        notes: null,
+        rawJson: {},
+        createdAt: "2026-09-03T00:00:00.000Z",
+        updatedAt: "2026-09-03T00:00:00.000Z",
+      },
+    ];
+
+    await handleTelegramUpdate(update("/deadlines"), context);
+
+    const sent = context.sent.at(-1)?.text;
+    expect(sent).toContain("Deadlines:");
+    // Item 1: ungraded with due date
+    expect(sent).toContain("Algorithms and Data Structures");
+    expect(sent).toContain("Homework 1: Graph Traversal");
+    expect(sent).toContain("2026-10-15T18:00:00.000Z");
+    expect(sent).toContain("Status: <b>pending</b>");
+
+    // Item 2: graded with score
+    expect(sent).toContain("Calculus II");
+    expect(sent).toContain("Midterm Exam");
+    expect(sent).toContain("2026-10-20T10:00:00.000Z");
+    expect(sent).toContain("Score: <b>94.5/100</b>");
+
+    // Item 3: no due date
+    expect(sent).toContain("Term Project Proposal");
+    expect(sent).toContain("no due date");
+    expect(sent).toContain("Status: <b>pending</b>");
+
+    // Also verify /assignments alias
+    await handleTelegramUpdate(update("/assignments"), context);
+    expect(context.sent.at(-1)?.text).toBe(sent);
   });
 
   it("matches a bank line to a receipt through two acknowledged buttons", async () => {

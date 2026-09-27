@@ -17,6 +17,7 @@ import { validateObsidianVaultPath } from "@lifeos/obsidian";
 import type {
   BankLineRecord,
   BudgetSummaryPayload,
+  CourseAssessmentItemRecord,
   CreateLifeEntityInput,
   FinanceTransactionRecord,
   Json,
@@ -121,6 +122,7 @@ const HELP_TEXT = [
   "/study — учебный курс",
   "/course progress [number]",
   "/course topic [text]",
+  "/deadlines",
   "/review review notes",
   "/spend 1200 шаурма",
   "Quick spend without slash: Такси 2700",
@@ -3041,6 +3043,52 @@ async function handleCourseCommand(
   });
 }
 
+function formatDeadlineItem(
+  item: CourseAssessmentItemRecord,
+  index: number,
+): string {
+  const course = escapeHtml(item.courseTitle);
+  const title = escapeHtml(item.title);
+  const due = item.dueAt ? `<code>${escapeHtml(item.dueAt)}</code>` : "no due date";
+  const isGraded = item.status === "graded" || item.actualScore !== null;
+  const statusOrScore =
+    isGraded && item.actualScore !== null
+      ? item.maxScore !== null
+        ? `Score: <b>${item.actualScore}/${item.maxScore}</b>`
+        : `Score: <b>${item.actualScore}</b>`
+      : `Status: <b>${escapeHtml(item.status)}</b>`;
+
+  return [
+    `${index + 1}. <b>${course}</b> — ${title}`,
+    `   Due: ${due}`,
+    `   ${statusOrScore}`,
+  ].join("\n");
+}
+
+async function handleDeadlinesCommand(
+  _args: string,
+  message: TelegramMessage,
+  runtime: TelegramBotRuntime,
+  user: TelegramUserRecord | null,
+): Promise<void> {
+  const items = await runtime.store!.listAllAssessmentItems(user!.userId);
+
+  if (items.length === 0) {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "No deadlines found.",
+    });
+    return;
+  }
+
+  const lines = items.map((item, index) => formatDeadlineItem(item, index));
+
+  await runtime.telegram.sendMessage({
+    chatId: message.chat.id,
+    text: ["<b>Deadlines:</b>", ...lines].join("\n\n"),
+  });
+}
+
 async function handleSourcesCommand(
   _args: string,
   message: TelegramMessage,
@@ -3626,6 +3674,8 @@ const COMMAND_REGISTRY: Record<string, CommandConfig> = {
   reminder: { handler: handleReminderCommand, requiresUser: true },
   course: { handler: handleCourseCommand, requiresUser: true },
   study: { handler: handleCourseCommand, requiresUser: true },
+  deadlines: { handler: handleDeadlinesCommand, requiresUser: true },
+  assignments: { handler: handleDeadlinesCommand, requiresUser: true },
   sources: { handler: handleSourcesCommand, requiresUser: true },
   google_sync: {
     handler: makeSyncSourceHandler(["google_calendar", "google_tasks"]),

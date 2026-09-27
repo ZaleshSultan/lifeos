@@ -393,6 +393,11 @@ export interface AssessmentItemRecord {
   updatedAt: string;
 }
 
+export interface CourseAssessmentItemRecord extends AssessmentItemRecord {
+  courseTitle: string;
+  courseCode: string | null;
+}
+
 export interface CreateAssessmentItemInput {
   studyCourseId: string;
   externalId?: string | null;
@@ -1588,6 +1593,9 @@ export interface LifeOSStore {
     userId: string,
     studyCourseId: string,
   ): Promise<AssessmentItemRecord[]>;
+  listAllAssessmentItems(
+    userId: string,
+  ): Promise<CourseAssessmentItemRecord[]>;
   createCourseReading(
     userId: string,
     input: CreateCourseReadingInput,
@@ -2041,6 +2049,17 @@ function toAssessmentItemRecord(row: AssessmentItemRow): AssessmentItemRecord {
     rawJson: row.raw_json,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+function toCourseAssessmentItemRecord(
+  row: AssessmentItemRow,
+  course?: { title: string; code: string } | null,
+): CourseAssessmentItemRecord {
+  return {
+    ...toAssessmentItemRecord(row),
+    courseTitle: course?.title ?? "Unknown Course",
+    courseCode: course?.code ?? null,
   };
 }
 
@@ -6336,6 +6355,61 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     }
 
     return (data ?? []).map(toAssessmentItemRecord);
+  }
+
+  async listAllAssessmentItems(
+    userId: string,
+  ): Promise<CourseAssessmentItemRecord[]> {
+    const { data: courses, error: coursesError } = await this.client
+      .from("study_courses")
+      .select("*")
+      .eq("user_id", userId);
+
+    if (coursesError) {
+      throwSupabaseError(
+        coursesError,
+        "Failed to list study courses for assessment items",
+      );
+    }
+
+    if (!courses || courses.length === 0) {
+      return [];
+    }
+
+    const courseMap = new Map(
+      courses.map((course) => [
+        course.id,
+        { title: course.title, code: course.code },
+      ]),
+    );
+    const courseIds = courses.map((course) => course.id);
+
+    const { data, error } = await this.client
+      .from("assessment_items")
+      .select("*")
+      .in("study_course_id", courseIds)
+      .order("due_at", { ascending: true, nullsFirst: false })
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      throwSupabaseError(error, "Failed to list all assessment items");
+    }
+
+    const items = (data ?? []).map((row) =>
+      toCourseAssessmentItemRecord(row, courseMap.get(row.study_course_id)),
+    );
+
+    return items.sort((a, b) => {
+      if (a.dueAt && b.dueAt) {
+        const diff = a.dueAt.localeCompare(b.dueAt);
+        if (diff !== 0) return diff;
+      } else if (a.dueAt) {
+        return -1;
+      } else if (b.dueAt) {
+        return 1;
+      }
+      return a.createdAt.localeCompare(b.createdAt);
+    });
   }
 
   private async assertCourseReadingOwnedByUser(
