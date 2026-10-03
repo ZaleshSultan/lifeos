@@ -398,6 +398,23 @@ export interface CourseAssessmentItemRecord extends AssessmentItemRecord {
   courseCode: string | null;
 }
 
+export interface AssignmentDeadlineRecord {
+  id: string;
+  externalId: string | null;
+  title: string;
+  courseTitle: string;
+  dueAt: string;
+  status: string;
+  score: number | null;
+  maxScore: number | null;
+  percentage: number | null;
+}
+
+export interface UpcomingAssignmentDeadlinesResult {
+  upcoming: AssignmentDeadlineRecord[];
+  overdue: AssignmentDeadlineRecord[];
+}
+
 export interface CreateAssessmentItemInput {
   studyCourseId: string;
   externalId?: string | null;
@@ -1596,6 +1613,10 @@ export interface LifeOSStore {
   listAllAssessmentItems(
     userId: string,
   ): Promise<CourseAssessmentItemRecord[]>;
+  listUpcomingAssignmentDeadlines(
+    userId: string,
+    nowIso?: string,
+  ): Promise<UpcomingAssignmentDeadlinesResult>;
   createCourseReading(
     userId: string,
     input: CreateCourseReadingInput,
@@ -6410,6 +6431,177 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       }
       return a.createdAt.localeCompare(b.createdAt);
     });
+  }
+
+  async listUpcomingAssignmentDeadlines(
+    userId: string,
+    nowIso?: string,
+  ): Promise<UpcomingAssignmentDeadlinesResult> {
+    const now = nowIso ? new Date(nowIso) : new Date();
+    const sevenDaysAgo = new Date(
+      now.getTime() - 7 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+
+    const { data: events, error } = await this.client
+      .from("source_events")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("source_key", "university_platform")
+      .eq("event_type", "task")
+      .eq("status", "active")
+      .not("due_at", "is", null)
+      .gte("due_at", sevenDaysAgo)
+      .order("due_at", { ascending: true });
+
+    if (error) {
+      throwSupabaseError(
+        error,
+        "Failed to list upcoming assignment deadlines from source_events",
+      );
+    }
+
+    if (!events || events.length === 0) {
+      return { upcoming: [], overdue: [] };
+    }
+
+    // Collect related grade external IDs from raw_json
+    const gradeExternalIds: string[] = [];
+    for (const event of events) {
+      const raw =
+        typeof event.raw_json === "object" && event.raw_json !== null
+          ? (event.raw_json as Record<string, unknown>)
+          : null;
+      const relatedId = raw?.related_grade_external_id;
+      if (typeof relatedId === "string" && relatedId.trim().length > 0) {
+        gradeExternalIds.push(relatedId.trim());
+      }
+    }
+
+    // Map: related_grade_external_id -> { score, maxScore, percentage }
+    const gradeMap = new Map<
+      string,
+      { score: number | null; maxScore: number | null; percentage: number | null }
+    >();
+
+    if (gradeExternalIds.length > 0) {
+      const uniqueGradeExternalIds = [...new Set(gradeExternalIds)];
+      const { data: gradeEvents, error: gradeEventsError } = await this.client
+        .from("source_events")
+        .select("id, external_id")
+        .eq("user_id", userId)
+        .eq("source_key", "university_platform")
+        .in("external_id", uniqueGradeExternalIds);
+
+      if (gradeEventsError) {
+        throwSupabaseError(
+          gradeEventsError,
+          "Failed to load grade source events for assignments",
+        );
+      }
+
+      if (gradeEvents && gradeEvents.length > 0) {
+        const gradeEventIds = gradeEvents.map((g) => g.id);
+        const eventIdToExternalId = new Map<string, string>();
+        for (const g of gradeEvents) {
+          if (g.external_id) {
+            eventIdToExternalId.set(g.id, g.external_id);
+          }
+        }
+
+        const { data: academicRows, error: academicError } = await this.client
+          .from("academic_records")
+          .select("source_event_id, score, max_score, percentage")
+          .eq("user_id", userId)
+          .in("source_event_id", gradeEventIds);
+
+        if (academicError) {
+          throwSupabaseError(
+            academicError,
+            "Failed to load academic records for assignments",
+          );
+        }
+
+        if (academicRows) {
+          for (const row of academicRows) {
+            if (row.source_event_id) {
+              const extId = eventIdToExternalId.get(row.source_event_id);
+              if (extId) {
+                const score = row.score !== null ? Number(row.score) : null;
+                const maxScore =
+                  row.max_score !== null ? Number(row.max_score) : null;
+                let percentage =
+                  row.percentage !== null ? Number(row.percentage) : null;
+                if (
+                  percentage === null &&
+                  score !== null &&
+                  maxScore !== null &&
+                  maxScore > 0
+                ) {
+                  percentage = Math.round(((score / maxScore) * 100) * 10) / 10;
+                }
+                gradeMap.set(extId, { score, maxScore, percentage });
+              }
+            }
+          }
+        }
+      }
+    }
+
+    const upcoming: AssignmentDeadlineRecord[] = [];
+    const overdue: AssignmentDeadlineRecord[] = [];
+    const nowTime = now.getTime();
+
+    for (const event of events) {
+      if (!event.due_at) continue;
+
+      const raw =
+        typeof event.raw_json === "object" && event.raw_json !== null
+          ? (event.raw_json as Record<string, unknown>)
+          : null;
+      const rawCourse =
+        typeof raw?.course_title === "string" ? raw.course_title.trim() : "";
+      const courseTitle =
+        rawCourse ||
+        (typeof event.description === "string" && event.description.trim()) ||
+        "Учебный курс";
+
+      const relatedId =
+        typeof raw?.related_grade_external_id === "string"
+          ? raw.related_grade_external_id.trim()
+          : "";
+      const grade = relatedId ? gradeMap.get(relatedId) : null;
+
+      const record: AssignmentDeadlineRecord = {
+        id: event.id,
+        externalId: event.external_id,
+        title: event.title || "Задание",
+        courseTitle,
+        dueAt: event.due_at,
+        status: event.status,
+        score: grade?.score ?? null,
+        maxScore: grade?.maxScore ?? null,
+        percentage: grade?.percentage ?? null,
+      };
+
+      const dueTime = new Date(event.due_at).getTime();
+      if (dueTime >= nowTime) {
+        upcoming.push(record);
+      } else {
+        // Overdue: only if not yet graded
+        if (record.score === null) {
+          overdue.push(record);
+        }
+      }
+    }
+
+    upcoming.sort(
+      (a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime(),
+    );
+    overdue.sort(
+      (a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime(),
+    );
+
+    return { upcoming, overdue };
   }
 
   private async assertCourseReadingOwnedByUser(

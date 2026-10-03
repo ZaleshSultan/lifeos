@@ -59,6 +59,7 @@ class FakeQuery {
   private readonly filters: Record<string, unknown> = {};
   private readonly inFilters: Record<string, unknown[]> = {};
   private readonly greaterThanFilters: Record<string, string> = {};
+  private readonly greaterThanOrEqualFilters: Record<string, string> = {};
   private readonly orders: Array<{
     column: string;
     ascending: boolean;
@@ -136,6 +137,11 @@ class FakeQuery {
 
   gt(key: string, value: string): this {
     this.greaterThanFilters[key] = value;
+    return this;
+  }
+
+  gte(key: string, value: string): this {
+    this.greaterThanOrEqualFilters[key] = value;
     return this;
   }
 
@@ -340,6 +346,12 @@ class FakeQuery {
 
       for (const [key, value] of Object.entries(this.greaterThanFilters)) {
         if (String(row[key]) <= value) {
+          return false;
+        }
+      }
+
+      for (const [key, value] of Object.entries(this.greaterThanOrEqualFilters)) {
+        if (String(row[key]) < value) {
           return false;
         }
       }
@@ -1355,6 +1367,160 @@ describe("SupabaseLifeOSStore Academic Engine Phase 1", () => {
 
       // Empty states
       expect(await store.listAllAssessmentItems("user-nonexistent")).toEqual([]);
+    });
+
+    it("lists upcoming assignment deadlines and overdue assignments without grade", async () => {
+      const client = new FakeSupabaseClient();
+      const nowIso = "2026-10-01T12:00:00.000Z";
+
+      client.sourceEvents = [
+        // 1. Upcoming task with grade linked
+        {
+          id: "event-task-1",
+          user_id: "user-a",
+          source_key: "university_platform",
+          event_type: "task",
+          title: "Assignment 1",
+          description: "Дедлайн по курсу «Algorithms»",
+          due_at: "2026-10-05T18:00:00.000Z",
+          status: "active",
+          raw_json: {
+            course_title: "Algorithms and Data Structures",
+            related_grade_external_id: "academic:moodle:101:501",
+          },
+        },
+        // 2. Upcoming task without grade
+        {
+          id: "event-task-2",
+          user_id: "user-a",
+          source_key: "university_platform",
+          event_type: "task",
+          title: "Assignment 2",
+          description: "Дедлайн по курсу «Operating Systems»",
+          due_at: "2026-10-03T18:00:00.000Z",
+          status: "active",
+          raw_json: {
+            course_title: "Operating Systems",
+            related_grade_external_id: null,
+          },
+        },
+        // 3. Overdue task (3 days ago) without grade
+        {
+          id: "event-task-3",
+          user_id: "user-a",
+          source_key: "university_platform",
+          event_type: "task",
+          title: "Quiz 1",
+          description: "Quiz on DB",
+          due_at: "2026-09-28T10:00:00.000Z",
+          status: "active",
+          raw_json: {
+            course_title: "Database Management Systems",
+            related_grade_external_id: "academic:moodle:102:502",
+          },
+        },
+        // 4. Overdue task with grade (should be excluded from overdue!)
+        {
+          id: "event-task-4",
+          user_id: "user-a",
+          source_key: "university_platform",
+          event_type: "task",
+          title: "Lab 1",
+          description: "Lab description",
+          due_at: "2026-09-27T10:00:00.000Z",
+          status: "active",
+          raw_json: {
+            course_title: "Computer Networks",
+            related_grade_external_id: "academic:moodle:103:503",
+          },
+        },
+        // 5. Overdue older than 7 days (should be excluded!)
+        {
+          id: "event-task-5",
+          user_id: "user-a",
+          source_key: "university_platform",
+          event_type: "task",
+          title: "Old Task",
+          description: "Old task",
+          due_at: "2026-09-20T10:00:00.000Z",
+          status: "active",
+          raw_json: {
+            course_title: "History",
+          },
+        },
+        // 6. Completed task (should be excluded!)
+        {
+          id: "event-task-6",
+          user_id: "user-a",
+          source_key: "university_platform",
+          event_type: "task",
+          title: "Completed Task",
+          due_at: "2026-10-04T10:00:00.000Z",
+          status: "completed",
+          raw_json: {},
+        },
+        // Grade events corresponding to related_grade_external_id
+        {
+          id: "event-grade-501",
+          user_id: "user-a",
+          source_key: "university_platform",
+          external_id: "academic:moodle:101:501",
+          event_type: "academic_grade",
+        },
+        {
+          id: "event-grade-503",
+          user_id: "user-a",
+          source_key: "university_platform",
+          external_id: "academic:moodle:103:503",
+          event_type: "academic_grade",
+        },
+      ];
+
+      client.academicRecords = [
+        {
+          id: "ar-1",
+          user_id: "user-a",
+          source_event_id: "event-grade-501",
+          score: 8,
+          max_score: 10,
+          percentage: 80,
+        },
+        {
+          id: "ar-3",
+          user_id: "user-a",
+          source_event_id: "event-grade-503",
+          score: 10,
+          max_score: 10,
+          percentage: 100,
+        },
+      ];
+
+      const store = storeWith(client);
+      const result = await store.listUpcomingAssignmentDeadlines("user-a", nowIso);
+
+      expect(result.upcoming).toHaveLength(2);
+      // Soonest upcoming first: Assignment 2 (Oct 3) before Assignment 1 (Oct 5)
+      expect(result.upcoming[0].title).toBe("Assignment 2");
+      expect(result.upcoming[0].courseTitle).toBe("Operating Systems");
+      expect(result.upcoming[0].score).toBeNull();
+      expect(result.upcoming[0].percentage).toBeNull();
+
+      expect(result.upcoming[1].title).toBe("Assignment 1");
+      expect(result.upcoming[1].courseTitle).toBe("Algorithms and Data Structures");
+      expect(result.upcoming[1].score).toBe(8);
+      expect(result.upcoming[1].maxScore).toBe(10);
+      expect(result.upcoming[1].percentage).toBe(80);
+
+      // Overdue: only Quiz 1 (ungraded), Lab 1 was graded so excluded
+      expect(result.overdue).toHaveLength(1);
+      expect(result.overdue[0].title).toBe("Quiz 1");
+      expect(result.overdue[0].courseTitle).toBe("Database Management Systems");
+      expect(result.overdue[0].score).toBeNull();
+
+      // Empty for nonexistent user
+      const empty = await store.listUpcomingAssignmentDeadlines("user-nonexistent", nowIso);
+      expect(empty.upcoming).toEqual([]);
+      expect(empty.overdue).toEqual([]);
     });
   });
 

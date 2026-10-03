@@ -848,6 +848,9 @@ export function tmaStore(events: string[] = []): LifeOSStore {
     async listAllAssessmentItems() {
       return [];
     },
+    async listUpcomingAssignmentDeadlines() {
+      return { upcoming: [], overdue: [] };
+    },
     async createAcademicTerm(userId, input) {
       return {
         id: "term-1",

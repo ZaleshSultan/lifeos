@@ -498,7 +498,7 @@ class AcademicPersistenceTest(unittest.TestCase):
         self.assertEqual(reminder["dedup_key"], "academic_grade_posted:academic:moodle:42:901")
         self.assertEqual(
             reminder["message"],
-            "Оценка по «Database Management Systems | Teacher»: Assignment 1 — 0/10",
+            "Оценка по «Database Management Systems | Teacher»: Assignment 1 — 0/10 (0%)",
         )
         self.assertEqual(reminder["metadata_json"]["notification_kind"], "instant_academic")
         self.assertIsNone(reminder["source_event_id"])

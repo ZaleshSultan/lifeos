@@ -35,10 +35,18 @@ import type {
   TmaHealthSummary,
   TmaHomeSummary,
   TmaSourcesSummary,
+  UpcomingAssignmentDeadlinesResult,
   WorkoutRecord,
 } from "@lifeos/db";
 import { describe, expect, it, vi } from "vitest";
-import { handleTelegramUpdate } from "./commands.js";
+import {
+  formatAssignmentDeadlineItem,
+  formatCompletedStatus,
+  formatDeadlineDate,
+  formatTimeRemaining,
+  handleTelegramUpdate,
+  splitTelegramMessages,
+} from "./commands.js";
 import type {
   AnswerCallbackQueryInput,
   SendMessageInput,
@@ -79,6 +87,10 @@ class FakeStore implements LifeOSStore {
   > = [];
   reminderMode: "chill" | "normal" | "duolingo" | "war" = "normal";
   allAssessmentItems: CourseAssessmentItemRecord[] = [];
+  upcomingAssignmentDeadlines: UpcomingAssignmentDeadlinesResult = {
+    upcoming: [],
+    overdue: [],
+  };
   readonly sources: SourceRecord[] = [
     {
       id: "source-manual",
@@ -1141,6 +1153,13 @@ class FakeStore implements LifeOSStore {
     return this.allAssessmentItems;
   }
 
+  async listUpcomingAssignmentDeadlines(
+    _userId: string,
+    _nowIso?: string,
+  ): Promise<UpcomingAssignmentDeadlinesResult> {
+    return this.upcomingAssignmentDeadlines;
+  }
+
   async createAcademicTerm(
     userId: string,
     input: Parameters<LifeOSStore["createAcademicTerm"]>[1],
@@ -1944,9 +1963,10 @@ describe("Telegram commands", () => {
       resize_keyboard: true,
       is_persistent: true,
       keyboard: [
-        [{ text: "Сегодня" }, { text: "Учёба" }],
+        [{ text: "Сегодня" }, { text: "Дедлайны" }],
+        [{ text: "Учёба" }, { text: "Напоминания" }],
         [{ text: "Тренировки" }, { text: "Финансы" }],
-        [{ text: "Напоминания" }, { text: "Банк" }],
+        [{ text: "Банк" }],
       ],
     });
 
@@ -2972,105 +2992,208 @@ describe("Telegram commands", () => {
 
   it("replies with empty state when /deadlines has no items", async () => {
     const context = runtime();
-    context.store.allAssessmentItems = [];
+    context.store.upcomingAssignmentDeadlines = { upcoming: [], overdue: [] };
 
     await handleTelegramUpdate(update("/deadlines"), context);
 
-    expect(context.sent.at(-1)?.text).toBe("No deadlines found.");
+    expect(context.sent.at(-1)?.text).toBe("Ближайших дедлайнов нет.");
   });
 
-  it("lists deadlines across courses with details and score or status", async () => {
+  it("lists deadlines with local time, subject, completion percentage, and overdue block", async () => {
     const context = runtime();
-    context.store.allAssessmentItems = [
-      {
-        id: "item-1",
-        studyCourseId: "course-1",
-        courseTitle: "Algorithms and Data Structures",
-        courseCode: "CS201",
-        externalId: "ext-1",
-        source: "moodle",
-        title: "Homework 1: Graph Traversal",
-        assessmentType: "assignment",
-        weightPercent: 15,
-        maxScore: 100,
-        actualScore: null,
-        dueAt: "2026-10-15T18:00:00.000Z",
-        dueSource: "moodle",
-        syllabusDueAt: null,
-        status: "pending",
-        notes: null,
-        rawJson: {},
-        createdAt: "2026-09-01T00:00:00.000Z",
-        updatedAt: "2026-09-01T00:00:00.000Z",
-      },
-      {
-        id: "item-2",
-        studyCourseId: "course-2",
-        courseTitle: "Calculus II",
-        courseCode: "MATH102",
-        externalId: "ext-2",
-        source: "moodle",
-        title: "Midterm Exam",
-        assessmentType: "exam",
-        weightPercent: 30,
-        maxScore: 100,
-        actualScore: 94.5,
-        dueAt: "2026-10-20T10:00:00.000Z",
-        dueSource: "moodle",
-        syllabusDueAt: null,
-        status: "graded",
-        notes: null,
-        rawJson: {},
-        createdAt: "2026-09-02T00:00:00.000Z",
-        updatedAt: "2026-09-02T00:00:00.000Z",
-      },
-      {
-        id: "item-3",
-        studyCourseId: "course-1",
-        courseTitle: "Algorithms and Data Structures",
-        courseCode: "CS201",
-        externalId: "ext-3",
-        source: "manual",
-        title: "Term Project Proposal",
-        assessmentType: "project",
-        weightPercent: 20,
-        maxScore: null,
-        actualScore: null,
-        dueAt: null,
-        dueSource: null,
-        syllabusDueAt: null,
-        status: "pending",
-        notes: null,
-        rawJson: {},
-        createdAt: "2026-09-03T00:00:00.000Z",
-        updatedAt: "2026-09-03T00:00:00.000Z",
-      },
-    ];
+    context.now = () => new Date("2026-09-28T18:00:00.000Z");
+    context.store.user = {
+      userId: "user-1",
+      telegramUserId: 123,
+      displayName: "User",
+      username: "user",
+      timezone: "Asia/Almaty", // UTC+5
+      status: "active",
+      role: "user",
+    };
+
+    context.store.upcomingAssignmentDeadlines = {
+      upcoming: [
+        {
+          id: "task-1",
+          externalId: "ext-1",
+          title: "Database Project",
+          courseTitle: "Database Management Systems",
+          dueAt: "2026-09-30T18:59:00.000Z", // 23:59 in Asia/Almaty (2 days 5 hours remaining from Sept 28 18:00 UTC)
+          status: "active",
+          score: 8,
+          maxScore: 10,
+          percentage: 80,
+        },
+        {
+          id: "task-2",
+          externalId: "ext-2",
+          title: "Lab 2",
+          courseTitle: "Operating Systems",
+          dueAt: "2026-10-01T10:00:00.000Z", // 15:00 in Asia/Almaty
+          status: "active",
+          score: null,
+          maxScore: null,
+          percentage: null,
+        },
+        {
+          id: "task-3",
+          externalId: "ext-3",
+          title: "Quiz 3",
+          courseTitle: "Calculus",
+          dueAt: "2026-10-02T10:00:00.000Z",
+          status: "active",
+          score: 8.5,
+          maxScore: null,
+          percentage: null,
+        },
+      ],
+      overdue: [
+        {
+          id: "task-4",
+          externalId: "ext-4",
+          title: "Homework 1",
+          courseTitle: "Algorithms",
+          dueAt: "2026-09-26T12:00:00.000Z",
+          status: "active",
+          score: null,
+          maxScore: null,
+          percentage: null,
+        },
+      ],
+    };
 
     await handleTelegramUpdate(update("/deadlines"), context);
 
     const sent = context.sent.at(-1)?.text;
-    expect(sent).toContain("Deadlines:");
-    // Item 1: ungraded with due date
-    expect(sent).toContain("Algorithms and Data Structures");
-    expect(sent).toContain("Homework 1: Graph Traversal");
-    expect(sent).toContain("2026-10-15T18:00:00.000Z");
-    expect(sent).toContain("Status: <b>pending</b>");
+    expect(sent).toBeDefined();
+    expect(sent).toContain("<b>Дедлайны:</b>");
 
-    // Item 2: graded with score
-    expect(sent).toContain("Calculus II");
-    expect(sent).toContain("Midterm Exam");
-    expect(sent).toContain("2026-10-20T10:00:00.000Z");
-    expect(sent).toContain("Score: <b>94.5/100</b>");
+    // Item 1: scored with max_score and percentage
+    expect(sent).toContain("1. «Database Project»");
+    expect(sent).toContain("Предмет: Database Management Systems");
+    // 2026-09-30T18:59Z - 2026-09-28T18:00Z = 2 days 59 min → hours=0, shows '2 дн.'
+    expect(sent).toContain("Дедлайн: 30.09.2026 23:59 (осталось 2 дн.)");
+    expect(sent).toContain("Выполнено: 8/10 (80%)");
 
-    // Item 3: no due date
-    expect(sent).toContain("Term Project Proposal");
-    expect(sent).toContain("no due date");
-    expect(sent).toContain("Status: <b>pending</b>");
+    // Item 2: not graded
+    expect(sent).toContain("2. «Lab 2»");
+    expect(sent).toContain("Предмет: Operating Systems");
+    expect(sent).toContain("Дедлайн: 01.10.2026 15:00");
+    expect(sent).toContain("Выполнено: ещё не оценено");
 
-    // Also verify /assignments alias
-    await handleTelegramUpdate(update("/assignments"), context);
-    expect(context.sent.at(-1)?.text).toBe(sent);
+    // Item 3: score without max_score
+    expect(sent).toContain("3. «Quiz 3»");
+    expect(sent).toContain("Предмет: Calculus");
+    expect(sent).toContain("Выполнено: 8.5");
+
+    // Overdue block
+    expect(sent).toContain("<b>Просроченные без оценки (за 7 дней):</b>");
+    expect(sent).toContain("1. «Homework 1»");
+    expect(sent).toContain("Предмет: Algorithms");
+    expect(sent).toContain("просрочено на 2 дн. 6 ч");
+    expect(sent).toContain("Выполнено: ещё не оценено");
+  });
+
+  it("button 'Дедлайны' invokes the exact same handler as /deadlines", async () => {
+    const context = runtime();
+    context.now = () => new Date("2026-09-28T18:00:00.000Z");
+    context.store.upcomingAssignmentDeadlines = {
+      upcoming: [
+        {
+          id: "task-1",
+          externalId: "ext-1",
+          title: "Exam Prep",
+          courseTitle: "Physics",
+          dueAt: "2026-09-30T10:00:00.000Z",
+          status: "active",
+          score: null,
+          maxScore: null,
+          percentage: null,
+        },
+      ],
+      overdue: [],
+    };
+
+    // Slash command
+    await handleTelegramUpdate(update("/deadlines"), context);
+    const slashResponse = context.sent.at(-1)?.text;
+
+    // Button press text "Дедлайны"
+    await handleTelegramUpdate(update("Дедлайны"), context);
+    const buttonResponse = context.sent.at(-1)?.text;
+
+    expect(slashResponse).toBeDefined();
+    expect(buttonResponse).toBe(slashResponse);
+    expect(buttonResponse).toContain("«Exam Prep»");
+  });
+
+  it("splits long deadline lists across multiple messages by item boundaries", async () => {
+    const context = runtime();
+    context.now = () => new Date("2026-10-01T00:00:00.000Z");
+
+    // Create 35 deadline items to easily exceed 4000 characters
+    const upcoming = Array.from({ length: 35 }, (_, i) => ({
+      id: `task-${i + 1}`,
+      externalId: `ext-${i + 1}`,
+      title: `Very Important Course Assignment Number ${i + 1} with Detailed Title`,
+      courseTitle: `Department of Advanced Computer Science Course ${i + 1}`,
+      dueAt: `2026-10-${String((i % 20) + 2).padStart(2, "0")}T18:00:00.000Z`,
+      status: "active",
+      score: i % 2 === 0 ? 85 : null,
+      maxScore: i % 2 === 0 ? 100 : null,
+      percentage: i % 2 === 0 ? 85 : null,
+    }));
+
+    context.store.upcomingAssignmentDeadlines = { upcoming, overdue: [] };
+
+    await handleTelegramUpdate(update("/deadlines"), context);
+
+    // Should have split into at least 2 messages
+    expect(context.sent.length).toBeGreaterThanOrEqual(2);
+    for (const msg of context.sent) {
+      expect(msg.text.length).toBeLessThanOrEqual(4096);
+    }
+
+    // Verify first message has item 1 and last message has item 35
+    expect(context.sent[0].text).toContain("1. «Very Important Course Assignment Number 1");
+    expect(context.sent.at(-1)?.text).toContain("35. «Very Important Course Assignment Number 35");
+  });
+
+  it("splitTelegramMessages splits on block boundaries without truncating blocks", () => {
+    const blocks = [
+      "Header",
+      "Item 1: AAAA",
+      "Item 2: BBBB",
+      "Item 3: CCCC",
+      "Item 4: DDDD",
+    ];
+    // With maxLength 25, cannot fit more than 1-2 blocks per message
+    const chunks = splitTelegramMessages(blocks, 25);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.join("\n\n")).toContain("Item 1: AAAA");
+    expect(chunks.join("\n\n")).toContain("Item 4: DDDD");
+    for (const chunk of chunks) {
+      expect(chunk.length).toBeLessThanOrEqual(25);
+    }
+  });
+
+  it("tests deadline helper functions: formatCompletedStatus and formatTimeRemaining", () => {
+    expect(formatCompletedStatus({ score: null, maxScore: null, percentage: null })).toBe("ещё не оценено");
+    expect(formatCompletedStatus({ score: 8, maxScore: 10, percentage: 80 })).toBe("8/10 (80%)");
+    expect(formatCompletedStatus({ score: 8, maxScore: 10, percentage: null })).toBe("8/10 (80%)");
+    expect(formatCompletedStatus({ score: 9.5, maxScore: null, percentage: null })).toBe("9.5");
+    expect(formatCompletedStatus({ score: 0, maxScore: 10, percentage: 0 })).toBe("0/10 (0%)");
+
+    const now = new Date("2026-10-01T12:00:00.000Z");
+    // 2 days 5 hours ahead
+    expect(formatTimeRemaining("2026-10-03T17:00:00.000Z", now)).toBe("осталось 2 дн. 5 ч");
+    // 3 hours 15 min ahead
+    expect(formatTimeRemaining("2026-10-01T15:15:00.000Z", now)).toBe("осталось 3 ч 15 мин");
+    // 25 min ahead
+    expect(formatTimeRemaining("2026-10-01T12:25:00.000Z", now)).toBe("осталось 25 мин");
+    // Overdue 2 days 3 hours
+    expect(formatTimeRemaining("2026-09-29T09:00:00.000Z", now)).toBe("просрочено на 2 дн. 3 ч");
   });
 
   it("matches a bank line to a receipt through two acknowledged buttons", async () => {

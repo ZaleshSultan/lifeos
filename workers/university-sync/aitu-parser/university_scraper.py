@@ -162,6 +162,11 @@ def grade_posted_message(course_title: str, item_title: str, score: float, max_s
     grade = f"{score:.15g}"
     if max_score is not None:
         grade += f"/{max_score:.15g}"
+        if max_score > 0:
+            pct = round(score / max_score * 100, 1)
+            # Format without trailing .0 for whole numbers
+            pct_str = f"{pct:.15g}"
+            grade += f" ({pct_str}%)"
     return f"Оценка по «{course_title}»: {item_title} — {grade}"
 
 

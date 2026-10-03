@@ -15,6 +15,7 @@ import {
 } from "@lifeos/core";
 import { validateObsidianVaultPath } from "@lifeos/obsidian";
 import type {
+  AssignmentDeadlineRecord,
   BankLineRecord,
   BudgetSummaryPayload,
   CourseAssessmentItemRecord,
@@ -53,6 +54,7 @@ interface ParsedCommand {
 
 const MAIN_MENU_COMMANDS = new Map<string, ParsedCommand>([
   ["Сегодня", { command: "today", args: "" }],
+  ["Дедлайны", { command: "deadlines", args: "" }],
   ["Учёба", { command: "study", args: "" }],
   ["Тренировки", { command: "workout_menu", args: "" }],
   ["Финансы", { command: "finance", args: "" }],
@@ -62,9 +64,10 @@ const MAIN_MENU_COMMANDS = new Map<string, ParsedCommand>([
 
 const MAIN_MENU_KEYBOARD: TelegramReplyKeyboardMarkup = {
   keyboard: [
-    [{ text: "Сегодня" }, { text: "Учёба" }],
+    [{ text: "Сегодня" }, { text: "Дедлайны" }],
+    [{ text: "Учёба" }, { text: "Напоминания" }],
     [{ text: "Тренировки" }, { text: "Финансы" }],
-    [{ text: "Напоминания" }, { text: "Банк" }],
+    [{ text: "Банк" }],
   ],
   resize_keyboard: true,
   is_persistent: true,
@@ -122,7 +125,7 @@ const HELP_TEXT = [
   "/study — учебный курс",
   "/course progress [number]",
   "/course topic [text]",
-  "/deadlines",
+  "/deadlines — список дедлайнов",
   "/review review notes",
   "/spend 1200 шаурма",
   "Quick spend without slash: Такси 2700",
@@ -3043,6 +3046,128 @@ async function handleCourseCommand(
   });
 }
 
+export function formatDeadlineDate(value: string, timezone: string): string {
+  try {
+    const dt = DateTime.fromISO(value, { setZone: true }).setZone(
+      timezone || LOCAL_TIMEZONE,
+    );
+    if (dt.isValid) {
+      return dt.toFormat("dd.MM.yyyy HH:mm");
+    }
+    const jsDt = DateTime.fromJSDate(new Date(value)).setZone(
+      timezone || LOCAL_TIMEZONE,
+    );
+    if (jsDt.isValid) {
+      return jsDt.toFormat("dd.MM.yyyy HH:mm");
+    }
+  } catch {
+    // fallback
+  }
+  return value;
+}
+
+export function formatTimeRemaining(dueAt: string, now: Date): string {
+  const diffMs = new Date(dueAt).getTime() - now.getTime();
+  const isOverdue = diffMs < 0;
+  const absMs = Math.abs(diffMs);
+  const totalMinutes = Math.floor(absMs / (60 * 1000));
+  const totalHours = Math.floor(totalMinutes / 60);
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+  const minutes = totalMinutes % 60;
+
+  const parts: string[] = [];
+  if (days > 0) {
+    parts.push(`${days} дн.`);
+    if (hours > 0) {
+      parts.push(`${hours} ч`);
+    }
+  } else if (hours > 0) {
+    parts.push(`${hours} ч`);
+    if (minutes > 0) {
+      parts.push(`${minutes} мин`);
+    }
+  } else {
+    parts.push(`${Math.max(1, minutes)} мин`);
+  }
+
+  const durationStr = parts.join(" ");
+  return isOverdue ? `просрочено на ${durationStr}` : `осталось ${durationStr}`;
+}
+
+export function formatCompletedStatus(item: {
+  score: number | null;
+  maxScore: number | null;
+  percentage: number | null;
+}): string {
+  if (item.score === null || item.score === undefined) {
+    return "ещё не оценено";
+  }
+
+  let text = `${item.score}`;
+  if (item.maxScore !== null && item.maxScore !== undefined) {
+    text += `/${item.maxScore}`;
+    const pct =
+      item.percentage ??
+      (item.maxScore > 0 ? (item.score / item.maxScore) * 100 : null);
+    if (pct !== null) {
+      const rounded = Math.round(pct * 10) / 10;
+      text += ` (${rounded}%)`;
+    }
+  } else if (item.percentage !== null && item.percentage !== undefined) {
+    const rounded = Math.round(item.percentage * 10) / 10;
+    text += ` (${rounded}%)`;
+  }
+
+  return text;
+}
+
+export function formatAssignmentDeadlineItem(
+  item: AssignmentDeadlineRecord,
+  index: number,
+  timezone: string,
+  now: Date,
+): string {
+  const title = escapeHtml(item.title);
+  const course = escapeHtml(item.courseTitle);
+  const dueFormatted = formatDeadlineDate(item.dueAt, timezone);
+  const remaining = formatTimeRemaining(item.dueAt, now);
+  const completed = formatCompletedStatus(item);
+
+  return [
+    `${index + 1}. «${title}»`,
+    `   Предмет: ${course}`,
+    `   Дедлайн: ${dueFormatted} (${remaining})`,
+    `   Выполнено: ${completed}`,
+  ].join("\n");
+}
+
+export function splitTelegramMessages(
+  blocks: string[],
+  maxLength: number = 4000,
+): string[] {
+  if (blocks.length === 0) return [];
+  const chunks: string[] = [];
+  let current = "";
+
+  for (const block of blocks) {
+    if (!current) {
+      current = block;
+    } else if (current.length + 2 + block.length <= maxLength) {
+      current += "\n\n" + block;
+    } else {
+      chunks.push(current);
+      current = block;
+    }
+  }
+
+  if (current) {
+    chunks.push(current);
+  }
+
+  return chunks;
+}
+
 function formatDeadlineItem(
   item: CourseAssessmentItemRecord,
   index: number,
@@ -3071,22 +3196,44 @@ async function handleDeadlinesCommand(
   runtime: TelegramBotRuntime,
   user: TelegramUserRecord | null,
 ): Promise<void> {
-  const items = await runtime.store!.listAllAssessmentItems(user!.userId);
+  const now = runtime.now?.() ?? new Date();
+  const timezone = user?.timezone || LOCAL_TIMEZONE;
+  const result = await runtime.store!.listUpcomingAssignmentDeadlines(
+    user!.userId,
+    now.toISOString(),
+  );
 
-  if (items.length === 0) {
+  if (result.upcoming.length === 0 && result.overdue.length === 0) {
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
-      text: "No deadlines found.",
+      text: "Ближайших дедлайнов нет.",
     });
     return;
   }
 
-  const lines = items.map((item, index) => formatDeadlineItem(item, index));
+  const blocks: string[] = [];
 
-  await runtime.telegram.sendMessage({
-    chatId: message.chat.id,
-    text: ["<b>Deadlines:</b>", ...lines].join("\n\n"),
-  });
+  if (result.upcoming.length > 0) {
+    const upcomingLines = result.upcoming.map((item, index) =>
+      formatAssignmentDeadlineItem(item, index, timezone, now),
+    );
+    blocks.push("<b>Дедлайны:</b>", ...upcomingLines);
+  }
+
+  if (result.overdue.length > 0) {
+    const overdueLines = result.overdue.map((item, index) =>
+      formatAssignmentDeadlineItem(item, index, timezone, now),
+    );
+    blocks.push("<b>Просроченные без оценки (за 7 дней):</b>", ...overdueLines);
+  }
+
+  const messages = splitTelegramMessages(blocks);
+  for (const text of messages) {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text,
+    });
+  }
 }
 
 async function handleSourcesCommand(

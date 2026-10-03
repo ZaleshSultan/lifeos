@@ -645,10 +645,21 @@ def format_telegram_message(
         return str(reminder.get("message") or "").strip() or "Уведомление"
     if notification_kind == "academic_assignment_deadline":
         course_title = str(metadata.get("course_title") or "Moodle").strip()
-        return (
-            f"⏰ Дедлайн задания по «{course_title}»: {message}\n"
-            f"Сдать до {local_time_label(event_at, timezone_name)}."
-        )
+        grade_info = metadata.get("grade_info")
+        lines = [
+            f"⏰ Дедлайн задания по «{course_title}»: {message}",
+            f"Предмет: {course_title}",
+            f"Сдать до {local_time_label(event_at, timezone_name)}.",
+        ]
+        if isinstance(grade_info, dict) and grade_info.get("score") is not None:
+            score = grade_info["score"]
+            max_score = grade_info.get("max_score")
+            grade_str = f"{score:.15g}"
+            if max_score is not None and max_score > 0:
+                pct = round(score / max_score * 100, 1)
+                grade_str += f"/{max_score:.15g} ({pct:.15g}%)"
+            lines.append(f"Выполнено: {grade_str}")
+        return "\n".join(lines)
     if notification_kind == "deadline":
         try:
             remaining = parse_datetime(event_at) - datetime.now(timezone.utc)

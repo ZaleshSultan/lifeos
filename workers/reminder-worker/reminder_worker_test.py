@@ -127,8 +127,27 @@ class ReminderWorkerTest(unittest.TestCase):
         self.assertEqual(
             message,
             "⏰ Дедлайн задания по «Operating Systems»: OS work\n"
+            "Предмет: Operating Systems\n"
             "Сдать до 2030-01-01 05:00 (Asia/Qyzylorda).",
         )
+
+    def test_moodle_assignment_deadline_message_includes_grade_percentage(self) -> None:
+        reminder = {
+            "message": "Lab 1",
+            "remind_at": "2029-12-31T22:00:00Z",
+            "metadata_json": {
+                "notification_kind": "academic_assignment_deadline",
+                "course_title": "Algorithms",
+                "event_at": "2030-01-01T00:00:00Z",
+                "grade_info": {"score": 8.0, "max_score": 10.0},
+            },
+        }
+
+        message = reminder_worker.format_telegram_message(reminder, {}, "Asia/Qyzylorda")
+
+        self.assertIn("Выполнено: 8/10 (80%)", message)
+        self.assertIn("Сдать до 2030-01-01 05:00 (Asia/Qyzylorda).", message)
+        self.assertIn("Предмет: Algorithms", message)
 
     def test_due_reminder_query_filters_pending_telegram_rows(self) -> None:
         client = CapturingSupabaseClient()
