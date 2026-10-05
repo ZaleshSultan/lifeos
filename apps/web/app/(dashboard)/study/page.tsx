@@ -56,27 +56,27 @@ export default async function StudyPage() {
           icon={GraduationCap}
           label="Предметы"
           tone="violet"
-          value={study.courses.length}
+          value={String(study.courses.length)}
         />
         <MetricCard
           detail="Занятия из сохранённого расписания."
           icon={CalendarDays}
           label="Пары"
-          value={scheduleCount}
+          value={String(scheduleCount)}
         />
         <MetricCard
           detail="Предметы с настроенной схемой силабуса."
           icon={Calculator}
           label="Калькуляторы"
           tone="amber"
-          value={calculatorCount}
+          value={String(calculatorCount)}
         />
         <MetricCard
           detail="Импортированные академические записи и оценки."
           icon={BookOpenCheck}
           label="Записи"
           tone="mint"
-          value={study.records.length}
+          value={String(study.records.length)}
         />
       </div>
 

@@ -33,6 +33,8 @@ function activeSession(
       google: {
         connected: false,
         status: "not_configured",
+        calendarWriteEnabled: false,
+        reconnectRequired: false,
       },
       health: {
         connected: false,
@@ -74,9 +76,11 @@ describe("TMA onboarding status content", () => {
       "Google Calendar",
       "Health",
     ]);
+
     expect(cards.find((card) => card.title === "Obsidian")?.status).toBe(
       "connected",
     );
+
     expect(
       cards.find((card) => card.title === "Google Calendar"),
     ).toMatchObject({
@@ -95,6 +99,8 @@ describe("TMA onboarding status content", () => {
           status: "connected",
           accountEmail: "person@example.com",
           updatedAt: "2026-06-15T10:10:00.000Z",
+          calendarWriteEnabled: true,
+          reconnectRequired: false,
         },
       },
     });
@@ -103,8 +109,10 @@ describe("TMA onboarding status content", () => {
 
     expect(google).toMatchObject({
       status: "connected",
-      description: "Connected as person@example.com.",
+      description:
+        "Connected as person@example.com. Reminders can be added to Calendar.",
     });
+
     expect(google?.action).toBeUndefined();
   });
 

@@ -36,7 +36,7 @@ export default async function TodayPage() {
           icon={Activity}
           label="Focus"
           tone="mint"
-          value={home.focusScore ?? "n/a"}
+          value={String(home.focusScore ?? "n/a")}
         />
         <MetricCard
           detail={home.modeReason}
@@ -60,7 +60,7 @@ export default async function TodayPage() {
           detail="Очередь синхронизации именно этого пользователя."
           icon={RefreshCw}
           label="Sync"
-          value={home.pendingSyncCount ?? 0}
+          value={String(home.pendingSyncCount ?? 0)}
         />
       </div>
 
