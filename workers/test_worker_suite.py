@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parent
 TEST_FILES = (
     ROOT / "common" / "lifeos_sync_test.py",
     ROOT / "reminder-worker" / "reminder_worker_test.py",
+    ROOT / "daily-digest-worker" / "daily_digest_worker_test.py",
     ROOT / "google-sync" / "google_sync_test.py",
     ROOT / "ics-sync" / "ics_sync_test.py",
     ROOT / "monthly-review-worker" / "monthly_review_worker_test.py",

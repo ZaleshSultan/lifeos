@@ -1,6 +1,7 @@
 import {
   Activity,
   CalendarClock,
+  CloudSun,
   Dumbbell,
   GraduationCap,
   HeartPulse,
@@ -94,6 +95,45 @@ export function HomeScreen({
               {home.modeLabel}
             </div>
           </div>
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-cyan-400/15 bg-cyan-400/[0.05] p-4 shadow-panel">
+        <div className="flex items-start gap-3">
+          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-cyan-400/20 bg-cyan-400/10 text-cyan-300">
+            <CloudSun className="h-5 w-5" />
+          </div>
+          {home.weather ? (
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-3">
+                <div className="truncate text-sm font-semibold text-white">
+                  {home.weather.locationName}
+                </div>
+                <div className="shrink-0 text-xl font-semibold text-white">
+                  {home.weather.temperatureC === null
+                    ? "—"
+                    : `${Math.round(home.weather.temperatureC)}°`}
+                </div>
+              </div>
+              <p className="mt-1 text-sm text-zinc-400">
+                {home.weather.weatherLabel}
+                {home.weather.minTemperatureC !== null &&
+                home.weather.maxTemperatureC !== null
+                  ? ` · ${Math.round(home.weather.minTemperatureC)}…${Math.round(home.weather.maxTemperatureC)}°`
+                  : ""}
+                {home.weather.precipitationProbabilityPercent !== null
+                  ? ` · осадки ${Math.round(home.weather.precipitationProbabilityPercent)}%`
+                  : ""}
+              </p>
+            </div>
+          ) : (
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-semibold text-white">Погода</div>
+              <p className="mt-1 text-xs leading-relaxed text-zinc-500">
+                Выбери город в боте командой /weather Astana — он будет отдельным для каждого пользователя.
+              </p>
+            </div>
+          )}
         </div>
       </section>
 

@@ -120,6 +120,27 @@ separate. Unknown attestations do not count as failed. The UI does not automatic
 map Moodle assignments to scenario inputs: assignment groups, scales and syllabus
 coefficients can differ.
 
+## Built-in syllabus fallback and campus map
+
+The TMA contains a built-in fallback for the five current course codes
+(`OS52-EN`, `DMS52-EN`, `K(RUSSIAN)L51-RU`, `CNC53-EN`, `DLD52-EN`). It uses the
+same 37 fields and coefficients as the supplied dashboard import. A valid
+`study_calculator_v1` stored in course metadata always takes priority over this
+fallback. Saving a scenario for a fallback course persists the calculator state
+into that course's metadata. The seed migration only fills active courses that
+do not already have a calculator, so saved user scenarios are not overwritten.
+
+The **Силабус** tab shows and edits the component names and weights that feed
+each course calculator. For an unknown course it starts with a neutral 100% ATT1
++ 100% ATT2 aggregate template instead of inventing assignment coefficients; the
+user can then split each attestation into the real syllabus components. Server
+validation requires ATT1 and ATT2 to total exactly 100% before the scheme is saved.
+
+The Study section also exposes a **Карта** view. It embeds and links to the
+external AITU main-campus map at `https://yuujiso.github.io/aitumap/` and keeps
+attribution to the upstream Yuujiso/aitumap project; a direct-link fallback is
+available when Telegram WebView cannot display the iframe.
+
 ## Checks
 
 ```bash

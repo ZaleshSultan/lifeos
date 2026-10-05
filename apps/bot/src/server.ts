@@ -42,6 +42,12 @@ import {
 } from "./syncthing.js";
 import { pipeline } from "node:stream/promises";
 import { handleWorkoutRoute } from "./workout-routes.js";
+import { fetchWeatherSnapshot } from "./weather.js";
+import { verifyWebSessionToken } from "./web-session.js";
+import {
+  cancelReminderGoogleCalendarEvent,
+  syncReminderToGoogleCalendar,
+} from "./google-calendar-sync.js";
 
 type TmaSessionState = "unregistered" | "pending" | "active" | "blocked";
 
@@ -75,6 +81,8 @@ interface TmaSessionStatus {
       status: "not_configured" | "connected" | "expired" | "revoked" | "error";
       accountEmail?: string | null;
       updatedAt?: string | null;
+      calendarWriteEnabled: boolean;
+      reconnectRequired: boolean;
     };
     health: {
       connected: false;
@@ -109,6 +117,8 @@ export interface BotServerOptions {
       | "googleOAuthClientSecret"
       | "googleOAuthRedirectUri"
       | "googleOAuthStateSecret"
+      | "webDashboardUrl"
+      | "webSessionSecret"
       | "syncthingApiUrl"
       | "syncthingApiKey"
       | "syncthingServerDeviceId"
@@ -162,6 +172,8 @@ interface ResolvedBotServerOptions {
   googleOAuthClientSecret?: string;
   googleOAuthRedirectUri?: string;
   googleOAuthStateSecret?: string;
+  webDashboardUrl?: string;
+  webSessionSecret?: string;
   store?: LifeOSStore;
   telegram?: TelegramClient;
 }
@@ -197,7 +209,7 @@ const TMA_INIT_DATA_MAX_FUTURE_SKEW_SECONDS = 300;
 const GOOGLE_OAUTH_STATE_MAX_AGE_SECONDS = 10 * 60;
 const HEALTH_INGEST_TOKEN_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 const GOOGLE_OAUTH_SCOPES = [
-  "https://www.googleapis.com/auth/calendar.readonly",
+  "https://www.googleapis.com/auth/calendar.events",
   "https://www.googleapis.com/auth/tasks.readonly",
   "https://www.googleapis.com/auth/userinfo.email",
 ] as const;
@@ -938,6 +950,28 @@ async function resolveTmaSessionIdentity(
     }
   | { ok: false; statusCode: number; error: string }
 > {
+  const webSession = verifyWebSessionToken(
+    bearerToken(request),
+    options.webSessionSecret,
+  );
+
+  if (webSession) {
+    if (!options.store) {
+      return { ok: false, statusCode: 503, error: "database_not_configured" };
+    }
+    const webUser = await options.store.resolveUserById(webSession.userId);
+    if (!webUser) {
+      return { ok: false, statusCode: 401, error: "invalid_web_session" };
+    }
+    return {
+      ok: true,
+      telegramUserId: webUser.telegramUserId ?? 0,
+      displayName: webUser.displayName,
+      username: webUser.username,
+      devUser: webUser,
+    };
+  }
+
   const initData = headerValue(request.headers["x-telegram-init-data"]);
 
   if (initData && options.telegramBotToken) {
@@ -1001,6 +1035,8 @@ function emptyIntegrations(): TmaSessionStatus["integrations"] {
     google: {
       connected: false,
       status: "not_configured",
+      calendarWriteEnabled: false,
+      reconnectRequired: false,
     },
     health: {
       connected: false,
@@ -1067,11 +1103,19 @@ async function buildTmaSessionStatus(
     };
 
     if (googleConnection) {
+      const calendarWriteEnabled = googleConnection.scopes.some(
+        (scope) =>
+          scope === "https://www.googleapis.com/auth/calendar" ||
+          scope === "https://www.googleapis.com/auth/calendar.events",
+      );
       integrations.google = {
         connected: googleConnection.status === "connected",
         status: googleConnection.status,
         accountEmail: googleConnection.providerAccountEmail,
         updatedAt: googleConnection.updatedAt,
+        calendarWriteEnabled,
+        reconnectRequired:
+          googleConnection.status === "connected" && !calendarWriteEnabled,
       };
     }
   }
@@ -1148,6 +1192,32 @@ async function resolveTmaUser(
   | { ok: true; user: TelegramUserRecord }
   | { ok: false; statusCode: number; error: string }
 > {
+  const webSession = verifyWebSessionToken(
+    bearerToken(request),
+    options.webSessionSecret,
+  );
+
+  if (webSession) {
+    if (!options.store) {
+      return { ok: false, statusCode: 503, error: "database_not_configured" };
+    }
+    const webUser = await options.store.resolveUserById(webSession.userId);
+    if (!webUser) {
+      return { ok: false, statusCode: 401, error: "invalid_web_session" };
+    }
+    if (webUser.status !== "active") {
+      return {
+        ok: false,
+        statusCode: 403,
+        error:
+          webUser.status === "pending"
+            ? "telegram_user_pending"
+            : "telegram_user_blocked",
+      };
+    }
+    return { ok: true, user: webUser };
+  }
+
   if (!options.store) {
     return {
       ok: false,
@@ -1512,6 +1582,12 @@ async function handleTelegramWebhook(
       telegram,
       store: options.store,
       tmaUrl: options.tmaUrl,
+      webDashboardUrl: options.webDashboardUrl,
+      webSessionSecret: options.webSessionSecret,
+      googleOAuth: {
+        clientId: options.googleOAuthClientId,
+        clientSecret: options.googleOAuthClientSecret,
+      },
       defaultUserId: options.defaultUserId,
       defaultTelegramUserId: options.defaultTelegramUserId,
       adminTelegramUserIds: options.adminTelegramUserIds,
@@ -2788,13 +2864,23 @@ async function handleRequest(
         return;
       }
 
-      await store.createReminder({
+      const reminder = await store.createReminder({
         userId: auth.user.userId,
         message: body.message,
         remindAt: body.remindAt,
         channel: "telegram",
         metadataJson: {
           source: "tma",
+        },
+      });
+      await syncReminderToGoogleCalendar({
+        store,
+        userId: auth.user.userId,
+        reminder,
+        timezone: auth.user.timezone,
+        config: {
+          clientId: options.googleOAuthClientId,
+          clientSecret: options.googleOAuthClientSecret,
         },
       });
 
@@ -2813,6 +2899,22 @@ async function handleRequest(
     if (request.method === "DELETE" && reminderRoute?.[1]) {
       const reminderId = decodeURIComponent(reminderRoute[1]);
       const reminder = await store.cancelReminder(auth.user.userId, reminderId);
+      try {
+        await cancelReminderGoogleCalendarEvent({
+          store,
+          userId: auth.user.userId,
+          reminder,
+          config: {
+            clientId: options.googleOAuthClientId,
+            clientSecret: options.googleOAuthClientSecret,
+          },
+        });
+      } catch (error) {
+        console.warn("google_calendar_cancel_failed", {
+          reminderId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
 
       writeJson(response, 200, tmaData(reminder));
       return;
@@ -2820,6 +2922,26 @@ async function handleRequest(
 
     if (request.method === "GET" && requestUrl.pathname === "/api/tma/study") {
       writeJson(response, 200, tmaData(await store.getTmaStudySummary(auth.user.userId, auth.user.timezone)));
+      return;
+    }
+
+    const studySyllabusMatch = requestUrl.pathname.match(/^\/api\/tma\/study\/courses\/([^/]+)\/syllabus$/);
+    if (request.method === "PUT" && studySyllabusMatch) {
+      const courseId = studySyllabusMatch[1];
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(courseId)) {
+        writeJson(response, 400, { error: "invalid_study_course_id" });
+        return;
+      }
+      const body = await readJsonBody(request);
+      try {
+        const state = await store.configureStudyCalculator(auth.user.userId, courseId, body);
+        writeJson(response, 200, tmaData(state));
+      } catch (error) {
+        if (!(error instanceof StudyWorkspaceError)) throw error;
+        const status = error.code === "study_course_not_found" ? 404
+          : error.code === "study_calculator_conflict" ? 409 : 400;
+        writeJson(response, status, { error: error.code });
+      }
       return;
     }
 
@@ -3248,11 +3370,27 @@ async function handleRequest(
     }
 
     if (request.method === "GET" && requestUrl.pathname === "/api/tma/home") {
-      writeJson(
-        response,
-        200,
-        tmaData(await store.getTmaHomeSummary(auth.user)),
-      );
+      const home = await store.getTmaHomeSummary(auth.user);
+      const weatherSettings = await store.getWeatherSettings(auth.user.userId);
+      let weather = null;
+      if (weatherSettings) {
+        try {
+          weather = await fetchWeatherSnapshot(
+            {
+              name: weatherSettings.locationName,
+              latitude: weatherSettings.latitude,
+              longitude: weatherSettings.longitude,
+            },
+            auth.user.timezone,
+          );
+        } catch (error) {
+          console.warn("weather_fetch_failed", {
+            userId: auth.user.userId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+      writeJson(response, 200, tmaData({ ...home, weather }));
       return;
     }
 
@@ -3471,6 +3609,8 @@ export function createBotServer(options: BotServerOptions = {}): Server {
     googleOAuthClientSecret: options.config?.googleOAuthClientSecret,
     googleOAuthRedirectUri: options.config?.googleOAuthRedirectUri,
     googleOAuthStateSecret: options.config?.googleOAuthStateSecret,
+    webDashboardUrl: options.config?.webDashboardUrl,
+    webSessionSecret: options.config?.webSessionSecret,
     store: options.store,
     telegram: options.telegram,
   };

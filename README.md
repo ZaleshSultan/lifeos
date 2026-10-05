@@ -12,6 +12,7 @@ Personal LifeOS monorepo for automation, knowledge workflows, and user-facing in
 - `packages/obsidian` - Obsidian integration package boundary
 - `workers/obsidian-mirror` - Supabase to Obsidian Markdown mirror
 - `workers/reminder-worker` - Supabase reminders to Telegram worker
+- `workers/daily-digest-worker` - daily Telegram briefing with tasks, classes, and deadlines
 - `apps/android-health-bridge` - installable manual Android Health Connect bridge
 - `apps/health-bridge` - legacy Android Health Connect bridge scaffold
 - `docs` - architecture, contracts, deployment, and operations docs
@@ -69,6 +70,19 @@ cp .env.example .env
 
 See `docs/REMINDER_WORKER.md` for Arch/systemd setup.
 
+Run the daily briefing worker locally:
+
+```bash
+cd workers/daily-digest-worker
+cp .env.example .env
+python3 daily_digest_worker.py
+```
+
+The default briefing time is `08:00` in each profile timezone; change
+`DAILY_DIGEST_TIME` in the worker `.env` if needed. Apply the latest Supabase
+migrations first so `daily_digest_deliveries` is available for duplicate
+protection. The default catch-up window is 12 hours after the configured time.
+
 ## Multi-User Telegram Onboarding
 
 LifeOS currently uses Supabase Auth users as owner records. User-owned tables reference `auth.users(id)`, and `public.profiles.user_id` is the LifeOS user id.
@@ -106,6 +120,34 @@ ALLOW_UNSAFE_TMA_DEV_AUTH=false
 ```
 
 These default-user variables are legacy/dev bootstrap helpers. They are not used to register new production users. If `/start` sees the configured Telegram id, it will try to link that one profile as active/admin. If the `auth.users` row is missing, it replies with the exact profile SQL to run.
+
+
+## Personal Web, Weather, and Google Calendar
+
+The web dashboard is multi-user. An active Telegram user runs `/web`; the bot
+creates a signed short login URL, and the Next.js app stores the session in an
+HttpOnly cookie. Backend requests are resolved back to that LifeOS `user_id`, so
+`/today` and `/study` show that user's data. Configure:
+
+```bash
+# apps/bot/.env
+LIFEOS_WEB_URL=https://web.example.com
+LIFEOS_WEB_SESSION_SECRET=replace-with-a-random-secret
+
+# apps/web/.env.local
+LIFEOS_API_BASE_URL=https://api.example.com
+NEXT_PUBLIC_LIFEOS_API_BASE_URL=https://api.example.com
+```
+
+Weather is also per-user. Run `/weather Astana` (or any city supported by
+Open-Meteo) once; the selected coordinates are saved in `user_settings` and
+used on the home screen and in the daily briefing.
+
+Google OAuth now requests Calendar event write access. After connecting Google,
+new `/remind` reminders are mirrored to the user's primary Google Calendar;
+snoozing updates the event and cancelling removes it. Existing users who
+connected with the old `calendar.readonly` scope need to reconnect Google once.
+The LifeOS reminder remains valid even if Google is temporarily unavailable.
 
 ## Health Ingest API
 
@@ -167,7 +209,7 @@ Start with:
 
 ## Status
 
-The repository now has backend foundations, Telegram webhook commands, Supabase migrations, health ingest, TMA scaffold, Obsidian worker, Android Health Connect scaffold, web dashboard scaffold, and deployment docs. Production auth, dashboard summary APIs, and full Android build hardening remain future phases.
+The repository now has backend foundations, Telegram webhook commands, Supabase migrations, health ingest, TMA scaffold, Obsidian worker, Android Health Connect scaffold, personal multi-user web dashboard, and deployment docs. Full Android build hardening and additional web surfaces remain future phases.
 
 ## Academic sync
 

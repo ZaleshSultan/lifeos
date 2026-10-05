@@ -74,7 +74,7 @@ import {
 } from "@lifeos/core";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { StudyCalculatorState } from "../../core/src/study.js";
-import { loadStudyWorkspaceCourses, saveStudyCalculator, type StudyWorkspaceCourse } from "./study-workspace.js";
+import { configureStudyCalculator, loadStudyWorkspaceCourses, saveStudyCalculator, type StudyWorkspaceCourse } from "./study-workspace.js";
 import type {
   AcademicTermStatus,
   AssessmentItemStatus,
@@ -603,6 +603,12 @@ export interface SafeUserOAuthConnection {
   updatedAt: string;
 }
 
+
+export interface WeatherSettings {
+  locationName: string;
+  latitude: number;
+  longitude: number;
+}
 export interface UpsertUserOAuthConnectionInput {
   provider: UserOAuthProvider;
   providerAccountEmail?: string | null;
@@ -1374,6 +1380,7 @@ export interface LifeOSStore {
   resolveTelegramUser(
     telegramUserId: number,
   ): Promise<TelegramUserRecord | null>;
+  resolveUserById(userId: string): Promise<TelegramUserRecord | null>;
   linkDefaultTelegramUser(
     input: BootstrapTelegramUserInput,
   ): Promise<TelegramUserRecord>;
@@ -1526,6 +1533,7 @@ export interface LifeOSStore {
   getTmaAcademicSummary(userId: string): Promise<TmaAcademicSummary>;
   getTmaStudySummary(userId: string, timezone: string): Promise<TmaStudySummary>;
   saveStudyCalculator(userId: string, courseId: string, input: unknown): Promise<StudyCalculatorState>;
+  configureStudyCalculator(userId: string, courseId: string, input: unknown): Promise<StudyCalculatorState>;
   upsertExternalSource(
     userId: string,
     source: UpsertExternalSourceInput,
@@ -1570,6 +1578,9 @@ export interface LifeOSStore {
   ): Promise<ReminderRecord>;
   getReminderMode(userId: string): Promise<ReminderMode>;
   setReminderMode(userId: string, mode: ReminderMode): Promise<ReminderMode>;
+  getWeatherSettings(userId: string): Promise<WeatherSettings | null>;
+  setWeatherSettings(userId: string, settings: WeatherSettings): Promise<WeatherSettings>;
+  updateReminderMetadata(userId: string, reminderId: string, metadataJson: Json): Promise<ReminderRecord>;
   listAcademicRecords(userId: string): Promise<AcademicRecord[]>;
   upsertAcademicRecord(
     input: UpsertAcademicRecordInput,
@@ -3470,6 +3481,20 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     }
 
     return toTelegramUserRecord(data);
+  }
+
+  async resolveUserById(userId: string): Promise<TelegramUserRecord | null> {
+    const { data, error } = await this.client
+      .from("profiles")
+      .select("*")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to resolve user");
+    }
+
+    return data ? toTelegramUserRecord(data) : null;
   }
 
   async linkDefaultTelegramUser(
@@ -5431,6 +5456,10 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     return saveStudyCalculator(this.client, userId, courseId, input);
   }
 
+  async configureStudyCalculator(userId: string, courseId: string, input: unknown): Promise<StudyCalculatorState> {
+    return configureStudyCalculator(this.client, userId, courseId, input);
+  }
+
   async upsertExternalSource(
     userId: string,
     source: UpsertExternalSourceInput,
@@ -5868,6 +5897,115 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     }
 
     return mode;
+  }
+
+  async getWeatherSettings(userId: string): Promise<WeatherSettings | null> {
+    const { data, error } = await this.client
+      .from("user_settings")
+      .select("settings")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (error) {
+      throwSupabaseError(error, "Failed to load weather settings");
+    }
+
+    const settings = jsonObject(data?.settings);
+    const weather =
+      typeof settings.weather === "object" &&
+      settings.weather !== null &&
+      !Array.isArray(settings.weather)
+        ? (settings.weather as Record<string, unknown>)
+        : {};
+    const latitude = Number(weather.latitude);
+    const longitude = Number(weather.longitude);
+    const locationName =
+      typeof weather.location_name === "string"
+        ? weather.location_name.trim()
+        : typeof weather.locationName === "string"
+          ? weather.locationName.trim()
+          : "";
+
+    if (
+      !locationName ||
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude) ||
+      latitude < -90 ||
+      latitude > 90 ||
+      longitude < -180 ||
+      longitude > 180
+    ) {
+      return null;
+    }
+
+    return { locationName, latitude, longitude };
+  }
+
+  async setWeatherSettings(
+    userId: string,
+    input: WeatherSettings,
+  ): Promise<WeatherSettings> {
+    const locationName = input.locationName.trim();
+    if (!locationName) throw new Error("Weather location name is required");
+    if (
+      !Number.isFinite(input.latitude) ||
+      input.latitude < -90 ||
+      input.latitude > 90 ||
+      !Number.isFinite(input.longitude) ||
+      input.longitude < -180 ||
+      input.longitude > 180
+    ) {
+      throw new Error("Weather coordinates are invalid");
+    }
+
+    const { data: current, error: loadError } = await this.client
+      .from("user_settings")
+      .select("settings")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (loadError) {
+      throwSupabaseError(loadError, "Failed to load weather settings");
+    }
+
+    const settings = {
+      ...jsonObject(current?.settings),
+      weather: {
+        location_name: locationName,
+        latitude: input.latitude,
+        longitude: input.longitude,
+      },
+    } satisfies Json;
+    const { error } = await this.client.from("user_settings").upsert(
+      { user_id: userId, settings },
+      { onConflict: "user_id" },
+    );
+    if (error) {
+      throwSupabaseError(error, "Failed to save weather settings");
+    }
+
+    return {
+      locationName,
+      latitude: input.latitude,
+      longitude: input.longitude,
+    };
+  }
+
+  async updateReminderMetadata(
+    userId: string,
+    reminderId: string,
+    metadataJson: Json,
+  ): Promise<ReminderRecord> {
+    const { data, error } = await this.client
+      .from("reminders")
+      .update({ metadata_json: metadataJson })
+      .eq("user_id", userId)
+      .eq("id", reminderId)
+      .select("*")
+      .single();
+    if (error) {
+      throwSupabaseError(error, "Failed to update reminder metadata");
+    }
+    return toReminderRecord(data);
   }
 
   async getFinanceBaseCurrency(userId: string): Promise<string> {

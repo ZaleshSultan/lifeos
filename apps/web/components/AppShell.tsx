@@ -6,6 +6,8 @@ import {
   CircleDollarSign,
   HeartPulse,
   LayoutDashboard,
+  LogOut,
+  UserRound,
   Settings,
   Zap,
   type LucideIcon,
@@ -18,6 +20,7 @@ import type { SystemStatus } from "@/lib/system-status";
 interface AppShellProps {
   children: React.ReactNode;
   systemStatus: SystemStatus;
+  userName?: string | null;
 }
 
 const navItems: Array<{
@@ -32,7 +35,7 @@ const navItems: Array<{
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
-export function AppShell({ children, systemStatus }: AppShellProps) {
+export function AppShell({ children, systemStatus, userName }: AppShellProps) {
   const pathname = usePathname();
 
   return (
@@ -82,6 +85,18 @@ export function AppShell({ children, systemStatus }: AppShellProps) {
           })}
         </nav>
 
+        <div className="mb-2 rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2.5">
+          <div className="flex items-center gap-2">
+            <UserRound className="h-3.5 w-3.5 text-cyan-400" />
+            <span className="min-w-0 flex-1 truncate text-xs font-medium text-zinc-300">
+              {userName || "LifeOS user"}
+            </span>
+            <Link href="/logout" aria-label="Выйти" className="text-zinc-600 transition hover:text-zinc-300">
+              <LogOut className="h-3.5 w-3.5" />
+            </Link>
+          </div>
+        </div>
+
         {/* Status footer */}
         <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2.5">
           <div className="flex items-center gap-2">
@@ -112,6 +127,8 @@ export function AppShell({ children, systemStatus }: AppShellProps) {
               LifeOS
             </span>
           </div>
+          <div className="flex items-center gap-2">
+            <span className="max-w-24 truncate text-xs text-zinc-500">{userName}</span>
           <div
             className={cx(
               "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium",
@@ -127,6 +144,7 @@ export function AppShell({ children, systemStatus }: AppShellProps) {
               )}
             />
             {systemStatus.shortLabel}
+          </div>
           </div>
         </header>
 

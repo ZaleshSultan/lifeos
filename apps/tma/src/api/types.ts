@@ -58,12 +58,26 @@ export interface TmaSessionStatus {
       status: "not_configured" | "connected" | "expired" | "revoked" | "error";
       accountEmail?: string | null;
       updatedAt?: string | null;
+      calendarWriteEnabled: boolean;
+      reconnectRequired: boolean;
     };
     health: {
       connected: false;
       status: "not_configured";
     };
   };
+}
+
+export interface WeatherSummary {
+  locationName: string;
+  temperatureC: number | null;
+  apparentTemperatureC: number | null;
+  weatherCode: number | null;
+  weatherLabel: string;
+  windSpeedKmh: number | null;
+  minTemperatureC: number | null;
+  maxTemperatureC: number | null;
+  precipitationProbabilityPercent: number | null;
 }
 
 export interface HomeSummary {
@@ -82,6 +96,7 @@ export interface HomeSummary {
   } | null;
   healthCompletenessScore?: number | null;
   pendingSyncCount?: number;
+  weather?: WeatherSummary | null;
   obsidianStatus?: {
     enabled: boolean;
     status: "disconnected" | "connected" | "error";

@@ -34,7 +34,7 @@ const SOURCE_CATALOG: Array<{
     sourceKey: "google_calendar",
     displayName: "Google Calendar",
     sourceType: "google",
-    note: "Read-only local OAuth worker.",
+    note: "Per-user OAuth writes LifeOS reminder events; calendar import still uses the legacy local worker.",
     implemented: true,
   },
   {

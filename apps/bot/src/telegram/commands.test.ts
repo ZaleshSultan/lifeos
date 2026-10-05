@@ -86,6 +86,7 @@ class FakeStore implements LifeOSStore {
     Awaited<ReturnType<LifeOSStore["generateMonthlyReview"]>>
   > = [];
   reminderMode: "chill" | "normal" | "duolingo" | "war" = "normal";
+  weatherSettings: Awaited<ReturnType<LifeOSStore["getWeatherSettings"]>> = null;
   allAssessmentItems: CourseAssessmentItemRecord[] = [];
   upcomingAssignmentDeadlines: UpcomingAssignmentDeadlinesResult = {
     upcoming: [],
@@ -279,6 +280,11 @@ class FakeStore implements LifeOSStore {
     }
 
     return this.user;
+  }
+
+  async resolveUserById(userId: string): Promise<TelegramUserRecord | null> {
+    if (this.user?.userId === userId) return this.user;
+    return this.telegramProfiles.find((item) => item.userId === userId) ?? null;
   }
 
   async linkDefaultTelegramUser(): Promise<TelegramUserRecord> {
@@ -817,6 +823,10 @@ class FakeStore implements LifeOSStore {
     throw new Error("Not used by Telegram command tests");
   }
 
+  async configureStudyCalculator(): Promise<never> {
+    throw new Error("Not used by Telegram command tests");
+  }
+
   async upsertExternalSource(
     userId: string,
     source: Parameters<LifeOSStore["upsertExternalSource"]>[1],
@@ -971,6 +981,31 @@ class FakeStore implements LifeOSStore {
       throw new Error("not found");
     }
     reminder.remindAt = remindAt;
+    return reminder;
+  }
+
+  async getWeatherSettings(): Promise<
+    Awaited<ReturnType<LifeOSStore["getWeatherSettings"]>>
+  > {
+    return this.weatherSettings;
+  }
+
+  async setWeatherSettings(
+    _userId: string,
+    settings: Parameters<LifeOSStore["setWeatherSettings"]>[1],
+  ): Promise<Awaited<ReturnType<LifeOSStore["setWeatherSettings"]>>> {
+    this.weatherSettings = settings;
+    return settings;
+  }
+
+  async updateReminderMetadata(
+    _userId: string,
+    reminderId: string,
+    metadataJson: Parameters<LifeOSStore["updateReminderMetadata"]>[2],
+  ): Promise<ReminderRecord> {
+    const reminder = this.reminders.find((item) => item.id === reminderId);
+    if (!reminder) throw new Error("not found");
+    reminder.metadataJson = metadataJson;
     return reminder;
   }
 
@@ -1966,6 +2001,8 @@ describe("Telegram commands", () => {
         [{ text: "Сегодня" }, { text: "Дедлайны" }],
         [{ text: "Учёба" }, { text: "Напоминания" }],
         [{ text: "Тренировки" }, { text: "Финансы" }],
+        [{ text: "Здоровье" }, { text: "Фокус" }],
+        [{ text: "Источники" }, { text: "Режим" }],
         [{ text: "Банк" }],
       ],
     });
@@ -1978,6 +2015,26 @@ describe("Telegram commands", () => {
         ? studyMarkup.inline_keyboard[0]?.[0]?.web_app?.url
         : undefined,
     ).toBe("https://lifeos.example/tma?screen=study");
+    const studyButtons =
+      studyMarkup && "inline_keyboard" in studyMarkup
+        ? studyMarkup.inline_keyboard.flat()
+        : [];
+    expect(
+      studyButtons.find((button) => button.text === "Расписание")?.web_app?.url,
+    ).toBe("https://lifeos.example/tma?screen=study&studyTab=schedule");
+    expect(
+      studyButtons.find((button) => button.text === "Оценки")?.web_app?.url,
+    ).toBe("https://lifeos.example/tma?screen=study&studyTab=grades");
+    expect(
+      studyButtons.find((button) => button.text === "Калькулятор")?.web_app
+        ?.url,
+    ).toBe("https://lifeos.example/tma?screen=study&studyTab=calculator");
+    expect(
+      studyButtons.find((button) => button.text === "Силабусы")?.web_app?.url,
+    ).toBe("https://lifeos.example/tma?screen=study&studyTab=syllabi");
+    expect(
+      studyButtons.find((button) => button.text === "Карта корпуса")?.web_app?.url,
+    ).toBe("https://lifeos.example/tma?screen=study&studyTab=map");
     await handleTelegramUpdate(update("/study"), context);
     expect(context.sent.at(-1)?.text).toContain("Курс:");
     await handleTelegramUpdate(update("/course"), context);
@@ -2944,6 +3001,64 @@ describe("Telegram commands", () => {
     expect(context.sent.at(-1)?.text).toContain("Discrete Mathematics");
     expect(context.sent.at(-1)?.text).toContain("DISCRETE-MATH-SUMMER-2026");
     expect(context.sent.at(-1)?.text).toContain("Прогресс: <b>0%</b>");
+  });
+
+  it("opens a requested study tab and routes study deadlines", async () => {
+    const context = runtime();
+
+    await handleTelegramUpdate(update("/study grades"), context);
+
+    const markup = context.sent.at(-1)?.replyMarkup;
+    expect(context.sent.at(-1)?.text).toContain("Открываю раздел «Оценки»");
+    expect(
+      markup && "inline_keyboard" in markup
+        ? markup.inline_keyboard[0]?.[0]?.web_app?.url
+        : undefined,
+    ).toBe("https://lifeos.example/tma?screen=study&studyTab=grades");
+
+    context.store.upcomingAssignmentDeadlines = {
+      upcoming: [
+        {
+          id: "study-task-1",
+          externalId: "study-ext-1",
+          title: "Lab report",
+          courseTitle: "Networks",
+          dueAt: "2026-05-20T10:00:00.000Z",
+          status: "active",
+          score: null,
+          maxScore: null,
+          percentage: null,
+        },
+      ],
+      overdue: [],
+    };
+
+    await handleTelegramUpdate(update("/study deadlines"), context);
+    expect(context.sent.at(-1)?.text).toContain("Lab report");
+
+    await handleTelegramUpdate(update("/study syllabi"), context);
+    const syllabiMarkup = context.sent.at(-1)?.replyMarkup;
+    expect(
+      syllabiMarkup && "inline_keyboard" in syllabiMarkup
+        ? syllabiMarkup.inline_keyboard[0]?.[0]?.web_app?.url
+        : undefined,
+    ).toBe("https://lifeos.example/tma?screen=study&studyTab=syllabi");
+
+    await handleTelegramUpdate(update("/study map"), context);
+    const mapMarkup = context.sent.at(-1)?.replyMarkup;
+    expect(
+      mapMarkup && "inline_keyboard" in mapMarkup
+        ? mapMarkup.inline_keyboard[0]?.[0]?.web_app?.url
+        : undefined,
+    ).toBe("https://lifeos.example/tma?screen=study&studyTab=map");
+    expect(
+      mapMarkup && "inline_keyboard" in mapMarkup
+        ? mapMarkup.inline_keyboard[1]?.[0]?.url
+        : undefined,
+    ).toBe("https://yuujiso.github.io/aitumap/");
+
+    await handleTelegramUpdate(update("/study today"), context);
+    expect(context.sent.at(-1)?.text).toContain("пар по расписанию нет");
   });
 
   it("updates active study course progress", async () => {

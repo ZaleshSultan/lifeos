@@ -88,3 +88,44 @@ export function useSaveStudyCalculatorMutation() {
     },
   });
 }
+
+export function useConfigureStudyCalculatorMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      courseId,
+      definition,
+      target,
+    }: {
+      courseId: string;
+      definition: StudyCalculatorState["definition"];
+      target?: number;
+    }) =>
+      request<StudyCalculatorState>(
+        `/api/tma/study/courses/${encodeURIComponent(courseId)}/syllabus`,
+        {
+          method: "PUT",
+          body: JSON.stringify({ definition, target }),
+        },
+      ),
+    async onMutate() {
+      await queryClient.cancelQueries({ queryKey: studyQueryKey });
+    },
+    async onSuccess(state, { courseId }) {
+      await queryClient.cancelQueries({ queryKey: studyQueryKey });
+      queryClient.setQueryData<StudyWorkspace>(studyQueryKey, (current) =>
+        current
+          ? {
+              ...current,
+              courses: current.courses.map((course) =>
+                course.id === courseId
+                  ? { ...course, calculator: state }
+                  : course,
+              ),
+            }
+          : current,
+      );
+      telegram.hapticImpact("light");
+    },
+  });
+}

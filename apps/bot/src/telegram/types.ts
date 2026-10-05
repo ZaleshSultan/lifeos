@@ -90,6 +90,12 @@ export interface TelegramBotRuntime {
   telegram: TelegramClient;
   store?: LifeOSStore;
   tmaUrl?: string;
+  webDashboardUrl?: string;
+  webSessionSecret?: string;
+  googleOAuth?: {
+    clientId?: string;
+    clientSecret?: string;
+  };
   defaultUserId?: string;
   defaultTelegramUserId?: number;
   adminTelegramUserIds?: number[];

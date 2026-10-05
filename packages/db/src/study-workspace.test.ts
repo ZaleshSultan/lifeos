@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { describe, expect, it } from "vitest";
 import {
+  configureStudyCalculator,
   loadStudyWorkspaceCourses,
   saveStudyCalculator,
 } from "./study-workspace.js";
@@ -140,6 +141,53 @@ describe("study workspace", () => {
           `in.(${courseId})`,
         );
     }
+  });
+
+  it("uses the built-in syllabus when a known active course has no stored calculator", async () => {
+    const f = fixture();
+    f.courses[0].code = "DMS52-EN";
+    f.courses[0].metadata = { untouched: "keep" };
+    const result = await loadStudyWorkspaceCourses(f.client, "owner");
+    expect(result[0].calculator?.definition.fields).toHaveLength(11);
+    expect(result[0].calculator?.definition.sourceName).toContain("built-in");
+  });
+
+  it("stores a user syllabus definition and preserves matching calculator values", async () => {
+    const f = fixture();
+    (f.courses[0].metadata as { study_calculator_v1: { values: Record<string, number> } })
+      .study_calculator_v1.values = { att1: 72 };
+    const customDefinition = {
+      ...definition,
+      sourceName: "Networks syllabus Fall 2026",
+      fields: definition.fields.map((field) => ({ ...field, label: `Custom ${field.label}` })),
+    };
+
+    const saved = await configureStudyCalculator(f.client, "owner", courseId, {
+      definition: customDefinition,
+      target: 85,
+    });
+
+    expect(saved.definition).toEqual(customDefinition);
+    expect(saved.values).toEqual({ att1: 72 });
+    expect(saved.target).toBe(85);
+    expect(f.courses[0].metadata).toMatchObject({
+      untouched: "keep",
+      study_calculator_v1: saved,
+    });
+  });
+
+  it("rejects an invalid syllabus definition before writing", async () => {
+    const f = fixture();
+    const invalid = {
+      ...definition,
+      fields: definition.fields.map((field, index) =>
+        index === 0 ? { ...field, weightPercent: 90 } : field,
+      ),
+    };
+    await expect(
+      configureStudyCalculator(f.client, "owner", courseId, { definition: invalid }),
+    ).rejects.toThrow("invalid_study_calculator");
+    expect(f.requests.some((request) => request.method === "PATCH")).toBe(false);
   });
 
   it("saves a scenario without changing its formula, Moodle link or unrelated metadata", async () => {

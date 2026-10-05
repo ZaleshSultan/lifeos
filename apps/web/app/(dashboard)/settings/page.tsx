@@ -1,104 +1,91 @@
-import { Bot, Database, ServerCog, ShieldCheck } from "lucide-react";
+import { Bot, CalendarDays, CloudSun, ShieldCheck } from "lucide-react";
+import { redirect } from "next/navigation";
 import { MetricCard } from "@/components/MetricCard";
 import { PageHeader } from "@/components/PageHeader";
 import { SectionPanel } from "@/components/SectionPanel";
-import { getSystemStatus } from "@/lib/system-status";
+import {
+  lifeosApi,
+  type WebHomeSummary,
+  type WebSessionStatus,
+} from "@/lib/lifeos-api";
 
 export default async function SettingsPage() {
-  const systemStatus = await getSystemStatus();
+  const [session, home] = await Promise.all([
+    lifeosApi<WebSessionStatus>("/api/tma/session"),
+    lifeosApi<WebHomeSummary>("/api/tma/home"),
+  ]);
+  if (!session || !home) redirect("/access");
 
-  const envVars = [
-    {
-      key: "LIFEOS_API_BASE_URL",
-      value: systemStatus.apiBaseUrl ?? "not-set",
-      set: !!systemStatus.apiBaseUrl,
-    },
-    {
-      key: "NEXT_PUBLIC_LIFEOS_API_BASE_URL",
-      value: process.env.NEXT_PUBLIC_LIFEOS_API_BASE_URL ?? "not-set",
-      set: !!process.env.NEXT_PUBLIC_LIFEOS_API_BASE_URL,
-    },
-  ];
+  const google = session.integrations.google;
+  const googleReady =
+    google.connected &&
+    google.status === "connected" &&
+    google.calendarWriteEnabled !== false &&
+    !google.reconnectRequired;
 
   return (
     <>
       <PageHeader
-        kicker="System"
-        summary="Deployment and integration settings belong in environment variables, Supabase policies, and backend-only secrets."
-        title="Settings"
+        kicker="Personal settings"
+        summary="Эти статусы относятся только к текущему LifeOS-пользователю и его подключениям."
+        title={session.displayName ? `Настройки · ${session.displayName}` : "Настройки"}
       />
 
       <div className="dashboard-grid">
         <MetricCard
-          detail={
-            systemStatus.apiBaseUrl ??
-            "Set LIFEOS_API_BASE_URL for server checks."
-          }
-          icon={ServerCog}
-          label="Backend API"
-          tone={systemStatus.online ? "mint" : "amber"}
-          value={systemStatus.online ? "Online" : "Check"}
-        />
-        <MetricCard
-          detail="Service role usage stays inside apps/bot and trusted workers."
-          icon={Database}
-          label="Supabase"
-          value="Server"
-        />
-        <MetricCard
-          detail="Bot webhooks call the backend; TMA opens with Telegram init data."
+          detail="Web-сессия привязана к тому же user_id, что и Telegram-профиль."
           icon={Bot}
           label="Telegram"
-          tone="violet"
-          value="Webhook"
+          tone="mint"
+          value={session.integrations.telegram.connected ? "Linked" : "Off"}
         />
         <MetricCard
-          detail="No service-role keys, ingest secrets, or bot tokens are shipped to web clients."
+          detail={
+            googleReady
+              ? google.accountEmail || "Calendar events enabled"
+              : google.reconnectRequired
+                ? "Нужно переподключить Google один раз"
+                : "Подключи Google в Mini App / Sources"
+          }
+          icon={CalendarDays}
+          label="Google Calendar"
+          tone={googleReady ? "mint" : "amber"}
+          value={googleReady ? "Ready" : "Setup"}
+        />
+        <MetricCard
+          detail={
+            home.weather
+              ? "Используется в Web, Mini App и ежедневной сводке."
+              : "Задай через /weather <город> в Telegram."
+          }
+          icon={CloudSun}
+          label="Weather"
+          tone="violet"
+          value={home.weather?.locationName ?? "Not set"}
+        />
+        <MetricCard
+          detail="Браузер хранит подписанную HttpOnly-сессию; service-role и OAuth tokens не отдаются клиенту."
           icon={ShieldCheck}
-          label="Security"
-          tone="mint"
+          label="Session"
           value="Scoped"
         />
       </div>
 
-      <div className="mt-6">
-        <SectionPanel eyebrow="Environment" title="Web Runtime Variables">
-          <div className="space-y-2">
-            {envVars.map((env) => (
-              <div
-                key={env.key}
-                className="flex items-stretch overflow-hidden rounded-lg border border-white/[0.06] bg-black/20"
-              >
-                {/* Key */}
-                <div className="flex items-center border-r border-white/[0.06] bg-white/[0.02] px-4 py-3">
-                  <span className="font-mono text-[12px] font-medium text-zinc-400 whitespace-nowrap">
-                    {env.key}
-                  </span>
-                </div>
-                {/* Value */}
-                <div className="flex flex-1 items-center justify-between gap-3 px-4 py-3">
-                  <span
-                    className={
-                      env.set
-                        ? "font-mono text-[12px] text-zinc-300 truncate"
-                        : "font-mono text-[12px] text-zinc-600 italic"
-                    }
-                  >
-                    {env.value}
-                  </span>
-                  <span
-                    className={
-                      env.set
-                        ? "shrink-0 rounded-full border border-emerald-400/20 bg-emerald-400/[0.08] px-2 py-0.5 text-[11px] font-medium text-emerald-400"
-                        : "shrink-0 rounded-full border border-zinc-700 bg-white/[0.03] px-2 py-0.5 text-[11px] font-medium text-zinc-600"
-                    }
-                  >
-                    {env.set ? "set" : "missing"}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
+      <div className="mt-6 grid gap-4 lg:grid-cols-2">
+        <SectionPanel eyebrow="Weather" title={home.weather?.locationName ?? "Город не выбран"}>
+          <p className="text-sm leading-relaxed text-zinc-400">
+            Чтобы изменить город, напиши боту <code>/weather Almaty</code>, <code>/weather Astana</code> или другой город. Настройка сохраняется отдельно для твоего аккаунта.
+          </p>
+        </SectionPanel>
+
+        <SectionPanel eyebrow="Calendar" title="Reminder → Google Calendar">
+          <p className="text-sm leading-relaxed text-zinc-400">
+            {googleReady
+              ? "Готово: новые reminders будут создавать события в твоём primary Google Calendar; snooze обновит время, cancel удалит событие."
+              : google.reconnectRequired
+                ? "Это старое read-only подключение. Открой Sources в Mini App и переподключи Google, чтобы разрешить создание событий."
+                : "Открой Sources в Mini App и подключи Google. Без Google reminders всё равно продолжат работать в LifeOS и Telegram."}
+          </p>
         </SectionPanel>
       </div>
     </>

@@ -1,0 +1,18 @@
+[Unit]
+Description=LifeOS daily Telegram digest worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/zalewko/lifeos
+EnvironmentFile=/home/zalewko/lifeos/workers/daily-digest-worker/.env
+ExecStart=/usr/bin/python3 /home/zalewko/lifeos/workers/daily-digest-worker/daily_digest_worker.py
+Restart=always
+RestartSec=5
+User=zalewko
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

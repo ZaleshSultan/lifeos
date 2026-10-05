@@ -81,6 +81,13 @@ restart_service lifeos-bot.service
 systemctl is-active --quiet lifeos-bot.service
 printf 'OK: lifeos-bot.service is active\n'
 
+if systemctl cat lifeos-daily-digest.service >/dev/null 2>&1; then
+  printf 'Restarting lifeos-daily-digest.service ...\n'
+  restart_service lifeos-daily-digest.service
+  systemctl is-active --quiet lifeos-daily-digest.service
+  printf 'OK: lifeos-daily-digest.service is active\n'
+fi
+
 check_url "local healthz" "http://localhost:3000/healthz"
 check_url "public healthz" "$PUBLIC_ORIGIN/healthz"
 check_url "public TMA" "$PUBLIC_ORIGIN/tma/"

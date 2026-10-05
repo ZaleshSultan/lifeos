@@ -90,9 +90,10 @@ path-free Obsidian status card in the TMA dashboard.
 ## Telegram Buttons
 
 Active users receive a persistent reply keyboard after `/start` (and after
-approval) in private chat. It opens Today, Study, Workouts, Finance, Reminders,
-and Bank. The Workouts button only reads the current workout; its inline
-"Начать тренировку" button explicitly starts one. Slash commands continue to
+approval) in private chat. It opens Today, Deadlines, Study, Workouts, Finance,
+Health, Focus, Reminders, Sources, Mode, and Bank. The Study action also exposes
+inline deep links for timetable, grades, and calculator tabs. The Workouts button
+only reads the current workout; its inline "Начать тренировку" button explicitly starts one. Slash commands continue to
 work.
 
 Bank details and matching are available only in the user's private chat.

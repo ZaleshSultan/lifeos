@@ -79,7 +79,9 @@ export function integrationCardsForSession(
   const google = session.integrations.google;
   const googleStatus: IntegrationDisplayStatus =
     google.status === "connected"
-      ? "connected"
+      ? google.reconnectRequired
+        ? "disconnected"
+        : "connected"
       : google.status === "error"
         ? "error"
         : google.status === "expired" || google.status === "revoked"
@@ -118,13 +120,15 @@ export function integrationCardsForSession(
       description:
         googleStatus === "connected"
           ? google.accountEmail
-            ? `Connected as ${google.accountEmail}.`
-            : "Google OAuth is connected."
+            ? `Connected as ${google.accountEmail}. Reminders can be added to Calendar.`
+            : "Google OAuth is connected with Calendar write access."
           : googleStatus === "error"
             ? "Google OAuth needs reconnecting."
-            : googleStatus === "disconnected"
-              ? "Google OAuth is disconnected or expired."
-              : "Connect Google Calendar and Tasks for per-user sync.",
+            : google.reconnectRequired
+              ? "Reconnect Google once to allow LifeOS reminders to create Calendar events."
+              : googleStatus === "disconnected"
+                ? "Google OAuth is disconnected or expired."
+                : "Connect Google Calendar and Tasks for per-user sync.",
       action: googleStatus === "connected" ? undefined : "connect_google",
     },
     {

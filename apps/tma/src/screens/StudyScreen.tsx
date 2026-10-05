@@ -1,11 +1,13 @@
-import { BookOpen, Calculator, CalendarDays, RefreshCw } from "lucide-react";
+import { BookOpen, BookText, Calculator, CalendarDays, MapPinned, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ApiError } from "../api/client";
 import { useSaveStudyCalculatorMutation, useStudyQuery } from "../api/study";
 import { ErrorPanel, LoadingPanel } from "../components/AsyncState";
 import { StudyCalculator } from "../components/study/StudyCalculator";
+import { StudyCampusMap } from "../components/study/StudyCampusMap";
 import { StudyGrades } from "../components/study/StudyGrades";
 import { StudySchedule } from "../components/study/StudySchedule";
+import { StudySyllabi } from "../components/study/StudySyllabi";
 import {
   createStudyDraft,
   reconcileStudyDraft,
@@ -18,16 +20,34 @@ const tabs = [
   { id: "schedule", label: "Расписание", icon: CalendarDays },
   { id: "calculator", label: "Калькулятор", icon: Calculator },
   { id: "grades", label: "Оценки", icon: BookOpen },
+  { id: "syllabi", label: "Силабус", icon: BookText },
+  { id: "map", label: "Карта", icon: MapPinned },
 ] as const;
+
+type StudyTabId = (typeof tabs)[number]["id"];
+
+function initialStudyTab(): StudyTabId {
+  const requested = new URLSearchParams(window.location.search).get("studyTab");
+  return tabs.some((tab) => tab.id === requested)
+    ? (requested as StudyTabId)
+    : "schedule";
+}
 
 export function StudyScreen() {
   const query = useStudyQuery();
   const save = useSaveStudyCalculatorMutation();
-  const [tab, setTab] = useState<(typeof tabs)[number]["id"]>("schedule");
+  const [tab, setTab] = useState<StudyTabId>(initialStudyTab);
   const [courseId, setCourseId] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, StudyDraft>>({});
   const [errors, setErrors] = useState<Record<string, string | null>>({});
   const [savedCourse, setSavedCourse] = useState<string | null>(null);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("screen", "study");
+    url.searchParams.set("studyTab", tab);
+    window.history.replaceState(null, "", url);
+  }, [tab]);
 
   useEffect(() => {
     if (!query.data) return;
@@ -97,7 +117,7 @@ export function StudyScreen() {
         </p>
       ) : null}
       <div
-        className="grid grid-cols-3 gap-1 rounded-xl border border-white/[0.08] bg-white/[0.03] p-1"
+        className="grid grid-cols-5 gap-1 rounded-xl border border-white/[0.08] bg-white/[0.03] p-1"
         role="tablist"
         aria-label="Разделы учёбы"
       >
@@ -117,7 +137,7 @@ export function StudyScreen() {
               const next =
                 tabs[
                   (tabs.findIndex((item) => item.id === tab) +
-                    (event.key === "ArrowRight" ? 1 : 2)) %
+                    (event.key === "ArrowRight" ? 1 : tabs.length - 1)) %
                     tabs.length
                 ];
               setTab(next.id);
@@ -125,7 +145,7 @@ export function StudyScreen() {
             }}
             onClick={() => setTab(id)}
             className={cx(
-              "flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-lg px-1 py-2 text-[11px] font-semibold transition-colors hover:bg-white/[0.06] active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400",
+              "flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-lg px-0.5 py-2 text-[10px] font-semibold transition-colors hover:bg-white/[0.06] active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400",
               tab === id ? "bg-cyan-400/10 text-cyan-200" : "text-zinc-400",
             )}
           >
@@ -143,6 +163,8 @@ export function StudyScreen() {
           <StudySchedule courses={data.courses} timezone={data.timezone} />
         ) : null}
         {tab === "grades" ? <StudyGrades records={data.records} /> : null}
+        {tab === "syllabi" ? <StudySyllabi courses={data.courses} /> : null}
+        {tab === "map" ? <StudyCampusMap /> : null}
         {tab === "calculator" ? (
           <div className="space-y-4">
             {!data.courses.length ? (

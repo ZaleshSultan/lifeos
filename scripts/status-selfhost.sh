@@ -5,6 +5,7 @@ PUBLIC_ORIGIN="https://archlinux.tail2492c9.ts.net"
 SERVICES=(
   lifeos-bot.service
   lifeos-reminder-worker.service
+  lifeos-daily-digest.service
   lifeos-google-sync.service
   lifeos-obsidian-mirror.service
   tailscaled.service

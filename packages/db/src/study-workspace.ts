@@ -4,6 +4,7 @@ import {
   validateStudyCalculatorValues,
   type StudyCalculatorState,
 } from "../../core/src/study.js";
+import { builtinStudyCalculatorState } from "../../core/src/study-syllabi.js";
 import type { Database, Json } from "./types.js";
 
 type Client = SupabaseClient<Database>;
@@ -112,7 +113,9 @@ export async function loadStudyWorkspaceCourses(
         startsOn: course.starts_on,
         endsOn: course.ends_on,
         externalCourseKey: course.external_course_key,
-        calculator: calculatorFromMetadata(course.metadata),
+        calculator:
+          calculatorFromMetadata(course.metadata) ??
+          builtinStudyCalculatorState(course.code),
         schedules: schedules
           .filter((slot) => slot.study_course_id === course.id)
           .map((slot) => ({
@@ -130,6 +133,64 @@ export async function loadStudyWorkspaceCourses(
   return result.sort((left, right) => left.title.localeCompare(right.title));
 }
 
+export async function configureStudyCalculator(
+  client: Client,
+  userId: string,
+  courseId: string,
+  input: unknown,
+): Promise<StudyCalculatorState> {
+  const { data: course, error } = await client
+    .from("study_courses")
+    .select("metadata,updated_at,code")
+    .eq("user_id", userId)
+    .eq("id", courseId)
+    .eq("status", "active")
+    .maybeSingle();
+  if (error) throw new Error("Failed to load study calculator");
+  if (!course) throw new StudyWorkspaceError("study_course_not_found");
+
+  const body = object(input);
+  if (!validateStudyCalculatorDefinition(body.definition))
+    throw new StudyWorkspaceError("invalid_study_calculator");
+
+  const current =
+    calculatorFromMetadata(course.metadata) ??
+    builtinStudyCalculatorState((course as { code?: string }).code ?? "");
+  const nextIds = new Set(body.definition.fields.map((field) => field.id));
+  const values = Object.fromEntries(
+    Object.entries(current?.values ?? {}).filter(([id]) => nextIds.has(id)),
+  );
+  const requestedTarget = body.target;
+  const target =
+    typeof requestedTarget === "number" &&
+    Number.isFinite(requestedTarget) &&
+    requestedTarget >= 0 &&
+    requestedTarget <= 100
+      ? requestedTarget
+      : (current?.target ?? 70);
+
+  const state: StudyCalculatorState = {
+    definition: body.definition,
+    values,
+    target,
+  };
+  const metadata = {
+    ...object(course.metadata),
+    study_calculator_v1: state,
+  } as unknown as Json;
+  const { data: saved, error: saveError } = await client
+    .from("study_courses")
+    .update({ metadata })
+    .eq("user_id", userId)
+    .eq("id", courseId)
+    .eq("updated_at", course.updated_at)
+    .select("id")
+    .maybeSingle();
+  if (saveError) throw new Error("Failed to save study calculator definition");
+  if (!saved) throw new StudyWorkspaceError("study_calculator_conflict");
+  return state;
+}
+
 export async function saveStudyCalculator(
   client: Client,
   userId: string,
@@ -138,14 +199,16 @@ export async function saveStudyCalculator(
 ): Promise<StudyCalculatorState> {
   const { data: course, error } = await client
     .from("study_courses")
-    .select("metadata,updated_at")
+    .select("metadata,updated_at,code")
     .eq("user_id", userId)
     .eq("id", courseId)
     .eq("status", "active")
     .maybeSingle();
   if (error) throw new Error("Failed to load study calculator");
   if (!course) throw new StudyWorkspaceError("study_course_not_found");
-  const current = calculatorFromMetadata(course.metadata);
+  const current =
+    calculatorFromMetadata(course.metadata) ??
+    builtinStudyCalculatorState((course as { code?: string }).code ?? "");
   if (!current)
     throw new StudyWorkspaceError("study_calculator_not_configured");
   const body = object(input);

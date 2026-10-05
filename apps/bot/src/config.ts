@@ -27,6 +27,8 @@ export interface BotConfig {
   googleOAuthClientSecret?: string;
   googleOAuthRedirectUri?: string;
   googleOAuthStateSecret?: string;
+  webDashboardUrl?: string;
+  webSessionSecret?: string;
   syncthingApiUrl?: string;
   syncthingApiKey?: string;
   syncthingServerDeviceId?: string;
@@ -134,6 +136,9 @@ export function loadBotConfig(source: EnvSource = process.env): BotConfig {
     googleOAuthClientSecret: optionalEnv(source, "GOOGLE_OAUTH_CLIENT_SECRET"),
     googleOAuthRedirectUri: optionalEnv(source, "GOOGLE_OAUTH_REDIRECT_URI"),
     googleOAuthStateSecret: optionalEnv(source, "GOOGLE_OAUTH_STATE_SECRET"),
+    webDashboardUrl:
+      optionalEnv(source, "LIFEOS_WEB_URL") ?? optionalEnv(source, "WEB_DASHBOARD_URL"),
+    webSessionSecret: optionalEnv(source, "LIFEOS_WEB_SESSION_SECRET"),
     syncthingApiUrl: optionalEnv(source, "SYNCTHING_API_URL"),
     syncthingApiKey: optionalEnv(source, "SYNCTHING_API_KEY"),
     syncthingServerDeviceId: optionalEnv(source, "SYNCTHING_SERVER_DEVICE_ID"),

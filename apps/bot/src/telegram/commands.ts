@@ -46,6 +46,17 @@ import type {
   TelegramUpdate,
 } from "./types.js";
 import { triggerFinanceAlerts } from "./alerts.js";
+import {
+  cancelReminderGoogleCalendarEvent,
+  syncReminderToGoogleCalendar,
+  type GoogleCalendarSyncResult,
+} from "../google-calendar-sync.js";
+import {
+  fetchWeatherSnapshot,
+  geocodeWeatherLocation,
+  type WeatherSnapshot,
+} from "../weather.js";
+import { createWebSessionToken } from "../web-session.js";
 
 interface ParsedCommand {
   command: string;
@@ -58,8 +69,14 @@ const MAIN_MENU_COMMANDS = new Map<string, ParsedCommand>([
   ["Учёба", { command: "study", args: "" }],
   ["Тренировки", { command: "workout_menu", args: "" }],
   ["Финансы", { command: "finance", args: "" }],
+  ["Здоровье", { command: "health", args: "" }],
+  ["Фокус", { command: "focus", args: "" }],
   ["Напоминания", { command: "reminders", args: "" }],
+  ["Источники", { command: "sources", args: "" }],
+  ["Режим", { command: "mode", args: "" }],
   ["Банк", { command: "bank", args: "unmatched" }],
+  ["Погода", { command: "weather", args: "" }],
+  ["Web", { command: "web", args: "" }],
 ]);
 
 const MAIN_MENU_KEYBOARD: TelegramReplyKeyboardMarkup = {
@@ -67,6 +84,9 @@ const MAIN_MENU_KEYBOARD: TelegramReplyKeyboardMarkup = {
     [{ text: "Сегодня" }, { text: "Дедлайны" }],
     [{ text: "Учёба" }, { text: "Напоминания" }],
     [{ text: "Тренировки" }, { text: "Финансы" }],
+    [{ text: "Здоровье" }, { text: "Фокус" }],
+    [{ text: "Источники" }, { text: "Режим" }],
+    [{ text: "Погода" }, { text: "Web" }],
     [{ text: "Банк" }],
   ],
   resize_keyboard: true,
@@ -101,6 +121,8 @@ const HELP_TEXT = [
   "/task task title",
   "/deadline 2026-05-20 task title",
   "/today",
+  "/weather [город] — погода и город для утренней сводки",
+  "/web — личная web-панель",
   "/focus [sleep 7 mood 8 energy 7 stress 3]",
   "/health",
   "/health_log steps:8000 sleep:7h rhr:62 weight:70.5 mood:7 energy:6",
@@ -122,7 +144,8 @@ const HELP_TEXT = [
   "/mode auto",
   "/mode clear",
   "/course",
-  "/study — учебный курс",
+  "/study — учебный раздел",
+  "/study today|schedule|grades|calculator|syllabi|map|deadlines",
   "/course progress [number]",
   "/course topic [text]",
   "/deadlines — список дедлайнов",
@@ -196,7 +219,7 @@ const SOURCE_CATALOG: Array<{
     sourceKey: "google_calendar",
     displayName: "Google Calendar",
     sourceType: "google",
-    note: "Read-only local OAuth worker.",
+    note: "Per-user OAuth writes LifeOS reminder events; calendar import still uses the legacy local worker.",
     implemented: true,
   },
   {
@@ -243,7 +266,8 @@ const SOURCE_CATALOG: Array<{
   },
 ];
 
-const LOCAL_TIMEZONE: string = process.env.LOCAL_TIMEZONE || "Asia/Qyzylorda";
+const LOCAL_TIMEZONE: string = process.env.LOCAL_TIMEZONE || "Asia/Almaty";
+const AITU_MAIN_CAMPUS_MAP_URL = "https://yuujiso.github.io/aitumap/";
 
 function escapeHtml(value: string): string {
   return value
@@ -674,10 +698,18 @@ function buildWorkoutScreenUrl(tmaUrl: string): string | null {
   }
 }
 
-function buildStudyScreenUrl(tmaUrl: string): string | null {
+function buildStudyScreenUrl(
+  tmaUrl: string,
+  tab?: "schedule" | "calculator" | "grades" | "syllabi" | "map",
+): string | null {
   try {
     const url = new URL(tmaUrl);
     url.searchParams.set("screen", "study");
+    if (tab) {
+      url.searchParams.set("studyTab", tab);
+    } else {
+      url.searchParams.delete("studyTab");
+    }
     return url.toString();
   } catch {
     return null;
@@ -720,6 +752,7 @@ function courseUsage(): string {
   return [
     "Usage:",
     "/course",
+    "/study today|schedule|grades|calculator|syllabi|map|deadlines",
     "/course progress [number]",
     "/course topic [text]",
   ].join("\n");
@@ -2423,6 +2456,144 @@ function makeFinanceEntryHandler(
   };
 }
 
+function googleCalendarResultLine(result: GoogleCalendarSyncResult): string {
+  if (result.status === "synced") {
+    return "📅 Google Calendar: событие добавлено.";
+  }
+  if (result.status === "failed") {
+    return "📅 Google Calendar временно не синхронизировался; LifeOS reminder сохранён.";
+  }
+  if (result.reason === "write_scope_missing") {
+    return "📅 Google Calendar: переподключи Google в LifeOS один раз, чтобы разрешить добавление событий.";
+  }
+  if (result.reason === "not_connected") {
+    return "📅 Google Calendar не подключён — reminder останется только в LifeOS/Telegram.";
+  }
+  return "📅 Google Calendar: синхронизация сейчас недоступна.";
+}
+
+function weatherText(snapshot: WeatherSnapshot): string {
+  const temperature =
+    snapshot.temperatureC === null ? "—" : `${Math.round(snapshot.temperatureC)}°C`;
+  const feels =
+    snapshot.apparentTemperatureC === null
+      ? null
+      : `${Math.round(snapshot.apparentTemperatureC)}°C`;
+  const range =
+    snapshot.minTemperatureC === null || snapshot.maxTemperatureC === null
+      ? null
+      : `${Math.round(snapshot.minTemperatureC)}…${Math.round(snapshot.maxTemperatureC)}°C`;
+  const rain =
+    snapshot.precipitationProbabilityPercent === null
+      ? null
+      : `${Math.round(snapshot.precipitationProbabilityPercent)}%`;
+  const details = [
+    range ? `днём ${range}` : null,
+    feels ? `ощущается ${feels}` : null,
+    rain ? `осадки ${rain}` : null,
+  ].filter(Boolean);
+  return [
+    `<b>🌤 ${escapeHtml(snapshot.locationName)}</b>`,
+    `${escapeHtml(snapshot.weatherLabel)} · <b>${escapeHtml(temperature)}</b>`,
+    details.length ? escapeHtml(details.join(" · ")) : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+async function handleWeatherCommand(
+  args: string,
+  message: TelegramMessage,
+  runtime: TelegramBotRuntime,
+  user: TelegramUserRecord | null,
+): Promise<void> {
+  const requested = args.trim();
+
+  try {
+    let location = await runtime.store!.getWeatherSettings(user!.userId);
+
+    if (requested) {
+      const geocoded = await geocodeWeatherLocation(requested);
+      if (!geocoded) {
+        await runtime.telegram.sendMessage({
+          chatId: message.chat.id,
+          text: `Не нашёл город «${escapeHtml(requested)}». Попробуй, например: <code>/weather Astana</code>.`,
+        });
+        return;
+      }
+      location = await runtime.store!.setWeatherSettings(user!.userId, {
+        locationName: [geocoded.name, geocoded.admin1, geocoded.country]
+          .filter(Boolean)
+          .join(", "),
+        latitude: geocoded.latitude,
+        longitude: geocoded.longitude,
+      });
+    }
+
+    if (!location) {
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: [
+          "Город для погоды ещё не выбран.",
+          "Укажи его один раз: <code>/weather Astana</code>",
+          "После этого погода будет персональной и попадёт в утреннюю сводку.",
+        ].join("\n"),
+      });
+      return;
+    }
+
+    const snapshot = await fetchWeatherSnapshot(
+      {
+        name: location.locationName,
+        latitude: location.latitude,
+        longitude: location.longitude,
+      },
+      user!.timezone || LOCAL_TIMEZONE,
+    );
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: `${requested ? "Город сохранён.\n\n" : ""}${weatherText(snapshot)}`,
+    });
+  } catch (error) {
+    console.warn("weather_command_failed", {
+      userId: user?.userId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "Погода сейчас временно недоступна. Сохранённый город не потерян — попробуй ещё раз позже.",
+    });
+  }
+}
+
+async function handleWebCommand(
+  _args: string,
+  message: TelegramMessage,
+  runtime: TelegramBotRuntime,
+  user: TelegramUserRecord | null,
+): Promise<void> {
+  if (!runtime.webDashboardUrl || !runtime.webSessionSecret) {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "Личная web-панель ещё не настроена на сервере. Нужны LIFEOS_WEB_URL и LIFEOS_WEB_SESSION_SECRET.",
+    });
+    return;
+  }
+
+  const url = new URL("/login", runtime.webDashboardUrl);
+  url.searchParams.set(
+    "token",
+    createWebSessionToken(user!.userId, runtime.webSessionSecret),
+  );
+  await runtime.telegram.sendMessage({
+    chatId: message.chat.id,
+    text: "🌐 Это твоя личная LifeOS web-панель. Данные в ней привязаны к твоему аккаунту, а не общие для всех.",
+    replyMarkup: {
+      inline_keyboard: [[{ text: "Открыть мой LifeOS Web", url: url.toString() }]],
+    },
+  });
+}
+
 async function handleRemindCommand(
   args: string,
   message: TelegramMessage,
@@ -2461,6 +2632,13 @@ async function handleRemindCommand(
       message_id: message.message_id,
     }),
   });
+  const calendarResult = await syncReminderToGoogleCalendar({
+    store: runtime.store!,
+    userId: user!.userId,
+    reminder,
+    timezone: user!.timezone || LOCAL_TIMEZONE,
+    config: runtime.googleOAuth ?? {},
+  });
 
   await runtime.telegram.sendMessage({
     chatId: message.chat.id,
@@ -2468,6 +2646,7 @@ async function handleRemindCommand(
       "Reminder scheduled.",
       `When: <code>${escapeHtml(formatReminderDateTime(reminder.remindAt, user!.timezone || LOCAL_TIMEZONE))}</code>`,
       `Message: ${escapeHtml(reminder.message)}`,
+      googleCalendarResultLine(calendarResult),
     ].join("\n"),
   });
 }
@@ -2887,6 +3066,19 @@ async function handleReminderCommand(
   const reminder = matches[0]!;
   if (action === "cancel") {
     await runtime.store!.cancelReminder(user!.userId, reminder.id);
+    try {
+      await cancelReminderGoogleCalendarEvent({
+        store: runtime.store!,
+        userId: user!.userId,
+        reminder,
+        config: runtime.googleOAuth ?? {},
+      });
+    } catch (error) {
+      console.warn("google_calendar_cancel_failed", {
+        reminderId: reminder.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
       text: `Cancelled reminder <code>${escapeHtml(reminder.id.slice(0, 8))}</code>.`,
@@ -2905,7 +3097,14 @@ async function handleReminderCommand(
     const remindAt = new Date(
       (runtime.now?.() ?? new Date()).getTime() + minutes * 60_000,
     ).toISOString();
-    await runtime.store!.snoozeReminder(user!.userId, reminder.id, remindAt);
+    const snoozed = await runtime.store!.snoozeReminder(user!.userId, reminder.id, remindAt);
+    await syncReminderToGoogleCalendar({
+      store: runtime.store!,
+      userId: user!.userId,
+      reminder: snoozed,
+      timezone: user!.timezone || LOCAL_TIMEZONE,
+      config: runtime.googleOAuth ?? {},
+    });
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
       text: `Snoozed reminder <code>${escapeHtml(reminder.id.slice(0, 8))}</code> until <code>${escapeHtml(formatReminderDateTime(remindAt, user!.timezone))}</code>.`,
@@ -2918,6 +3117,70 @@ async function handleReminderCommand(
   });
 }
 
+const STUDY_WEEKDAYS = [
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+] as const;
+
+const STUDY_SESSION_LABELS: Record<string, string> = {
+  lecture: "лекция",
+  practical: "практика",
+  lab: "лабораторная",
+};
+
+async function handleStudyTodaySchedule(
+  message: TelegramMessage,
+  runtime: TelegramBotRuntime,
+  user: TelegramUserRecord,
+): Promise<void> {
+  const timezone = user.timezone || LOCAL_TIMEZONE;
+  const now = DateTime.fromJSDate(runtime.now?.() ?? new Date()).setZone(timezone);
+  const dayKey = STUDY_WEEKDAYS[now.weekday - 1]!;
+  const workspace = await runtime.store!.getTmaStudySummary(user.userId, timezone);
+  const slots = workspace.courses
+    .flatMap((course) =>
+      course.schedules
+        .filter((slot) => slot.dayOfWeek === dayKey)
+        .map((slot) => ({ course, slot })),
+    )
+    .sort((left, right) => left.slot.startTime.localeCompare(right.slot.startTime));
+
+  const lines = slots.map(({ course, slot }, index) => {
+    const details = [
+      slot.sessionType ? STUDY_SESSION_LABELS[slot.sessionType] ?? slot.sessionType : null,
+      slot.room,
+    ].filter(Boolean);
+    return `${index + 1}. <b>${escapeHtml(slot.startTime.slice(0, 5))}–${escapeHtml(slot.endTime.slice(0, 5))}</b> — ${escapeHtml(course.title)}${details.length ? `\n   ${escapeHtml(details.join(" · "))}` : ""}`;
+  });
+
+  const campusMapUrl = runtime.tmaUrl
+    ? buildStudyScreenUrl(runtime.tmaUrl, "map")
+    : null;
+  await runtime.telegram.sendMessage({
+    chatId: message.chat.id,
+    text: lines.length
+      ? [`<b>Пары сегодня · ${escapeHtml(now.toFormat("dd.MM.yyyy"))}</b>`, ...lines].join("\n")
+      : `Сегодня (${escapeHtml(now.toFormat("dd.MM.yyyy"))}) пар по расписанию нет.`,
+    replyMarkup: {
+      inline_keyboard: campusMapUrl
+        ? [
+            [
+              {
+                text: "Карта главного корпуса",
+                web_app: { url: campusMapUrl },
+              },
+            ],
+          ]
+        : [[{ text: "Карта главного корпуса", url: AITU_MAIN_CAMPUS_MAP_URL }]],
+    },
+  });
+}
+
 async function handleCourseCommand(
   args: string,
   message: TelegramMessage,
@@ -2927,6 +3190,69 @@ async function handleCourseCommand(
   const now = runtime.now?.() ?? new Date();
   const today = localDateString(now, user!.timezone);
   const trimmed = args.trim();
+  const normalized = trimmed.toLowerCase();
+
+  if (normalized === "deadlines") {
+    await handleDeadlinesCommand("", message, runtime, user);
+    return;
+  }
+
+  if (normalized === "today") {
+    await handleStudyTodaySchedule(message, runtime, user!);
+    return;
+  }
+
+  if (normalized === "map") {
+    const mapUrl = runtime.tmaUrl
+      ? buildStudyScreenUrl(runtime.tmaUrl, "map")
+      : null;
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "Карта главного корпуса AITU · Yuujiso/aitumap",
+      replyMarkup: {
+        inline_keyboard: [
+          ...(mapUrl
+            ? [[{ text: "Открыть карту в LifeOS", web_app: { url: mapUrl } }]]
+            : []),
+          [{ text: "Открыть оригинал", url: AITU_MAIN_CAMPUS_MAP_URL }],
+        ],
+      },
+    });
+    return;
+  }
+
+  if (
+    normalized === "schedule" ||
+    normalized === "grades" ||
+    normalized === "calculator" ||
+    normalized === "syllabi"
+  ) {
+    const tab = normalized as "schedule" | "grades" | "calculator" | "syllabi";
+    const studyUrl = runtime.tmaUrl
+      ? buildStudyScreenUrl(runtime.tmaUrl, tab)
+      : null;
+    const labels = {
+      schedule: "Расписание",
+      grades: "Оценки",
+      calculator: "Калькулятор",
+      syllabi: "Силабусы",
+    } as const;
+
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: studyUrl
+        ? `Открываю раздел «${labels[tab]}».`
+        : `Раздел «${labels[tab]}» доступен в Mini App. Ссылка Mini App не настроена.`,
+      replyMarkup: studyUrl
+        ? {
+            inline_keyboard: [
+              [{ text: `Открыть: ${labels[tab]}`, web_app: { url: studyUrl } }],
+            ],
+          }
+        : undefined,
+    });
+    return;
+  }
 
   if (!trimmed) {
     const course = await runtime.store!.getActiveStudyCourse(
@@ -2946,6 +3272,52 @@ async function handleCourseCommand(
         ? {
             inline_keyboard: [
               [{ text: "Открыть учёбу", web_app: { url: studyUrl } }],
+              [
+                {
+                  text: "Расписание",
+                  web_app: {
+                    url: buildStudyScreenUrl(runtime.tmaUrl!, "schedule")!,
+                  },
+                },
+                {
+                  text: "Оценки",
+                  web_app: {
+                    url: buildStudyScreenUrl(runtime.tmaUrl!, "grades")!,
+                  },
+                },
+              ],
+              [
+                {
+                  text: "Калькулятор",
+                  web_app: {
+                    url: buildStudyScreenUrl(runtime.tmaUrl!, "calculator")!,
+                  },
+                },
+                {
+                  text: "Силабусы",
+                  web_app: {
+                    url: buildStudyScreenUrl(runtime.tmaUrl!, "syllabi")!,
+                  },
+                },
+              ],
+              [
+                { text: "Пары сегодня", callback_data: "study_today" },
+                { text: "Дедлайны", callback_data: "study_deadlines" },
+              ],
+              [
+                runtime.tmaUrl
+                  ? {
+                      text: "Карта корпуса",
+                      web_app: {
+                        url: buildStudyScreenUrl(runtime.tmaUrl, "map")!,
+                      },
+                    }
+                  : { text: "Карта корпуса", url: AITU_MAIN_CAMPUS_MAP_URL },
+              ],
+              [
+                { text: "➕ Дедлайн", callback_data: "study_add_deadline" },
+                { text: "✍️ Тема", callback_data: "study_add_topic" },
+              ],
             ],
           }
         : undefined,
@@ -3813,6 +4185,8 @@ const COMMAND_REGISTRY: Record<string, CommandConfig> = {
     requiresUser: true,
   },
   remind: { handler: handleRemindCommand, requiresUser: true },
+  weather: { handler: handleWeatherCommand, requiresUser: true },
+  web: { handler: handleWebCommand, requiresUser: true },
   workout: { handler: handleWorkoutCommand, requiresUser: true },
   workout_menu: { handler: handleWorkoutMenuCommand, requiresUser: true },
 
@@ -4356,7 +4730,13 @@ async function handleTelegramCallbackQuery(
   const bankMatch =
     typeof data === "string" ? BANK_MATCH_CALLBACK_PATTERN.exec(data) : null;
 
-  if (data !== "workout_start" && !bankMatch) {
+  const studyAction =
+    data === "study_today" ||
+    data === "study_deadlines" ||
+    data === "study_add_deadline" ||
+    data === "study_add_topic";
+
+  if (data !== "workout_start" && !bankMatch && !studyAction) {
     await answer("Эта кнопка недоступна. Откройте раздел заново.");
     return;
   }
@@ -4395,6 +4775,40 @@ async function handleTelegramCallbackQuery(
   }
 
   try {
+    if (data === "study_today") {
+      await handleStudyTodaySchedule(message, runtime, user);
+      return;
+    }
+
+    if (data === "study_deadlines") {
+      await handleDeadlinesCommand("", message, runtime, user);
+      return;
+    }
+
+    if (data === "study_add_deadline") {
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: [
+          "Добавить дедлайн:",
+          "<code>/deadline 2026-10-12 Лабораторная по ОС</code>",
+          "",
+          "Замени дату и название — запись сразу попадёт в LifeOS.",
+        ].join("\n"),
+      });
+      return;
+    }
+
+    if (data === "study_add_topic") {
+      await runtime.telegram.sendMessage({
+        chatId: message.chat.id,
+        text: [
+          "Записать тему текущего курса:",
+          "<code>/course topic Process scheduling</code>",
+        ].join("\n"),
+      });
+      return;
+    }
+
     if (bankMatch) {
       await handleBankMatchCallback(
         bankMatch[1]!,

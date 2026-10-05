@@ -25,6 +25,23 @@ root `/assets/` references.
 `pnpm selfhost:deploy` builds the TMA, restarts `lifeos-bot.service`, then
 checks local health, public health, and the public TMA.
 
+## Daily Study Digest (one-time setup)
+
+After applying the latest Supabase migrations, install the daily digest service once:
+
+```bash
+cd /home/zalewko/lifeos/workers/daily-digest-worker
+cp .env.example .env
+chmod 600 .env
+$EDITOR .env
+sudo cp lifeos-daily-digest.service.example /etc/systemd/system/lifeos-daily-digest.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now lifeos-daily-digest.service
+```
+
+The default delivery time is 08:00 in each profile timezone. The worker keeps a
+per-day delivery record, so restarts do not create duplicate morning messages.
+
 ## Status And Logs
 
 ```bash
@@ -32,6 +49,7 @@ pnpm selfhost:status
 
 journalctl -u lifeos-bot.service -n 100 --no-pager
 journalctl -u lifeos-reminder-worker.service -n 100 --no-pager
+journalctl -u lifeos-daily-digest.service -n 100 --no-pager
 journalctl -u lifeos-google-sync.service -n 100 --no-pager
 journalctl -u lifeos-obsidian-mirror.service -n 100 --no-pager
 ```
@@ -40,6 +58,7 @@ Restart an individual worker only when needed:
 
 ```bash
 sudo systemctl restart lifeos-reminder-worker.service
+sudo systemctl restart lifeos-daily-digest.service
 sudo systemctl restart lifeos-google-sync.service
 sudo systemctl restart lifeos-obsidian-mirror.service
 ```
@@ -80,6 +99,7 @@ pnpm typecheck
 pnpm selfhost:build-tma
 pnpm --filter @lifeos/web build
 python -m py_compile workers/reminder-worker/reminder_worker.py
+python -m py_compile workers/daily-digest-worker/daily_digest_worker.py
 python -m py_compile workers/google-sync/google_sync.py
 python -m py_compile workers/ics-sync/ics_sync.py
 ```

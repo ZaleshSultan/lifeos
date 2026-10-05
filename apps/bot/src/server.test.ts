@@ -33,6 +33,7 @@ import type {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadBotConfig } from "./config.js";
 import { createBotServer, type BotServerOptions } from "./server.js";
+import { createWebSessionToken } from "./web-session.js";
 import type { SendMessageInput, TelegramClient } from "./telegram/types.js";
 
 const servers: ReturnType<typeof createBotServer>[] = [];
@@ -297,6 +298,9 @@ export function tmaStore(events: string[] = []): LifeOSStore {
   return {
     async resolveTelegramUser() {
       return null;
+    },
+    async resolveUserById(userId) {
+      return userId === "user-1" ? activeTelegramUser() : null;
     },
     async linkDefaultTelegramUser() {
       return activeTelegramUser({ displayName: "User" });
@@ -591,6 +595,9 @@ export function tmaStore(events: string[] = []): LifeOSStore {
     async saveStudyCalculator(): Promise<never> {
       throw new Error("Not used by general server tests");
     },
+    async configureStudyCalculator(): Promise<never> {
+      throw new Error("Not used by general server tests");
+    },
     async upsertExternalSource(userId, source) {
       return {
         id: `source-${source.sourceKey}`,
@@ -724,6 +731,18 @@ export function tmaStore(events: string[] = []): LifeOSStore {
     async setReminderMode(_userId, nextMode) {
       reminderMode = nextMode;
       return reminderMode;
+    },
+    async getWeatherSettings() {
+      return null;
+    },
+    async setWeatherSettings(_userId, settings) {
+      return settings;
+    },
+    async updateReminderMetadata(_userId, reminderId, metadataJson) {
+      const reminder = reminders.find((item) => item.id === reminderId);
+      if (!reminder) throw new Error("not found");
+      reminder.metadataJson = metadataJson;
+      return reminder;
     },
     async listAcademicRecords() {
       return [];
@@ -2470,6 +2489,40 @@ describe("bot server", () => {
     });
   });
 
+  it("accepts a signed personal web session and resolves the matching user", async () => {
+    const store = tmaStore();
+    store.resolveUserById = async (userId) =>
+      userId === "user-1" ? activeTelegramUser({ displayName: "Web User" }) : null;
+    const server = createBotServer({
+      config: {
+        webSessionSecret: "web-session-secret",
+      },
+      store,
+    });
+    servers.push(server);
+
+    const port = await listen(server);
+    const token = createWebSessionToken(
+      "user-1",
+      "web-session-secret",
+      60,
+      Math.floor(Date.now() / 1000),
+    );
+    const response = await fetch(`http://127.0.0.1:${port}/api/tma/session`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      data: {
+        state: "active",
+        displayName: "Web User",
+        profile: { status: "active" },
+      },
+    });
+  });
+
   it("returns Google connection status in TMA session without leaking tokens", async () => {
     const store = tmaStore();
     store.resolveTelegramUser = async () => activeTelegramUser();
@@ -2515,6 +2568,8 @@ describe("bot server", () => {
             connected: true,
             status: "connected",
             accountEmail: "person@example.com",
+            calendarWriteEnabled: false,
+            reconnectRequired: true,
           },
         },
       },
@@ -2593,7 +2648,7 @@ describe("bot server", () => {
     expect(url.searchParams.get("prompt")).toBe("consent");
     expect(url.searchParams.get("state")).toMatch(/\./);
     expect(url.searchParams.get("scope")).toContain(
-      "https://www.googleapis.com/auth/calendar.readonly",
+      "https://www.googleapis.com/auth/calendar.events",
     );
     expect(JSON.stringify(body)).not.toContain("google-client-secret");
     expect(JSON.stringify(body)).not.toContain("google-state-secret");
@@ -2690,7 +2745,7 @@ describe("bot server", () => {
               refresh_token: "refresh-secret",
               expires_in: 3600,
               scope:
-                "https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/tasks.readonly",
+                "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/tasks.readonly",
             }),
             {
               status: 200,
