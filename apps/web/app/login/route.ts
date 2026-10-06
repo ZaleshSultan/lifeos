@@ -4,19 +4,19 @@ import { verifyWebTokenAgainstApi } from "@/lib/lifeos-api";
 export async function GET(request: NextRequest) {
   const token = request.nextUrl.searchParams.get("token")?.trim();
   if (!token) {
-    return NextResponse.redirect(new URL("/access?error=invalid", request.url));
+    return NextResponse.redirect(new URL("/web/access?error=invalid", request.url));
   }
 
   try {
     const verification = await verifyWebTokenAgainstApi(token);
     if (!verification.ok) {
-      return NextResponse.redirect(new URL("/access?error=invalid", request.url));
+      return NextResponse.redirect(new URL("/web/access?error=invalid", request.url));
     }
   } catch {
-    return NextResponse.redirect(new URL("/access?error=invalid", request.url));
+    return NextResponse.redirect(new URL("/web/access?error=invalid", request.url));
   }
 
-  const response = NextResponse.redirect(new URL("/today", request.url));
+  const response = NextResponse.redirect(new URL("/web/today", request.url));
   response.cookies.set("lifeos_web_session", token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",

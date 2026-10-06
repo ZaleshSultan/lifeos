@@ -2580,7 +2580,10 @@ async function handleWebCommand(
     return;
   }
 
-  const url = new URL("/login", runtime.webDashboardUrl);
+  const webBase = runtime.webDashboardUrl.endsWith("/")
+    ? runtime.webDashboardUrl
+    : `${runtime.webDashboardUrl}/`;
+  const url = new URL("login", webBase);
   url.searchParams.set(
     "token",
     createWebSessionToken(user!.userId, runtime.webSessionSecret),
