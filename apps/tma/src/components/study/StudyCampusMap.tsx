@@ -38,7 +38,7 @@ export function StudyCampusMap() {
 
       <p className="px-1 text-xs leading-relaxed text-zinc-500">
         Карта: Yuujiso/aitumap. Используется с указанием автора согласно README
-        проекта. {" "}
+        проекта.{" "}
         <a
           href={AITU_MAP_REPO_URL}
           target="_blank"

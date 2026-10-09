@@ -40,22 +40,44 @@ export class ApiError extends Error {
   }
 }
 
-export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+export async function request<T>(
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
+  const session = telegram.initData;
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers: {
       "content-type": "application/json",
-      "x-telegram-init-data": telegram.initData,
-      ...options.headers,
+      ...Object.fromEntries(new Headers(options.headers).entries()),
+      "x-telegram-init-data": session,
     },
   });
 
+  if (session !== telegram.initData) {
+    throw new ApiError("Сессия Telegram изменилась. Обнови приложение.", 401);
+  }
+
   if (!response.ok) {
     const text = await response.text();
-    throw new ApiError(
-      text || `Request failed: ${response.status}`,
-      response.status,
-    );
+    let message = text || `Request failed: ${response.status}`;
+    try {
+      const error = JSON.parse(text) as { error?: string };
+      const messages: Record<string, string> = {
+        invalid_telegram_init_data:
+          "Открой LifeOS через кнопку Mini App в Telegram. Если сессия устарела, закрой приложение и открой снова.",
+        telegram_user_not_linked:
+          "Сначала отправь /start своему боту LifeOS, затем открой Mini App снова.",
+        tma_auth_not_configured:
+          "Авторизация Mini App ещё не настроена на сервере.",
+        database_not_configured:
+          "Сервер запускается. Попробуй обновить данные через минуту.",
+      };
+      if (error.error && messages[error.error]) message = messages[error.error];
+    } catch {
+      // Keep non-JSON backend messages intact.
+    }
+    throw new ApiError(message, response.status);
   }
 
   if (response.status === 204) {
@@ -63,6 +85,9 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
   }
 
   const body = (await response.json()) as ApiEnvelope<T> | T;
+  if (session !== telegram.initData) {
+    throw new ApiError("Сессия Telegram изменилась. Обнови приложение.", 401);
+  }
 
   if (body && typeof body === "object" && "data" in body) {
     return (body as ApiEnvelope<T>).data;

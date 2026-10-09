@@ -68,6 +68,8 @@ function fixture() {
       room: "secret",
     },
   ];
+  const schemes: Array<Record<string, unknown>> = [];
+  const documents: Array<Record<string, unknown>> = [];
   const requests: Array<{ table: string; method: string; url: URL }> = [];
   let conflict = false;
   const client = createClient<Database>("http://test.local", "test-key", {
@@ -78,7 +80,37 @@ function fixture() {
         const table = url.pathname.split("/").pop()!;
         const method = init?.method ?? "GET";
         requests.push({ table, method, url });
-        let rows = (table === "study_courses" ? courses : schedules)
+        if (table === "activate_study_grading_scheme") {
+          const body = JSON.parse(String(init?.body));
+          schemes
+            .filter(
+              (scheme) =>
+                scheme.user_id === body.p_user_id &&
+                scheme.study_course_id === body.p_course_id,
+            )
+            .forEach((scheme) => {
+              scheme.is_active = scheme.id === body.p_scheme_id;
+            });
+          return new Response("null", {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        const tableRows =
+          table === "study_courses"
+            ? courses
+            : table === "course_schedules"
+              ? schedules
+              : table === "grading_schemes"
+                ? schemes
+                : documents;
+        if (method === "POST")
+          tableRows.push({
+            ...JSON.parse(String(init?.body)),
+            id: `00000000-0000-4000-8000-${String(tableRows.length + 1).padStart(12, "0")}`,
+            created_at: "2026-10-08T00:00:00Z",
+          });
+        let rows = tableRows
           .filter((row) => {
             return [...url.searchParams].every(([key, filter]) => {
               if (filter.startsWith("eq."))
@@ -119,6 +151,8 @@ function fixture() {
   return {
     client,
     courses,
+    schemes,
+    documents,
     requests,
     setConflict: () => {
       conflict = true;
@@ -136,38 +170,77 @@ describe("study workspace", () => {
     for (const request of f.requests) {
       if (request.table === "study_courses")
         expect(request.url.searchParams.get("user_id")).toBe("eq.owner");
-      else
+      else if (request.table === "course_schedules")
         expect(request.url.searchParams.get("study_course_id")).toBe(
           `in.(${courseId})`,
         );
+      else {
+        expect(request.url.searchParams.get("user_id")).toBe("eq.owner");
+        expect(request.url.searchParams.get("study_course_id")).toBe(
+          `eq.${courseId}`,
+        );
+      }
     }
   });
 
-  it("uses the built-in syllabus when a known active course has no stored calculator", async () => {
+  it("does not invent runtime course formulas when no definition is stored", async () => {
     const f = fixture();
     f.courses[0].code = "DMS52-EN";
     f.courses[0].metadata = { untouched: "keep" };
     const result = await loadStudyWorkspaceCourses(f.client, "owner");
-    expect(result[0].calculator?.definition.fields).toHaveLength(11);
-    expect(result[0].calculator?.definition.sourceName).toContain("built-in");
+    expect(result[0].calculator).toBeNull();
+  });
+
+  it("uses the stored active scheme for any course and sanitizes manual grade provenance", async () => {
+    const f = fixture();
+    f.schemes.push({
+      id: "scheme",
+      user_id: "owner",
+      study_course_id: courseId,
+      definition,
+      is_active: true,
+      verification: "verified",
+      version: 1,
+    });
+    (
+      f.courses[0].metadata as { study_calculator_v1: { values: unknown } }
+    ).study_calculator_v1.values = {
+      att1: { earned: 15, max: 30, kind: "actual", source: "client" },
+    };
+    const [course] = await loadStudyWorkspaceCourses(f.client, "owner");
+    expect(course.calculator?.values.att1).toEqual({
+      earned: 15,
+      max: 30,
+      kind: "actual",
+      source: "manual_confirmed",
+    });
+    expect(course.gradingSchemes[0].isActive).toBe(true);
   });
 
   it("stores a user syllabus definition and preserves matching calculator values", async () => {
     const f = fixture();
-    (f.courses[0].metadata as { study_calculator_v1: { values: Record<string, number> } })
-      .study_calculator_v1.values = { att1: 72 };
+    (
+      f.courses[0].metadata as {
+        study_calculator_v1: { values: Record<string, number> };
+      }
+    ).study_calculator_v1.values = { att1: 72 };
     const customDefinition = {
       ...definition,
       sourceName: "Networks syllabus Fall 2026",
-      fields: definition.fields.map((field) => ({ ...field, label: `Custom ${field.label}` })),
+      fields: definition.fields.map((field) => ({
+        ...field,
+        label: `Custom ${field.label}`,
+      })),
     };
 
     const saved = await configureStudyCalculator(f.client, "owner", courseId, {
       definition: customDefinition,
       target: 85,
+      confirmed: true,
     });
 
-    expect(saved.definition).toEqual(customDefinition);
+    expect(saved.definition).toMatchObject(customDefinition);
+    expect(saved.definition.verification).toBe("verified");
     expect(saved.values).toEqual({ att1: 72 });
     expect(saved.target).toBe(85);
     expect(f.courses[0].metadata).toMatchObject({
@@ -185,9 +258,58 @@ describe("study workspace", () => {
       ),
     };
     await expect(
-      configureStudyCalculator(f.client, "owner", courseId, { definition: invalid }),
+      configureStudyCalculator(f.client, "owner", courseId, {
+        definition: invalid,
+      }),
     ).rejects.toThrow("invalid_study_calculator");
-    expect(f.requests.some((request) => request.method === "PATCH")).toBe(false);
+    expect(f.requests.some((request) => request.method === "PATCH")).toBe(
+      false,
+    );
+  });
+
+  it("requires confirmation before replacing a definition and retains attendance", async () => {
+    const f = fixture();
+    await expect(
+      configureStudyCalculator(f.client, "owner", courseId, { definition }),
+    ).rejects.toThrow("study_scheme_needs_review");
+    expect(f.requests.some((request) => request.method === "POST")).toBe(false);
+    const saved = await saveStudyCalculator(f.client, "owner", courseId, {
+      values: { att1: { earned: 15, max: 30, kind: "actual" } },
+      target: 70,
+      attendancePercent: 80,
+      maxima: { exam: 30 },
+    });
+    expect(saved.attendancePercent).toBe(80);
+    expect(saved.maxima).toEqual({ exam: 30 });
+    expect(
+      (await loadStudyWorkspaceCourses(f.client, "owner"))[0].calculator
+        ?.maxima,
+    ).toEqual({ exam: 30 });
+    expect(saved.values.att1).toMatchObject({
+      kind: "actual",
+      source: "manual_confirmed",
+    });
+    await expect(
+      saveStudyCalculator(f.client, "owner", courseId, {
+        values: {},
+        target: 70,
+        attendancePercent: 120,
+      }),
+    ).rejects.toThrow("invalid_study_calculator");
+    await expect(
+      saveStudyCalculator(f.client, "owner", courseId, {
+        values: {},
+        target: 70,
+        maxima: { exam: 0 },
+      }),
+    ).rejects.toThrow("invalid_study_calculator");
+    await expect(
+      saveStudyCalculator(f.client, "owner", courseId, {
+        values: {},
+        target: 70,
+        maxima: { unmapped: 30 },
+      }),
+    ).rejects.toThrow("invalid_study_calculator");
   });
 
   it("saves a scenario without changing its formula, Moodle link or unrelated metadata", async () => {

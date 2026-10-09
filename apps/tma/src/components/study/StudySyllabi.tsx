@@ -1,229 +1,741 @@
-import { BookText, Plus, Save, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import type {
-  StudyCalculatorDefinition,
-  StudyCalculatorField,
+import { BookText, Download, Plus, Save, Trash2, Upload } from "lucide-react";
+import { useEffect, useState } from "react";
+import {
+  validateStudyCalculatorDefinition,
+  type StudyCalculatorDefinition,
+  type StudyCalculatorField,
+  type StudyPeriod,
 } from "../../../../../packages/core/src/study.js";
 import {
-  useConfigureStudyCalculatorMutation,
+  studyApi,
+  useStudyWriteMutation,
   type StudyWorkspaceCourse,
 } from "../../api/study";
+import { cx } from "../../lib/styles";
+import {
+  studyButtonClass,
+  studyInputClass,
+  studyPanelClass,
+} from "./StudyWorkspacePanels";
 
-type EditablePeriod = "att1" | "att2";
+const periods: { id: StudyPeriod; label: string }[] = [
+  { id: "att1", label: "ATT1" },
+  { id: "att2", label: "ATT2" },
+  { id: "exam", label: "Final" },
+];
 
-type SyllabusDraft = {
-  sourceName: string;
-  attestationThreshold: string;
-  fields: StudyCalculatorField[];
-};
-
-const periodLabels: Record<StudyCalculatorField["period"], string> = {
-  att1: "Аттестация 1",
-  att2: "Аттестация 2",
-  exam: "Экзамен",
-};
-
-function draftForCourse(course: StudyWorkspaceCourse): SyllabusDraft {
-  const definition = course.calculator?.definition;
-  if (definition) {
-    return {
-      sourceName: definition.sourceName,
-      attestationThreshold: String(definition.attestationThreshold),
-      fields: definition.fields.map((field) => ({ ...field })),
-    };
-  }
+function initialDefinition(
+  course: StudyWorkspaceCourse,
+): StudyCalculatorDefinition {
+  if (course.calculator) return structuredClone(course.calculator.definition);
   return {
-    sourceName: `Ручной силабус: ${course.code || course.title}`,
-    attestationThreshold: "25",
+    version: 1,
+    sourceName: `Ручной силлабус: ${course.code || course.title}`,
+    attestationThreshold: 0,
+    verification: "needs_review",
+    topLevelWeights: { att1: 30, att2: 30, exam: 40 },
     fields: [
       {
         id: "att1-total",
         label: "Итог ATT1",
         period: "att1",
         weightPercent: 100,
+        maxScore: 100,
       },
       {
         id: "att2-total",
         label: "Итог ATT2",
         period: "att2",
         weightPercent: 100,
+        maxScore: 100,
       },
       {
         id: "exam",
-        label: "Экзамен",
+        label: "Final",
         period: "exam",
         weightPercent: 100,
+        maxScore: 100,
       },
     ],
   };
 }
 
-function nextFieldId(period: EditablePeriod, fields: StudyCalculatorField[]) {
-  const ids = new Set(fields.map((field) => field.id));
-  let index = 1;
-  while (ids.has(`${period}-manual-${index}`)) index += 1;
-  return `${period}-manual-${index}`;
-}
-
-function periodWeight(fields: StudyCalculatorField[], period: EditablePeriod) {
-  return fields
-    .filter((field) => field.period === period)
-    .reduce((sum, field) => sum + field.weightPercent, 0);
-}
-
-export function StudySyllabi({ courses }: { courses: StudyWorkspaceCourse[] }) {
-  const configure = useConfigureStudyCalculatorMutation();
-  const [courseId, setCourseId] = useState(courses[0]?.id ?? "");
-  const course = courses.find((item) => item.id === courseId) ?? courses[0];
-  const [draft, setDraft] = useState<SyllabusDraft | null>(
-    course ? draftForCourse(course) : null,
+function CourseSyllabus({ course }: { course: StudyWorkspaceCourse }) {
+  const upload = useStudyWriteMutation(studyApi.uploadDocument);
+  const create = useStudyWriteMutation(studyApi.createScheme);
+  const activate = useStudyWriteMutation(studyApi.activateScheme);
+  const [draft, setDraft] = useState(() => initialDefinition(course));
+  const [documentId, setDocumentId] = useState("");
+  const [confirmed, setConfirmed] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const valid = validateStudyCalculatorDefinition(draft);
+  const weights = draft.topLevelWeights ?? { att1: 30, att2: 30, exam: 40 };
+  const activeScheme = course.gradingSchemes?.find(
+    (scheme) => scheme.isActive || scheme.active,
   );
-  const [saved, setSaved] = useState(false);
-
-  useEffect(() => {
-    if (!courses.some((item) => item.id === courseId))
-      setCourseId(courses[0]?.id ?? "");
-  }, [courseId, courses]);
-
-  useEffect(() => {
-    if (!course) {
-      setDraft(null);
-      return;
-    }
-    setDraft(draftForCourse(course));
-    setSaved(false);
-  }, [course?.id, course?.calculator?.definition]);
-
-  const validation = useMemo(() => {
-    if (!draft) return { error: "Нет курса", att1: 0, att2: 0 };
-    const att1 = periodWeight(draft.fields, "att1");
-    const att2 = periodWeight(draft.fields, "att2");
-    const threshold = Number(draft.attestationThreshold);
-    if (!draft.sourceName.trim())
-      return { error: "Укажи источник или название силабуса.", att1, att2 };
-    if (!Number.isFinite(threshold) || threshold < 0 || threshold > 100)
-      return { error: "Порог аттестации должен быть от 0 до 100.", att1, att2 };
-    if (draft.fields.some((field) => !field.label.trim()))
-      return { error: "У всех компонентов должно быть название.", att1, att2 };
-    if (
-      draft.fields.some(
-        (field) =>
-          !Number.isFinite(field.weightPercent) ||
-          field.weightPercent <= 0 ||
-          field.weightPercent > 100,
-      )
-    )
-      return { error: "Вес каждого компонента должен быть от 0 до 100.", att1, att2 };
-    if (Math.abs(att1 - 100) > 0.000001 || Math.abs(att2 - 100) > 0.000001)
-      return {
-        error: "Вес компонентов каждой аттестации должен давать ровно 100%.",
-        att1,
-        att2,
-      };
-    return { error: null, att1, att2 };
-  }, [draft]);
-
-  if (!courses.length) {
-    return (
-      <p className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 text-sm text-zinc-400">
-        Курсы пока не добавлены. Сначала импортируй учебный план.
-      </p>
-    );
-  }
-
-  if (!course || !draft) return null;
-
-  const updateField = (
-    id: string,
-    patch: Partial<Pick<StudyCalculatorField, "label" | "weightPercent">>,
-  ) => {
-    setSaved(false);
-    setDraft((current) =>
-      current
-        ? {
-            ...current,
-            fields: current.fields.map((field) =>
-              field.id === id ? { ...field, ...patch } : field,
-            ),
-          }
-        : current,
-    );
+  const edit = (next: StudyCalculatorDefinition) => {
+    setDraft({ ...next, verification: "needs_review" });
+    setMessage(null);
   };
-
-  const addField = (period: EditablePeriod) => {
-    setSaved(false);
-    setDraft((current) => {
-      if (!current) return current;
-      return {
-        ...current,
-        fields: [
-          ...current.fields,
-          {
-            id: nextFieldId(period, current.fields),
-            label: "Новый компонент",
-            period,
-            weightPercent: 10,
-          },
-        ],
-      };
+  const editField = (id: string, patch: Partial<StudyCalculatorField>) =>
+    edit({
+      ...draft,
+      fields: draft.fields.map((field) =>
+        field.id === id
+          ? { ...field, ...patch, verification: "needs_review" }
+          : field,
+      ),
+    });
+  const addField = (period: StudyPeriod) => {
+    let counter = 1;
+    while (
+      draft.fields.some((field) => field.id === `${period}-manual-${counter}`)
+    )
+      counter += 1;
+    edit({
+      ...draft,
+      fields: [
+        ...draft.fields,
+        {
+          id: `${period}-manual-${counter}`,
+          label: "Новый компонент",
+          period,
+          weightPercent: 10,
+          maxScore: 100,
+          type: "assignment",
+          verification: "needs_review",
+        },
+      ],
     });
   };
-
-  const removeField = (id: string, period: EditablePeriod) => {
-    if (draft.fields.filter((field) => field.period === period).length <= 1)
-      return;
-    setSaved(false);
-    setDraft((current) =>
-      current
-        ? { ...current, fields: current.fields.filter((field) => field.id !== id) }
-        : current,
-    );
-  };
-
-  const save = () => {
-    if (validation.error) return;
-    const definition: StudyCalculatorDefinition = {
-      version: 1,
-      sourceName: draft.sourceName.trim(),
-      attestationThreshold: Number(draft.attestationThreshold),
-      fields: draft.fields.map((field) => ({
-        ...field,
-        label: field.label.trim(),
-      })),
-    };
-    configure.mutate(
-      {
-        courseId: course.id,
-        definition,
-        target: course.calculator?.target ?? 70,
-      },
-      {
-        onSuccess: () => setSaved(true),
-        onError: () => setSaved(false),
-      },
-    );
-  };
-
+  const removeField = (id: string) =>
+    edit({
+      ...draft,
+      fields: draft.fields.filter((field) => field.id !== id),
+      requirements: draft.requirements?.filter(
+        (requirement) => requirement.fieldId !== id,
+      ),
+    });
   return (
     <div className="space-y-4">
-      <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
+      <section className={studyPanelClass}>
         <h2 className="flex items-center gap-2 font-semibold text-white">
-          <BookText className="h-5 w-5 text-cyan-400" aria-hidden="true" />
-          Силабусы и схема оценивания
+          <BookText
+            className="h-5 w-5 shrink-0 text-cyan-400"
+            aria-hidden="true"
+          />
+          Силлабус · {course.code}
         </h2>
-        <p className="mt-2 text-sm leading-relaxed text-zinc-400">
-          Настрой компоненты ATT1 и ATT2 по силабусу предмета. Если точной схемы
-          ещё нет, базовый вариант позволяет вводить итог ATT1/ATT2 целиком —
-          веса отдельных работ не выдумываются.
+        <p className="mt-2 break-words text-sm text-zinc-300">{course.title}</p>
+        <p className="mt-2 text-xs text-zinc-400">
+          Статус активной схемы:{" "}
+          {course.calculator?.definition.verification === "verified"
+            ? "проверена по источнику"
+            : "требует ручной проверки"}
+          . Исторические версии и оценки сохраняются.
         </p>
       </section>
+      {course.calculator && !activeScheme && course.gradingSchemes?.length ? (
+        <section className="space-y-3 rounded-xl border border-amber-400/20 bg-amber-400/[0.04] p-4">
+          <h3 className="text-sm font-semibold text-amber-200">
+            Существующие настройки сохранены
+          </h3>
+          <p className="text-xs text-zinc-300">
+            Схемы по PDF предложены как отдельные версии. Сравни веса ниже и
+            подтверди нужную версию. Новая схема применяется после активации.
+          </p>
+          <details>
+            <summary className="min-h-11 cursor-pointer py-2 text-sm text-zinc-200">
+              Текущие настройки: {course.calculator.definition.sourceName}
+            </summary>
+            {periods.map((period) => (
+              <div key={period.id} className="mt-2 text-xs text-zinc-300">
+                <p className="font-semibold">
+                  {period.label}:{" "}
+                  {
+                    (course.calculator!.definition.topLevelWeights ?? {
+                      att1: 30,
+                      att2: 30,
+                      exam: 40,
+                    })[period.id]
+                  }
+                  % итога
+                </p>
+                {course
+                  .calculator!.definition.fields.filter(
+                    (field) => field.period === period.id,
+                  )
+                  .map((field) => (
+                    <p className="mt-1 break-words" key={field.id}>
+                      {field.label}: {field.weightPercent}%
+                    </p>
+                  ))}
+              </div>
+            ))}
+          </details>
+        </section>
+      ) : null}
+      <section className={cx(studyPanelClass, "space-y-3")}>
+        <h3 className="font-semibold text-white">PDF и источники</h3>
+        {(course.documents ?? []).map((document) => (
+          <div
+            className="space-y-2 rounded-lg bg-white/[0.03] p-3"
+            key={document.id}
+          >
+            <p className="break-words text-sm text-zinc-200">
+              {document.fileName} · версия {document.version}
+            </p>
+            <p className="text-xs text-zinc-400">
+              {document.extractionStatus === "verified"
+                ? "Проверен"
+                : "Требует ручной проверки"}
+              {document.sourcePages?.length
+                ? ` · страницы ${document.sourcePages.join(", ")}`
+                : ""}
+            </p>
+            {(document.notes ?? []).map((note, index) => (
+              <p key={index} className="text-xs text-amber-200">
+                {note}
+              </p>
+            ))}
+            <button
+              type="button"
+              disabled={document.available === false}
+              className={studyButtonClass}
+              onClick={() => {
+                setMessage(null);
+                void studyApi
+                  .openDocument(document.id)
+                  .catch((error: Error) => setMessage(error.message));
+              }}
+            >
+              Открыть PDF
+            </button>
+            <button
+              type="button"
+              disabled={document.available === false}
+              className={cx(studyButtonClass, "flex items-center gap-2")}
+              onClick={() => {
+                setMessage(null);
+                void studyApi
+                  .downloadDocument(document.id, document.fileName)
+                  .catch(() =>
+                    setMessage(
+                      "PDF недоступен. Проверь подключение и повтори.",
+                    ),
+                  );
+              }}
+            >
+              <Download className="h-4 w-4" aria-hidden="true" />
+              Скачать PDF
+            </button>
+            {document.available === false ? (
+              <p className="text-xs text-amber-200">
+                Сохранён источник и checksum. Загрузи оригинальный PDF, чтобы
+                открыть его здесь.
+              </p>
+            ) : null}
+          </div>
+        ))}
+        {!course.documents?.length ? (
+          <p className="text-sm text-zinc-400">
+            PDF ещё не прикреплён. Источник компонентов указан в схеме ниже.
+          </p>
+        ) : null}
+        <label className="flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-lg border border-cyan-400/30 px-3 py-2 text-sm text-cyan-200">
+          <Upload className="h-4 w-4" aria-hidden="true" />
+          {uploading ? "Загружаем PDF…" : "Загрузить новый PDF"}
+          <input
+            type="file"
+            accept="application/pdf,.pdf"
+            disabled={uploading}
+            className="sr-only"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (!file) return;
+              event.target.value = "";
+              if (
+                !file.name.toLowerCase().endsWith(".pdf") ||
+                file.size > 60 * 1024 * 1024
+              ) {
+                setMessage("Выбери PDF размером до 60 МБ.");
+                return;
+              }
+              setUploading(true);
+              setMessage(null);
+              void upload
+                .mutateAsync({
+                  courseId: course.id,
+                  fileName: file.name,
+                  file,
+                })
+                .then((document) => {
+                  setDocumentId(document.id);
+                  setMessage(
+                    "PDF сохранён как новая версия. Проверь таблицу оценивания и создай схему ниже.",
+                  );
+                })
+                .catch(() =>
+                  setMessage(
+                    "Не удалось загрузить PDF. Проверь формат и подключение.",
+                  ),
+                )
+                .finally(() => setUploading(false));
+            }}
+          />
+        </label>
+        <p className="text-xs leading-relaxed text-zinc-400">
+          Новый PDF требует проверки. Номера учебных недель не преобразуются в
+          даты без начала триместра.
+        </p>
+      </section>
+      <section className={cx(studyPanelClass, "space-y-4")}>
+        <h3 className="font-semibold text-white">Редактор новой версии</h3>
+        <label className="block text-sm text-zinc-300">
+          Источник / название версии
+          <input
+            className={studyInputClass}
+            maxLength={200}
+            value={draft.sourceName}
+            onChange={(event) =>
+              edit({ ...draft, sourceName: event.target.value })
+            }
+          />
+        </label>
+        <label className="block text-sm text-zinc-300">
+          Прикреплённый PDF
+          <select
+            className={studyInputClass}
+            value={documentId}
+            onChange={(event) => setDocumentId(event.target.value)}
+          >
+            <option value="">Без нового PDF</option>
+            {(course.documents ?? []).map((document) => (
+              <option key={document.id} value={document.id}>
+                {document.fileName} · v{document.version}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="grid grid-cols-3 gap-2">
+          {periods.map((period) => (
+            <label key={period.id} className="text-xs text-zinc-300">
+              {period.label} в итоге, %
+              <input
+                className={studyInputClass}
+                inputMode="decimal"
+                type="number"
+                min="0"
+                max="100"
+                step="any"
+                value={weights[period.id]}
+                onChange={(event) =>
+                  edit({
+                    ...draft,
+                    topLevelWeights: {
+                      ...weights,
+                      [period.id]: Number(event.target.value),
+                    },
+                  })
+                }
+              />
+            </label>
+          ))}
+        </div>
+        <p className="text-xs text-zinc-400">
+          Сумма верхних весов: {weights.att1 + weights.att2 + weights.exam}% /
+          100%
+        </p>
+        {periods.map((period) => {
+          const fields = draft.fields.filter(
+            (field) => field.period === period.id,
+          );
+          const sum = fields.reduce(
+            (total, field) => total + field.weightPercent,
+            0,
+          );
+          return (
+            <div
+              key={period.id}
+              className="space-y-3 border-t border-white/[0.08] pt-3"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-white">
+                  {period.label} · {sum}% / 100%
+                </p>
+                <button
+                  type="button"
+                  className={studyButtonClass}
+                  aria-label={`Добавить компонент ${period.label}`}
+                  onClick={() => addField(period.id)}
+                >
+                  <Plus className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </div>
+              {fields.map((field) => (
+                <div
+                  key={field.id}
+                  className="space-y-2 rounded-lg bg-white/[0.03] p-3"
+                >
+                  <label className="block text-xs text-zinc-300">
+                    Название
+                    <input
+                      className={studyInputClass}
+                      value={field.label}
+                      maxLength={300}
+                      onChange={(event) =>
+                        editField(field.id, { label: event.target.value })
+                      }
+                    />
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="text-xs text-zinc-300">
+                      Вес в группе, %
+                      <input
+                        className={studyInputClass}
+                        type="number"
+                        min="0.01"
+                        max="100"
+                        step="any"
+                        value={field.weightPercent}
+                        onChange={(event) =>
+                          editField(field.id, {
+                            weightPercent: Number(event.target.value),
+                          })
+                        }
+                      />
+                    </label>
+                    <label className="text-xs text-zinc-300">
+                      Максимум баллов
+                      <input
+                        className={studyInputClass}
+                        type="number"
+                        min="0.01"
+                        step="any"
+                        value={field.maxScore ?? 100}
+                        onChange={(event) =>
+                          editField(field.id, {
+                            maxScore: Number(event.target.value),
+                          })
+                        }
+                      />
+                    </label>
+                  </div>
+                  <label className="block text-xs text-zinc-300">
+                    Тип
+                    <input
+                      className={studyInputClass}
+                      maxLength={80}
+                      value={field.type ?? ""}
+                      onChange={(event) =>
+                        editField(field.id, { type: event.target.value })
+                      }
+                    />
+                  </label>
+                  <label className="block text-xs text-zinc-300">
+                    Страница PDF
+                    <input
+                      className={studyInputClass}
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={field.sourcePage ?? ""}
+                      onChange={(event) =>
+                        editField(field.id, {
+                          sourcePage: event.target.value
+                            ? Number(event.target.value)
+                            : undefined,
+                        })
+                      }
+                    />
+                  </label>
+                  {field.sourceDocument ? (
+                    <p className="break-words text-xs text-zinc-400">
+                      Источник: {field.sourceDocument}
+                      {field.sourcePage ? ` · стр. ${field.sourcePage}` : ""}
+                    </p>
+                  ) : null}
+                  <button
+                    type="button"
+                    className={cx(
+                      studyButtonClass,
+                      "flex w-full items-center justify-center gap-2",
+                    )}
+                    disabled={fields.length <= 1}
+                    onClick={() => removeField(field.id)}
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />
+                    Убрать компонент из новой версии
+                  </button>
+                </div>
+              ))}
+            </div>
+          );
+        })}
+        <details className="space-y-3 border-t border-white/[0.08] pt-3">
+          <summary className="min-h-11 cursor-pointer py-2 text-sm font-semibold text-zinc-200">
+            Пороги и условия допуска
+          </summary>
+          <label className="block text-sm text-zinc-300">
+            Предупреждение о низкой аттестации
+            <input
+              className={studyInputClass}
+              type="number"
+              min="0"
+              max="100"
+              value={draft.attestationThreshold}
+              onChange={(event) =>
+                edit({
+                  ...draft,
+                  attestationThreshold: Number(event.target.value),
+                })
+              }
+            />
+          </label>
+          <p className="text-xs text-zinc-400">
+            Этот порог — предупреждение. Подтверждённые ограничения из PDF
+            перечислены отдельно.
+          </p>
+          {(draft.requirements ?? []).map((requirement, index) => (
+            <div
+              key={requirement.id}
+              className="space-y-2 rounded-lg bg-white/[0.03] p-3"
+            >
+              <p className="text-sm text-zinc-300">
+                {requirement.label} ·{" "}
+                {requirement.verification === "verified"
+                  ? "подтверждено источником"
+                  : "требует проверки"}
+              </p>
+              <label className="block text-xs text-zinc-300">
+                Минимум, %
+                <input
+                  className={studyInputClass}
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="any"
+                  value={requirement.minimumPercent}
+                  onChange={(event) =>
+                    edit({
+                      ...draft,
+                      requirements: draft.requirements?.map((item, current) =>
+                        current === index
+                          ? {
+                              ...item,
+                              minimumPercent: Number(event.target.value),
+                              verification: "needs_review",
+                            }
+                          : item,
+                      ),
+                    })
+                  }
+                />
+              </label>
+            </div>
+          ))}
+        </details>
+        {!valid ? (
+          <p
+            className="rounded-lg bg-amber-400/10 p-3 text-sm text-amber-200"
+            role="alert"
+          >
+            Укажи источник, корректные максимумы и веса: в каждом ATT1 / ATT2 /
+            Final и верхнем уровне сумма должна быть 100%.
+          </p>
+        ) : null}
+        <button
+          type="button"
+          disabled={!valid || create.isPending || uploading}
+          className={cx(
+            studyButtonClass,
+            "flex w-full items-center justify-center gap-2 bg-cyan-400/10 text-cyan-200",
+          )}
+          onClick={() =>
+            create.mutate(
+              {
+                courseId: course.id,
+                definition: draft,
+                ...(documentId ? { documentId } : {}),
+                activate: false,
+              },
+              {
+                onSuccess: () =>
+                  setMessage(
+                    "Новая версия сохранена. Проверь её и активируй отдельно ниже.",
+                  ),
+                onError: () =>
+                  setMessage(
+                    "Не удалось сохранить версию. Проверь схему и повтори.",
+                  ),
+              },
+            )
+          }
+        >
+          <Save className="h-4 w-4" aria-hidden="true" />
+          {create.isPending ? "Сохраняем…" : "Создать новую версию"}
+        </button>
+      </section>
+      <section className={cx(studyPanelClass, "space-y-3")}>
+        <h3 className="font-semibold text-white">
+          Сохранённые версии и активация
+        </h3>
+        {(course.gradingSchemes ?? []).map((scheme) => (
+          <div
+            key={scheme.id}
+            className="space-y-3 rounded-lg bg-white/[0.03] p-3"
+          >
+            <p className="break-words text-sm text-zinc-200">
+              Версия {scheme.version}: {scheme.definition.sourceName}
+            </p>
+            <p className="text-xs text-zinc-400">
+              {scheme.isActive || scheme.active ? "Активная" : "Сохранённая"} ·{" "}
+              {["verified", "user_confirmed"].includes(
+                scheme.verification ?? "",
+              )
+                ? "проверена"
+                : "требует проверки"}
+            </p>
+            <details>
+              <summary className="min-h-11 cursor-pointer py-2 text-sm text-cyan-200">
+                Показать дерево компонентов
+              </summary>
+              {periods.map((period) => (
+                <div className="mt-2 text-xs text-zinc-300" key={period.id}>
+                  <p className="font-semibold">
+                    {period.label}:{" "}
+                    {
+                      (scheme.definition.topLevelWeights ?? {
+                        att1: 30,
+                        att2: 30,
+                        exam: 40,
+                      })[period.id]
+                    }
+                    % итога
+                  </p>
+                  {scheme.definition.fields
+                    .filter((field) => field.period === period.id)
+                    .map((field) => (
+                      <p className="mt-1 break-words" key={field.id}>
+                        {field.label} · {field.weightPercent}% · max{" "}
+                        {field.maxScore ?? 100}
+                        {field.sourcePage ? ` · стр. ${field.sourcePage}` : ""}
+                      </p>
+                    ))}
+                </div>
+              ))}
+            </details>
+            <button
+              type="button"
+              className={cx(studyButtonClass, "w-full")}
+              onClick={() => {
+                setDraft(structuredClone(scheme.definition));
+                setDocumentId(scheme.documentId ?? "");
+                setMessage(null);
+              }}
+            >
+              Открыть в редакторе
+            </button>
+            {!scheme.isActive && !scheme.active ? (
+              <>
+                <label className="flex min-h-11 items-start gap-2 text-xs text-zinc-300">
+                  <input
+                    className="mt-1 shrink-0"
+                    type="checkbox"
+                    checked={confirmed === scheme.id}
+                    onChange={(event) =>
+                      setConfirmed(event.target.checked ? scheme.id : null)
+                    }
+                  />
+                  <span>
+                    Я сверил(а) компоненты и условия с PDF. Эта версия будет
+                    использоваться для новых расчётов; прежние оценки
+                    сохранятся.
+                  </span>
+                </label>
+                <button
+                  type="button"
+                  disabled={confirmed !== scheme.id || activate.isPending}
+                  className={cx(studyButtonClass, "w-full text-cyan-200")}
+                  onClick={() =>
+                    activate.mutate(
+                      { courseId: course.id, schemeId: scheme.id },
+                      {
+                        onSuccess: () => {
+                          setConfirmed(null);
+                          setMessage(
+                            "Версия активирована. Обновлённая схема доступна в калькуляторе.",
+                          );
+                        },
+                        onError: () =>
+                          setMessage(
+                            "Активация не выполнена. Проверь актуальность версии.",
+                          ),
+                      },
+                    )
+                  }
+                >
+                  {activate.isPending
+                    ? "Активируем…"
+                    : "Подтвердить и активировать"}
+                </button>
+              </>
+            ) : null}
+          </div>
+        ))}
+        {!course.gradingSchemes?.length ? (
+          <p className="text-sm text-zinc-400">
+            Версий пока нет. Текущие настройки сохранены; создай первую версию
+            без их замены.
+          </p>
+        ) : null}
+      </section>
+      {message ? (
+        <p
+          className="rounded-lg border border-white/[0.1] p-3 text-sm text-zinc-200"
+          role="status"
+        >
+          {message}
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
+export function StudySyllabi({
+  courses,
+  initialCourseId,
+  onCourseChange,
+}: {
+  courses: StudyWorkspaceCourse[];
+  initialCourseId?: string | null;
+  onCourseChange?: (id: string) => void;
+}) {
+  const [courseId, setCourseId] = useState(
+    initialCourseId ?? courses[0]?.id ?? "",
+  );
+  useEffect(() => {
+    if (initialCourseId) setCourseId(initialCourseId);
+  }, [initialCourseId]);
+  const course = courses.find((item) => item.id === courseId) ?? courses[0];
+  if (!course)
+    return (
+      <p className={cx(studyPanelClass, "text-sm text-zinc-400")}>
+        Курсы пока не добавлены. Импортируй учебный план или подключи источник.
+      </p>
+    );
+  return (
+    <div className="space-y-4">
       <label className="block text-sm text-zinc-300">
         Предмет
         <select
-          className="mt-2 min-h-11 w-full rounded-lg border border-white/[0.12] bg-graphite-900 px-3 py-3 text-base text-white"
+          className={studyInputClass}
           value={course.id}
-          onChange={(event) => setCourseId(event.target.value)}
+          onChange={(event) => {
+            setCourseId(event.target.value);
+            onCourseChange?.(event.target.value);
+          }}
         >
           {courses.map((item) => (
             <option key={item.id} value={item.id}>
@@ -232,152 +744,7 @@ export function StudySyllabi({ courses }: { courses: StudyWorkspaceCourse[] }) {
           ))}
         </select>
       </label>
-
-      <section className="space-y-4 rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
-        <div>
-          <h3 className="font-semibold text-white">{course.title}</h3>
-          <p className="mt-1 text-xs text-zinc-500">{course.code}</p>
-        </div>
-
-        <label className="block text-sm text-zinc-300">
-          Источник / версия силабуса
-          <input
-            value={draft.sourceName}
-            onChange={(event) => {
-              setSaved(false);
-              setDraft({ ...draft, sourceName: event.target.value });
-            }}
-            className="mt-2 min-h-11 w-full rounded-lg border border-white/[0.12] bg-graphite-900 px-3 py-2 text-base text-white"
-            placeholder="Например: Syllabus OS, Fall 2026"
-          />
-        </label>
-
-        <label className="block text-sm text-zinc-300">
-          Порог аттестации
-          <input
-            type="number"
-            min="0"
-            max="100"
-            step="1"
-            inputMode="decimal"
-            value={draft.attestationThreshold}
-            onChange={(event) => {
-              setSaved(false);
-              setDraft({ ...draft, attestationThreshold: event.target.value });
-            }}
-            className="mt-2 min-h-11 w-full rounded-lg border border-white/[0.12] bg-graphite-900 px-3 py-2 text-base text-white"
-          />
-        </label>
-
-        {(["att1", "att2"] as const).map((period) => {
-          const fields = draft.fields.filter((field) => field.period === period);
-          const sum = period === "att1" ? validation.att1 : validation.att2;
-          return (
-            <div key={period} className="space-y-3 border-t border-white/[0.07] pt-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="font-medium text-zinc-100">{periodLabels[period]}</p>
-                  <p className={sum === 100 ? "text-xs text-emerald-300" : "text-xs text-amber-200"}>
-                    Сумма весов: {sum}% / 100%
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => addField(period)}
-                  className="flex min-h-11 items-center gap-1 rounded-lg border border-white/[0.1] px-3 text-xs font-semibold text-cyan-200"
-                >
-                  <Plus className="h-4 w-4" aria-hidden="true" />
-                  Добавить
-                </button>
-              </div>
-
-              {fields.map((field) => (
-                <div key={field.id} className="grid grid-cols-[minmax(0,1fr)_78px_44px] gap-2">
-                  <input
-                    aria-label={`Название компонента ${periodLabels[period]}`}
-                    value={field.label}
-                    onChange={(event) => updateField(field.id, { label: event.target.value })}
-                    className="min-h-11 min-w-0 rounded-lg border border-white/[0.1] bg-graphite-900 px-3 text-sm text-white"
-                  />
-                  <input
-                    aria-label={`Вес ${field.label}`}
-                    type="number"
-                    min="0.01"
-                    max="100"
-                    step="0.01"
-                    inputMode="decimal"
-                    value={field.weightPercent}
-                    onChange={(event) =>
-                      updateField(field.id, {
-                        weightPercent: Number(event.target.value),
-                      })
-                    }
-                    className="min-h-11 min-w-0 rounded-lg border border-white/[0.1] bg-graphite-900 px-2 text-right text-sm tabular-nums text-white"
-                  />
-                  <button
-                    type="button"
-                    aria-label={`Удалить ${field.label}`}
-                    disabled={fields.length <= 1}
-                    onClick={() => removeField(field.id, period)}
-                    className="grid min-h-11 place-items-center rounded-lg border border-white/[0.1] text-zinc-400 disabled:opacity-30"
-                  >
-                    <Trash2 className="h-4 w-4" aria-hidden="true" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          );
-        })}
-
-        <div className="space-y-2 border-t border-white/[0.07] pt-4">
-          <p className="font-medium text-zinc-100">Экзамен</p>
-          {draft.fields
-            .filter((field) => field.period === "exam")
-            .map((field) => (
-              <div key={field.id} className="grid grid-cols-[minmax(0,1fr)_78px] gap-2">
-                <input
-                  value={field.label}
-                  onChange={(event) => updateField(field.id, { label: event.target.value })}
-                  className="min-h-11 min-w-0 rounded-lg border border-white/[0.1] bg-graphite-900 px-3 text-sm text-white"
-                />
-                <div className="grid min-h-11 place-items-center rounded-lg border border-white/[0.1] bg-white/[0.025] text-sm tabular-nums text-zinc-400">
-                  100%
-                </div>
-              </div>
-            ))}
-        </div>
-
-        <p className="text-xs leading-relaxed text-zinc-500">
-          Итоговая формула LifeOS остаётся 30% ATT1 + 30% ATT2 + 40% экзамен.
-          Внутри ATT1 и ATT2 веса выше задаются по силабусу.
-        </p>
-
-        {validation.error ? (
-          <p className="rounded-lg bg-amber-400/10 px-3 py-2 text-sm text-amber-200" role="alert">
-            {validation.error}
-          </p>
-        ) : null}
-        {configure.isError ? (
-          <p className="rounded-lg bg-rose-400/10 px-3 py-2 text-sm text-rose-200" role="alert">
-            Не удалось сохранить силабус. Обнови данные и попробуй ещё раз.
-          </p>
-        ) : null}
-        {saved ? (
-          <p className="text-sm text-emerald-300" role="status">
-            Силабус сохранён — калькулятор уже использует эту схему.
-          </p>
-        ) : null}
-
-        <button
-          type="button"
-          disabled={Boolean(validation.error) || configure.isPending}
-          onClick={save}
-          className="flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-cyan-400 px-4 py-3 text-sm font-semibold text-graphite-950 active:scale-[0.98] disabled:opacity-50"
-        >
-          <Save className="h-4 w-4" aria-hidden="true" />
-          {configure.isPending ? "Сохраняем…" : "Сохранить силабус"}
-        </button>
-      </section>
+      <CourseSyllabus key={course.id} course={course} />
     </div>
   );
 }

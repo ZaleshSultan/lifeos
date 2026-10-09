@@ -25,7 +25,7 @@ import type { Json } from "../packages/db/src/types.js";
 const args = process.argv.slice(2);
 if (args.includes("--help")) {
   console.log(
-    "Usage: pnpm exec tsx scripts/import-study-syllabi.ts [--env apps/bot/.env] [--user UUID] [--course CODE] [--resume-dir DIR] [--apply]\nDefault is read-only dry run. --apply imports missing originals into private Storage using binary TUS chunks, verifies SHA-256 and creates only missing grading candidates. Existing legacy PDFs, grades, overrides, versions and custom calculators are preserved. Partial imports resume safely. Apply migration 20261008000300 first. Credentials and upload URLs are never printed.",
+    "Usage: pnpm exec tsx scripts/import-study-syllabi.ts [--env apps/bot/.env] [--user UUID] [--course CODE] [--resume-dir DIR] [--apply]\nDefault is read-only dry run. --apply imports missing originals into private Storage using binary TUS chunks, verifies SHA-256 and creates only missing grading candidates. Existing legacy PDFs, grades, overrides, versions and custom calculators are preserved. Partial imports resume safely. Requires migration 20261008000300 in database history; do not reapply an installed migration. Credentials and upload URLs are never printed.",
   );
   process.exit(0);
 }

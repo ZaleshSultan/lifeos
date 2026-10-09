@@ -114,3 +114,11 @@ For hosted Supabase, link once and push:
 supabase link --project-ref YOUR_PROJECT_REF
 supabase db push
 ```
+
+## Study workspace and PDF Storage
+
+The repository includes the existing `20261008000100_study_workspace`, `20261008000200_study_syllabus_seeds`, `20261008000300_study_pdf_storage`, and `20261008000400_daily_digest_claims` migrations. Production history was checked read-only on 2026-10-09 and already contains all four; do not replay or repair them.
+
+`syllabus_documents`, `grading_schemes`, `assessment_grade_overrides`, and `assessment_component_mappings` extend the existing courses/assessments without replacing historical data. New PDF bytes live in the private `lifeos-study-syllabi` bucket; legacy Base64 documents remain readable. Metadata is registered only after download length and SHA-256 verification. Daily digest claims use service-only atomic RPCs and retain existing delivery history.
+
+Run `bash scripts/test-study-postgres.sh` to check migrations, A/B/anon RLS, content hydration, version preservation, and concurrent claims in a disposable local database. This command does not use production credentials. See [the deployment runbook](STUDY_REFACTOR_DEPLOY_DEBIAN.md).

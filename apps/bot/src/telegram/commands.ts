@@ -145,7 +145,7 @@ const HELP_TEXT = [
   "/mode clear",
   "/course",
   "/study — учебный раздел",
-  "/study today|schedule|grades|calculator|syllabi|map|deadlines",
+  "/study today|courses|assignments|schedule|grades|calculator|syllabi|map|deadlines",
   "/course progress [number]",
   "/course topic [text]",
   "/deadlines — список дедлайнов",
@@ -681,6 +681,7 @@ function utcDayBounds(now: Date): { dayStart: string; dayEnd: string } {
 function buildWorkoutUrl(tmaUrl: string, workoutId: string): string | null {
   try {
     const url = new URL(tmaUrl);
+    url.searchParams.set("screen", "workout");
     url.searchParams.set("workoutId", workoutId);
     return url.toString();
   } catch {
@@ -700,11 +701,16 @@ function buildWorkoutScreenUrl(tmaUrl: string): string | null {
 
 function buildStudyScreenUrl(
   tmaUrl: string,
-  tab?: "schedule" | "calculator" | "grades" | "syllabi" | "map",
+  tab?: "today" | "courses" | "assignments" | "deadlines" | "schedule" | "calculator" | "grades" | "syllabi" | "map",
 ): string | null {
   try {
     const url = new URL(tmaUrl);
+    if (url.protocol !== "https:" || url.username || url.password) return null;
     url.searchParams.set("screen", "study");
+    // A bot button opens the requested section without inheriting a stale course
+    // or workout from a configured URL copied out of a previous Mini App visit.
+    url.searchParams.delete("studyCourse");
+    url.searchParams.delete("workoutId");
     if (tab) {
       url.searchParams.set("studyTab", tab);
     } else {
@@ -752,7 +758,7 @@ function courseUsage(): string {
   return [
     "Usage:",
     "/course",
-    "/study today|schedule|grades|calculator|syllabi|map|deadlines",
+    "/study today|courses|assignments|schedule|grades|calculator|syllabi|map|deadlines",
     "/course progress [number]",
     "/course topic [text]",
   ].join("\n");
@@ -989,7 +995,7 @@ function healthImportHelp(): string {
     '  "raw": {}',
     "}</pre>",
     "curl:",
-    "<code>curl -X POST https://archlinux.tail2492c9.ts.net/api/health/ingest -H 'content-type: application/json' -H 'Authorization: Bearer <health-session-token>' --data @health.json</code>",
+    "<code>curl -X POST https://YOUR_DOMAIN/api/health/ingest -H 'content-type: application/json' -H 'Authorization: Bearer <health-session-token>' --data @health.json</code>",
   ].join("\n");
 }
 
@@ -3226,15 +3232,19 @@ async function handleCourseCommand(
 
   if (
     normalized === "schedule" ||
+    normalized === "courses" ||
+    normalized === "assignments" ||
     normalized === "grades" ||
     normalized === "calculator" ||
     normalized === "syllabi"
   ) {
-    const tab = normalized as "schedule" | "grades" | "calculator" | "syllabi";
+    const tab = normalized as "courses" | "assignments" | "schedule" | "grades" | "calculator" | "syllabi";
     const studyUrl = runtime.tmaUrl
       ? buildStudyScreenUrl(runtime.tmaUrl, tab)
       : null;
     const labels = {
+      courses: "Предметы",
+      assignments: "Задания",
       schedule: "Расписание",
       grades: "Оценки",
       calculator: "Калькулятор",
@@ -3276,6 +3286,14 @@ async function handleCourseCommand(
             inline_keyboard: [
               [{ text: "Открыть учёбу", web_app: { url: studyUrl } }],
               [
+                { text: "Сегодня", web_app: { url: buildStudyScreenUrl(runtime.tmaUrl!, "today")! } },
+                { text: "Предметы", web_app: { url: buildStudyScreenUrl(runtime.tmaUrl!, "courses")! } },
+              ],
+              [
+                { text: "Задания", web_app: { url: buildStudyScreenUrl(runtime.tmaUrl!, "assignments")! } },
+                { text: "Дедлайны", web_app: { url: buildStudyScreenUrl(runtime.tmaUrl!, "deadlines")! } },
+              ],
+              [
                 {
                   text: "Расписание",
                   web_app: {
@@ -3305,7 +3323,7 @@ async function handleCourseCommand(
               ],
               [
                 { text: "Пары сегодня", callback_data: "study_today" },
-                { text: "Дедлайны", callback_data: "study_deadlines" },
+                { text: "Дедлайны текстом", callback_data: "study_deadlines" },
               ],
               [
                 runtime.tmaUrl

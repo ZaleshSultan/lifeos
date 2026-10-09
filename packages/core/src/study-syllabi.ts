@@ -1,115 +1,77 @@
-import type { StudyCalculatorDefinition, StudyCalculatorState } from "./study.js";
+import {
+  validateStudyCalculatorDefinition,
+  type StudyCalculatorDefinition,
+  type StudyCalculatorState,
+} from "./study.js";
 
-const SOURCE_NAME = "AITU syllabus (built-in fallback)";
-const THRESHOLD = 25;
-
-type Field = StudyCalculatorDefinition["fields"][number];
-
-function field(
-  id: string,
-  label: string,
-  period: Field["period"],
-  weightPercent: number,
-): Field {
-  return { id, label, period, weightPercent };
-}
-
-const DEFINITIONS: Record<string, StudyCalculatorDefinition> = {
-  "OS52-EN": {
-    version: 1,
-    sourceName: SOURCE_NAME,
-    attestationThreshold: THRESHOLD,
-    fields: [
-      field("os-a1", "Lab 1 (Week 1)", "att1", 20),
-      field("os-a2", "Lab 2 (Week 2)", "att1", 20),
-      field("os-a3", "Lab 3 (Week 3)", "att1", 20),
-      field("os-a4", "Lab 4 (Week 4)", "att1", 20),
-      field("os-mid", "Midterm Exam", "att1", 20),
-      field("os-a5", "Lab 5 (Week 6)", "att2", 20),
-      field("os-a6", "Lab 6 (Week 7)", "att2", 20),
-      field("os-a7", "Lab 7 (Week 8)", "att2", 20),
-      field("os-a8", "Lab 8 (Week 9)", "att2", 20),
-      field("os-end", "Endterm Exam", "att2", 20),
-      field("os-exam", "Экзамен", "exam", 100),
-    ],
-  },
-  "DMS52-EN": {
-    version: 1,
-    sourceName: SOURCE_NAME,
-    attestationThreshold: THRESHOLD,
-    fields: [
-      field("dms-a1", "Assignment 1: ERD Diagram", "att1", 20),
-      field("dms-a2", "Assignment 2: Intro to DDL", "att1", 20),
-      field("dms-a3", "Assignment 3: DML & JOINs", "att1", 20),
-      field("dms-q1", "Learn Quiz (Moodle)", "att1", 10),
-      field("dms-mid", "Midterm Exam (Mixed)", "att1", 30),
-      field("dms-a4", "Assignment 4: Subqueries", "att2", 20),
-      field("dms-a5", "Assignment 5: Window Functions", "att2", 20),
-      field("dms-a6", "Assignment 6: Set Ops & ACID", "att2", 20),
-      field("dms-q2", "Learn Quiz (Moodle)", "att2", 10),
-      field("dms-end", "Endterm Exam (Mixed)", "att2", 30),
-      field("dms-exam", "Экзамен", "exam", 100),
-    ],
-  },
-  "K(RUSSIAN)L51-RU": {
-    version: 1,
-    sourceName: SOURCE_NAME,
-    attestationThreshold: THRESHOLD,
-    fields: [
-      field("krl-a1", "Задание 1: Анализ языковых норм (Неделя 4)", "att1", 60),
-      field("krl-mid", "Midterm Exam (Тестирование)", "att1", 40),
-      field("krl-a2", "Задание 2: Презентация «Оратор» (Недели 8-9)", "att2", 60),
-      field("krl-end", "Endterm Exam (Тестирование)", "att2", 40),
-      field("krl-exam", "Экзамен", "exam", 100),
-    ],
-  },
-  "CNC53-EN": {
-    version: 1,
-    sourceName: SOURCE_NAME,
-    attestationThreshold: THRESHOLD,
-    fields: [
-      field("cnc-p1", "Практики / лабораторные", "att1", 60),
-      field("cnc-mid", "Midterm Exam", "att1", 40),
-      field("cnc-p2", "Практики / лабораторные", "att2", 60),
-      field("cnc-end", "Endterm Exam", "att2", 40),
-      field("cnc-exam", "Экзамен", "exam", 100),
-    ],
-  },
-  "DLD52-EN": {
-    version: 1,
-    sourceName: SOURCE_NAME,
-    attestationThreshold: THRESHOLD,
-    fields: [
-      field("dld-p1", "Практики / лабораторные", "att1", 60),
-      field("dld-mid", "Midterm Exam", "att1", 40),
-      field("dld-p2", "Практики / лабораторные", "att2", 60),
-      field("dld-end", "Endterm Exam", "att2", 40),
-      field("dld-exam", "Экзамен", "exam", 100),
-    ],
-  },
-};
-
-function cloneDefinition(definition: StudyCalculatorDefinition): StudyCalculatorDefinition {
-  return {
-    ...definition,
-    fields: definition.fields.map((item) => ({ ...item })),
+export interface StudySyllabusSeed {
+  key: string;
+  courseCodes: string[];
+  courseTitles?: string[];
+  definition: StudyCalculatorDefinition;
+  document: {
+    fileName: string;
+    sha256: string;
+    sourcePages: number[];
+    extractionStatus: "verified" | "needs_review";
   };
+  notes?: string[];
 }
 
+/** Validate imported data; domain code never reads a PDF or chooses weights by course name. */
+export function validateStudySyllabusSeed(
+  value: unknown,
+): value is StudySyllabusSeed {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const seed = value as Record<string, unknown>;
+  const document = seed.document as StudySyllabusSeed["document"] | undefined;
+  return (
+    typeof seed.key === "string" &&
+    /^[a-z0-9][a-z0-9-]{0,99}$/.test(seed.key) &&
+    Array.isArray(seed.courseCodes) &&
+    seed.courseCodes.length > 0 &&
+    seed.courseCodes.every(
+      (code) => typeof code === "string" && code.trim() && code.length <= 100,
+    ) &&
+    (seed.courseTitles === undefined ||
+      (Array.isArray(seed.courseTitles) &&
+        seed.courseTitles.every(
+          (title) =>
+            typeof title === "string" && title.trim() && title.length <= 300,
+        ))) &&
+    validateStudyCalculatorDefinition(seed.definition) &&
+    !!document &&
+    typeof document.fileName === "string" &&
+    document.fileName.endsWith(".pdf") &&
+    !/[\\/]/.test(document.fileName) &&
+    typeof document.sha256 === "string" &&
+    /^[a-f0-9]{64}$/.test(document.sha256) &&
+    Array.isArray(document.sourcePages) &&
+    document.sourcePages.length > 0 &&
+    document.sourcePages.every((page) => Number.isInteger(page) && page > 0) &&
+    (document.extractionStatus === "verified" ||
+      document.extractionStatus === "needs_review") &&
+    (seed.notes === undefined ||
+      (Array.isArray(seed.notes) &&
+        seed.notes.every(
+          (note) => typeof note === "string" && note.length <= 2000,
+        )))
+  );
+}
+
+/** @deprecated Schemes are persisted per course. This compatibility shim invents no fallback. */
 export function builtinStudySyllabusDefinition(
-  courseCode: string,
+  _courseCode: string,
 ): StudyCalculatorDefinition | null {
-  const definition = DEFINITIONS[courseCode.trim().toUpperCase()];
-  return definition ? cloneDefinition(definition) : null;
+  return null;
 }
-
+/** @deprecated Read the user's persisted grading scheme instead. */
 export function builtinStudyCalculatorState(
-  courseCode: string,
+  _courseCode: string,
 ): StudyCalculatorState | null {
-  const definition = builtinStudySyllabusDefinition(courseCode);
-  return definition ? { definition, values: {}, target: 70 } : null;
+  return null;
 }
-
+/** @deprecated The initial catalog is data in docs/syllabi/grading-seeds.json, not domain constants. */
 export function builtinStudySyllabusCourseCodes(): string[] {
-  return Object.keys(DEFINITIONS);
+  return [];
 }

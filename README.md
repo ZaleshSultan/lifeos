@@ -78,7 +78,7 @@ cp .env.example .env
 python3 daily_digest_worker.py
 ```
 
-The default briefing time is `08:00` in each profile timezone; change
+The default briefing time is `06:00` in each profile timezone; change
 `DAILY_DIGEST_TIME` in the worker `.env` if needed. Apply the latest Supabase
 migrations first so `daily_digest_deliveries` is available for duplicate
 protection. The default catch-up window is 12 hours after the configured time.

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSessionQuery } from "./api/hooks";
 import { AppShell } from "./components/AppShell";
 import { ErrorPanel, LoadingPanel } from "./components/AsyncState";
@@ -12,34 +12,27 @@ import { RemindersScreen } from "./screens/RemindersScreen";
 import { SourcesScreen } from "./screens/SourcesScreen";
 import { WorkoutScreen } from "./screens/WorkoutScreen";
 import { StudyScreen } from "./screens/StudyScreen";
+import { screenFromSearch } from "./lib/navigation";
+import { telegram } from "./telegram";
 import type { ScreenId } from "./types";
 
-const SCREENS: ScreenId[] = [
-  "home",
-  "study",
-  "workout",
-  "health",
-  "focus",
-  "finance",
-  "sources",
-  "reminders",
-  "mode",
-];
-
 function initialScreen(): ScreenId {
-  const params = new URLSearchParams(window.location.search);
-  const requestedScreen = params.get("screen");
-
-  if (requestedScreen && SCREENS.includes(requestedScreen as ScreenId)) {
-    return requestedScreen as ScreenId;
-  }
-
-  return params.has("workoutId") ? "workout" : "home";
+  return screenFromSearch(window.location.search, telegram.initData);
 }
 
 export default function App() {
   const [screen, setScreen] = useState<ScreenId>(initialScreen);
   const sessionQuery = useSessionQuery();
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("screen", screen);
+    window.history.replaceState(null, "", url);
+  }, [screen]);
+  useEffect(() => {
+    const update = () => setScreen(initialScreen());
+    window.addEventListener("popstate", update);
+    return () => window.removeEventListener("popstate", update);
+  }, []);
 
   if (sessionQuery.isLoading) {
     return (

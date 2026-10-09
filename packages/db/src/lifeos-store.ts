@@ -74,7 +74,9 @@ import {
 } from "@lifeos/core";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { StudyCalculatorState } from "../../core/src/study.js";
-import { configureStudyCalculator, loadStudyWorkspaceCourses, saveStudyCalculator, type StudyWorkspaceCourse } from "./study-workspace.js";
+import { configureStudyCalculator, loadStudyWorkspaceCourses, saveStudyCalculator, StudyWorkspaceError, type StudyWorkspaceCourse } from "./study-workspace.js";
+import { activateStudyScheme, assertStudyCourse, createStudyDocument, createStudyScheme, downloadStudyDocument, loadStudySupplement, saveStudyMapping, saveStudyOverride, getOwnedAssessment, type StudyDocument, type StudyScheme, type StudySupplement } from "./study-records.js";
+import type { StudyDocumentInput } from "./study-document-storage.js";
 import type {
   AcademicTermStatus,
   AssessmentItemStatus,
@@ -1370,10 +1372,10 @@ export interface TmaAcademicSummary {
   academicRecords: AcademicRecord[];
 }
 
-export interface TmaStudySummary {
+export interface TmaStudySummary extends StudySupplement {
   timezone: string;
   courses: StudyWorkspaceCourse[];
-  records: AcademicRecord[];
+  records: Omit<AcademicRecord, "userId" | "rawJson">[];
 }
 
 export interface LifeOSStore {
@@ -1534,6 +1536,14 @@ export interface LifeOSStore {
   getTmaStudySummary(userId: string, timezone: string): Promise<TmaStudySummary>;
   saveStudyCalculator(userId: string, courseId: string, input: unknown): Promise<StudyCalculatorState>;
   configureStudyCalculator(userId: string, courseId: string, input: unknown): Promise<StudyCalculatorState>;
+  createManualStudyAssignment(userId: string, input: CreateAssessmentItemInput): Promise<AssessmentItemRecord>;
+  saveStudyGradeOverride(userId: string, assessmentId: string, input: unknown): Promise<void>;
+  saveStudyComponentMapping(userId: string, assessmentId: string, input: unknown): Promise<void>;
+  createStudyDocument(userId: string, courseId: string, input: StudyDocumentInput): Promise<StudyDocument>;
+  downloadStudyDocument(userId: string, documentId: string): Promise<{fileName: string; bytes: Uint8Array}>;
+  createStudyScheme(userId: string, courseId: string, input: unknown): Promise<StudyScheme>;
+  activateStudyScheme(userId: string, courseId: string, schemeId: string, confirmed: boolean): Promise<StudyScheme>;
+  editManualStudyAssignment(userId: string, id: string, input: UpdateAssessmentItemInput): Promise<AssessmentItemRecord>;
   upsertExternalSource(
     userId: string,
     source: UpsertExternalSourceInput,
@@ -5445,11 +5455,41 @@ export class SupabaseLifeOSStore implements LifeOSStore {
   }
 
   async getTmaStudySummary(userId: string, timezone: string): Promise<TmaStudySummary> {
-    const [courses, records] = await Promise.all([
+    const [courses, records, supplement] = await Promise.all([
       loadStudyWorkspaceCourses(this.client, userId),
       this.listAcademicRecords(userId),
+      loadStudySupplement(this.client, userId),
     ]);
-    return { timezone, courses, records };
+    for (const course of courses) {
+      const validIds = new Set(course.calculator?.definition.fields.map(field => field.id) ?? []);
+      for (const assignment of supplement.assignments) {
+        if (assignment.schemeId !== course.gradingSchemes.find(scheme => scheme.isActive)?.id || assignment.studyCourseId !== course.id || !assignment.componentId || !validIds.has(assignment.componentId) || assignment.effectiveScore === null || assignment.effectiveMax === null || !Number.isFinite(assignment.effectiveScore) || !Number.isFinite(assignment.effectiveMax) || assignment.effectiveMax <= 0 || assignment.effectiveScore < 0 || assignment.effectiveScore > assignment.effectiveMax) continue;
+        course.actualValues[assignment.componentId] = {earned: assignment.effectiveScore, max: assignment.effectiveMax, kind: "actual", source: assignment.override ? "manual_override" : assignment.source};
+      }
+    }
+    // Only supported grade fields leave the trust boundary, never raw LMS payloads/user IDs.
+    return { timezone, courses, records: records.map(({userId: _owner, rawJson: _raw, ...record}) => record), ...supplement };
+  }
+
+  async saveStudyGradeOverride(userId: string, assessmentId: string, input: unknown): Promise<void> { return saveStudyOverride(this.client, userId, assessmentId, input); }
+  async saveStudyComponentMapping(userId: string, assessmentId: string, input: unknown): Promise<void> { return saveStudyMapping(this.client, userId, assessmentId, input); }
+  async createStudyDocument(userId: string, courseId: string, input: StudyDocumentInput): Promise<StudyDocument> { return createStudyDocument(this.client, userId, courseId, input); }
+  async downloadStudyDocument(userId: string, documentId: string): Promise<{fileName: string; bytes: Uint8Array}> { return downloadStudyDocument(this.client, userId, documentId); }
+  async createStudyScheme(userId: string, courseId: string, input: unknown): Promise<StudyScheme> { return createStudyScheme(this.client, userId, courseId, input); }
+  async activateStudyScheme(userId: string, courseId: string, schemeId: string, confirmed: boolean): Promise<StudyScheme> { return activateStudyScheme(this.client, userId, courseId, schemeId, confirmed); }
+  async createManualStudyAssignment(userId: string, input: CreateAssessmentItemInput): Promise<AssessmentItemRecord> {
+    await assertStudyCourse(this.client, userId, input.studyCourseId);
+    if (input.actualScore != null && (input.maxScore == null || input.actualScore < 0 || input.actualScore > input.maxScore) || input.maxScore != null && (!Number.isFinite(input.maxScore) || input.maxScore <= 0) || input.actualScore != null && !Number.isFinite(input.actualScore)) throw new StudyWorkspaceError("invalid_study_assignment");
+    return this.createAssessmentItem(userId, { ...input, source: "manual", externalId: null });
+  }
+  async editManualStudyAssignment(userId: string, id: string, input: UpdateAssessmentItemInput): Promise<AssessmentItemRecord> {
+    const row = await getOwnedAssessment(this.client, userId, id);
+    if (row.source !== "manual") throw new StudyWorkspaceError("study_assignment_read_only");
+    const earned = input.actualScore === undefined ? row.actual_score : input.actualScore;
+    const max = input.maxScore === undefined ? row.max_score : input.maxScore;
+    if (max !== null && (!Number.isFinite(max) || max <= 0) || earned !== null && (!Number.isFinite(earned) || earned < 0 || max === null || earned > max)) throw new StudyWorkspaceError("invalid_study_assignment");
+    if (input.rawJson !== undefined) input = {...input, rawJson: {...(row.raw_json !== null && typeof row.raw_json === "object" && !Array.isArray(row.raw_json) ? row.raw_json : {}), ...(input.rawJson as object)}};
+    return this.updateAssessmentItem(userId, id, input);
   }
 
   async saveStudyCalculator(userId: string, courseId: string, input: unknown): Promise<StudyCalculatorState> {

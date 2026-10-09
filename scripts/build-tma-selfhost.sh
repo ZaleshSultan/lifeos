@@ -2,30 +2,22 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-DIST_DIR="$REPO_ROOT/apps/tma/dist"
-INDEX_FILE="$DIST_DIR/index.html"
-
+# Empty API base uses the serving origin. Never bake a personal hostname into JS.
+export VITE_API_BASE_URL="${VITE_API_BASE_URL:-}"
+export VITE_ALLOW_MOCK_DATA=false
+export VITE_BASE_PATH="${VITE_BASE_PATH:-/tma/}"
+TMA_BUILD_DIR="${TMA_BUILD_DIR:-$REPO_ROOT/apps/tma/dist}"
+if [[ "$VITE_BASE_PATH" != /tma/ ]]; then
+  printf 'ERROR: bot self-hosting serves /tma/; VITE_BASE_PATH must be /tma/\n' >&2
+  exit 1
+fi
 cd "$REPO_ROOT"
-rm -rf "$DIST_DIR"
-
-VITE_API_BASE_URL="https://lifeos.zalewko.me" \
-VITE_ALLOW_MOCK_DATA="false" \
-VITE_BASE_PATH="/tma/" \
-pnpm --filter @lifeos/tma build
-
-if [[ ! -f "$INDEX_FILE" ]]; then
-  printf 'ERROR: TMA build did not create %s\n' "$INDEX_FILE" >&2
-  exit 1
-fi
-
-if ! grep -q '/tma/assets/' "$INDEX_FILE"; then
-  printf 'ERROR: %s does not contain /tma/assets/ paths\n' "$INDEX_FILE" >&2
-  exit 1
-fi
-
-if grep -Eq '(src|href)="/assets/' "$INDEX_FILE"; then
-  printf 'ERROR: %s contains broken root /assets/ paths\n' "$INDEX_FILE" >&2
-  exit 1
-fi
-
-printf 'OK: self-host TMA built with /tma/assets/ paths\n'
+corepack pnpm --filter @lifeos/tma build --outDir "$TMA_BUILD_DIR"
+python3 - "$TMA_BUILD_DIR/index.html" <<'PY'
+from pathlib import Path
+import sys
+index = Path(sys.argv[1]).read_text()
+if '/tma/assets/' not in index or '="/assets/' in index:
+    raise SystemExit('ERROR: built assets must use /tma/assets/')
+print('OK: self-host TMA built with /tma/assets/ paths')
+PY

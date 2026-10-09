@@ -28,7 +28,6 @@ import {
   type CurrencyCode,
 } from "@lifeos/core";
 import type { LifeOSStore, TelegramUserRecord } from "@lifeos/db";
-import { StudyWorkspaceError } from "@lifeos/db";
 import type { BotConfig } from "./config.js";
 import { handleTelegramUpdate } from "./telegram/commands.js";
 import type { TelegramClient, TelegramUpdate } from "./telegram/types.js";
@@ -42,6 +41,7 @@ import {
 } from "./syncthing.js";
 import { pipeline } from "node:stream/promises";
 import { handleWorkoutRoute } from "./workout-routes.js";
+import { handleStudyRoutes } from "./study-routes.js";
 import { fetchWeatherSnapshot } from "./weather.js";
 import { verifyWebSessionToken } from "./web-session.js";
 import {
@@ -257,7 +257,7 @@ function writeJson(
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
     "access-control-allow-headers":
-      "authorization,content-type,x-telegram-init-data,x-telegram-bot-api-secret-token",
+      "authorization,content-type,x-study-file-name,x-telegram-init-data,x-telegram-bot-api-secret-token",
   });
   response.end(JSON.stringify(body));
 }
@@ -267,7 +267,7 @@ function writeNoContent(response: ServerResponse): void {
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
     "access-control-allow-headers":
-      "authorization,content-type,x-telegram-init-data,x-telegram-bot-api-secret-token",
+      "authorization,content-type,x-study-file-name,x-telegram-init-data,x-telegram-bot-api-secret-token",
   });
   response.end();
 }
@@ -407,10 +407,30 @@ async function handleTmaStaticRequest(
   requestUrl: URL,
   options: ResolvedBotServerOptions,
 ): Promise<boolean> {
-  if (
-    !options.tmaStaticDir ||
-    (request.method !== "GET" && request.method !== "HEAD")
-  ) {
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return false;
+  }
+
+  // Previously sent Telegram buttons may point to the backend origin. Only
+  // treat that origin's root as an app entry when self-hosting is configured.
+  // The redirect stays on this origin and preserves Telegram's query/hash.
+  if (requestUrl.pathname === "/" && options.tmaStaticDir) {
+    response.writeHead(308, {
+      location: `/tma/${requestUrl.search}`,
+      "cache-control": "no-store",
+    });
+    response.end();
+    return true;
+  }
+
+  if (!options.tmaStaticDir) {
+    if (
+      requestUrl.pathname === "/tma" ||
+      requestUrl.pathname.startsWith("/tma/")
+    ) {
+      writeJson(response, 503, { error: "tma_build_unavailable" });
+      return true;
+    }
     return false;
   }
 
@@ -458,12 +478,21 @@ async function handleTmaStaticRequest(
     options.tmaStaticDir,
     requestedPath,
   );
+  // A stale/missing asset is a real 404, never an HTML response labelled as JS.
+  if (
+    !requestedFile &&
+    (relativePath.startsWith("assets/") || extname(relativePath))
+  ) {
+    writeJson(response, 404, { error: "tma_asset_not_found" });
+    return true;
+  }
   const filePath =
     requestedFile ??
     (await resolveTmaStaticFile(options.tmaStaticDir, "index.html"));
 
   if (!filePath) {
-    return false;
+    writeJson(response, 503, { error: "tma_build_unavailable" });
+    return true;
   }
 
   await writeStaticFile(
@@ -528,6 +557,12 @@ function validateTelegramInitData(
   username: string | null;
 } | null {
   const params = new URLSearchParams(initData);
+  if (
+    initData.length > 16_384 ||
+    new Set(params.keys()).size !== [...params.keys()].length
+  ) {
+    return null;
+  }
   const hash = params.get("hash");
   const authDateValue = params.get("auth_date");
 
@@ -573,7 +608,11 @@ function validateTelegramInitData(
       username?: unknown;
     };
 
-    if (typeof user.id !== "number") {
+    if (
+      typeof user.id !== "number" ||
+      !Number.isSafeInteger(user.id) ||
+      user.id <= 0
+    ) {
       return null;
     }
 
@@ -1331,10 +1370,18 @@ function isoDateIsBefore(left: string, right: string): boolean {
   return left < right;
 }
 
-async function readJsonBody(
+async function readBinaryBody(
   request: IncomingMessage,
   maxBytes = JSON_BODY_MAX_BYTES,
-): Promise<unknown> {
+): Promise<Buffer> {
+  if (Number(request.headers["content-length"]) > maxBytes) {
+    request.resume();
+    throw new RequestBodyError(
+      413,
+      "request_body_too_large",
+      "Request body is too large",
+    );
+  }
   const chunks: Buffer[] = [];
   let totalBytes = 0;
 
@@ -1353,7 +1400,14 @@ async function readJsonBody(
     chunks.push(buffer);
   }
 
-  const raw = Buffer.concat(chunks).toString("utf8");
+  return Buffer.concat(chunks);
+}
+
+async function readJsonBody(
+  request: IncomingMessage,
+  maxBytes = JSON_BODY_MAX_BYTES,
+): Promise<unknown> {
+  const raw = (await readBinaryBody(request, maxBytes)).toString("utf8");
 
   if (!raw.trim()) {
     return {};
@@ -2920,50 +2974,19 @@ async function handleRequest(
       return;
     }
 
-    if (request.method === "GET" && requestUrl.pathname === "/api/tma/study") {
-      writeJson(response, 200, tmaData(await store.getTmaStudySummary(auth.user.userId, auth.user.timezone)));
+    if (
+      await handleStudyRoutes({
+        request,
+        response,
+        url: requestUrl,
+        store,
+        user: auth.user,
+        readJsonBody,
+        readBinaryBody,
+        writeJson,
+      })
+    )
       return;
-    }
-
-    const studySyllabusMatch = requestUrl.pathname.match(/^\/api\/tma\/study\/courses\/([^/]+)\/syllabus$/);
-    if (request.method === "PUT" && studySyllabusMatch) {
-      const courseId = studySyllabusMatch[1];
-      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(courseId)) {
-        writeJson(response, 400, { error: "invalid_study_course_id" });
-        return;
-      }
-      const body = await readJsonBody(request);
-      try {
-        const state = await store.configureStudyCalculator(auth.user.userId, courseId, body);
-        writeJson(response, 200, tmaData(state));
-      } catch (error) {
-        if (!(error instanceof StudyWorkspaceError)) throw error;
-        const status = error.code === "study_course_not_found" ? 404
-          : error.code === "study_calculator_conflict" ? 409 : 400;
-        writeJson(response, status, { error: error.code });
-      }
-      return;
-    }
-
-    const studyCalculatorMatch = requestUrl.pathname.match(/^\/api\/tma\/study\/courses\/([^/]+)\/calculator$/);
-    if (request.method === "PUT" && studyCalculatorMatch) {
-      const courseId = studyCalculatorMatch[1];
-      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(courseId)) {
-        writeJson(response, 400, { error: "invalid_study_course_id" });
-        return;
-      }
-      const body = await readJsonBody(request);
-      try {
-        const state = await store.saveStudyCalculator(auth.user.userId, courseId, body);
-        writeJson(response, 200, tmaData(state));
-      } catch (error) {
-        if (!(error instanceof StudyWorkspaceError)) throw error;
-        const status = error.code === "study_course_not_found" ? 404
-          : error.code === "study_calculator_conflict" ? 409 : 400;
-        writeJson(response, status, { error: error.code });
-      }
-      return;
-    }
 
     if (
       request.method === "GET" &&
@@ -3113,7 +3136,7 @@ async function handleRequest(
           "access-control-allow-origin": "*",
           "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
           "access-control-allow-headers":
-            "authorization,content-type,x-telegram-init-data,x-telegram-bot-api-secret-token",
+            "authorization,content-type,x-study-file-name,x-telegram-init-data,x-telegram-bot-api-secret-token",
         });
         response.end(bytes);
       } catch (error) {
@@ -3394,10 +3417,18 @@ async function handleRequest(
       return;
     }
 
-    if (await handleWorkoutRoute({
-      request, response, pathname: requestUrl.pathname,
-      userId: auth.user.userId, store, readJsonBody, writeJson,
-    })) return;
+    if (
+      await handleWorkoutRoute({
+        request,
+        response,
+        pathname: requestUrl.pathname,
+        userId: auth.user.userId,
+        store,
+        readJsonBody,
+        writeJson,
+      })
+    )
+      return;
 
     if (request.method === "GET" && requestUrl.pathname === "/api/tma/health") {
       writeJson(
@@ -3617,6 +3648,12 @@ export function createBotServer(options: BotServerOptions = {}): Server {
 
   return createServer((request: IncomingMessage, response: ServerResponse) => {
     void handleRequest(request, response, resolvedOptions).catch((error) => {
+      // A client can close the WebView while an asset/PDF stream is in flight.
+      // Its response cannot be replaced with JSON once headers were sent.
+      if (response.headersSent || response.destroyed) {
+        if (!response.destroyed) response.destroy();
+        return;
+      }
       if (error instanceof RequestBodyError) {
         writeJson(response, error.statusCode, {
           error: error.errorCode,

@@ -40,6 +40,8 @@ replay_pid*.log
 *.keystore
 !debug.keystore
 apps/*/build/
+apps/tma/.deploy-*/
+apps/tma/dist.previous-*/
 apps/*/.gradle/
 apps/*/.kotlin/
 

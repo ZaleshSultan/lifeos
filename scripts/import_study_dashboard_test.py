@@ -47,6 +47,7 @@ class FakeDB:
                          "status": "active", "metadata": {"keep": "existing"}, "external_course_key": f"moodle:{index}"}
                         for index, code in enumerate(imported)]
         self.courses.append({"id": "other-user-course", "user_id": "user-b", "code": "OS52-EN", "status": "active", "metadata": {}})
+        self.schemes = []
         self.schedules = []
         if with_schedules:
             for course in self.courses[:-1]:
@@ -56,7 +57,7 @@ class FakeDB:
     def request(self, method, table, query=None, body=None, prefer=None):
         query = query or {}
         self.calls.append((method, table, deepcopy(query), deepcopy(body)))
-        rows = self.courses if table == "study_courses" else self.schedules
+        rows = self.courses if table == "study_courses" else self.schemes if table == "grading_schemes" else self.schedules
 
         def matches(row):
             for key, expression in query.items():
@@ -100,6 +101,8 @@ class StudyDashboardImportTest(unittest.TestCase):
         for code, weights in expected.items():
             profile = self.imported[code]["definition"]
             self.assertEqual(profile["attestationThreshold"], 25)
+            self.assertEqual(profile["verification"], "needs_review")
+            self.assertTrue(all(field["verification"] == "needs_review" for field in profile["fields"]))
             for period in ("att1", "att2"):
                 self.assertEqual([field["weightPercent"] for field in profile["fields"] if field["period"] == period], weights)
             self.assertEqual([field["weightPercent"] for field in profile["fields"] if field["period"] == "exam"], [100])
@@ -130,26 +133,44 @@ class StudyDashboardImportTest(unittest.TestCase):
         importer.apply_plan(db, plan)
         self.assertEqual(len(db.schedules), 25)
         second = importer.build_plan(db, self.imported)
-        self.assertTrue(all(not item["profile_changed"] and not item["operations"] for item in second))
+        self.assertTrue(all(not item["candidate_created"] and not item["profile_changed"] and not item["operations"] for item in second))
         call_count = len(db.calls)
         importer.apply_plan(db, second)
         self.assertEqual(len(db.calls), call_count)
 
-    def test_moves_only_the_two_recognized_seed_slots_preserving_their_ids(self):
+    def test_does_not_implicitly_change_rooms_teachers_or_move_slots(self):
+        for field, value in (("room", "Other Room"), ("instructor_name", "Other Teacher"), ("start_time", "21:00")):
+            db = FakeDB(self.imported)
+            db.schedules[0][field] = value
+            with self.subTest(field=field), self.assertRaises(importer.StudyImportError):
+                importer.build_plan(db, self.imported)
+            self.assertTrue(all(call[0] == "GET" for call in db.calls))
+        self.assertEqual(importer.KNOWN_MOVES, {})
+
+    def test_only_explicit_exact_corrections_can_update_an_existing_slot(self):
         db = FakeDB(self.imported)
-        moved_ids = []
-        for code, move in importer.KNOWN_MOVES.items():
-            old_day, old_time, day, start, room, teacher = move
-            course = next(course for course in db.courses if course["code"] == code)
-            slot = next(row for row in db.schedules if row["study_course_id"] == course["id"] and row["day_of_week"] == day and row["start_time"] == start)
-            moved_ids.append(slot["id"])
-            slot.update({"day_of_week": old_day, "start_time": old_time, "end_time": old_time[:3] + "50", "room": room + " (Campus)", "instructor_name": teacher})
-        plan = importer.build_plan(db, self.imported)
-        self.assertEqual(sum(len(item["operations"]) for item in plan), 2)
+        course = db.courses[0]
+        slot = db.schedules[0]
+        desired = importer.normalized_schedule(slot)
+        slot.update({"day_of_week": "saturday", "start_time": "18:00", "end_time": "18:50", "room": "Old Room", "instructor_name": "Old Teacher"})
+        corrections = {course["code"]: [{"from": importer.normalized_schedule(slot), "to": desired}]}
+        plan = importer.build_plan(db, self.imported, corrections)
+        self.assertEqual(sum(len(item["operations"]) for item in plan), 1)
+        slot_id = slot["id"]
         importer.apply_plan(db, plan)
+        self.assertEqual(slot["id"], slot_id)
+        self.assertEqual(importer.normalized_schedule(slot), desired)
         self.assertEqual(len(db.schedules), 25)
-        self.assertEqual(len([row for row in db.schedules if row["id"] in moved_ids]), 2)
-        self.assertTrue(all(not item["operations"] for item in importer.build_plan(db, self.imported)))
+
+    def test_mismatched_correction_aborts_without_any_write(self):
+        db = FakeDB(self.imported)
+        slot = db.schedules[0]
+        desired = importer.normalized_schedule(slot)
+        slot["room"] = "Changed Room"
+        corrections = {db.courses[0]["code"]: [{"from": {**importer.normalized_schedule(slot), "room": "Another Room"}, "to": desired}]}
+        with self.assertRaises(importer.StudyImportError):
+            importer.build_plan(db, self.imported, corrections)
+        self.assertTrue(all(call[0] == "GET" for call in db.calls))
 
     def test_unexpected_extra_or_ambiguous_rows_abort_before_any_write(self):
         for duplicate in (False, True):
@@ -175,20 +196,23 @@ class StudyDashboardImportTest(unittest.TestCase):
         self.assertEqual(course["metadata"]["keep"], "existing")
         self.assertEqual(course["external_course_key"], "moodle:0")
         self.assertNotIn(importer.PROFILE_KEY, db.courses[-1]["metadata"])
+        self.assertEqual(profile["definition"], {})
+        self.assertEqual(len(db.schemes), 5)
+        self.assertTrue(all(row["is_active"] is False and row["verification"] == "needs_review" for row in db.schemes))
 
-    def test_refuses_to_lose_unrecognized_saved_values(self):
+    def test_preserves_custom_unrecognized_and_raw_point_saved_values(self):
         db = FakeDB(self.imported)
-        db.courses[0]["metadata"][importer.PROFILE_KEY] = {"values": {"manual-score": 20}, "target": 70}
-        with self.assertRaises(importer.StudyImportError):
-            importer.build_plan(db, self.imported)
-        self.assertTrue(all(call[0] == "GET" for call in db.calls))
+        state = {"definition": {"custom": True}, "values": {"manual-score": 20, "custom-score": {"earned": 15, "max": 30, "kind": "actual", "source": "manual_confirmed"}}, "target": 70}
+        db.courses[0]["metadata"][importer.PROFILE_KEY] = deepcopy(state)
+        importer.apply_plan(db, importer.build_plan(db, self.imported))
+        self.assertEqual(db.courses[0]["metadata"][importer.PROFILE_KEY], state)
+        self.assertFalse(any(call[1] == "study_courses" and call[0] != "GET" for call in db.calls))
 
-    def test_metadata_compare_and_swap_keeps_concurrent_edits(self):
+    def test_concurrent_user_metadata_is_untouched(self):
         db = FakeDB(self.imported)
         plan = importer.build_plan(db, self.imported)
         db.courses[0]["metadata"]["new-user-setting"] = "retain"
-        with self.assertRaises(importer.StudyImportError):
-            importer.apply_plan(db, plan)
+        importer.apply_plan(db, plan)
         self.assertEqual(db.courses[0]["metadata"]["new-user-setting"], "retain")
         self.assertNotIn(importer.PROFILE_KEY, db.courses[0]["metadata"])
 
@@ -212,6 +236,29 @@ class StudyDashboardImportTest(unittest.TestCase):
             with self.assertRaises(importer.StudyImportError):
                 importer.build_plan(db, self.imported)
             self.assertTrue(all(call[0] == "GET" for call in db.calls))
+
+    def test_parses_a_generic_mapped_course_with_no_fixed_course_or_slot_count(self):
+        html = """<table><tr class="day-header"><td>Понедельник</td></tr>
+        <tr><td></td><td>09:00–09:50</td><td><span class="badge">EX101</span></td><td>Лекция</td><td>Example Teacher</td><td>Онлайн</td></tr></table>
+        <table><tr><td>Essay</td><td><input type="number" id="abc-a"></td></tr>
+        <tr><td>Project</td><td><input type="number" id="abc-b"></td></tr>
+        <tr><td>Final</td><td><input type="number" id="abc-exam"></td></tr></table>
+        <script>const abcAtt1=(getVal('abc-a') * 1); const abcAtt2=(getVal('abc-b') * 1);
+        const finalScore=(att1 * 0.3) + (att2 * 0.3) + (exam * 0.4); if(att1 < 25 || att2 < 25) {}</script>"""
+        parsed = importer.parse_dashboard(html, "generic.html", {"abc": ("EX-101", "EX101")})
+        self.assertEqual(list(parsed), ["EX-101"])
+        self.assertEqual(len(parsed["EX-101"]["schedules"]), 1)
+        self.assertEqual(parsed["EX-101"]["definition"]["fields"][0]["label"], "Essay")
+        self.assertEqual(parsed["EX-101"]["definition"]["verification"], "needs_review")
+
+    def test_legacy_network_formula_is_never_active_or_applied_over_custom_scheme(self):
+        db = FakeDB(self.imported)
+        db.schemes.append({"id": "active-original", "user_id": "user-a", "study_course_id": db.courses[0]["id"], "definition": {"verified": True}, "version": 4, "is_active": True})
+        importer.apply_plan(db, importer.build_plan(db, self.imported))
+        self.assertEqual(db.schemes[0]["is_active"], True)
+        candidates = [row for row in db.schemes if row["id"] != "active-original"]
+        self.assertTrue(all(row["is_active"] is False and row["verification"] == "needs_review" for row in candidates))
+
 
 
 if __name__ == "__main__":
