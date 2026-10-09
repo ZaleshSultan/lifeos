@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 REQUEST_TIMEOUT_SECONDS = 30
 DEFAULT_TIMEZONE = "Asia/Almaty"
-DEFAULT_DIGEST_TIME = "08:00"
+DEFAULT_DIGEST_TIME = "06:00"
 DEFAULT_SEND_WINDOW_MINUTES = 720
 WEEKDAYS = (
     "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"
@@ -33,6 +33,10 @@ JsonObject = dict[str, Any]
 
 class WorkerError(RuntimeError):
     pass
+
+
+class TelegramRejected(WorkerError):
+    """Telegram explicitly rejected the request; no message was accepted."""
 
 
 @dataclass(frozen=True)
@@ -129,7 +133,10 @@ def resolve_timezone(name: str):
     except ZoneInfoNotFoundError:
         if name in {"Asia/Almaty", "Asia/Qyzylorda"}:
             return timezone(timedelta(hours=5))
-        return timezone.utc
+        try:
+            return ZoneInfo(DEFAULT_TIMEZONE)
+        except ZoneInfoNotFoundError:
+            return timezone(timedelta(hours=5))
 
 
 def digest_window(local_now: datetime, digest_time: str, window_minutes: int) -> bool:
@@ -140,10 +147,14 @@ def digest_window(local_now: datetime, digest_time: str, window_minutes: int) ->
 
 def build_tma_url(base_url: str, *, screen: str = "study", study_tab: str | None = None) -> str:
     parts = urllib.parse.urlsplit(base_url)
+    if parts.scheme != "https" or not parts.netloc or parts.username or parts.password:
+        raise WorkerError("TMA_URL must be an HTTPS frontend URL without credentials")
     query = dict(urllib.parse.parse_qsl(parts.query, keep_blank_values=True))
     query["screen"] = screen
     if study_tab:
         query["studyTab"] = study_tab
+    else:
+        query.pop("studyTab", None)
     return urllib.parse.urlunsplit(
         (parts.scheme, parts.netloc, parts.path, urllib.parse.urlencode(query), parts.fragment)
     )
@@ -203,29 +214,36 @@ class SupabaseRestClient:
             return {}
         return rows[0]["settings"]
 
-    def claim_delivery(self, user_id: str, local_date: str, chat_id: str) -> bool:
-        try:
-            self.request("POST", "daily_digest_deliveries", body={
-                "user_id": user_id,
-                "local_date": local_date,
-                "telegram_chat_id": int(chat_id),
-                "status": "sending",
-            }, prefer="return=minimal")
-            return True
-        except WorkerError as exc:
-            if "409" in str(exc):
-                return False
-            raise
+    def claim_delivery(self, user_id: str, local_date: str, chat_id: str) -> str | None:
+        token = self.request("POST", "rpc/claim_daily_digest_delivery", body={
+            "p_user_id": user_id,
+            "p_local_date": local_date,
+            "p_chat_id": int(chat_id),
+        })
+        if token is not None and not isinstance(token, str):
+            raise WorkerError("Invalid daily digest claim response")
+        return token
 
-    def complete_delivery(self, user_id: str, local_date: str) -> None:
-        self.request("PATCH", "daily_digest_deliveries", {
-            "user_id": f"eq.{user_id}", "local_date": f"eq.{local_date}"
-        }, {"status": "sent", "sent_at": datetime.now(timezone.utc).isoformat()}, prefer="return=minimal")
+    def start_delivery(self, user_id: str, local_date: str, token: str) -> bool:
+        return self.request("POST", "rpc/start_daily_digest_delivery", body={
+            "p_user_id": user_id, "p_local_date": local_date, "p_claim_token": token,
+        }) is True
 
-    def release_delivery(self, user_id: str, local_date: str) -> None:
-        self.request("DELETE", "daily_digest_deliveries", {
-            "user_id": f"eq.{user_id}", "local_date": f"eq.{local_date}", "status": "eq.sending"
-        }, prefer="return=minimal")
+    def complete_delivery(self, user_id: str, local_date: str, token: str,
+                          message_id: int) -> None:
+        completed = self.request("POST", "rpc/complete_daily_digest_delivery", body={
+            "p_user_id": user_id, "p_local_date": local_date, "p_claim_token": token,
+            "p_message_id": message_id,
+        })
+        if completed is not True:
+            raise WorkerError("Daily digest completion rejected for this claim")
+
+    def release_delivery(self, user_id: str, local_date: str, token: str,
+                         *, uncertain: bool = False) -> None:
+        self.request("POST", "rpc/release_daily_digest_delivery", body={
+            "p_user_id": user_id, "p_local_date": local_date, "p_claim_token": token,
+            "p_outcome": "uncertain" if uncertain else "retry",
+        })
 
     def list_today_tasks(self, user_id: str, day_start: str, day_end: str) -> list[JsonObject]:
         planned = self.request("GET", "tasks", {
@@ -272,7 +290,7 @@ class SupabaseRestClient:
 
     def list_deadlines(self, user_id: str, now_iso: str, horizon_iso: str) -> list[JsonObject]:
         university = self.request("GET", "source_events", {
-            "select": "id,title,due_at,description,raw_json",
+            "select": "id,external_id,title,due_at,description,raw_json",
             "user_id": f"eq.{user_id}", "source_key": "eq.university_platform",
             "event_type": "eq.task", "status": "eq.active", "due_at": f"gte.{now_iso}",
             "and": f"(due_at.lte.{horizon_iso})", "order": "due_at.asc", "limit": "20",
@@ -282,16 +300,37 @@ class SupabaseRestClient:
             "user_id": f"eq.{user_id}", "entity_type": "eq.deadline", "due_at": f"gte.{now_iso}",
             "and": f"(due_at.lte.{horizon_iso})", "order": "due_at.asc", "limit": "20",
         }) or []
+        course_rows = self.list_courses(user_id)
+        course_ids = [str(row["id"]) for row in course_rows if row.get("id")]
+        assessments = self.request("GET", "assessment_items", {
+            "select": "id,external_id,source,study_course_id,title,due_at,status",
+            "study_course_id": f"in.({','.join(course_ids)})",
+            "status": "not.eq.graded", "due_at": f"gte.{now_iso}",
+            "and": f"(due_at.lte.{horizon_iso})", "order": "due_at.asc", "limit": "20",
+        }) or [] if course_ids else []
+        course_titles = {str(row["id"]): str(row.get("title") or row.get("code") or "Учёба")
+                         for row in course_rows if row.get("id")}
+        linked_grades: dict[str, str] = {}
         result: list[JsonObject] = []
         for row in university:
             raw = row.get("raw_json") if isinstance(row.get("raw_json"), dict) else {}
             course = raw.get("course_title") or row.get("description") or "Учёба"
-            result.append({"id": row.get("id"), "title": row.get("title") or "Задание", "due_at": row.get("due_at"), "course": course})
+            source_id = f"university:{row.get('external_id') or row.get('id')}"
+            if raw.get("related_grade_external_id"):
+                linked_grades[str(raw["related_grade_external_id"])] = source_id
+            result.append({"id": row.get("id"), "source_id": source_id, "title": row.get("title") or "Задание", "due_at": row.get("due_at"), "course": course})
         for row in manual:
-            result.append({"id": row.get("id"), "title": row.get("title") or "Дедлайн", "due_at": row.get("due_at"), "course": "LifeOS"})
-        dedup: dict[tuple[str, str], JsonObject] = {}
+            result.append({"id": row.get("id"), "source_id": f"lifeos:{row.get('id')}", "title": row.get("title") or "Дедлайн", "due_at": row.get("due_at"), "course": "LifeOS"})
+        for row in assessments:
+            external_id = str(row.get("external_id") or "")
+            source_id = linked_grades.get(external_id) or f"assessment:{row.get('source')}:{external_id or row.get('id')}"
+            result.append({"id": row.get("id"), "source_id": source_id,
+                           "title": row.get("title") or "Задание", "due_at": row.get("due_at"),
+                           "course": course_titles.get(str(row.get("study_course_id")), "Учёба")})
+        dedup: dict[str, JsonObject] = {}
         for row in result:
-            dedup[(str(row.get("title")), str(row.get("due_at")))] = row
+            # Two unrelated assignments may share both title and due time.
+            dedup[str(row.get("source_id") or row.get("id"))] = row
         return sorted(dedup.values(), key=lambda row: str(row.get("due_at") or ""))[:20]
 
 
@@ -299,7 +338,7 @@ class TelegramClient:
     def __init__(self, token: str) -> None:
         self.url = f"https://api.telegram.org/bot{token}/sendMessage"
 
-    def send_message(self, chat_id: str, text: str, reply_markup: JsonObject | None = None) -> None:
+    def send_message(self, chat_id: str, text: str, reply_markup: JsonObject | None = None) -> int:
         payload: JsonObject = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
         if reply_markup:
             payload["reply_markup"] = reply_markup
@@ -311,12 +350,30 @@ class TelegramClient:
         )
         try:
             with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
-                if response.status >= 300:
-                    raise WorkerError(f"Telegram send failed: {response.status}")
+                result = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
-            raise WorkerError(f"Telegram send failed: {exc.code}") from exc
+            try:
+                result = json.loads(exc.read().decode("utf-8"))
+            except (ValueError, UnicodeError):
+                raise WorkerError(f"Telegram delivery outcome unknown: HTTP {exc.code}") from exc
+            if (isinstance(result, dict) and result.get("ok") is False
+                    and 400 <= exc.code < 500 and exc.code != 408):
+                raise TelegramRejected(f"Telegram rejected send: {exc.code}") from exc
+            raise WorkerError(f"Telegram delivery outcome unknown: HTTP {exc.code}") from exc
         except urllib.error.URLError as exc:
-            raise WorkerError(f"Telegram send failed: {exc.reason}") from exc
+            raise WorkerError("Telegram delivery outcome unknown: network error") from exc
+        except (OSError, ValueError, UnicodeError) as exc:
+            raise WorkerError("Telegram delivery outcome unknown: unreadable response") from exc
+        if isinstance(result, dict) and result.get("ok") is False:
+            code = result.get("error_code")
+            if isinstance(code, int) and 400 <= code < 500 and code != 408:
+                raise TelegramRejected(f"Telegram rejected send: {code}")
+            raise WorkerError("Telegram delivery outcome unknown: server error")
+        message = result.get("result") if isinstance(result, dict) else None
+        message_id = message.get("message_id") if isinstance(message, dict) else None
+        if not isinstance(result, dict) or result.get("ok") is not True or type(message_id) is not int or message_id <= 0:
+            raise WorkerError("Telegram delivery outcome unknown: invalid response")
+        return message_id
 
 
 WEATHER_LABELS = {
@@ -435,6 +492,70 @@ def digest_greeting(local_now: datetime) -> str:
     return "Добрый вечер"
 
 
+def first_class_lines(
+    local_now: datetime, courses: list[JsonObject], schedule: list[JsonObject]
+) -> list[str]:
+    """Highlight the earliest valid class, even if schedule rows are unsorted."""
+    if not schedule:
+        return ["<b>🎓 Сегодня пар нет</b>"]
+
+    timed_classes: list[tuple[str, JsonObject]] = []
+    for row in schedule:
+        clock = str(row.get("start_time") or "")[:5]
+        if re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", clock):
+            timed_classes.append((clock, row))
+
+    if not timed_classes:
+        return ["<b>🎓 Пары сегодня есть — проверь время в расписании</b>"]
+
+    start, first = min(timed_classes, key=lambda item: item[0])
+    course_map = {str(course.get("id")): course for course in courses}
+    course = course_map.get(str(first.get("study_course_id")), {})
+    title = html.escape(str(course.get("title") or course.get("code") or "Предмет"))
+    room = str(first.get("room") or "").strip()
+    room_suffix = f" · {html.escape(room)}" if room else ""
+
+    first_at = local_now.replace(
+        hour=int(start[:2]), minute=int(start[3:]), second=0, microsecond=0
+    )
+    minutes_until = int((first_at - local_now).total_seconds() // 60)
+    if minutes_until >= 0:
+        hours, minutes = divmod(minutes_until, 60)
+        duration = " ".join(
+            part for part in (f"{hours} ч" if hours else "", f"{minutes} мин" if minutes else "")
+            if part
+        ) or "меньше минуты"
+        status = f"До первой пары: {duration}"
+    else:
+        end = str(first.get("end_time") or "")[:5]
+        end_at = (
+            local_now.replace(hour=int(end[:2]), minute=int(end[3:]), second=0, microsecond=0)
+            if re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", end)
+            else None
+        )
+        status = (
+            "Первая пара идёт сейчас" if end_at and local_now < end_at
+            else "Первая пара уже началась" if end_at is None
+            else "Первая пара уже закончилась"
+        )
+
+    lines = [f"<b>🚨 Первая пара: {start} — {title}{room_suffix}</b>", status]
+    online = [item for item in timed_classes if re.search(
+        r"online|онлайн|zoom|teams|remote|дистанц", str(item[1].get("room") or ""), re.I
+    )]
+    on_campus = [item for item in timed_classes if str(item[1].get("room") or "").strip()
+                 and item not in online]
+    if online:
+        online_start, online_class = min(online, key=lambda item: item[0])
+        online_course = course_map.get(str(online_class.get("study_course_id")), {})
+        lines.append(f"Первая онлайн: <b>{online_start}</b> — {html.escape(str(online_course.get('title') or 'Предмет'))}")
+        if on_campus:
+            campus_start, campus_class = min(on_campus, key=lambda item: item[0])
+            campus_course = course_map.get(str(campus_class.get("study_course_id")), {})
+            lines.append(f"Первая очная: <b>{campus_start}</b> — {html.escape(str(campus_course.get('title') or 'Предмет'))} · {html.escape(str(campus_class.get('room')))}")
+    return lines
+
+
 def build_digest(
     local_now: datetime,
     timezone_name: str,
@@ -446,6 +567,7 @@ def build_digest(
 ) -> str:
     course_map = {str(course.get("id")): course for course in courses}
     lines = [f"<b>{digest_greeting(local_now)} · {local_now:%d.%m.%Y}</b>"]
+    lines.extend(["", *first_class_lines(local_now, courses, schedule)])
     weather_lines = weather_digest_lines(weather)
     if weather_lines:
         lines.extend(["", *weather_lines])
@@ -486,7 +608,7 @@ def build_digest(
             due = local_due_label(str(row.get("due_at") or ""), timezone_name)
             lines.append(f"• {title} — {course} · <b>{html.escape(due)}</b>")
     else:
-        lines.append("На ближайшие 7 дней дедлайнов нет.")
+        lines.append("Сохранённых дедлайнов на 7 дней нет. Проверь актуальность синхронизации в «Учёбе».")
 
     return "\n".join(lines)[:3900]
 
@@ -505,9 +627,12 @@ def process_profile(db: SupabaseRestClient, telegram: TelegramClient, settings: 
     if not digest_window(local_now, settings.digest_time, settings.send_window_minutes):
         return False
     local_date = local_now.date().isoformat()
-    if not db.claim_delivery(user_id, local_date, chat_id):
+    claim_token = db.claim_delivery(user_id, local_date, chat_id)
+    if not claim_token:
         return False
 
+    send_started = False
+    telegram_accepted = False
     try:
         day_start, day_end = utc_bounds(local_now.date(), timezone_name)
         tasks = db.list_today_tasks(user_id, day_start, day_end)
@@ -533,16 +658,32 @@ def process_profile(db: SupabaseRestClient, telegram: TelegramClient, settings: 
                     "web_app": {"url": build_tma_url(settings.tma_url, study_tab="map")},
                 },
             ])
+            for row in [(("Сегодня", "today"), ("Задания", "assignments")),
+                        (("Дедлайны", "deadlines"), ("Оценки", "grades")),
+                        (("Калькулятор", "calculator"), ("Расписание", "schedule"))]:
+                buttons.append([{"text": label, "web_app": {"url": build_tma_url(settings.tma_url, study_tab=tab)}}
+                                for label, tab in row])
         else:
             buttons.append([{"text": "Карта корпуса", "url": AITU_MAP_URL}])
-        telegram.send_message(chat_id, text, {"inline_keyboard": buttons})
-        db.complete_delivery(user_id, local_date)
-        return True
-    except Exception:
+        # Commit the outbound phase before the network call. A crash/timeout after
+        # this point is ambiguous and must never cause an automatic second send.
+        if not db.start_delivery(user_id, local_date, claim_token):
+            return False
+        send_started = True
+        message_id = telegram.send_message(chat_id, text, {"inline_keyboard": buttons})
+        telegram_accepted = True
+        # Repeating completion is safe for the same claim. Sending again is not.
         try:
-            db.release_delivery(user_id, local_date)
+            db.complete_delivery(user_id, local_date, claim_token, message_id)
         except Exception:
-            logging.exception("failed to release daily digest claim")
+            db.complete_delivery(user_id, local_date, claim_token, message_id)
+        return True
+    except Exception as exc:
+        try:
+            uncertain = telegram_accepted or (send_started and not isinstance(exc, TelegramRejected))
+            db.release_delivery(user_id, local_date, claim_token, uncertain=uncertain)
+        except Exception:
+            logging.exception("failed to update daily digest claim; outbound claims remain blocked")
         raise
 
 
@@ -564,7 +705,10 @@ def main() -> int:
     settings = load_settings()
     logging.info("daily digest worker started; target time=%s", settings.digest_time)
     while True:
-        run_once(settings)
+        try:
+            run_once(settings)
+        except Exception:
+            logging.exception("daily digest polling failed; retrying next poll")
         time.sleep(settings.poll_seconds)
 
 

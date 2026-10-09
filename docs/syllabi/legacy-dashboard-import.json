@@ -1,0 +1,25 @@
+{
+  "description": "Operator-only mapping for the old supplied HTML; not runtime grading data. Historical display codes are preserved as explicit aliases. Formulas imported from this HTML are always inactive needs_review candidates.",
+  "courses": {
+    "os": {
+      "code": "OS52-EN",
+      "displayCode": "OS 2207"
+    },
+    "dms": {
+      "code": "DMS52-EN",
+      "displayCode": "SUBD 2217"
+    },
+    "krl": {
+      "code": "K(RUSSIAN)L51-RU",
+      "displayCode": "RL 2202"
+    },
+    "cnc": {
+      "code": "CNC53-EN",
+      "displayCode": "CNC 2305"
+    },
+    "dld": {
+      "code": "DLD52-EN",
+      "displayCode": "DLD 2201"
+    }
+  }
+}

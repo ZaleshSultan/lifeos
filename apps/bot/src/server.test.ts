@@ -590,11 +590,19 @@ export function tmaStore(events: string[] = []): LifeOSStore {
       } satisfies TmaAcademicSummary;
     },
     async getTmaStudySummary(_userId, timezone) {
-      return { timezone, courses: [], records: [] };
+      return { timezone, courses: [], records: [], assignments: [], deadlines: [], sources: [], sync: { updatedAt: null, status: "not_synced", message: "" } };
     },
     async saveStudyCalculator(): Promise<never> {
       throw new Error("Not used by general server tests");
     },
+    async saveStudyGradeOverride(): Promise<never> { throw new Error("Not used by general tests"); },
+    async saveStudyComponentMapping(): Promise<never> { throw new Error("Not used by general tests"); },
+    async createStudyDocument(): Promise<never> { throw new Error("Not used by general tests"); },
+    async downloadStudyDocument(): Promise<never> { throw new Error("Not used by general tests"); },
+    async createStudyScheme(): Promise<never> { throw new Error("Not used by general tests"); },
+    async activateStudyScheme(): Promise<never> { throw new Error("Not used by general tests"); },
+    async editManualStudyAssignment(): Promise<never> { throw new Error("Not used by general tests"); },
+    async createManualStudyAssignment(): Promise<never> { throw new Error("Not used by general tests"); },
     async configureStudyCalculator(): Promise<never> {
       throw new Error("Not used by general server tests");
     },

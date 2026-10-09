@@ -79,11 +79,27 @@ export async function lifeosApi<T>(path: string): Promise<T | null> {
   return body.data ?? null;
 }
 
-export function verifyWebTokenAgainstApi(token: string): Promise<Response> {
-  return fetch(`${apiBaseUrl()}/api/tma/session`, {
+export async function exchangeWebLoginToken(
+  token: string,
+): Promise<string | null> {
+  const response = await fetch(`${apiBaseUrl()}/api/web/session/exchange`, {
+    method: "POST",
     headers: { authorization: `Bearer ${token}` },
     cache: "no-store",
   });
+
+  if (!response.ok) return null;
+
+  const body = (await response.json()) as {
+    data?: {
+      token?: string;
+    };
+  };
+
+  const sessionToken = body.data?.token;
+  return typeof sessionToken === "string" && sessionToken
+    ? sessionToken
+    : null;
 }
 
 

@@ -1,0 +1,1243 @@
+diff --git a/apps/health-bridge/README.md b/apps/health-bridge/README.md
+index 64063cf..af0a9c4 100644
+--- a/apps/health-bridge/README.md
++++ b/apps/health-bridge/README.md
+@@ -1,6 +1,6 @@
+ # LifeOS Health Bridge
+ 
+-Android scaffold for syncing Xiaomi Watch 4 data into LifeOS through the
++Android app for syncing Xiaomi Watch 4 data into LifeOS through the
+ Samsung Galaxy S23+ and Android Health Connect:
+ 
+ ```text
+@@ -13,18 +13,19 @@ metric to Health Connect before the bridge can read it.
+ 
+ ## Scope
+ 
+-- Kotlin Android app scaffold
++- Kotlin Android app
+ - Health Connect client structure
+ - WorkManager worker structure
+-- Basic Compose `MainActivity`
+-- `SecureConfigStore` placeholder implementation backed by private `SharedPreferences`
++- Russian Compose connection and sync screen
++- Android Keystore AES-GCM token encryption (with migration from legacy plain preferences)
+ - Previous-day Health Connect aggregation in the phone's local timezone
+ - `LifeOsApiClient` for `POST /api/health/ingest`
+ - Schedules:
+   - `00:01` nightly previous-day sync
+-  - `00:15` retry
++  - WorkManager exponential retry on transient network failures
+   - `06:00` morning reconcile
+-  - manual sync from UI
++  - foreground manual sync for today and yesterday; foreground seven-day historical import
++- in-app success/error status and Health Connect background-read permission
+ 
+ ## Required Permissions
+ 
+@@ -41,6 +42,7 @@ Declared Health Connect read permissions:
+ - `android.permission.health.READ_STEPS`
+ - `android.permission.health.READ_TOTAL_CALORIES_BURNED`
+ - `android.permission.health.READ_WEIGHT`
++- `android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND` (optional, only on supported devices)
+ 
+ Network permission:
+ 
+@@ -64,7 +66,7 @@ Then from this folder:
+ ./gradlew :app:lintDebug
+ ```
+ 
+-This scaffold does not include a checked-in Gradle wrapper binary. Generate one from a machine with Gradle installed:
++The repository does not check in a Gradle wrapper. Generate one from a machine with Gradle installed:
+ 
+ ```bash
+ gradle wrapper
+@@ -77,11 +79,9 @@ Open the app and save:
+ - LifeOS API base URL, for example `https://your-lifeos-backend.example.com`
+ - Health session token issued by the backend endpoint `POST /api/tma/health/ingest-token`
+ 
+-Then grant Health Connect permissions and tap **Sync now** for a manual
+-previous-day sync. Start with manual sync; scheduled sync can be enabled after
+-record availability is verified on the Samsung Galaxy S23+.
++Then grant the desired Health Connect permissions and tap **Отправить данные за сегодня и вчера**. Check the in-app sync status with **Обновить результат**. Manual sync works without background access while the app is open. Automated background sync is best-effort, available only with permission and device support.
+ 
+-The bridge stores only the per-user health session token on the Android phone and sends it as `Authorization: Bearer <token>`. The APK no longer accepts or sends a user id; the backend binds ingested metrics only to the user encoded in that signed token.
++The bridge encrypts the per-user health session token in Android Keystore on the phone and sends it as `Authorization: Bearer <token>`. The APK no longer accepts or sends a user id; the backend binds ingested metrics only to the user encoded in that signed token.
+ 
+ ## Xiaomi Watch 4 Verification
+ 
+@@ -89,7 +89,7 @@ The bridge stores only the per-user health session token on the Android phone an
+ 2. In Android Health Connect, confirm Mi Fitness has write access.
+ 3. Confirm records such as steps or sleep are visible from Mi Fitness.
+ 4. Grant this bridge read access.
+-5. Tap **Sync now**.
++5. Tap **Отправить данные за сегодня и вчера** (keep the app open).
+ 6. Check `/health` in Telegram and the TMA Health screen.
+ 
+ If Mi Fitness does not publish a metric to Health Connect, use `/health_log` or
+@@ -131,9 +131,9 @@ Reference: [Health Connect reads and pagination](https://developer.android.com/h
+ 
+ ## TODOs Before Production
+ 
+-- Replace `SharedPreferencesSecureConfigStore` with AndroidX Security or platform-backed encrypted storage.
+-- Add validation/error messages around backend config fields.
+-- Add user-visible WorkManager status history.
++- Build/debug and install an APK on the actual Galaxy S23+ with Android Studio.
++- Verify background sync runs with granted `READ_HEALTH_DATA_IN_BACKGROUND`, battery optimization and supported Health Connect version.
++- Upgrade from one-record sync status to a rolling WorkManager history.
+ - Add instrumentation tests with fake Health Connect data.
+ - Verify exact record availability on target devices and Health Connect provider apps.
+ - Configure Play Console Health Connect data access declarations before release.
+@@ -144,3 +144,15 @@ Reference: [Health Connect reads and pagination](https://developer.android.com/h
+ per-user signed Bearer token issued by the authenticated TMA session. The Android
+ APK does not contain a shared backend secret and does not send a configurable
+ LifeOS user id.
++
++## Functional updates
++
++- Manual send now uploads **today so far plus yesterday**; seven-day backfill has a separate action.
++- Automatic sync uses periodic WorkManager tasks; manual sync runs in the open Activity to support devices without Health Connect background-read support. The app must remain open during manual import. Exact delivery at 00:01 or 06:00 is **not guaranteed** by Android.
++- An optional background Health Connect read permission is requested separately only on devices supporting it; otherwise manually run the app in foreground.
++- API requires HTTPS and stores the per-user token encrypted with the Android Keystore. Invalid/expired tokens produce actionable 401/403 status.
++- A zero-result sync is not reported as a successful upload. Open Mi Fitness and Health Connect permissions to confirm whether data is exported.
++
++## Token renewal
++
++Health tokens generated by the existing TMA endpoint expire after **30 days**. If the app shows HTTP 401/403, open LifeOS Mini App → Health → Connect watch, request a new token and paste it into this app. Never use a shared backend service-role key.
+diff --git a/apps/health-bridge/app/build.gradle.kts b/apps/health-bridge/app/build.gradle.kts
+index 977e2d5..35216c3 100644
+--- a/apps/health-bridge/app/build.gradle.kts
++++ b/apps/health-bridge/app/build.gradle.kts
+@@ -13,8 +13,8 @@ android {
+         applicationId = "com.lifeos.healthbridge"
+         minSdk = 28
+         targetSdk = 36
+-        versionCode = 1
+-        versionName = "0.1.0"
++        versionCode = 2
++        versionName = "0.2.0"
+     }
+ 
+     buildFeatures {
+diff --git a/apps/health-bridge/app/src/main/AndroidManifest.xml b/apps/health-bridge/app/src/main/AndroidManifest.xml
+index 9ad35ea..ffe1ac3 100644
+--- a/apps/health-bridge/app/src/main/AndroidManifest.xml
++++ b/apps/health-bridge/app/src/main/AndroidManifest.xml
+@@ -10,9 +10,12 @@
+     <uses-permission android:name="android.permission.health.READ_OXYGEN_SATURATION" />
+     <uses-permission android:name="android.permission.health.READ_SLEEP" />
+     <uses-permission android:name="android.permission.health.READ_STEPS" />
++    <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND" />
+     <uses-permission android:name="android.permission.health.READ_TOTAL_CALORIES_BURNED" />
+     <uses-permission android:name="android.permission.health.READ_WEIGHT" />
+ 
++    <queries><package android:name="com.google.android.apps.healthdata" /></queries>
++
+     <application
+         android:name=".LifeOsHealthBridgeApp"
+         android:allowBackup="false"
+diff --git a/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/MainActivity.kt b/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/MainActivity.kt
+index 8ee80c3..06042a1 100644
+--- a/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/MainActivity.kt
++++ b/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/MainActivity.kt
+@@ -16,6 +16,7 @@ import androidx.compose.material3.Button
+ import androidx.compose.material3.Card
+ import androidx.compose.material3.CardDefaults
+ import androidx.compose.material3.MaterialTheme
++import androidx.compose.material3.OutlinedButton
+ import androidx.compose.material3.OutlinedTextField
+ import androidx.compose.material3.Surface
+ import androidx.compose.material3.Text
+@@ -27,184 +28,204 @@ import androidx.compose.runtime.remember
+ import androidx.compose.runtime.rememberCoroutineScope
+ import androidx.compose.runtime.setValue
+ import androidx.compose.ui.Modifier
++import androidx.compose.ui.platform.LocalContext
+ import androidx.compose.ui.text.input.PasswordVisualTransformation
+ import androidx.compose.ui.unit.dp
+ import androidx.health.connect.client.HealthConnectClient
++import androidx.health.connect.client.permission.HealthPermission
+ import com.lifeos.healthbridge.config.BridgeConfig
+ import com.lifeos.healthbridge.config.SharedPreferencesSecureConfigStore
++import com.lifeos.healthbridge.config.SyncLogStore
++import com.lifeos.healthbridge.config.validHealthBridgeUrl
+ import com.lifeos.healthbridge.health.HealthConnectBridge
+-import com.lifeos.healthbridge.sync.HealthSyncScheduler
++import com.lifeos.healthbridge.sync.HealthSyncRunner
++import com.lifeos.healthbridge.model.SyncReason
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.withContext
+ import com.lifeos.healthbridge.ui.HealthBridgeTheme
+ import kotlinx.coroutines.launch
+ 
+ class MainActivity : ComponentActivity() {
+     override fun onCreate(savedInstanceState: Bundle?) {
+         super.onCreate(savedInstanceState)
+-
+-        setContent {
+-            HealthBridgeTheme {
+-                MainScreen()
+-            }
+-        }
++        setContent { HealthBridgeTheme { MainScreen() } }
+     }
+ }
+ 
+ @Composable
+ private fun MainScreen() {
+     val scope = rememberCoroutineScope()
+-    val context = androidx.compose.ui.platform.LocalContext.current
++    val context = LocalContext.current
+     val configStore = remember { SharedPreferencesSecureConfigStore(context) }
++    val logStore = remember { SyncLogStore(context) }
+     val bridge = remember { HealthConnectBridge(context) }
+-    val scheduler = remember { HealthSyncScheduler(context) }
++    var sending by remember { mutableStateOf(false) }
+     var config by remember { mutableStateOf(configStore.read()) }
+     var apiBaseUrl by remember { mutableStateOf(config.apiBaseUrl) }
+     var sessionToken by remember { mutableStateOf(config.sessionToken) }
+-    var status by remember { mutableStateOf("Ready") }
++    var status by remember { mutableStateOf("Настрой подключение и разреши чтение Health Connect.") }
+     var missingPermissionCount by remember { mutableStateOf<Int?>(null) }
+-    val permissionLauncher = rememberLauncherForActivityResult(
+-        contract = bridge.permissionContract(),
+-    ) {
+-        scope.launch {
+-            missingPermissionCount = bridge.missingPermissions().size
+-            status = if (missingPermissionCount == 0) {
+-                "Health Connect permissions granted"
+-            } else {
+-                "Missing $missingPermissionCount Health Connect permissions"
+-            }
++    var grantedReadCount by remember { mutableStateOf(0) }
++    var backgroundGranted by remember { mutableStateOf(false) }
++    var lastSync by remember { mutableStateOf(logStore.read()) }
++    val available = bridge.availability() == HealthConnectClient.SDK_AVAILABLE
++    val backgroundSupported = available && bridge.backgroundReadSupported()
++
++    suspend fun refreshPermissions() {
++        if (available) {
++            val granted = bridge.client().permissionController.getGrantedPermissions()
++            missingPermissionCount = (bridge.permissions - granted).size
++            grantedReadCount = (bridge.permissions intersect granted).size
++            backgroundGranted = bridge.backgroundReadGranted()
+         }
+     }
+ 
+-    LaunchedEffect(Unit) {
+-        if (bridge.availability() == HealthConnectClient.SDK_AVAILABLE) {
+-            missingPermissionCount = bridge.missingPermissions().size
+-        }
++    val permissionLauncher = rememberLauncherForActivityResult(bridge.permissionContract()) {
++        scope.launch { refreshPermissions() }
+     }
+ 
+-    Surface(
+-        color = MaterialTheme.colorScheme.background,
+-        modifier = Modifier.fillMaxSize(),
+-    ) {
++    LaunchedEffect(available) { refreshPermissions() }
++
++    Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
+         Column(
+-            modifier = Modifier
+-                .verticalScroll(rememberScrollState())
+-                .padding(20.dp),
++            modifier = Modifier.verticalScroll(rememberScrollState()).padding(20.dp),
+             verticalArrangement = Arrangement.spacedBy(16.dp),
+         ) {
++            Text("LifeOS · Подключение часов", style = MaterialTheme.typography.headlineMedium)
+             Text(
+-                text = "LifeOS Health Bridge",
+-                style = MaterialTheme.typography.headlineMedium,
+-            )
+-            Text(
+-                text = "Health Connect only. Previous-day sync to your LifeOS backend.",
++                "Xiaomi Watch → Mi Fitness → Health Connect → LifeOS. " +
++                    "Передаются только показатели, доступные в Health Connect.",
+                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+-                style = MaterialTheme.typography.bodyMedium,
+             )
+ 
+-            StatusCard(
+-                healthConnectAvailable = bridge.availability() == HealthConnectClient.SDK_AVAILABLE,
+-                missingPermissionCount = missingPermissionCount,
+-                configComplete = config.isComplete,
+-                status = status,
+-            )
++            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
++                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
++                    Text("Проверка подключения", style = MaterialTheme.typography.titleMedium)
++                    Text("Health Connect: ${if (available) "доступен" else "не найден / требует обновления"}")
++                    Text("Данные: ${when (missingPermissionCount) {
++                        null -> "проверяем разрешения"
++                        0 -> "все разрешения на чтение выданы"
++                        else -> "разрешено $grantedReadCount, ещё $missingPermissionCount по желанию"
++                    }}")
++                    Text("Фоновое чтение: ${when {
++                        !backgroundSupported -> "не поддерживается на устройстве; синхронизируй вручную"
++                        backgroundGranted -> "разрешено"
++                        else -> "не разрешено"
++                    }}")
++                    Text("LifeOS: ${if (config.isComplete) "адрес и токен сохранены" else "не настроен"}")
++                    Text(status, color = MaterialTheme.colorScheme.primary)
++                }
++            }
+ 
+             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+-                Column(
+-                    modifier = Modifier.padding(16.dp),
+-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+-                ) {
+-                    Text("Backend config", style = MaterialTheme.typography.titleMedium)
++                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
++                    Text("Подключить LifeOS", style = MaterialTheme.typography.titleMedium)
++                    Text("В Mini App открой «Здоровье» → «Подключить часы» и получи адрес API и личный токен.")
+                     OutlinedTextField(
+                         value = apiBaseUrl,
+                         onValueChange = { apiBaseUrl = it },
+-                        label = { Text("API base URL") },
++                        label = { Text("HTTPS-адрес API") },
+                         modifier = Modifier.fillMaxWidth(),
+                         singleLine = true,
++                        isError = apiBaseUrl.isNotBlank() && !validHealthBridgeUrl(apiBaseUrl),
+                     )
+                     OutlinedTextField(
+                         value = sessionToken,
+                         onValueChange = { sessionToken = it },
+-                        label = { Text("Health session token") },
++                        label = { Text("Персональный Health-токен") },
+                         modifier = Modifier.fillMaxWidth(),
+                         singleLine = true,
+                         visualTransformation = PasswordVisualTransformation(),
+                     )
+                     Button(
+                         modifier = Modifier.fillMaxWidth(),
++                        enabled = validHealthBridgeUrl(apiBaseUrl) && sessionToken.isNotBlank(),
+                         onClick = {
+-                            config = BridgeConfig(
+-                                apiBaseUrl = apiBaseUrl.trim(),
+-                                sessionToken = sessionToken,
+-                            )
+-                            configStore.write(config)
+-                            status = "Config saved"
++                            try {
++                                val newConfig = BridgeConfig(apiBaseUrl.trim().trimEnd('/'), sessionToken.trim())
++                                configStore.write(newConfig)
++                                config = configStore.read()
++                                status = if (config.isComplete) "Подключение сохранено. Токен защищён Android Keystore." else "Не удалось сохранить токен."
++                            } catch (_: Exception) {
++                                status = "Не удалось безопасно сохранить токен. Проверь настройки телефона."
++                            }
+                         },
+-                    ) {
+-                        Text("Save config")
+-                    }
++                    ) { Text("Сохранить подключение") }
+                 }
+             }
+ 
+-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+-                Button(
+-                    modifier = Modifier.weight(1f),
+-                    onClick = {
+-                        permissionLauncher.launch(bridge.permissions)
+-                    },
+-                ) {
+-                    Text("Permissions")
+-                }
+-                Button(
+-                    modifier = Modifier.weight(1f),
+-                    onClick = {
+-                        scheduler.scheduleManualSync()
+-                        status = "Manual sync enqueued"
+-                    },
+-                ) {
+-                    Text("Sync now")
+-                }
++            Button(
++                modifier = Modifier.fillMaxWidth(),
++                enabled = available,
++                onClick = { permissionLauncher.launch(bridge.permissions) },
++            ) { Text("Разрешить доступ к данным здоровья") }
++            if (backgroundSupported) {
++                OutlinedButton(
++                    modifier = Modifier.fillMaxWidth(),
++                    enabled = grantedReadCount > 0 && !backgroundGranted,
++                    onClick = { permissionLauncher.launch(setOf(HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND)) },
++                ) { Text(if (backgroundGranted) "Фоновое чтение разрешено" else "Разрешить фоновое чтение") }
+             }
+ 
++            Button(
++                modifier = Modifier.fillMaxWidth(),
++                enabled = config.isComplete && available && grantedReadCount > 0 && !sending,
++                onClick = {
++                    sending = true
++                    status = "Отправляем показатели за вчера и сегодня…"
++                    scope.launch {
++                        try {
++                            val result = withContext(Dispatchers.IO) {
++                                HealthSyncRunner(context).run(SyncReason.Manual, background = false)
++                            }
++                            status = when (result) {
++                                is com.lifeos.healthbridge.sync.SyncOutcome.Success -> result.message
++                                is com.lifeos.healthbridge.sync.SyncOutcome.Failure -> result.message
++                            }
++                            lastSync = logStore.read()
++                        } finally { sending = false }
++                    }
++                },
++            ) { Text("Отправить данные за сегодня и вчера") }
++            OutlinedButton(
++                modifier = Modifier.fillMaxWidth(),
++                enabled = config.isComplete && available && grantedReadCount > 0 && !sending,
++                onClick = {
++                    sending = true
++                    status = "Загружаем предыдущие 7 дней…"
++                    scope.launch {
++                        try {
++                            val result = withContext(Dispatchers.IO) {
++                                HealthSyncRunner(context).run(SyncReason.Backfill, background = false)
++                            }
++                            status = when (result) {
++                                is com.lifeos.healthbridge.sync.SyncOutcome.Success -> result.message
++                                is com.lifeos.healthbridge.sync.SyncOutcome.Failure -> result.message
++                            }
++                            lastSync = logStore.read()
++                        } finally { sending = false }
++                    }
++                },
++            ) { Text("Загрузить предыдущие 7 дней") }
++
+             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+-                Column(
+-                    modifier = Modifier.padding(16.dp),
+-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+-                ) {
+-                    Text("Schedule", style = MaterialTheme.typography.titleMedium)
+-                    Text("00:01 nightly previous-day sync")
+-                    Text("00:15 retry")
+-                    Text("06:00 morning reconcile")
+-                    Text("Manual sync from this screen")
++                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
++                    Text("Последняя синхронизация", style = MaterialTheme.typography.titleMedium)
++                    Text(lastSync?.timestamp.orEmpty().ifBlank { "Ещё не запускалась" })
++                    Text(lastSync?.message ?: "После отправки нажми «Обновить результат».")
++                    OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = {
++                        lastSync = logStore.read()
++                        scope.launch { refreshPermissions() }
++                    }) { Text("Обновить результат") }
+                 }
+             }
+-        }
+-    }
+-}
+-
+-@Composable
+-private fun StatusCard(
+-    healthConnectAvailable: Boolean,
+-    missingPermissionCount: Int?,
+-    configComplete: Boolean,
+-    status: String,
+-) {
+-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+-        Column(
+-            modifier = Modifier.padding(16.dp),
+-            verticalArrangement = Arrangement.spacedBy(8.dp),
+-        ) {
+-            Text("Status", style = MaterialTheme.typography.titleMedium)
+-            Text("Health Connect: ${if (healthConnectAvailable) "available" else "unavailable"}")
+             Text(
+-                "Permissions: ${
+-                    when (missingPermissionCount) {
+-                        null -> "checking"
+-                        0 -> "granted"
+-                        else -> "$missingPermissionCount missing"
+-                    }
+-                }",
++                "Автоматически: примерно после полуночи и утром, когда Android разрешит работу в фоне. " +
++                    "Для новых шагов и пульса можно нажимать ручную отправку. " +
++                    "Если Health Connect пуст, проверь в Mi Fitness разрешение на передачу данных.",
++                color = MaterialTheme.colorScheme.onSurfaceVariant,
++                style = MaterialTheme.typography.bodySmall,
+             )
+-            Text("Config: ${if (configComplete) "saved" else "incomplete"}")
+-            Text(status, color = MaterialTheme.colorScheme.primary)
+         }
+     }
+ }
+diff --git a/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/api/LifeOsApiClient.kt b/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/api/LifeOsApiClient.kt
+index 8672048..0439af7 100644
+--- a/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/api/LifeOsApiClient.kt
++++ b/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/api/LifeOsApiClient.kt
+@@ -36,31 +36,24 @@ class LifeOsApiClient(
+         )
+         val connection = (URL("${config.apiBaseUrl}/api/health/ingest").openConnection() as HttpURLConnection)
+ 
+-        connection.requestMethod = "POST"
+-        connection.connectTimeout = 15_000
+-        connection.readTimeout = 30_000
+-        connection.doOutput = true
+-        connection.setRequestProperty("content-type", "application/json")
+-        connection.setRequestProperty("authorization", "Bearer ${config.sessionToken}")
+-
+-        connection.outputStream.use { output ->
+-            output.write(body.toByteArray(Charsets.UTF_8))
+-        }
+-
+-        val status = connection.responseCode
+-        val responseText = if (status in 200..299) {
+-            connection.inputStream.bufferedReader().use { it.readText() }
+-        } else {
+-            connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+-        }
+-
+-        if (status !in 200..299) {
+-            throw LifeOsApiException(status, responseText)
++        try {
++            connection.requestMethod = "POST"
++            connection.connectTimeout = 15_000
++            connection.readTimeout = 30_000
++            connection.doOutput = true
++            connection.setRequestProperty("content-type", "application/json")
++            connection.setRequestProperty("authorization", "Bearer ${config.sessionToken}")
++            connection.outputStream.use { output ->
++                output.write(body.toByteArray(Charsets.UTF_8))
++            }
++            val status = connection.responseCode
++            if (status !in 200..299) throw LifeOsApiException(status)
++            // Never surface raw server output in UI logs: it can contain metadata.
++            connection.inputStream.use { it.readBytes() }
++        } finally {
++            connection.disconnect()
+         }
+     }
+ }
+ 
+-class LifeOsApiException(
+-    val status: Int,
+-    response: String,
+-) : RuntimeException("LifeOS API request failed with HTTP $status: $response")
++class LifeOsApiException(val status: Int) : RuntimeException("LifeOS API HTTP $status")
+diff --git a/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/config/SecureConfigStore.kt b/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/config/SecureConfigStore.kt
+index fb12070..db1eab8 100644
+--- a/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/config/SecureConfigStore.kt
++++ b/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/config/SecureConfigStore.kt
+@@ -1,41 +1,100 @@
+ package com.lifeos.healthbridge.config
+ 
+ import android.content.Context
++import android.security.keystore.KeyGenParameterSpec
++import android.security.keystore.KeyProperties
++import android.util.Base64
++import java.net.URI
++import java.security.KeyStore
++import javax.crypto.Cipher
++import javax.crypto.KeyGenerator
++import javax.crypto.SecretKey
++import javax.crypto.spec.GCMParameterSpec
+ 
+-data class BridgeConfig(
+-    val apiBaseUrl: String,
+-    val sessionToken: String,
+-) {
+-    val isComplete: Boolean
+-        get() = apiBaseUrl.isNotBlank() && sessionToken.isNotBlank()
++data class BridgeConfig(val apiBaseUrl: String, val sessionToken: String) {
++    val isComplete: Boolean get() = apiBaseUrl.isNotBlank() && validHealthBridgeUrl(apiBaseUrl) && sessionToken.isNotBlank()
+ }
+ 
++/** Reject cleartext bearer-token transmission. */
++fun validHealthBridgeUrl(raw: String): Boolean = try {
++    val uri = URI(raw.trim())
++    uri.scheme.equals("https", ignoreCase = true) &&
++        !uri.host.isNullOrBlank() && uri.userInfo == null &&
++        uri.query == null && uri.fragment == null
++} catch (_: Exception) { false }
++
+ interface SecureConfigStore {
+     fun read(): BridgeConfig
+     fun write(config: BridgeConfig)
+ }
+ 
+-class SharedPreferencesSecureConfigStore(
+-    context: Context,
+-) : SecureConfigStore {
+-    private val preferences = context.getSharedPreferences("lifeos_health_bridge_config", Context.MODE_PRIVATE)
++/** Android Keystore AES-GCM; migrates the original unencrypted preference on first read. */
++class SharedPreferencesSecureConfigStore(context: Context) : SecureConfigStore {
++    private val preferences = context.applicationContext.getSharedPreferences(
++        "lifeos_health_bridge_config", Context.MODE_PRIVATE,
++    )
+ 
+     override fun read(): BridgeConfig {
+-        return BridgeConfig(
+-            apiBaseUrl = preferences.getString(KEY_API_BASE_URL, null).orEmpty(),
+-            sessionToken = preferences.getString(KEY_SESSION_TOKEN, null).orEmpty(),
+-        )
++        val url = preferences.getString(KEY_API_BASE_URL, null).orEmpty()
++        val encrypted = preferences.getString(KEY_ENCRYPTED_TOKEN, null)
++        if (encrypted != null) {
++            val token = try { decrypt(encrypted) } catch (_: Exception) { "" }
++            return BridgeConfig(url, token)
++        }
++        // One-time migration from older APKs. Never retain plaintext after successful migration.
++        val legacy = preferences.getString(KEY_SESSION_TOKEN, null).orEmpty()
++        if (legacy.isNotEmpty()) {
++            try {
++                write(BridgeConfig(url, legacy))
++            } catch (_: Exception) {
++                return BridgeConfig(url, "")
++            }
++        }
++        return BridgeConfig(url, legacy)
+     }
+ 
+     override fun write(config: BridgeConfig) {
++        val encoded = if (config.sessionToken.isNotBlank()) encrypt(config.sessionToken) else null
+         preferences.edit()
+-            .putString(KEY_API_BASE_URL, config.apiBaseUrl.trimEnd('/'))
+-            .putString(KEY_SESSION_TOKEN, config.sessionToken)
++            .putString(KEY_API_BASE_URL, config.apiBaseUrl.trim().trimEnd('/'))
++            .putString(KEY_ENCRYPTED_TOKEN, encoded)
++            .remove(KEY_SESSION_TOKEN)
+             .apply()
+     }
+ 
++    private fun key(): SecretKey {
++        val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
++        (store.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
++        return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
++            init(KeyGenParameterSpec.Builder(
++                KEY_ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
++            )
++                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
++                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
++                .setUserAuthenticationRequired(false)
++                .build())
++        }.generateKey()
++    }
++
++    private fun encrypt(plain: String): String {
++        val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key()) }
++        val encrypted = cipher.doFinal(plain.toByteArray(Charsets.UTF_8))
++        return Base64.encodeToString(cipher.iv + encrypted, Base64.NO_WRAP)
++    }
++
++    private fun decrypt(encoded: String): String {
++        val raw = Base64.decode(encoded, Base64.DEFAULT)
++        require(raw.size > 12 + 16) { "Invalid stored token" }
++        val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
++            init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, raw.copyOfRange(0, 12)))
++        }
++        return String(cipher.doFinal(raw.copyOfRange(12, raw.size)), Charsets.UTF_8)
++    }
++
+     private companion object {
++        const val KEY_ALIAS = "lifeos_health_bridge_token_v1"
+         const val KEY_API_BASE_URL = "api_base_url"
+         const val KEY_SESSION_TOKEN = "health_session_token"
++        const val KEY_ENCRYPTED_TOKEN = "health_session_token_encrypted"
+     }
+ }
+diff --git a/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/config/SyncLogStore.kt b/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/config/SyncLogStore.kt
+new file mode 100644
+index 0000000..073f533
+--- /dev/null
++++ b/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/config/SyncLogStore.kt
+@@ -0,0 +1,34 @@
++package com.lifeos.healthbridge.config
++
++import android.content.Context
++import java.time.Instant
++
++/** No tokens, location, or raw health records are persisted in the diagnostic log. */
++data class SyncLog(
++    val timestamp: String,
++    val state: String,
++    val message: String,
++)
++
++class SyncLogStore(context: Context) {
++    private val preferences = context.applicationContext.getSharedPreferences(
++        "lifeos_health_sync_status", Context.MODE_PRIVATE,
++    )
++
++    fun read(): SyncLog? {
++        val timestamp = preferences.getString("time", null) ?: return null
++        return SyncLog(
++            timestamp,
++            preferences.getString("state", "unknown").orEmpty(),
++            preferences.getString("message", "").orEmpty(),
++        )
++    }
++
++    fun write(state: String, message: String) {
++        preferences.edit()
++            .putString("time", Instant.now().toString())
++            .putString("state", state)
++            .putString("message", message.take(300))
++            .apply()
++    }
++}
+diff --git a/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/health/HealthAggregator.kt b/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/health/HealthAggregator.kt
+index db91e92..a71766d 100644
+--- a/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/health/HealthAggregator.kt
++++ b/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/health/HealthAggregator.kt
+@@ -1,6 +1,8 @@
+ package com.lifeos.healthbridge.health
+ 
+ import androidx.health.connect.client.HealthConnectClient
++import androidx.health.connect.client.aggregate.AggregateMetric
++import androidx.health.connect.client.permission.HealthPermission
+ import androidx.health.connect.client.records.ActiveCaloriesBurnedRecord
+ import androidx.health.connect.client.records.DistanceRecord
+ import androidx.health.connect.client.records.ExerciseSessionRecord
+@@ -30,27 +32,35 @@ class HealthAggregator(private val healthConnectClient: HealthConnectClient) {
+             RecordPage(page.records, page.pageToken)
+         }
+ 
+-    suspend fun aggregatePreviousDay(range: PreviousDayRange): AggregatedHealthDay {
++    suspend fun aggregatePreviousDay(range: PreviousDayRange): AggregatedHealthDay = aggregateDay(range)
++
++    suspend fun aggregateDay(range: PreviousDayRange, grantedPermissions: Set<String>? = null): AggregatedHealthDay {
++        // Caller passes the actual granted set so users can share steps without
++        // granting unrelated weight/oxygen/sleep permissions.
++        fun permitted(permission: String) = grantedPermissions == null || permission in grantedPermissions
+         val filter = TimeRangeFilter.between(range.start, range.end)
+-        val aggregate = healthConnectClient.aggregate(
+-            AggregateRequest(
+-                metrics = setOf(
+-                    StepsRecord.COUNT_TOTAL,
+-                    TotalCaloriesBurnedRecord.ENERGY_TOTAL,
+-                    ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL,
+-                    HeartRateRecord.BPM_AVG,
+-                    RestingHeartRateRecord.BPM_AVG,
+-                    DistanceRecord.DISTANCE_TOTAL,
+-                    WeightRecord.WEIGHT_AVG,
+-                ),
+-                timeRangeFilter = filter,
+-            ),
+-        )
+-        val sleepRecords = readAll<SleepSessionRecord>(filter).distinctBy { it.metadata.id }
+-        val exerciseRecords = readAll<ExerciseSessionRecord>(filter).distinctBy { it.metadata.id }
+-        val heartRateRecords = readAll<HeartRateRecord>(filter).distinctBy { it.metadata.id }
+-        val hrvRecords = readAll<HeartRateVariabilityRmssdRecord>(filter).distinctBy { it.metadata.id }
+-        val oxygenRecords = readAll<OxygenSaturationRecord>(filter).distinctBy { it.metadata.id }
++        val requested = mutableSetOf<AggregateMetric<*>>()
++        if (permitted(HealthPermission.getReadPermission(StepsRecord::class))) requested.add(StepsRecord.COUNT_TOTAL)
++        if (permitted(HealthPermission.getReadPermission(TotalCaloriesBurnedRecord::class))) requested.add(TotalCaloriesBurnedRecord.ENERGY_TOTAL)
++        if (permitted(HealthPermission.getReadPermission(ActiveCaloriesBurnedRecord::class))) requested.add(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL)
++        if (permitted(HealthPermission.getReadPermission(HeartRateRecord::class))) requested.add(HeartRateRecord.BPM_AVG)
++        if (permitted(HealthPermission.getReadPermission(RestingHeartRateRecord::class))) requested.add(RestingHeartRateRecord.BPM_AVG)
++        if (permitted(HealthPermission.getReadPermission(DistanceRecord::class))) requested.add(DistanceRecord.DISTANCE_TOTAL)
++        if (permitted(HealthPermission.getReadPermission(WeightRecord::class))) requested.add(WeightRecord.WEIGHT_AVG)
++        val aggregate = if (requested.isNotEmpty()) {
++            healthConnectClient.aggregate(AggregateRequest(metrics = requested, timeRangeFilter = filter))
++        } else null
++
++        val sleepRecords = if (permitted(HealthPermission.getReadPermission(SleepSessionRecord::class)))
++            readAll<SleepSessionRecord>(filter).distinctBy { it.metadata.id } else emptyList()
++        val exerciseRecords = if (permitted(HealthPermission.getReadPermission(ExerciseSessionRecord::class)))
++            readAll<ExerciseSessionRecord>(filter).distinctBy { it.metadata.id } else emptyList()
++        val heartRateRecords = if (permitted(HealthPermission.getReadPermission(HeartRateRecord::class)))
++            readAll<HeartRateRecord>(filter).distinctBy { it.metadata.id } else emptyList()
++        val hrvRecords = if (permitted(HealthPermission.getReadPermission(HeartRateVariabilityRmssdRecord::class)))
++            readAll<HeartRateVariabilityRmssdRecord>(filter).distinctBy { it.metadata.id } else emptyList()
++        val oxygenRecords = if (permitted(HealthPermission.getReadPermission(OxygenSaturationRecord::class)))
++            readAll<OxygenSaturationRecord>(filter).distinctBy { it.metadata.id } else emptyList()
+         val sleep = sleepTotals(
+             sleepRecords.flatMap { session ->
+                 session.stages.map { stage ->
+@@ -97,18 +107,18 @@ class HealthAggregator(private val healthConnectClient: HealthConnectClient) {
+             deepSleepMinutes = sleep.deepMinutes,
+             remSleepMinutes = sleep.remMinutes,
+             awakeMinutes = sleep.awakeMinutes,
+-            restingHeartRate = aggregate[RestingHeartRateRecord.BPM_AVG]?.toDouble(),
+-            averageHeartRate = aggregate[HeartRateRecord.BPM_AVG]?.toDouble(),
++            restingHeartRate = aggregate?.get(RestingHeartRateRecord.BPM_AVG)?.toDouble(),
++            averageHeartRate = aggregate?.get(HeartRateRecord.BPM_AVG)?.toDouble(),
+             hrvMs = hrvRecords.map { it.heartRateVariabilityMillis }.takeIf { it.isNotEmpty() }?.average(),
+             spo2Avg = oxygenRecords.map { it.percentage.value }.takeIf { it.isNotEmpty() }?.average(),
+-            steps = aggregate[StepsRecord.COUNT_TOTAL],
+-            caloriesBurned = aggregate[TotalCaloriesBurnedRecord.ENERGY_TOTAL]?.inKilocalories,
+-            activeEnergyKcal = aggregate[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]?.inKilocalories,
++            steps = aggregate?.get(StepsRecord.COUNT_TOTAL),
++            caloriesBurned = aggregate?.get(TotalCaloriesBurnedRecord.ENERGY_TOTAL)?.inKilocalories,
++            activeEnergyKcal = aggregate?.get(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL)?.inKilocalories,
+             workoutMinutes = exerciseRecords.takeIf { it.isNotEmpty() }?.let { records ->
+                 intervalMinutes(records.map { HealthInterval(it.startTime, it.endTime) }, range)
+             },
+-            distanceMeters = aggregate[DistanceRecord.DISTANCE_TOTAL]?.inMeters,
+-            weightKg = aggregate[WeightRecord.WEIGHT_AVG]?.inKilograms,
++            distanceMeters = aggregate?.get(DistanceRecord.DISTANCE_TOTAL)?.inMeters,
++            weightKg = aggregate?.get(WeightRecord.WEIGHT_AVG)?.inKilograms,
+         )
+         return AggregatedHealthDay(
+             date = range.date.toString(),
+diff --git a/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/health/HealthConnectBridge.kt b/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/health/HealthConnectBridge.kt
+index 6b8772a..2b27e77 100644
+--- a/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/health/HealthConnectBridge.kt
++++ b/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/health/HealthConnectBridge.kt
+@@ -2,6 +2,7 @@ package com.lifeos.healthbridge.health
+ 
+ import android.content.Context
+ import androidx.health.connect.client.HealthConnectClient
++import androidx.health.connect.client.HealthConnectFeatures
+ import androidx.health.connect.client.PermissionController
+ import androidx.health.connect.client.permission.HealthPermission
+ import androidx.health.connect.client.records.ActiveCaloriesBurnedRecord
+@@ -33,6 +34,18 @@ class HealthConnectBridge(
+         HealthPermission.getReadPermission(WeightRecord::class),
+     )
+ 
++    fun backgroundReadSupported(): Boolean =
++        availability() == HealthConnectClient.SDK_AVAILABLE &&
++            client().features.getFeatureStatus(
++                HealthConnectFeatures.FEATURE_READ_HEALTH_DATA_IN_BACKGROUND,
++            ) == HealthConnectFeatures.FEATURE_STATUS_AVAILABLE
++
++    fun requestablePermissions(): Set<String> = permissions +
++        if (backgroundReadSupported()) setOf(HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND) else emptySet()
++
++    suspend fun backgroundReadGranted(): Boolean = !backgroundReadSupported() ||
++        HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND in client().permissionController.getGrantedPermissions()
++
+     fun availability(): Int = HealthConnectClient.getSdkStatus(context)
+ 
+     fun client(): HealthConnectClient = HealthConnectClient.getOrCreate(context)
+diff --git a/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/health/PreviousDayRange.kt b/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/health/PreviousDayRange.kt
+index dbfb8c2..7bfa959 100644
+--- a/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/health/PreviousDayRange.kt
++++ b/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/health/PreviousDayRange.kt
+@@ -4,6 +4,7 @@ import java.time.Instant
+ import java.time.LocalDate
+ import java.time.ZoneId
+ 
++/** Half-open day in the device timezone; today's range stops at now. */
+ data class PreviousDayRange(
+     val date: LocalDate,
+     val start: Instant,
+@@ -11,15 +12,15 @@ data class PreviousDayRange(
+     val zoneId: ZoneId,
+ )
+ 
+-fun previousDayRange(
+-    now: Instant = Instant.now(),
+-    zoneId: ZoneId = ZoneId.systemDefault(),
+-): PreviousDayRange {
+-    val date = now.atZone(zoneId).toLocalDate().minusDays(1)
+-    return PreviousDayRange(
+-        date = date,
+-        start = date.atStartOfDay(zoneId).toInstant(),
+-        end = date.plusDays(1).atStartOfDay(zoneId).toInstant(),
+-        zoneId = zoneId,
+-    )
++fun dayRange(date: LocalDate, now: Instant = Instant.now(), zoneId: ZoneId = ZoneId.systemDefault()): PreviousDayRange {
++    val start = date.atStartOfDay(zoneId).toInstant()
++    val end = minOf(date.plusDays(1).atStartOfDay(zoneId).toInstant(), now)
++    require(end > start) { "Day has not started yet" }
++    return PreviousDayRange(date, start, end, zoneId)
+ }
++
++fun previousDayRange(now: Instant = Instant.now(), zoneId: ZoneId = ZoneId.systemDefault()): PreviousDayRange =
++    dayRange(now.atZone(zoneId).toLocalDate().minusDays(1), now, zoneId)
++
++fun todayRange(now: Instant = Instant.now(), zoneId: ZoneId = ZoneId.systemDefault()): PreviousDayRange =
++    dayRange(now.atZone(zoneId).toLocalDate(), now, zoneId)
+diff --git a/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/permissions/HealthPermissionRationaleActivity.kt b/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/permissions/HealthPermissionRationaleActivity.kt
+index 4c2e77f..7e7de94 100644
+--- a/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/permissions/HealthPermissionRationaleActivity.kt
++++ b/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/permissions/HealthPermissionRationaleActivity.kt
+@@ -41,11 +41,11 @@ private fun PermissionRationale() {
+                 style = MaterialTheme.typography.headlineSmall,
+             )
+             Text(
+-                text = "This app reads Health Connect activity, sleep, workout, heart, and body metrics to sync your previous-day summary into your private LifeOS backend.",
++                text = "Приложение читает разрешённые тобой показатели сна, пульса, шагов и тренировок из Health Connect и отправляет их в твой личный LifeOS. Фоновое чтение требуется только для автоматической синхронизации.",
+                 style = MaterialTheme.typography.bodyLarge,
+             )
+             Text(
+-                text = "It does not scrape Mi Fitness, use Xiaomi private APIs, or require firmware changes.",
++                text = "Мы не читаем данные напрямую с часов и не используем закрытые API Xiaomi. Если Mi Fitness не публикует показатель в Health Connect, LifeOS не сможет его получить.",
+                 style = MaterialTheme.typography.bodyMedium,
+             )
+         }
+diff --git a/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/sync/HealthSyncPlan.kt b/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/sync/HealthSyncPlan.kt
+new file mode 100644
+index 0000000..b64f4f1
+--- /dev/null
++++ b/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/sync/HealthSyncPlan.kt
+@@ -0,0 +1,11 @@
++package com.lifeos.healthbridge.sync
++
++import com.lifeos.healthbridge.model.SyncReason
++import java.time.LocalDate
++
++/** Explicit sync dates so manual sync is useful immediately, not just tomorrow. */
++internal fun syncDates(reason: SyncReason, localToday: LocalDate): List<LocalDate> = when (reason) {
++    SyncReason.Manual -> listOf(localToday.minusDays(1), localToday)
++    SyncReason.Backfill -> (7 downTo 1).map { localToday.minusDays(it.toLong()) }
++    SyncReason.Nightly, SyncReason.Retry, SyncReason.MorningReconcile -> listOf(localToday.minusDays(1))
++}
+diff --git a/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/sync/HealthSyncRunner.kt b/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/sync/HealthSyncRunner.kt
+new file mode 100644
+index 0000000..9da5c2b
+--- /dev/null
++++ b/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/sync/HealthSyncRunner.kt
+@@ -0,0 +1,86 @@
++package com.lifeos.healthbridge.sync
++
++import android.content.Context
++import androidx.health.connect.client.HealthConnectClient
++import com.lifeos.healthbridge.api.LifeOsApiClient
++import com.lifeos.healthbridge.api.LifeOsApiException
++import com.lifeos.healthbridge.config.SharedPreferencesSecureConfigStore
++import com.lifeos.healthbridge.config.SyncLogStore
++import com.lifeos.healthbridge.health.AggregatedHealthDay
++import com.lifeos.healthbridge.health.HealthAggregator
++import com.lifeos.healthbridge.health.HealthConnectBridge
++import com.lifeos.healthbridge.health.dayRange
++import com.lifeos.healthbridge.model.SyncReason
++import java.time.Instant
++import java.time.ZoneId
++
++sealed interface SyncOutcome {
++    data class Success(val message: String) : SyncOutcome
++    data class Failure(val message: String, val retry: Boolean = false) : SyncOutcome
++}
++
++/** Shared foreground/manual and WorkManager/background sync implementation. */
++class HealthSyncRunner(private val context: Context) {
++    suspend fun run(reason: SyncReason, background: Boolean): SyncOutcome {
++        val log = SyncLogStore(context)
++        log.write("running", "Чтение Health Connect…")
++        fun fail(message: String, retry: Boolean = false): SyncOutcome.Failure {
++            log.write("error", message)
++            return SyncOutcome.Failure(message, retry)
++        }
++        val config = SharedPreferencesSecureConfigStore(context).read()
++        if (!config.isComplete) return fail("Настрой HTTPS-адрес и личный токен LifeOS.")
++        val bridge = HealthConnectBridge(context)
++        if (bridge.availability() != HealthConnectClient.SDK_AVAILABLE)
++            return fail("Health Connect недоступен или требует обновления.")
++        try {
++            val granted = bridge.client().permissionController.getGrantedPermissions()
++            if (granted.intersect(bridge.permissions).isEmpty())
++                return fail("Разреши хотя бы один показатель в Health Connect.")
++            if (background && (!bridge.backgroundReadSupported() || !bridge.backgroundReadGranted()))
++                return fail("Нет доступа к Health Connect в фоне. Разреши фон или используй ручную отправку.")
++
++            val now = Instant.now()
++            val zone = ZoneId.systemDefault()
++            val today = now.atZone(zone).toLocalDate()
++            val aggregator = HealthAggregator(bridge.client())
++            val api = LifeOsApiClient()
++            var sent = 0
++            var skipped = 0
++            for (date in syncDates(reason, today)) {
++                val day = aggregator.aggregateDay(dayRange(date, now, zone), granted)
++                if (!day.hasData()) { skipped++; continue }
++                api.postHealthIngest(config, reason, day)
++                sent++
++            }
++            if (sent == 0) {
++                val message = "Health Connect не содержит данных за эти дни. Проверь, что Mi Fitness пишет данные туда."
++                log.write("empty", message)
++                return SyncOutcome.Success(message)
++            }
++            val message = "Передано дней: $sent; без показателей: $skipped. Проверь раздел «Здоровье» в LifeOS."
++            log.write("success", message)
++            return SyncOutcome.Success(message)
++        } catch (error: LifeOsApiException) {
++            val message = when (error.status) {
++                401, 403 -> "HTTP ${error.status}: обнови личный Health-токен в LifeOS."
++                400, 413, 422 -> "HTTP ${error.status}: сервер отклонил данные, проверь версии приложения и API."
++                else -> "HTTP ${error.status}: временная ошибка сервера."
++            }
++            return fail(message, error.status == 429 || error.status >= 500)
++        } catch (_: SecurityException) {
++            return fail("Health Connect отказал в доступе. Проверь разрешения для приложения.")
++        } catch (error: Exception) {
++            return fail("Ошибка чтения или сети (${error.javaClass.simpleName}). Попробуй ещё раз.", true)
++        }
++    }
++}
++
++private fun AggregatedHealthDay.hasData(): Boolean {
++    val m = metrics
++    return workouts.isNotEmpty() || samples.isNotEmpty() || listOf(
++        m.sleepMinutes, m.steps, m.restingHeartRate, m.averageHeartRate, m.hrvMs,
++        m.spo2Avg, m.activeEnergyKcal, m.caloriesBurned, m.distanceMeters, m.workoutMinutes,
++        m.weightKg,
++    ).any { it != null }
++}
+diff --git a/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/sync/HealthSyncScheduler.kt b/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/sync/HealthSyncScheduler.kt
+index d284a44..280b72e 100644
+--- a/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/sync/HealthSyncScheduler.kt
++++ b/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/sync/HealthSyncScheduler.kt
+@@ -4,9 +4,9 @@ import android.content.Context
+ import androidx.work.BackoffPolicy
+ import androidx.work.Constraints
+ import androidx.work.Data
+-import androidx.work.ExistingWorkPolicy
++import androidx.work.ExistingPeriodicWorkPolicy
+ import androidx.work.NetworkType
+-import androidx.work.OneTimeWorkRequestBuilder
++import androidx.work.PeriodicWorkRequestBuilder
+ import androidx.work.WorkManager
+ import com.lifeos.healthbridge.model.SyncReason
+ import java.time.Duration
+@@ -16,116 +16,35 @@ import java.time.LocalTime
+ import java.time.ZoneId
+ import java.util.concurrent.TimeUnit
+ 
+-class HealthSyncScheduler(
+-    context: Context,
+-) {
+-    private val appContext = context.applicationContext
+-    private val workManager = WorkManager.getInstance(appContext)
+-    private val constraints = Constraints.Builder()
+-        .setRequiredNetworkType(NetworkType.CONNECTED)
+-        .build()
++/** Periodic requests survive errors and reboot; WorkManager times are approximate. */
++class HealthSyncScheduler(context: Context) {
++    private val workManager = WorkManager.getInstance(context.applicationContext)
++    private val constraints = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
+ 
+     fun scheduleAllDaily() {
+-        scheduleAt(
+-            uniqueName = WORK_NIGHTLY,
+-            reason = SyncReason.Nightly,
+-            targetTime = LocalTime.of(0, 1),
+-        )
+-        scheduleAt(
+-            uniqueName = WORK_RETRY,
+-            reason = SyncReason.Retry,
+-            targetTime = LocalTime.of(0, 15),
+-        )
+-        scheduleAt(
+-            uniqueName = WORK_MORNING_RECONCILE,
+-            reason = SyncReason.MorningReconcile,
+-            targetTime = LocalTime.of(6, 0),
+-        )
++        schedulePeriodic(WORK_NIGHTLY, SyncReason.Nightly, LocalTime.of(0, 1))
++        schedulePeriodic(WORK_MORNING_RECONCILE, SyncReason.MorningReconcile, LocalTime.of(6, 0))
+     }
+ 
+-    fun scheduleRetry() {
+-        scheduleAt(
+-            uniqueName = WORK_RETRY,
+-            reason = SyncReason.Retry,
+-            targetTime = LocalTime.of(0, 15),
+-        )
+-    }
+-
+-    fun scheduleManualSync() {
+-        enqueue(
+-            uniqueName = WORK_MANUAL,
+-            reason = SyncReason.Manual,
+-            initialDelay = Duration.ZERO,
+-            existingWorkPolicy = ExistingWorkPolicy.REPLACE,
+-        )
+-    }
+-
+-    fun scheduleNextFor(reason: SyncReason) {
+-        when (reason) {
+-            SyncReason.Nightly -> scheduleAt(WORK_NIGHTLY, reason, LocalTime.of(0, 1))
+-            SyncReason.Retry -> scheduleAt(WORK_RETRY, reason, LocalTime.of(0, 15))
+-            SyncReason.MorningReconcile -> scheduleAt(WORK_MORNING_RECONCILE, reason, LocalTime.of(6, 0))
+-            SyncReason.Manual,
+-            SyncReason.Backfill -> Unit
+-        }
+-    }
+-
+-    private fun scheduleAt(
+-        uniqueName: String,
+-        reason: SyncReason,
+-        targetTime: LocalTime,
+-        zoneId: ZoneId = ZoneId.systemDefault(),
+-    ) {
+-        enqueue(
+-            uniqueName = uniqueName,
+-            reason = reason,
+-            initialDelay = delayUntilNext(targetTime, zoneId),
+-            existingWorkPolicy = ExistingWorkPolicy.REPLACE,
+-        )
+-    }
+-
+-    private fun enqueue(
+-        uniqueName: String,
+-        reason: SyncReason,
+-        initialDelay: Duration,
+-        existingWorkPolicy: ExistingWorkPolicy,
+-    ) {
+-        val request = OneTimeWorkRequestBuilder<HealthSyncWorker>()
++    private fun schedulePeriodic(name: String, reason: SyncReason, time: LocalTime) {
++        val request = PeriodicWorkRequestBuilder<HealthSyncWorker>(24, TimeUnit.HOURS, 15, TimeUnit.MINUTES)
+             .setConstraints(constraints)
+-            .setInputData(
+-                Data.Builder()
+-                    .putString(HealthSyncWorker.KEY_SYNC_REASON, reason.wireValue)
+-                    .build(),
+-            )
+-            .setInitialDelay(initialDelay.toMillis().coerceAtLeast(0), TimeUnit.MILLISECONDS)
++            .setInputData(Data.Builder().putString(HealthSyncWorker.KEY_SYNC_REASON, reason.wireValue).build())
++            .setInitialDelay(delayUntilNext(time).toMillis(), TimeUnit.MILLISECONDS)
+             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15, TimeUnit.MINUTES)
+             .build()
+-
+-        workManager.enqueueUniqueWork(uniqueName, existingWorkPolicy, request)
++        workManager.enqueueUniquePeriodicWork(name, ExistingPeriodicWorkPolicy.KEEP, request)
+     }
+ 
+-    private fun delayUntilNext(
+-        targetTime: LocalTime,
+-        zoneId: ZoneId,
+-        now: Instant = Instant.now(),
+-    ): Duration {
+-        val zonedNow = now.atZone(zoneId)
+-        var targetDate = LocalDate.from(zonedNow)
+-
+-        if (!zonedNow.toLocalTime().isBefore(targetTime)) {
+-            targetDate = targetDate.plusDays(1)
+-        }
+-
+-        return Duration.between(
+-            zonedNow,
+-            targetDate.atTime(targetTime).atZone(zoneId),
+-        )
++    private fun delayUntilNext(targetTime: LocalTime, zone: ZoneId = ZoneId.systemDefault(), now: Instant = Instant.now()): Duration {
++        val zonedNow = now.atZone(zone)
++        var date = LocalDate.from(zonedNow)
++        if (!zonedNow.toLocalTime().isBefore(targetTime)) date = date.plusDays(1)
++        return Duration.between(zonedNow, date.atTime(targetTime).atZone(zone))
+     }
+ 
+-    private companion object {
+-        const val WORK_NIGHTLY = "lifeos-health-nightly-00-01"
+-        const val WORK_RETRY = "lifeos-health-retry-00-15"
+-        const val WORK_MORNING_RECONCILE = "lifeos-health-morning-reconcile-06-00"
+-        const val WORK_MANUAL = "lifeos-health-manual"
++    companion object {
++        private const val WORK_NIGHTLY = "lifeos-health-nightly-v2"
++        private const val WORK_MORNING_RECONCILE = "lifeos-health-morning-v2"
+     }
+ }
+diff --git a/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/sync/HealthSyncWorker.kt b/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/sync/HealthSyncWorker.kt
+index 0a8375e..6487e87 100644
+--- a/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/sync/HealthSyncWorker.kt
++++ b/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/sync/HealthSyncWorker.kt
+@@ -1,63 +1,21 @@
+ package com.lifeos.healthbridge.sync
+ 
+ import android.content.Context
+-import androidx.health.connect.client.HealthConnectClient
+ import androidx.work.CoroutineWorker
+ import androidx.work.WorkerParameters
+-import com.lifeos.healthbridge.api.LifeOsApiClient
+-import com.lifeos.healthbridge.config.SharedPreferencesSecureConfigStore
+-import com.lifeos.healthbridge.health.HealthAggregator
+-import com.lifeos.healthbridge.health.HealthConnectBridge
+-import com.lifeos.healthbridge.health.previousDayRange
+ import com.lifeos.healthbridge.model.SyncReason
+ 
+-class HealthSyncWorker(
+-    appContext: Context,
+-    workerParameters: WorkerParameters,
+-) : CoroutineWorker(appContext, workerParameters) {
++/** Automated schedule only. Manual sends run in the open Activity as foreground requests. */
++class HealthSyncWorker(context: Context, parameters: WorkerParameters) : CoroutineWorker(context, parameters) {
+     override suspend fun doWork(): Result {
+         val reason = inputData.getString(KEY_SYNC_REASON)
+             ?.let { raw -> SyncReason.entries.firstOrNull { it.wireValue == raw } }
+-            ?: SyncReason.Manual
+-        val config = SharedPreferencesSecureConfigStore(applicationContext).read()
+-
+-        if (!config.isComplete) {
+-            return Result.failure()
+-        }
+-
+-        val bridge = HealthConnectBridge(applicationContext)
+-
+-        if (bridge.availability() != HealthConnectClient.SDK_AVAILABLE) {
+-            return Result.retry()
+-        }
+-
+-        if (bridge.missingPermissions().isNotEmpty()) {
+-            return Result.failure()
+-        }
+-
+-        return try {
+-            val range = previousDayRange()
+-            val day = HealthAggregator(bridge.client()).aggregatePreviousDay(range)
+-
+-            LifeOsApiClient().postHealthIngest(
+-                config = config,
+-                reason = reason,
+-                day = day,
+-            )
+-
+-            HealthSyncScheduler(applicationContext).scheduleNextFor(reason)
+-            Result.success()
+-        } catch (_: Exception) {
+-            if (reason == SyncReason.Retry) {
+-                Result.failure()
+-            } else {
+-                HealthSyncScheduler(applicationContext).scheduleRetry()
+-                Result.retry()
+-            }
++            ?: SyncReason.Nightly
++        return when (val result = HealthSyncRunner(applicationContext).run(reason, background = true)) {
++            is SyncOutcome.Success -> Result.success()
++            is SyncOutcome.Failure -> if (result.retry) Result.retry() else Result.failure()
+         }
+     }
+ 
+-    companion object {
+-        const val KEY_SYNC_REASON = "sync_reason"
+-    }
++    companion object { const val KEY_SYNC_REASON = "sync_reason" }
+ }
+diff --git a/apps/health-bridge/app/src/test/java/com/lifeos/healthbridge/health/HealthSyncPlanTest.kt b/apps/health-bridge/app/src/test/java/com/lifeos/healthbridge/health/HealthSyncPlanTest.kt
+new file mode 100644
+index 0000000..6addcf2
+--- /dev/null
++++ b/apps/health-bridge/app/src/test/java/com/lifeos/healthbridge/health/HealthSyncPlanTest.kt
+@@ -0,0 +1,36 @@
++package com.lifeos.healthbridge.health
++
++import com.lifeos.healthbridge.model.SyncReason
++import com.lifeos.healthbridge.sync.syncDates
++import java.time.Instant
++import java.time.LocalDate
++import java.time.ZoneId
++import org.junit.Assert.assertEquals
++import org.junit.Test
++
++class HealthSyncPlanTest {
++    private val today = LocalDate.parse("2026-10-09")
++
++    @Test fun `manual sends yesterday and today so latest metrics are visible`() {
++        assertEquals(listOf(today.minusDays(1), today), syncDates(SyncReason.Manual, today))
++    }
++
++    @Test fun `background runs yesterday only`() {
++        assertEquals(listOf(today.minusDays(1)), syncDates(SyncReason.Nightly, today))
++        assertEquals(listOf(today.minusDays(1)), syncDates(SyncReason.MorningReconcile, today))
++    }
++
++    @Test fun `backfill last seven completed days`() {
++        assertEquals(7, syncDates(SyncReason.Backfill, today).size)
++        assertEquals(today.minusDays(7), syncDates(SyncReason.Backfill, today).first())
++        assertEquals(today.minusDays(1), syncDates(SyncReason.Backfill, today).last())
++    }
++
++    @Test fun `today range ends at now and previous range spans midnight`() {
++        val now = Instant.parse("2026-10-09T11:22:00Z")
++        val zone = ZoneId.of("UTC")
++        assertEquals(now, todayRange(now, zone).end)
++        assertEquals(Instant.parse("2026-10-09T00:00:00Z"), todayRange(now, zone).start)
++        assertEquals(Instant.parse("2026-10-09T00:00:00Z"), previousDayRange(now, zone).end)
++    }
++}

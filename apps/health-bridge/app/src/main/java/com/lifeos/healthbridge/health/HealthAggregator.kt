@@ -1,6 +1,8 @@
 package com.lifeos.healthbridge.health
 
 import androidx.health.connect.client.HealthConnectClient
+import androidx.health.connect.client.aggregate.AggregateMetric
+import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.ActiveCaloriesBurnedRecord
 import androidx.health.connect.client.records.DistanceRecord
 import androidx.health.connect.client.records.ExerciseSessionRecord
@@ -30,27 +32,35 @@ class HealthAggregator(private val healthConnectClient: HealthConnectClient) {
             RecordPage(page.records, page.pageToken)
         }
 
-    suspend fun aggregatePreviousDay(range: PreviousDayRange): AggregatedHealthDay {
+    suspend fun aggregatePreviousDay(range: PreviousDayRange): AggregatedHealthDay = aggregateDay(range)
+
+    suspend fun aggregateDay(range: PreviousDayRange, grantedPermissions: Set<String>? = null): AggregatedHealthDay {
+        // Caller passes the actual granted set so users can share steps without
+        // granting unrelated weight/oxygen/sleep permissions.
+        fun permitted(permission: String) = grantedPermissions == null || permission in grantedPermissions
         val filter = TimeRangeFilter.between(range.start, range.end)
-        val aggregate = healthConnectClient.aggregate(
-            AggregateRequest(
-                metrics = setOf(
-                    StepsRecord.COUNT_TOTAL,
-                    TotalCaloriesBurnedRecord.ENERGY_TOTAL,
-                    ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL,
-                    HeartRateRecord.BPM_AVG,
-                    RestingHeartRateRecord.BPM_AVG,
-                    DistanceRecord.DISTANCE_TOTAL,
-                    WeightRecord.WEIGHT_AVG,
-                ),
-                timeRangeFilter = filter,
-            ),
-        )
-        val sleepRecords = readAll<SleepSessionRecord>(filter).distinctBy { it.metadata.id }
-        val exerciseRecords = readAll<ExerciseSessionRecord>(filter).distinctBy { it.metadata.id }
-        val heartRateRecords = readAll<HeartRateRecord>(filter).distinctBy { it.metadata.id }
-        val hrvRecords = readAll<HeartRateVariabilityRmssdRecord>(filter).distinctBy { it.metadata.id }
-        val oxygenRecords = readAll<OxygenSaturationRecord>(filter).distinctBy { it.metadata.id }
+        val requested = mutableSetOf<AggregateMetric<*>>()
+        if (permitted(HealthPermission.getReadPermission(StepsRecord::class))) requested.add(StepsRecord.COUNT_TOTAL)
+        if (permitted(HealthPermission.getReadPermission(TotalCaloriesBurnedRecord::class))) requested.add(TotalCaloriesBurnedRecord.ENERGY_TOTAL)
+        if (permitted(HealthPermission.getReadPermission(ActiveCaloriesBurnedRecord::class))) requested.add(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL)
+        if (permitted(HealthPermission.getReadPermission(HeartRateRecord::class))) requested.add(HeartRateRecord.BPM_AVG)
+        if (permitted(HealthPermission.getReadPermission(RestingHeartRateRecord::class))) requested.add(RestingHeartRateRecord.BPM_AVG)
+        if (permitted(HealthPermission.getReadPermission(DistanceRecord::class))) requested.add(DistanceRecord.DISTANCE_TOTAL)
+        if (permitted(HealthPermission.getReadPermission(WeightRecord::class))) requested.add(WeightRecord.WEIGHT_AVG)
+        val aggregate = if (requested.isNotEmpty()) {
+            healthConnectClient.aggregate(AggregateRequest(metrics = requested, timeRangeFilter = filter))
+        } else null
+
+        val sleepRecords = if (permitted(HealthPermission.getReadPermission(SleepSessionRecord::class)))
+            readAll<SleepSessionRecord>(filter).distinctBy { it.metadata.id } else emptyList()
+        val exerciseRecords = if (permitted(HealthPermission.getReadPermission(ExerciseSessionRecord::class)))
+            readAll<ExerciseSessionRecord>(filter).distinctBy { it.metadata.id } else emptyList()
+        val heartRateRecords = if (permitted(HealthPermission.getReadPermission(HeartRateRecord::class)))
+            readAll<HeartRateRecord>(filter).distinctBy { it.metadata.id } else emptyList()
+        val hrvRecords = if (permitted(HealthPermission.getReadPermission(HeartRateVariabilityRmssdRecord::class)))
+            readAll<HeartRateVariabilityRmssdRecord>(filter).distinctBy { it.metadata.id } else emptyList()
+        val oxygenRecords = if (permitted(HealthPermission.getReadPermission(OxygenSaturationRecord::class)))
+            readAll<OxygenSaturationRecord>(filter).distinctBy { it.metadata.id } else emptyList()
         val sleep = sleepTotals(
             sleepRecords.flatMap { session ->
                 session.stages.map { stage ->
@@ -97,18 +107,18 @@ class HealthAggregator(private val healthConnectClient: HealthConnectClient) {
             deepSleepMinutes = sleep.deepMinutes,
             remSleepMinutes = sleep.remMinutes,
             awakeMinutes = sleep.awakeMinutes,
-            restingHeartRate = aggregate[RestingHeartRateRecord.BPM_AVG]?.toDouble(),
-            averageHeartRate = aggregate[HeartRateRecord.BPM_AVG]?.toDouble(),
+            restingHeartRate = aggregate?.get(RestingHeartRateRecord.BPM_AVG)?.toDouble(),
+            averageHeartRate = aggregate?.get(HeartRateRecord.BPM_AVG)?.toDouble(),
             hrvMs = hrvRecords.map { it.heartRateVariabilityMillis }.takeIf { it.isNotEmpty() }?.average(),
             spo2Avg = oxygenRecords.map { it.percentage.value }.takeIf { it.isNotEmpty() }?.average(),
-            steps = aggregate[StepsRecord.COUNT_TOTAL],
-            caloriesBurned = aggregate[TotalCaloriesBurnedRecord.ENERGY_TOTAL]?.inKilocalories,
-            activeEnergyKcal = aggregate[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]?.inKilocalories,
+            steps = aggregate?.get(StepsRecord.COUNT_TOTAL),
+            caloriesBurned = aggregate?.get(TotalCaloriesBurnedRecord.ENERGY_TOTAL)?.inKilocalories,
+            activeEnergyKcal = aggregate?.get(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL)?.inKilocalories,
             workoutMinutes = exerciseRecords.takeIf { it.isNotEmpty() }?.let { records ->
                 intervalMinutes(records.map { HealthInterval(it.startTime, it.endTime) }, range)
             },
-            distanceMeters = aggregate[DistanceRecord.DISTANCE_TOTAL]?.inMeters,
-            weightKg = aggregate[WeightRecord.WEIGHT_AVG]?.inKilograms,
+            distanceMeters = aggregate?.get(DistanceRecord.DISTANCE_TOTAL)?.inMeters,
+            weightKg = aggregate?.get(WeightRecord.WEIGHT_AVG)?.inKilograms,
         )
         return AggregatedHealthDay(
             date = range.date.toString(),

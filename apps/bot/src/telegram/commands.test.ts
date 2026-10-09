@@ -816,13 +816,21 @@ class FakeStore implements LifeOSStore {
   }
 
   async getTmaStudySummary() {
-    return { timezone: "UTC", courses: [], records: [] };
+    return { timezone: "UTC", courses: [], records: [], assignments: [], deadlines: [], sources: [], sync: { updatedAt: null, status: "not_synced", message: "" } };
   }
 
   async saveStudyCalculator(): Promise<never> {
     throw new Error("Not used by Telegram command tests");
   }
 
+  async saveStudyGradeOverride(): Promise<never> { throw new Error("Not used by general tests"); }
+  async saveStudyComponentMapping(): Promise<never> { throw new Error("Not used by general tests"); }
+  async createStudyDocument(): Promise<never> { throw new Error("Not used by general tests"); }
+  async downloadStudyDocument(): Promise<never> { throw new Error("Not used by general tests"); }
+  async createStudyScheme(): Promise<never> { throw new Error("Not used by general tests"); }
+  async activateStudyScheme(): Promise<never> { throw new Error("Not used by general tests"); }
+  async editManualStudyAssignment(): Promise<never> { throw new Error("Not used by general tests"); }
+  async createManualStudyAssignment(): Promise<never> { throw new Error("Not used by general tests"); }
   async configureStudyCalculator(): Promise<never> {
     throw new Error("Not used by Telegram command tests");
   }
@@ -2589,7 +2597,7 @@ describe("Telegram commands", () => {
     });
   });
 
-  it("opens the workout TMA with only the workout id in the URL", async () => {
+  it("opens the workout TMA with its screen and short workout id in the URL", async () => {
     const context = runtime();
 
     await handleTelegramUpdate(update("/workout Push day"), context);
@@ -2601,9 +2609,25 @@ describe("Telegram commands", () => {
         : undefined;
 
     expect(button?.web_app?.url).toBe(
-      "https://lifeos.example/tma?workoutId=workout-1",
+      "https://lifeos.example/tma?screen=workout&workoutId=workout-1",
     );
     expect(button?.web_app?.url).not.toContain("Push");
+  });
+
+  it("opens an active workout when the configured Mini App URL names another screen", async () => {
+    const context = runtime();
+    context.tmaUrl = "https://lifeos.example/tma/?screen=study&theme=dark";
+    await handleTelegramUpdate(update("/workout Push day"), context);
+    const markup = context.sent.at(-1)?.replyMarkup;
+    const link = markup && "inline_keyboard" in markup
+      ? markup.inline_keyboard[0]?.[0]?.web_app?.url
+      : undefined;
+    expect(link).toBeDefined();
+    const url = new URL(link!);
+    expect(url.pathname).toBe("/tma/");
+    expect(url.searchParams.get("screen")).toBe("workout");
+    expect(url.searchParams.get("workoutId")).toBe("workout-1");
+    expect(url.searchParams.get("theme")).toBe("dark");
   });
 
   it("opens the workout menu without starting a workout", async () => {
@@ -3060,6 +3084,39 @@ describe("Telegram commands", () => {
 
     await handleTelegramUpdate(update("/study today"), context);
     expect(context.sent.at(-1)?.text).toContain("пар по расписанию нет");
+  });
+
+  it("routes every study menu button to its own tab without inheriting stale filters", async () => {
+    const context = runtime();
+    context.tmaUrl = "https://lifeos.example/tma/?screen=workout&studyTab=map&studyCourse=old-course&workoutId=old-workout&theme=dark";
+    await handleTelegramUpdate(update("/study"), context);
+    const markup = context.sent.at(-1)?.replyMarkup;
+    const buttons = markup && "inline_keyboard" in markup ? markup.inline_keyboard.flat() : [];
+    const links = buttons.filter((button) => button.web_app);
+    expect(links).toHaveLength(10);
+    const expected: Record<string, string | null> = {
+      "Открыть учёбу": null,
+      "Сегодня": "today",
+      "Предметы": "courses",
+      "Задания": "assignments",
+      "Дедлайны": "deadlines",
+      "Расписание": "schedule",
+      "Оценки": "grades",
+      "Калькулятор": "calculator",
+      "Силабусы": "syllabi",
+      "Карта корпуса": "map",
+    };
+    for (const [label, tab] of Object.entries(expected)) {
+      const link = links.find((button) => button.text === label)?.web_app?.url;
+      expect(link, label).toBeDefined();
+      const url = new URL(link!);
+      expect(url.pathname).toBe("/tma/");
+      expect(url.searchParams.get("screen")).toBe("study");
+      expect(url.searchParams.get("studyTab")).toBe(tab);
+      expect(url.searchParams.has("studyCourse")).toBe(false);
+      expect(url.searchParams.has("workoutId")).toBe(false);
+      expect(url.searchParams.get("theme")).toBe("dark");
+    }
   });
 
   it("updates active study course progress", async () => {

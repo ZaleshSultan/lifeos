@@ -1,0 +1,780 @@
+[
+  {
+    "key": "dbms-2026-2027",
+    "courseCodes": ["DMS52-EN", "SUBD 2217", "SUBD2217"],
+    "courseTitles": [
+      "Database management systems",
+      "Database Management Systems"
+    ],
+    "definition": {
+      "version": 1,
+      "sourceName": "Database management systems · 2026–2027",
+      "attestationThreshold": 0,
+      "topLevelWeights": {
+        "att1": 30,
+        "att2": 30,
+        "exam": 40
+      },
+      "verification": "verified",
+      "requirements": [
+        {
+          "id": "att1-minimum",
+          "label": "ATT1 не ниже 25%",
+          "kind": "period_minimum",
+          "period": "att1",
+          "minimumPercent": 25,
+          "verification": "verified",
+          "sourcePage": 3
+        },
+        {
+          "id": "att2-minimum",
+          "label": "ATT2 не ниже 25%",
+          "kind": "period_minimum",
+          "period": "att2",
+          "minimumPercent": 25,
+          "verification": "verified",
+          "sourcePage": 3
+        },
+        {
+          "id": "attendance-minimum",
+          "label": "Посещаемость не ниже 70% (исключения согласуются с университетом)",
+          "kind": "attendance_minimum",
+          "minimumPercent": 70,
+          "verification": "verified",
+          "sourcePage": 3
+        }
+      ],
+      "fields": [
+        {
+          "id": "dms-a1",
+          "label": "Assignment 1: Creating ERD diagram",
+          "period": "att1",
+          "weightPercent": 20,
+          "type": "assignment",
+          "sourcePage": 2,
+          "verification": "verified",
+          "sourceDocument": "Database management systems(1).pdf"
+        },
+        {
+          "id": "dms-a2",
+          "label": "Assignment 2: Intro to DDL",
+          "period": "att1",
+          "weightPercent": 20,
+          "type": "assignment",
+          "sourcePage": 2,
+          "verification": "verified",
+          "sourceDocument": "Database management systems(1).pdf"
+        },
+        {
+          "id": "dms-a3",
+          "label": "Assignment 3: Intro to DML and JOIN operators",
+          "period": "att1",
+          "weightPercent": 20,
+          "type": "assignment",
+          "sourcePage": 2,
+          "verification": "verified",
+          "sourceDocument": "Database management systems(1).pdf"
+        },
+        {
+          "id": "dms-q1",
+          "label": "Learn Quiz",
+          "period": "att1",
+          "weightPercent": 10,
+          "type": "quiz",
+          "sourcePage": 2,
+          "verification": "verified",
+          "sourceDocument": "Database management systems(1).pdf"
+        },
+        {
+          "id": "dms-mid",
+          "label": "Midterm",
+          "period": "att1",
+          "weightPercent": 30,
+          "type": "midterm",
+          "sourcePage": 2,
+          "verification": "verified",
+          "sourceDocument": "Database management systems(1).pdf"
+        },
+        {
+          "id": "dms-a4",
+          "label": "Assignment 4: Subquery, grouping, aggregate functions",
+          "period": "att2",
+          "weightPercent": 20,
+          "type": "assignment",
+          "sourcePage": 2,
+          "verification": "verified",
+          "sourceDocument": "Database management systems(1).pdf"
+        },
+        {
+          "id": "dms-a5",
+          "label": "Assignment 5: Window functions",
+          "period": "att2",
+          "weightPercent": 20,
+          "type": "assignment",
+          "sourcePage": 2,
+          "verification": "verified",
+          "sourceDocument": "Database management systems(1).pdf"
+        },
+        {
+          "id": "dms-a6",
+          "label": "Assignment 6: Set Operations, Grouping Sets, Cube and Rollup, PostgreSQL Views and Indexes, ACID",
+          "period": "att2",
+          "weightPercent": 20,
+          "type": "assignment",
+          "sourcePage": 2,
+          "verification": "verified",
+          "sourceDocument": "Database management systems(1).pdf"
+        },
+        {
+          "id": "dms-q2",
+          "label": "Learn Quiz",
+          "period": "att2",
+          "weightPercent": 10,
+          "type": "quiz",
+          "sourcePage": 2,
+          "verification": "verified",
+          "sourceDocument": "Database management systems(1).pdf"
+        },
+        {
+          "id": "dms-end",
+          "label": "Endterm",
+          "period": "att2",
+          "weightPercent": 30,
+          "type": "endterm",
+          "sourcePage": 2,
+          "verification": "verified",
+          "sourceDocument": "Database management systems(1).pdf"
+        },
+        {
+          "id": "dms-exam",
+          "label": "Final Test",
+          "period": "exam",
+          "weightPercent": 100,
+          "type": "exam",
+          "sourcePage": 2,
+          "verification": "verified",
+          "sourceDocument": "Database management systems(1).pdf"
+        }
+      ]
+    },
+    "document": {
+      "fileName": "Database management systems(1).pdf",
+      "sha256": "89293598accc4fbbbeed93228f76cf88e41b6fef9d41be77fa1cabb7b77121e7",
+      "sourcePages": [1, 2, 3],
+      "extractionStatus": "verified"
+    },
+    "notes": [
+      "Raw maxima are not established by percentage weights; absent maxScore uses a normalized 100-point scenario denominator until the LMS/teacher supplies its actual max.",
+      "Assignments must be defended; an undefended assignment receives zero per p3. Do not apply a second penalty to a grade already reported by the LMS."
+    ]
+  },
+  {
+    "key": "os-2026-2027",
+    "courseCodes": ["OS52-EN", "OS 2207", "OS2207"],
+    "courseTitles": ["Operating Systems"],
+    "definition": {
+      "version": 1,
+      "sourceName": "Operating Systems · 2026–2027",
+      "attestationThreshold": 0,
+      "topLevelWeights": {
+        "att1": 30,
+        "att2": 30,
+        "exam": 40
+      },
+      "verification": "verified",
+      "requirements": [
+        {
+          "id": "attendance-minimum",
+          "label": "Посещаемость не ниже 70% (исключения согласуются с университетом)",
+          "kind": "attendance_minimum",
+          "minimumPercent": 70,
+          "verification": "verified",
+          "sourcePage": 3
+        }
+      ],
+      "fields": [
+        {
+          "id": "os-a1",
+          "label": "Assignment 1",
+          "period": "att1",
+          "weightPercent": 20,
+          "type": "assignment",
+          "sourcePage": 8,
+          "verification": "verified",
+          "maxScore": 15,
+          "sourceDocument": "Syllabus Operating Systems CS(1).pdf",
+          "maxScoreSourcePage": 2
+        },
+        {
+          "id": "os-a2",
+          "label": "Assignment 2",
+          "period": "att1",
+          "weightPercent": 20,
+          "type": "assignment",
+          "sourcePage": 8,
+          "verification": "verified",
+          "maxScore": 15,
+          "sourceDocument": "Syllabus Operating Systems CS(1).pdf",
+          "maxScoreSourcePage": 2
+        },
+        {
+          "id": "os-a3",
+          "label": "Assignment 3",
+          "period": "att1",
+          "weightPercent": 20,
+          "type": "assignment",
+          "sourcePage": 8,
+          "verification": "verified",
+          "maxScore": 15,
+          "sourceDocument": "Syllabus Operating Systems CS(1).pdf",
+          "maxScoreSourcePage": 2
+        },
+        {
+          "id": "os-a4",
+          "label": "Assignment 4",
+          "period": "att1",
+          "weightPercent": 20,
+          "type": "assignment",
+          "sourcePage": 8,
+          "verification": "verified",
+          "maxScore": 15,
+          "sourceDocument": "Syllabus Operating Systems CS(1).pdf",
+          "maxScoreSourcePage": 2
+        },
+        {
+          "id": "os-mid",
+          "label": "Midterm",
+          "period": "att1",
+          "weightPercent": 20,
+          "type": "midterm",
+          "sourcePage": 8,
+          "verification": "verified",
+          "sourceDocument": "Syllabus Operating Systems CS(1).pdf"
+        },
+        {
+          "id": "os-a5",
+          "label": "Assignment 5",
+          "period": "att2",
+          "weightPercent": 20,
+          "type": "assignment",
+          "sourcePage": 8,
+          "verification": "verified",
+          "maxScore": 15,
+          "sourceDocument": "Syllabus Operating Systems CS(1).pdf",
+          "maxScoreSourcePage": 2
+        },
+        {
+          "id": "os-a6",
+          "label": "Assignment 6",
+          "period": "att2",
+          "weightPercent": 20,
+          "type": "assignment",
+          "sourcePage": 8,
+          "verification": "verified",
+          "maxScore": 15,
+          "sourceDocument": "Syllabus Operating Systems CS(1).pdf",
+          "maxScoreSourcePage": 2
+        },
+        {
+          "id": "os-a7",
+          "label": "Assignment 7",
+          "period": "att2",
+          "weightPercent": 20,
+          "type": "assignment",
+          "sourcePage": 8,
+          "verification": "verified",
+          "maxScore": 15,
+          "sourceDocument": "Syllabus Operating Systems CS(1).pdf",
+          "maxScoreSourcePage": 2
+        },
+        {
+          "id": "os-a8",
+          "label": "Assignment 8",
+          "period": "att2",
+          "weightPercent": 20,
+          "type": "assignment",
+          "sourcePage": 8,
+          "verification": "verified",
+          "maxScore": 15,
+          "sourceDocument": "Syllabus Operating Systems CS(1).pdf",
+          "maxScoreSourcePage": 2
+        },
+        {
+          "id": "os-end",
+          "label": "Endterm",
+          "period": "att2",
+          "weightPercent": 20,
+          "type": "endterm",
+          "sourcePage": 8,
+          "verification": "verified",
+          "sourceDocument": "Syllabus Operating Systems CS(1).pdf"
+        },
+        {
+          "id": "os-exam",
+          "label": "Final exam (MCQ + open questions)",
+          "period": "exam",
+          "weightPercent": 100,
+          "type": "exam",
+          "sourcePage": 8,
+          "verification": "verified",
+          "sourceDocument": "Syllabus Operating Systems CS(1).pdf"
+        }
+      ]
+    },
+    "document": {
+      "fileName": "Syllabus Operating Systems CS(1).pdf",
+      "sha256": "afd1e66d9c6448eb7800a66687adee7830894173348f8056a4cae54c67e5691a",
+      "sourcePages": [1, 2, 3, 8],
+      "extractionStatus": "verified"
+    },
+    "notes": [
+      "p2 explicitly states each weekly assignment is graded on a 15-point scale; p8 weights are 20 of the category total100. The denominator15 is independent from the weight20.",
+      "p3 late Moodle submission incurs a 30% reduction, late defense zero; use reported grades, do not double-apply penalties.",
+      "No verified 25% attestation minimum was found in the inspected OS grading/policy pages; do not inherit this threshold from another course."
+    ]
+  },
+  {
+    "key": "dld-2026-2027",
+    "courseCodes": ["DLD52-EN", "DLD5"],
+    "courseTitles": ["Digital Logic Design"],
+    "definition": {
+      "version": 1,
+      "sourceName": "Digital Logic Design · 2026–2027",
+      "attestationThreshold": 0,
+      "topLevelWeights": {
+        "att1": 30,
+        "att2": 30,
+        "exam": 40
+      },
+      "verification": "verified",
+      "requirements": [
+        {
+          "id": "att1-minimum",
+          "label": "ATT1 не ниже 25%",
+          "kind": "period_minimum",
+          "period": "att1",
+          "minimumPercent": 25,
+          "verification": "verified",
+          "sourcePage": 3
+        },
+        {
+          "id": "att2-minimum",
+          "label": "ATT2 не ниже 25%",
+          "kind": "period_minimum",
+          "period": "att2",
+          "minimumPercent": 25,
+          "verification": "verified",
+          "sourcePage": 3
+        },
+        {
+          "id": "attendance-minimum",
+          "label": "Посещаемость не ниже 70% (исключения согласуются с университетом)",
+          "kind": "attendance_minimum",
+          "minimumPercent": 70,
+          "verification": "verified",
+          "sourcePage": 3
+        }
+      ],
+      "fields": [
+        {
+          "id": "dld-a1",
+          "label": "Assignment 1",
+          "period": "att1",
+          "weightPercent": 20,
+          "type": "assignment",
+          "sourcePage": 5,
+          "verification": "verified",
+          "sourceDocument": "Digital Logic Design (CS)-1(1).pdf"
+        },
+        {
+          "id": "dld-a2",
+          "label": "Assignment 2",
+          "period": "att1",
+          "weightPercent": 20,
+          "type": "assignment",
+          "sourcePage": 5,
+          "verification": "verified",
+          "sourceDocument": "Digital Logic Design (CS)-1(1).pdf"
+        },
+        {
+          "id": "dld-a3",
+          "label": "Assignment 3",
+          "period": "att1",
+          "weightPercent": 20,
+          "type": "assignment",
+          "sourcePage": 5,
+          "verification": "verified",
+          "sourceDocument": "Digital Logic Design (CS)-1(1).pdf"
+        },
+        {
+          "id": "dld-mid",
+          "label": "Midterm",
+          "period": "att1",
+          "weightPercent": 40,
+          "type": "midterm",
+          "sourcePage": 5,
+          "verification": "verified",
+          "sourceDocument": "Digital Logic Design (CS)-1(1).pdf"
+        },
+        {
+          "id": "dld-a4",
+          "label": "Assignment 4",
+          "period": "att2",
+          "weightPercent": 20,
+          "type": "assignment",
+          "sourcePage": 5,
+          "verification": "verified",
+          "sourceDocument": "Digital Logic Design (CS)-1(1).pdf"
+        },
+        {
+          "id": "dld-a5",
+          "label": "Assignment 5",
+          "period": "att2",
+          "weightPercent": 20,
+          "type": "assignment",
+          "sourcePage": 5,
+          "verification": "verified",
+          "sourceDocument": "Digital Logic Design (CS)-1(1).pdf"
+        },
+        {
+          "id": "dld-a6",
+          "label": "Assignment 6",
+          "period": "att2",
+          "weightPercent": 20,
+          "type": "assignment",
+          "sourcePage": 5,
+          "verification": "verified",
+          "sourceDocument": "Digital Logic Design (CS)-1(1).pdf"
+        },
+        {
+          "id": "dld-end",
+          "label": "Endterm",
+          "period": "att2",
+          "weightPercent": 40,
+          "type": "endterm",
+          "sourcePage": 5,
+          "verification": "verified",
+          "sourceDocument": "Digital Logic Design (CS)-1(1).pdf"
+        },
+        {
+          "id": "dld-exam",
+          "label": "Final exam (MCQ or Final Project)",
+          "period": "exam",
+          "weightPercent": 100,
+          "type": "exam",
+          "sourcePage": 5,
+          "verification": "verified",
+          "sourceDocument": "Digital Logic Design (CS)-1(1).pdf"
+        }
+      ]
+    },
+    "document": {
+      "fileName": "Digital Logic Design (CS)-1(1).pdf",
+      "sha256": "f7b66711135d7a83b7aee7f2b5ced72769ee28dadc0abc380b80aee1a1ad50ae",
+      "sourcePages": [1, 3, 5],
+      "extractionStatus": "verified"
+    },
+    "notes": [
+      "Each assignment combines labs, quizzes and practical assessments (p5); they are not separate additional weighted components.",
+      "Raw maxima are not independently specified; use normalized100 until actual LMS max is supplied.",
+      "p3 permits individual attendance accommodations; calculator displays the general70% requirement and teacher-approved exceptions must be recorded in the user scheme."
+    ]
+  },
+  {
+    "key": "cn-2026-2027",
+    "courseCodes": ["CNC53-EN", "CS 3145", "CS3145", "KSC 3216", "KSC3216"],
+    "courseTitles": ["Computer Networks"],
+    "definition": {
+      "version": 1,
+      "sourceName": "Computer Networks · 2026–2027",
+      "attestationThreshold": 0,
+      "topLevelWeights": {
+        "att1": 30,
+        "att2": 30,
+        "exam": 40
+      },
+      "verification": "verified",
+      "requirements": [
+        {
+          "id": "attendance-minimum",
+          "label": "Посещаемость не ниже 70% (исключения согласуются с университетом)",
+          "kind": "attendance_minimum",
+          "minimumPercent": 70,
+          "verification": "verified",
+          "sourcePage": 3
+        }
+      ],
+      "fields": [
+        {
+          "id": "cnc-a1",
+          "label": "Assignment 1",
+          "period": "att1",
+          "weightPercent": 20,
+          "type": "assignment",
+          "sourcePage": 7,
+          "verification": "verified",
+          "maxScore": 20,
+          "sourceDocument": "Computer Networks (CS)(1).pdf",
+          "maxScoreSourcePage": 2
+        },
+        {
+          "id": "cnc-a2",
+          "label": "Assignment 2",
+          "period": "att1",
+          "weightPercent": 20,
+          "type": "assignment",
+          "sourcePage": 7,
+          "verification": "verified",
+          "maxScore": 20,
+          "sourceDocument": "Computer Networks (CS)(1).pdf",
+          "maxScoreSourcePage": 2
+        },
+        {
+          "id": "cnc-a3",
+          "label": "Assignment 3",
+          "period": "att1",
+          "weightPercent": 20,
+          "type": "assignment",
+          "sourcePage": 7,
+          "verification": "verified",
+          "maxScore": 20,
+          "sourceDocument": "Computer Networks (CS)(1).pdf",
+          "maxScoreSourcePage": 2
+        },
+        {
+          "id": "cnc-a4",
+          "label": "Assignment 4",
+          "period": "att1",
+          "weightPercent": 20,
+          "type": "assignment",
+          "sourcePage": 7,
+          "verification": "verified",
+          "maxScore": 20,
+          "sourceDocument": "Computer Networks (CS)(1).pdf",
+          "maxScoreSourcePage": 2
+        },
+        {
+          "id": "cnc-mid",
+          "label": "Midterm",
+          "period": "att1",
+          "weightPercent": 20,
+          "type": "midterm",
+          "sourcePage": 7,
+          "verification": "verified",
+          "sourceDocument": "Computer Networks (CS)(1).pdf"
+        },
+        {
+          "id": "cnc-a5",
+          "label": "Assignment 5",
+          "period": "att2",
+          "weightPercent": 15,
+          "type": "assignment",
+          "sourcePage": 7,
+          "verification": "verified",
+          "maxScore": 20,
+          "sourceDocument": "Computer Networks (CS)(1).pdf",
+          "maxScoreSourcePage": 2
+        },
+        {
+          "id": "cnc-a6",
+          "label": "Assignment 6",
+          "period": "att2",
+          "weightPercent": 15,
+          "type": "assignment",
+          "sourcePage": 7,
+          "verification": "verified",
+          "maxScore": 20,
+          "sourceDocument": "Computer Networks (CS)(1).pdf",
+          "maxScoreSourcePage": 2
+        },
+        {
+          "id": "cnc-a7",
+          "label": "Assignment 7",
+          "period": "att2",
+          "weightPercent": 15,
+          "type": "assignment",
+          "sourcePage": 7,
+          "verification": "verified",
+          "maxScore": 20,
+          "sourceDocument": "Computer Networks (CS)(1).pdf",
+          "maxScoreSourcePage": 2
+        },
+        {
+          "id": "cnc-a8",
+          "label": "Assignment 8",
+          "period": "att2",
+          "weightPercent": 15,
+          "type": "assignment",
+          "sourcePage": 7,
+          "verification": "verified",
+          "maxScore": 20,
+          "sourceDocument": "Computer Networks (CS)(1).pdf",
+          "maxScoreSourcePage": 2
+        },
+        {
+          "id": "cnc-cisco",
+          "label": "Cisco certificate",
+          "period": "att2",
+          "weightPercent": 10,
+          "type": "certificate",
+          "sourcePage": 7,
+          "verification": "verified",
+          "sourceDocument": "Computer Networks (CS)(1).pdf"
+        },
+        {
+          "id": "cnc-end",
+          "label": "Endterm",
+          "period": "att2",
+          "weightPercent": 30,
+          "type": "endterm",
+          "sourcePage": 7,
+          "verification": "verified",
+          "sourceDocument": "Computer Networks (CS)(1).pdf"
+        },
+        {
+          "id": "cnc-exam",
+          "label": "Final exam (MCQ + open questions)",
+          "period": "exam",
+          "weightPercent": 100,
+          "type": "exam",
+          "sourcePage": 7,
+          "verification": "verified",
+          "sourceDocument": "Computer Networks (CS)(1).pdf"
+        }
+      ]
+    },
+    "document": {
+      "fileName": "Computer Networks (CS)(1).pdf",
+      "sha256": "1063302df784ddf671ac0235e5fc102b9a8a9c10891aca26a3a2210be0df9f0b",
+      "sourcePages": [1, 2, 3, 7],
+      "extractionStatus": "verified"
+    },
+    "notes": [
+      "p2 weekly assignments use a20-point scale. ATT2 category weights are15 each, with Cisco10 and Endterm30 (p7).",
+      "p3 notes difficulty-dependent point values; maxScore20 is the syllabus starting scale and actual LMS denominators remain authoritative.",
+      "No verified25% attestation minimum was found in inspected Networks grading/policy pages.",
+      "p3 specifies a20-point late submission deduction and zero for late defenses; do not reapply these to reported LMS grades."
+    ]
+  },
+  {
+    "key": "russian-c1-2026-2027",
+    "courseCodes": ["K(RUSSIAN)L51-RU", "RL2202", "RL 2202"],
+    "courseTitles": [
+      "Русский язык. Уровень С1",
+      "Русский язык C1",
+      "Russian Language C1"
+    ],
+    "definition": {
+      "version": 1,
+      "sourceName": "Русский язык. Уровень С1 · 2026–2027",
+      "attestationThreshold": 0,
+      "topLevelWeights": {
+        "att1": 30,
+        "att2": 30,
+        "exam": 40
+      },
+      "verification": "verified",
+      "requirements": [
+        {
+          "id": "att1-minimum",
+          "label": "ATT1 не ниже 25%",
+          "kind": "period_minimum",
+          "period": "att1",
+          "minimumPercent": 25,
+          "verification": "verified",
+          "sourcePage": 2
+        },
+        {
+          "id": "att2-minimum",
+          "label": "ATT2 не ниже 25%",
+          "kind": "period_minimum",
+          "period": "att2",
+          "minimumPercent": 25,
+          "verification": "verified",
+          "sourcePage": 2
+        },
+        {
+          "id": "attendance-minimum",
+          "label": "Посещаемость не ниже 70% (исключения согласуются с университетом)",
+          "kind": "attendance_minimum",
+          "minimumPercent": 70,
+          "verification": "verified",
+          "sourcePage": 3
+        }
+      ],
+      "fields": [
+        {
+          "id": "krl-a1",
+          "label": "Работа: анализ и редактирование языковых норм (неделя4)",
+          "period": "att1",
+          "weightPercent": 60,
+          "type": "assignment",
+          "sourcePage": 7,
+          "verification": "verified",
+          "maxScore": 100,
+          "sourceDocument": "Русский Язык, С1_4, 2026-2027(1).pdf",
+          "maxScoreSourcePage": 7
+        },
+        {
+          "id": "krl-mid",
+          "label": "Midterm: комплексное тестирование (неделя5)",
+          "period": "att1",
+          "weightPercent": 40,
+          "type": "midterm",
+          "sourcePage": 8,
+          "verification": "verified",
+          "maxScore": 100,
+          "sourceDocument": "Русский Язык, С1_4, 2026-2027(1).pdf",
+          "maxScoreSourcePage": 8
+        },
+        {
+          "id": "krl-a2",
+          "label": "Устная презентация «Лучший оратор современности» (недели8–9)",
+          "period": "att2",
+          "weightPercent": 60,
+          "type": "presentation",
+          "sourcePage": 8,
+          "verification": "verified",
+          "maxScore": 100,
+          "sourceDocument": "Русский Язык, С1_4, 2026-2027(1).pdf",
+          "maxScoreSourcePage": 8
+        },
+        {
+          "id": "krl-end",
+          "label": "Endterm: комплексное тестирование (неделя10)",
+          "period": "att2",
+          "weightPercent": 40,
+          "type": "endterm",
+          "sourcePage": 8,
+          "verification": "verified",
+          "maxScore": 100,
+          "sourceDocument": "Русский Язык, С1_4, 2026-2027(1).pdf",
+          "maxScoreSourcePage": 8
+        },
+        {
+          "id": "krl-exam",
+          "label": "Итоговый комбинированный экзамен",
+          "period": "exam",
+          "weightPercent": 100,
+          "type": "exam",
+          "sourcePage": 8,
+          "verification": "verified",
+          "maxScore": 100,
+          "sourceDocument": "Русский Язык, С1_4, 2026-2027(1).pdf",
+          "maxScoreSourcePage": 8
+        }
+      ]
+    },
+    "document": {
+      "fileName": "Русский Язык, С1_4, 2026-2027(1).pdf",
+      "sha256": "3b202a5738adc26ace86c94806b2e81dbc866bf8370b61f0ba740d0a3af8f812",
+      "sourcePages": [1, 2, 3, 7, 8],
+      "extractionStatus": "verified"
+    },
+    "notes": [
+      "Table p7–8 has only one assessed work per attestation60% plus respective control40%; do not generate six/eight assignments.",
+      "p3 participation contributes20% to each assessed assignment raw grade (maximum100); this is internal to the assessment, not an extra course-level weight.",
+      "needs_review: p3 mentions assessed work on week3 while grading table p7 says week4; retain the verified table label week4 as a planning hint, never manufacture a calendar deadline without trimester start/teacher confirmation."
+    ]
+  }
+]

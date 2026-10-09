@@ -36,31 +36,24 @@ class LifeOsApiClient(
         )
         val connection = (URL("${config.apiBaseUrl}/api/health/ingest").openConnection() as HttpURLConnection)
 
-        connection.requestMethod = "POST"
-        connection.connectTimeout = 15_000
-        connection.readTimeout = 30_000
-        connection.doOutput = true
-        connection.setRequestProperty("content-type", "application/json")
-        connection.setRequestProperty("authorization", "Bearer ${config.sessionToken}")
-
-        connection.outputStream.use { output ->
-            output.write(body.toByteArray(Charsets.UTF_8))
-        }
-
-        val status = connection.responseCode
-        val responseText = if (status in 200..299) {
-            connection.inputStream.bufferedReader().use { it.readText() }
-        } else {
-            connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
-        }
-
-        if (status !in 200..299) {
-            throw LifeOsApiException(status, responseText)
+        try {
+            connection.requestMethod = "POST"
+            connection.connectTimeout = 15_000
+            connection.readTimeout = 30_000
+            connection.doOutput = true
+            connection.setRequestProperty("content-type", "application/json")
+            connection.setRequestProperty("authorization", "Bearer ${config.sessionToken}")
+            connection.outputStream.use { output ->
+                output.write(body.toByteArray(Charsets.UTF_8))
+            }
+            val status = connection.responseCode
+            if (status !in 200..299) throw LifeOsApiException(status)
+            // Never surface raw server output in UI logs: it can contain metadata.
+            connection.inputStream.use { it.readBytes() }
+        } finally {
+            connection.disconnect()
         }
     }
 }
 
-class LifeOsApiException(
-    val status: Int,
-    response: String,
-) : RuntimeException("LifeOS API request failed with HTTP $status: $response")
+class LifeOsApiException(val status: Int) : RuntimeException("LifeOS API HTTP $status")

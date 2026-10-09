@@ -71,7 +71,8 @@ export function OnboardingStatusScreen({
             {session.state}
           </span>
           <span className="rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-1 text-xs font-medium text-zinc-400">
-            Telegram {session.telegramUserId}
+            {session.displayName ||
+              (session.username ? `@${session.username}` : "Telegram")}
           </span>
         </div>
 

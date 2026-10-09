@@ -1,6 +1,9 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+vi.mock("../../telegram", () => ({
+  telegram: { initData: "", hapticImpact: () => {} },
+}));
 import type { StudyCalculatorState } from "../../../../../packages/core/src/study.js";
 import type { StudyWorkspaceCourse } from "../../api/study";
 import type { AcademicRecord } from "../../api/types";
@@ -14,7 +17,20 @@ import {
   studyDaySessions,
   studyDraftIsDirty,
   studyWeekday,
+  studyTimezone,
+  studyWallTimeToIso,
+  studyIsoToWallTime,
+  studySessionIsOnline,
 } from "./model";
+import {
+  filterStudyDueItems,
+  studySafeSourceUrl,
+} from "./StudyWorkspacePanels";
+import {
+  studyTabIds,
+  studyTabFromSearch,
+  studyNavigationUrl,
+} from "./navigation";
 
 const scenario: StudyCalculatorState = {
   definition: {
@@ -84,6 +100,109 @@ describe("study calculator form", () => {
     );
     expect(html).toContain("80 / 100");
     expect(html).toContain("округлён вверх до 0,1");
+  });
+});
+
+describe("study navigation, raw points and timezones", () => {
+  it("opens every study tab after a direct-link reload without dropping base path", () => {
+    for (const tab of studyTabIds) {
+      const url = studyNavigationUrl(
+        "https://life.example/tma/?screen=home",
+        tab,
+        "course-one",
+      );
+      expect(new URL(url).pathname).toBe("/tma/");
+      expect(new URL(url).searchParams.get("screen")).toBe("study");
+      expect(new URL(url).searchParams.get("studyCourse")).toBe("course-one");
+      expect(studyTabFromSearch(new URL(url).search)).toBe(tab);
+    }
+    expect(studyTabFromSearch("?studyTab=malicious")).toBe("today");
+  });
+
+  it("retains earned/max and actual/assumed provenance instead of flattening to percentages", () => {
+    const points = {
+      ...scenario,
+      values: {
+        a1: { earned: 15, max: 30, kind: "actual" as const, source: "Moodle" },
+        a2: { earned: 90, max: 100, kind: "assumed" as const },
+        exam: null,
+      },
+    };
+    const draft = createStudyDraft(points);
+    expect(draft.inputs.a1).toBe("15");
+    expect(draft.maxima?.a1).toBe("30");
+    expect(draft.kinds?.a1).toBe("actual");
+    expect(parseStudyDraft(draft).state).toEqual(points);
+    expect(
+      parseStudyDraft({ ...draft, maxima: { ...draft.maxima, a1: "0" } })
+        .invalidFields,
+    ).toContain("a1");
+    expect(
+      parseStudyDraft({ ...draft, inputs: { ...draft.inputs, a1: "31" } })
+        .invalidFields,
+    ).toContain("a1");
+  });
+
+  it("roundtrips the raw maximum for an unknown assessment without inventing a zero grade", () => {
+    const initial = createStudyDraft(scenario);
+    const edited = {
+      ...initial,
+      maxima: { ...initial.maxima, exam: "30" },
+      pointValues: { ...initial.pointValues, exam: true },
+    };
+    const state = parseStudyDraft(edited).state!;
+    expect(state.values.exam).toBeNull();
+    expect(state.maxima).toEqual({ exam: 30 });
+    const reloaded = createStudyDraft(JSON.parse(JSON.stringify(state)));
+    expect(reloaded.inputs.exam).toBe("");
+    expect(reloaded.maxima?.exam).toBe("30");
+    expect(parseStudyDraft(reloaded).state).toEqual(state);
+    const html = renderToStaticMarkup(
+      createElement(StudyScenarioResult, {
+        state: {
+          ...state,
+          target: 70,
+          values: { ...state.values, a1: 60, a2: 80 },
+        },
+        options: { selectedFieldId: "exam" },
+      }),
+    );
+    expect(html).toContain("21 / 30");
+  });
+
+  it("uses the profile timezone for manual due dates and falls back to Astana time", () => {
+    expect(studyTimezone("invalid-timezone")).toBe("Asia/Almaty");
+    const iso = studyWallTimeToIso("2026-10-08T06:00", "Asia/Almaty");
+    expect(iso).toBe("2026-10-08T01:00:00.000Z");
+    expect(studyIsoToWallTime(iso, "Asia/Almaty")).toBe("2026-10-08T06:00");
+    expect(
+      studySessionIsOnline({ room: "online", sessionType: "lecture" }),
+    ).toBe(true);
+    expect(
+      studySessionIsOnline({ room: "C1.101", sessionType: "lecture" }),
+    ).toBe(false);
+  });
+
+  it("filters by profile's local day and keeps missing deadlines distinct", () => {
+    const items = [
+      { dueAt: "2026-10-07T23:00:00Z", status: "pending" },
+      { dueAt: "2026-10-07T01:00:00Z", status: "submitted" },
+      { dueAt: null, status: "pending" },
+    ];
+    const now = new Date("2026-10-08T01:00:00Z");
+    expect(filterStudyDueItems(items, "today", "Asia/Almaty", now)).toEqual([
+      items[0],
+    ]);
+    expect(filterStudyDueItems(items, "overdue", "Asia/Almaty", now)).toEqual([
+      items[0],
+    ]);
+    expect(filterStudyDueItems(items, "all", "Asia/Almaty", now)).toHaveLength(
+      3,
+    );
+    expect(studySafeSourceUrl("javascript:alert(1)")).toBeNull();
+    expect(studySafeSourceUrl("https://moodle.example/assignment/1")).toContain(
+      "https:",
+    );
   });
 });
 

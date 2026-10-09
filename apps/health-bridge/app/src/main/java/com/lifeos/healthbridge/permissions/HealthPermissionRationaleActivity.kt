@@ -41,11 +41,11 @@ private fun PermissionRationale() {
                 style = MaterialTheme.typography.headlineSmall,
             )
             Text(
-                text = "This app reads Health Connect activity, sleep, workout, heart, and body metrics to sync your previous-day summary into your private LifeOS backend.",
+                text = "Приложение читает разрешённые тобой показатели сна, пульса, шагов и тренировок из Health Connect и отправляет их в твой личный LifeOS. Фоновое чтение требуется только для автоматической синхронизации.",
                 style = MaterialTheme.typography.bodyLarge,
             )
             Text(
-                text = "It does not scrape Mi Fitness, use Xiaomi private APIs, or require firmware changes.",
+                text = "Мы не читаем данные напрямую с часов и не используем закрытые API Xiaomi. Если Mi Fitness не публикует показатель в Health Connect, LifeOS не сможет его получить.",
                 style = MaterialTheme.typography.bodyMedium,
             )
         }

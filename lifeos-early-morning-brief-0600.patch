@@ -1,0 +1,290 @@
+diff --git a/CHANGES_2026-10-05.md b/CHANGES_2026-10-05.md
+index abe84e6..46e5477 100644
+--- a/CHANGES_2026-10-05.md
++++ b/CHANGES_2026-10-05.md
+@@ -3,7 +3,7 @@
+ ## Что добавлено
+ 
+ - Ежедневный Telegram-дайджест: дела на сегодня, сегодняшние пары и дедлайны на ближайшие 7 дней.
+-- Время дайджеста настраивается через `DAILY_DIGEST_TIME` (по умолчанию `08:00`) и учитывает timezone профиля; fallback — `Asia/Almaty`.
++- Время дайджеста настраивается через `DAILY_DIGEST_TIME` (по умолчанию `06:00`) и учитывает timezone профиля; fallback — `Asia/Almaty`.
+ - Защита от повторной отправки одной и той же дневной сводки через `daily_digest_deliveries`.
+ - Быстрые учебные действия в Telegram: пары сегодня, дедлайны, карта корпуса, силабусы, калькулятор, добавление дедлайна/темы.
+ - `/study today`, `/study deadlines`, `/study map`, `/study syllabi` и deep-link переходы в нужную вкладку TMA.
+@@ -17,7 +17,7 @@
+    - `20261005000100_daily_digest_deliveries.sql`
+    - `20261005000200_seed_aitu_study_calculators.sql`
+ 2. Создать `workers/daily-digest-worker/.env` по примеру `.env.example`.
+-3. При необходимости изменить `DAILY_DIGEST_TIME=08:00`; окно catch-up по умолчанию 720 минут.
++3. При необходимости изменить `DAILY_DIGEST_TIME=06:00`; окно catch-up по умолчанию 720 минут.
+ 4. Установить systemd unit из `workers/daily-digest-worker/lifeos-daily-digest.service.example` (пример настроен на `/home/zalewko/lifeos`).
+ 5. Выполнить:
+ 
+diff --git a/CHANGES_2026-10-07_EARLY_BRIEF.md b/CHANGES_2026-10-07_EARLY_BRIEF.md
+new file mode 100644
+index 0000000..55b4416
+--- /dev/null
++++ b/CHANGES_2026-10-07_EARLY_BRIEF.md
+@@ -0,0 +1,27 @@
++# Early morning study brief patch — 2026-10-07
++
++## What changed
++
++- Daily Telegram digest default moved from `08:00` to `06:00` in each user's profile timezone.
++- The first line of the briefing now highlights the first class of the day:
++  - `🚨 Первая пара: 10:00 — DBMS · C1.2.223 · через 4 ч`
++  - or `🎓 Сегодня пар нет` when the schedule is empty.
++- The rest of the briefing still includes today's tasks, the full timetable, and deadlines for the next 7 days.
++- Added `scripts/set-daily-digest-time.sh` to update an already-created worker `.env` and restart the systemd worker.
++
++## Apply on the server
++
++After applying the patch, run:
++
++```bash
++cd /home/zalewko/lifeos
++./scripts/set-daily-digest-time.sh 06:00
++```
++
++For 05:00 instead:
++
++```bash
++./scripts/set-daily-digest-time.sh 05:00
++```
++
++This helper matters when the existing `.env` still contains the old `DAILY_DIGEST_TIME=08:00`, because environment configuration overrides the code default.
+diff --git a/README.md b/README.md
+index 5e8eb92..27f8c48 100644
+--- a/README.md
++++ b/README.md
+@@ -78,7 +78,7 @@ cp .env.example .env
+ python3 daily_digest_worker.py
+ ```
+ 
+-The default briefing time is `08:00` in each profile timezone; change
++The default briefing time is `06:00` in each profile timezone; change
+ `DAILY_DIGEST_TIME` in the worker `.env` if needed. Apply the latest Supabase
+ migrations first so `daily_digest_deliveries` is available for duplicate
+ protection. The default catch-up window is 12 hours after the configured time.
+@@ -186,3 +186,10 @@ The repository now has backend foundations, Telegram webhook commands, Supabase
+ ## Academic sync
+ 
+ See [the academic sync update guide](docs/ACADEMIC_SYNC_COMPLETION.md) for Moodle grade parsing, explicit course links, worker checks, and deployment instructions.
++
++### Early morning study brief
++
++The daily Telegram study brief defaults to `06:00` in each profile timezone and
++highlights the day's first class before the task/schedule/deadline lists. For an
++existing self-host install, run `./scripts/set-daily-digest-time.sh 06:00` after
++updating; use `05:00` instead if you want the message one hour earlier.
+diff --git a/scripts/set-daily-digest-time.sh b/scripts/set-daily-digest-time.sh
+new file mode 100755
+index 0000000..e7d0e18
+--- /dev/null
++++ b/scripts/set-daily-digest-time.sh
+@@ -0,0 +1,36 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++TARGET_TIME="${1:-06:00}"
++if [[ ! "$TARGET_TIME" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]; then
++  echo "Usage: $0 [HH:MM]" >&2
++  exit 2
++fi
++
++ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
++ENV_FILE="$ROOT_DIR/workers/daily-digest-worker/.env"
++EXAMPLE_FILE="$ROOT_DIR/workers/daily-digest-worker/.env.example"
++
++if [[ ! -f "$ENV_FILE" ]]; then
++  if [[ ! -f "$EXAMPLE_FILE" ]]; then
++    echo "Missing $EXAMPLE_FILE" >&2
++    exit 1
++  fi
++  cp "$EXAMPLE_FILE" "$ENV_FILE"
++  chmod 600 "$ENV_FILE"
++fi
++
++if grep -q '^DAILY_DIGEST_TIME=' "$ENV_FILE"; then
++  sed -i "s/^DAILY_DIGEST_TIME=.*/DAILY_DIGEST_TIME=$TARGET_TIME/" "$ENV_FILE"
++else
++  printf '\nDAILY_DIGEST_TIME=%s\n' "$TARGET_TIME" >> "$ENV_FILE"
++fi
++
++echo "Daily digest time set to $TARGET_TIME"
++
++if command -v systemctl >/dev/null 2>&1 && systemctl cat lifeos-daily-digest.service >/dev/null 2>&1; then
++  sudo systemctl restart lifeos-daily-digest.service
++  sudo systemctl --no-pager --full status lifeos-daily-digest.service | sed -n '1,12p'
++else
++  echo "lifeos-daily-digest.service is not installed; restart your worker manually."
++fi
+diff --git a/workers/daily-digest-worker/.env.example b/workers/daily-digest-worker/.env.example
+index 59d7dad..19adce2 100644
+--- a/workers/daily-digest-worker/.env.example
++++ b/workers/daily-digest-worker/.env.example
+@@ -3,7 +3,7 @@ SUPABASE_SERVICE_ROLE_KEY=replace-with-supabase-service-role-key
+ TELEGRAM_BOT_TOKEN=replace-with-telegram-bot-token
+ TMA_URL=https://lifeos.example.com/tma/
+ APP_TIMEZONE=Asia/Almaty
+-DAILY_DIGEST_TIME=08:00
++DAILY_DIGEST_TIME=06:00
+ DAILY_DIGEST_POLL_SECONDS=60
+ DAILY_DIGEST_SEND_WINDOW_MINUTES=720
+ # Optional: during setup, restrict sends to one Telegram user id.
+diff --git a/workers/daily-digest-worker/README.md b/workers/daily-digest-worker/README.md
+index 5cf8c9e..255370b 100644
+--- a/workers/daily-digest-worker/README.md
++++ b/workers/daily-digest-worker/README.md
+@@ -1,7 +1,7 @@
+ # Daily digest worker
+ 
+ Sends one Telegram briefing per active user each day. The default send time is
+-`08:00` in the profile timezone (fallback `Asia/Almaty`). The message contains:
++`06:00` in the profile timezone (fallback `Asia/Almaty`). The message contains:
+ 
+ - LifeOS tasks/deadlines due today plus tasks captured today without a due date;
+ - today's university timetable from `study_courses` + `course_schedules`;
+@@ -12,11 +12,11 @@ The worker polls once per minute only to respect each profile's timezone. It use
+ `daily_digest_deliveries` as an idempotency guard, so restarts inside the send
+ window do not duplicate a successful message. A failed Telegram send releases
+ the claim and is retried during the configured send window. By default that
+-window is 12 hours after 08:00, so a morning server restart does not silently
++window is 12 hours after 06:00, so a morning server restart does not silently
+ skip the briefing; `DAILY_DIGEST_SEND_WINDOW_MINUTES` can make it shorter.
+ 
+ Copy `.env.example` to `.env`, apply migrations, then install the example systemd
+-service. Change `DAILY_DIGEST_TIME` to any `HH:MM` value if 08:00 is not desired.
++service. Change `DAILY_DIGEST_TIME` to any `HH:MM` value if 06:00 is not desired.
+ 
+ 
+ ## Systemd install
+diff --git a/workers/daily-digest-worker/daily_digest_worker.py b/workers/daily-digest-worker/daily_digest_worker.py
+index 931a10d..ce7102d 100755
+--- a/workers/daily-digest-worker/daily_digest_worker.py
++++ b/workers/daily-digest-worker/daily_digest_worker.py
+@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+ 
+ REQUEST_TIMEOUT_SECONDS = 30
+ DEFAULT_TIMEZONE = "Asia/Almaty"
+-DEFAULT_DIGEST_TIME = "08:00"
++DEFAULT_DIGEST_TIME = "06:00"
+ DEFAULT_SEND_WINDOW_MINUTES = 720
+ WEEKDAYS = (
+     "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"
+@@ -314,6 +314,48 @@ def digest_greeting(local_now: datetime) -> str:
+     return "Добрый вечер"
+ 
+ 
++def _schedule_start_minutes(row: JsonObject) -> int:
++    raw = str(row.get("start_time") or "")
++    try:
++        hour, minute = (int(part) for part in raw[:5].split(":", 1))
++        return hour * 60 + minute
++    except (TypeError, ValueError):
++        return 24 * 60
++
++
++def first_class_line(
++    local_now: datetime,
++    courses: list[JsonObject],
++    schedule: list[JsonObject],
++) -> str:
++    if not schedule:
++        return "<b>🎓 Сегодня пар нет</b>"
++
++    course_map = {str(course.get("id")): course for course in courses}
++    first = min(schedule, key=_schedule_start_minutes)
++    course = course_map.get(str(first.get("study_course_id")), {})
++    title = html.escape(str(course.get("title") or course.get("code") or "Предмет"))
++    start = str(first.get("start_time") or "")[:5] or "—"
++    room = str(first.get("room") or "").strip()
++    suffix = f" · {html.escape(room)}" if room else ""
++
++    start_minutes = _schedule_start_minutes(first)
++    now_minutes = local_now.hour * 60 + local_now.minute
++    delta = start_minutes - now_minutes
++    if 0 < delta < 24 * 60:
++        hours, minutes = divmod(delta, 60)
++        if hours and minutes:
++            until = f" · через {hours} ч {minutes} мин"
++        elif hours:
++            until = f" · через {hours} ч"
++        else:
++            until = f" · через {minutes} мин"
++    else:
++        until = ""
++
++    return f"<b>🚨 Первая пара: {html.escape(start)} — {title}{suffix}</b>{until}"
++
++
+ def build_digest(
+     local_now: datetime,
+     timezone_name: str,
+@@ -323,7 +365,11 @@ def build_digest(
+     deadlines: list[JsonObject],
+ ) -> str:
+     course_map = {str(course.get("id")): course for course in courses}
+-    lines = [f"<b>{digest_greeting(local_now)} · {local_now:%d.%m.%Y}</b>", ""]
++    lines = [
++        f"<b>{digest_greeting(local_now)} · {local_now:%d.%m.%Y}</b>",
++        first_class_line(local_now, courses, schedule),
++        "",
++    ]
+ 
+     lines.append("<b>✅ Дела на сегодня</b>")
+     if tasks:
+diff --git a/workers/daily-digest-worker/daily_digest_worker_test.py b/workers/daily-digest-worker/daily_digest_worker_test.py
+index 051963d..d5034bf 100644
+--- a/workers/daily-digest-worker/daily_digest_worker_test.py
++++ b/workers/daily-digest-worker/daily_digest_worker_test.py
+@@ -42,7 +42,7 @@ class DailyDigestTest(unittest.TestCase):
+         self.assertEqual(worker.digest_greeting(datetime(2026, 10, 5, 19, 0, tzinfo=tz)), "Добрый вечер")
+ 
+     def test_build_digest_contains_tasks_schedule_and_deadlines(self) -> None:
+-        local = datetime(2026, 10, 5, 8, 0, tzinfo=worker.resolve_timezone("Asia/Almaty"))
++        local = datetime(2026, 10, 5, 6, 0, tzinfo=worker.resolve_timezone("Asia/Almaty"))
+         text = worker.build_digest(
+             local,
+             "Asia/Almaty",
+@@ -61,6 +61,8 @@ class DailyDigestTest(unittest.TestCase):
+                 "due_at": "2026-10-06T12:00:00Z",
+             }],
+         )
++        self.assertIn("🚨 Первая пара: 10:00 — Операционные системы · C1.2.223", text)
++        self.assertIn("через 4 ч", text)
+         self.assertIn("Сделать лабораторную", text)
+         self.assertIn("10:30", text)
+         self.assertIn("10:00–10:50", text)
+@@ -69,6 +71,13 @@ class DailyDigestTest(unittest.TestCase):
+         self.assertIn("06.10 17:00", text)
+ 
+ 
++    def test_default_digest_time_is_six_am(self) -> None:
++        self.assertEqual(worker.DEFAULT_DIGEST_TIME, "06:00")
++
++    def test_first_class_line_handles_day_without_classes(self) -> None:
++        local = datetime(2026, 10, 5, 6, 0, tzinfo=worker.resolve_timezone("Asia/Almaty"))
++        self.assertEqual(worker.first_class_line(local, [], []), "<b>🎓 Сегодня пар нет</b>")
++
+     def test_process_profile_sends_full_digest_and_marks_delivery_complete(self) -> None:
+         class FakeDb:
+             def __init__(self):
+@@ -120,7 +129,7 @@ class DailyDigestTest(unittest.TestCase):
+             telegram_bot_token="token",
+             tma_url="https://lifeos.example/tma/",
+         )
+-        now = datetime(2026, 10, 5, 3, 5, tzinfo=timezone.utc)
++        now = datetime(2026, 10, 5, 1, 5, tzinfo=timezone.utc)  # 06:05 Almaty
+         sent = worker.process_profile(
+             db, telegram, settings,
+             {"user_id": "user-1", "telegram_user_id": 123, "timezone": "Asia/Almaty"},
+@@ -154,7 +163,7 @@ class DailyDigestTest(unittest.TestCase):
+             service_role_key="key",
+             telegram_bot_token="token",
+         )
+-        now = datetime(2026, 10, 5, 3, 5, tzinfo=timezone.utc)  # 08:05 Almaty
++        now = datetime(2026, 10, 5, 1, 5, tzinfo=timezone.utc)  # 06:05 Almaty
+         sent = worker.process_profile(
+             FakeDb(), FakeTelegram(), settings,
+             {"user_id": "user-1", "telegram_user_id": 123, "timezone": "Asia/Almaty"},

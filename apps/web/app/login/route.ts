@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyWebTokenAgainstApi } from "@/lib/lifeos-api";
+import { exchangeWebLoginToken } from "@/lib/lifeos-api";
 
 function publicWebUrl(path: string): URL {
   const base =
@@ -12,23 +12,23 @@ function publicWebUrl(path: string): URL {
 }
 
 export async function GET(request: NextRequest) {
-  const token = request.nextUrl.searchParams.get("token")?.trim();
+  const loginToken = request.nextUrl.searchParams.get("token")?.trim();
 
-  if (!token) {
+  if (!loginToken) {
     return NextResponse.redirect(
       publicWebUrl("access?error=invalid"),
     );
   }
 
-  try {
-    const verification = await verifyWebTokenAgainstApi(token);
+  let sessionToken: string | null = null;
 
-    if (!verification.ok) {
-      return NextResponse.redirect(
-        publicWebUrl("access?error=invalid"),
-      );
-    }
+  try {
+    sessionToken = await exchangeWebLoginToken(loginToken);
   } catch {
+    sessionToken = null;
+  }
+
+  if (!sessionToken) {
     return NextResponse.redirect(
       publicWebUrl("access?error=invalid"),
     );
@@ -38,9 +38,9 @@ export async function GET(request: NextRequest) {
     publicWebUrl("today"),
   );
 
-  response.cookies.set("lifeos_web_session", token, {
+  response.cookies.set("lifeos_web_session", sessionToken, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: true,
     sameSite: "lax",
     path: "/",
     maxAge: 30 * 24 * 60 * 60,

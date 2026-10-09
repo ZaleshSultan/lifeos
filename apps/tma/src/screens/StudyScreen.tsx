@@ -1,7 +1,22 @@
-import { BookOpen, BookText, Calculator, CalendarDays, MapPinned, RefreshCw } from "lucide-react";
+import {
+  BookOpen,
+  BookText,
+  Calculator,
+  CalendarDays,
+  ClipboardList,
+  GraduationCap,
+  MapPinned,
+  RefreshCw,
+  Timer,
+  Sun,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { ApiError } from "../api/client";
-import { useSaveStudyCalculatorMutation, useStudyQuery } from "../api/study";
+import {
+  useSaveStudyCalculatorMutation,
+  useStudyQuery,
+  type StudyWorkspaceCourse,
+} from "../api/study";
 import { ErrorPanel, LoadingPanel } from "../components/AsyncState";
 import { StudyCalculator } from "../components/study/StudyCalculator";
 import { StudyCampusMap } from "../components/study/StudyCampusMap";
@@ -9,61 +24,108 @@ import { StudyGrades } from "../components/study/StudyGrades";
 import { StudySchedule } from "../components/study/StudySchedule";
 import { StudySyllabi } from "../components/study/StudySyllabi";
 import {
+  StudyAssignments,
+  StudyCourses,
+  StudyDeadlines,
+  StudyToday,
+  studyInputClass,
+  studyPanelClass,
+} from "../components/study/StudyWorkspacePanels";
+import {
   createStudyDraft,
   reconcileStudyDraft,
   studyDraftIsDirty,
+  studyTimezone,
   type StudyDraft,
 } from "../components/study/model";
+import {
+  studyNavigationUrl,
+  studyTabFromSearch,
+  type StudyTabId,
+} from "../components/study/navigation";
 import { cx } from "../lib/styles";
+import { telegram } from "../telegram";
 
 const tabs = [
+  { id: "today", label: "Сегодня", icon: Sun },
+  { id: "courses", label: "Предметы", icon: GraduationCap },
+  { id: "assignments", label: "Задания", icon: ClipboardList },
+  { id: "deadlines", label: "Дедлайны", icon: Timer },
   { id: "schedule", label: "Расписание", icon: CalendarDays },
-  { id: "calculator", label: "Калькулятор", icon: Calculator },
   { id: "grades", label: "Оценки", icon: BookOpen },
-  { id: "syllabi", label: "Силабус", icon: BookText },
+  { id: "calculator", label: "Цель 70+", icon: Calculator },
+  { id: "syllabi", label: "Силлабусы", icon: BookText },
   { id: "map", label: "Карта", icon: MapPinned },
 ] as const;
 
-type StudyTabId = (typeof tabs)[number]["id"];
-
-function initialStudyTab(): StudyTabId {
-  const requested = new URLSearchParams(window.location.search).get("studyTab");
-  return tabs.some((tab) => tab.id === requested)
-    ? (requested as StudyTabId)
-    : "schedule";
+function calculatorForCourse(course: StudyWorkspaceCourse) {
+  return course.calculator
+    ? {
+        ...course.calculator,
+        values: { ...course.calculator.values, ...course.actualValues },
+      }
+    : null;
 }
 
 export function StudyScreen() {
   const query = useStudyQuery();
   const save = useSaveStudyCalculatorMutation();
-  const [tab, setTab] = useState<StudyTabId>(initialStudyTab);
-  const [courseId, setCourseId] = useState<string | null>(null);
+  const [tab, setTab] = useState<StudyTabId>(() =>
+    studyTabFromSearch(window.location.search, telegram.initData),
+  );
+  const [courseId, setCourseId] = useState<string | null>(() =>
+    new URLSearchParams(window.location.search).get("studyCourse"),
+  );
   const [drafts, setDrafts] = useState<Record<string, StudyDraft>>({});
   const [errors, setErrors] = useState<Record<string, string | null>>({});
   const [savedCourse, setSavedCourse] = useState<string | null>(null);
 
   useEffect(() => {
-    const url = new URL(window.location.href);
-    url.searchParams.set("screen", "study");
-    url.searchParams.set("studyTab", tab);
-    window.history.replaceState(null, "", url);
-  }, [tab]);
-
+    window.history.replaceState(
+      null,
+      "",
+      studyNavigationUrl(window.location.href, tab, courseId),
+    );
+  }, [tab, courseId]);
+  useEffect(() => {
+    const update = () => {
+      setTab(studyTabFromSearch(window.location.search, telegram.initData));
+      setCourseId(
+        new URLSearchParams(window.location.search).get("studyCourse"),
+      );
+    };
+    window.addEventListener("popstate", update);
+    return () => window.removeEventListener("popstate", update);
+  }, []);
   useEffect(() => {
     if (!query.data) return;
     setDrafts((current) => {
-      const updated = { ...current };
+      const updated: Record<string, StudyDraft> = {};
       for (const course of query.data.courses) {
-        if (course.calculator)
+        const calculator = calculatorForCourse(course);
+        if (calculator)
           updated[course.id] = reconcileStudyDraft(
             current[course.id],
-            course.calculator,
+            calculator,
           );
       }
       return updated;
     });
   }, [query.data]);
 
+  if (!query.data && tab === "map")
+    return (
+      <div className="space-y-4">
+        <StudyCampusMap />
+        <button
+          type="button"
+          className="min-h-11 w-full rounded-lg border border-white/[0.12] px-3 text-sm text-cyan-200"
+          onClick={() => setTab("today")}
+        >
+          Открыть учебные разделы
+        </button>
+      </div>
+    );
   if (query.isLoading) return <LoadingPanel title="Загружаем учёбу…" />;
   if (!query.data)
     return (
@@ -73,24 +135,36 @@ export function StudyScreen() {
         onRetry={() => void query.refetch()}
       />
     );
-
-  const data = query.data;
+  const data = { ...query.data, timezone: studyTimezone(query.data.timezone) };
   const course =
     data.courses.find((item) => item.id === courseId) ??
     data.courses.find((item) => item.calculator) ??
     data.courses[0];
-  const draft = course?.calculator
-    ? (drafts[course.id] ?? createStudyDraft(course.calculator))
-    : null;
+  const calculator = course ? calculatorForCourse(course) : null;
+  const draft =
+    calculator && course
+      ? (drafts[course.id] ?? createStudyDraft(calculator))
+      : null;
   const dirtyCount = Object.values(drafts).filter(studyDraftIsDirty).length;
+  const navigate = (next: string, id?: string) => {
+    const nextTab = tabs.find((item) => item.id === next)?.id ?? "today";
+    window.history.pushState(
+      null,
+      "",
+      studyNavigationUrl(window.location.href, nextTab, id ?? null),
+    );
+    setTab(nextTab);
+    setCourseId(id ?? null);
+  };
+
   return (
     <div className="min-w-0 space-y-4">
       <header className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-[26px] font-semibold text-white">Учёба</h1>
           <p className="mt-1 text-sm text-zinc-400">
-            {data.courses.length} курсов · {data.records.length} оценочных
-            записей
+            {data.courses.length} предметов · {(data.assignments ?? []).length}{" "}
+            работ
           </p>
         </div>
         <button
@@ -106,18 +180,17 @@ export function StudyScreen() {
       {query.isError ? (
         <ErrorPanel
           title="Не удалось обновить данные"
-          detail="Показаны ранее загруженные данные. Несохранённые значения калькулятора сохранены на экране."
+          detail="Показаны ранее загруженные данные. Введённые сценарии сохранены на экране."
           onRetry={() => void query.refetch()}
         />
       ) : null}
       {dirtyCount ? (
         <p className="text-xs text-amber-200" role="status">
-          Есть несохранённые сценарии: {dirtyCount}. Сохрани их перед выходом из
-          раздела.
+          Есть несохранённые сценарии: {dirtyCount}. Сохрани их перед выходом.
         </p>
       ) : null}
       <div
-        className="grid grid-cols-5 gap-1 rounded-xl border border-white/[0.08] bg-white/[0.03] p-1"
+        className="grid grid-cols-3 gap-1 rounded-xl border border-white/[0.08] bg-white/[0.03] p-1"
         role="tablist"
         aria-label="Разделы учёбы"
       >
@@ -131,25 +204,32 @@ export function StudyScreen() {
             aria-controls="study-panel"
             tabIndex={tab === id ? 0 : -1}
             onKeyDown={(event) => {
-              if (event.key !== "ArrowRight" && event.key !== "ArrowLeft")
+              if (
+                !["ArrowRight", "ArrowLeft", "Home", "End"].includes(event.key)
+              )
                 return;
               event.preventDefault();
+              const index = tabs.findIndex((item) => item.id === tab);
               const next =
-                tabs[
-                  (tabs.findIndex((item) => item.id === tab) +
-                    (event.key === "ArrowRight" ? 1 : tabs.length - 1)) %
-                    tabs.length
-                ];
-              setTab(next.id);
+                event.key === "Home"
+                  ? tabs[0]
+                  : event.key === "End"
+                    ? tabs[tabs.length - 1]
+                    : tabs[
+                        (index +
+                          (event.key === "ArrowRight" ? 1 : tabs.length - 1)) %
+                          tabs.length
+                      ];
+              navigate(next.id, courseId ?? undefined);
               document.getElementById(`study-tab-${next.id}`)?.focus();
             }}
-            onClick={() => setTab(id)}
+            onClick={() => navigate(id, courseId ?? undefined)}
             className={cx(
-              "flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-lg px-0.5 py-2 text-[10px] font-semibold transition-colors hover:bg-white/[0.06] active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400",
+              "flex min-h-14 min-w-0 items-center justify-center gap-1.5 rounded-lg px-1 py-2 text-[11px] font-semibold transition-colors hover:bg-white/[0.06] active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400",
               tab === id ? "bg-cyan-400/10 text-cyan-200" : "text-zinc-400",
             )}
           >
-            <Icon className="h-4 w-4" aria-hidden="true" />
+            <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
             {label}
           </button>
         ))}
@@ -159,24 +239,50 @@ export function StudyScreen() {
         role="tabpanel"
         aria-labelledby={`study-tab-${tab}`}
       >
+        {tab === "today" ? (
+          <StudyToday data={data} onNavigate={navigate} />
+        ) : null}
+        {tab === "courses" ? (
+          <StudyCourses data={data} onNavigate={navigate} />
+        ) : null}
+        {tab === "assignments" ? (
+          <StudyAssignments
+            data={data}
+            courseId={courseId}
+            onCourseChange={setCourseId}
+          />
+        ) : null}
+        {tab === "deadlines" ? (
+          <StudyDeadlines
+            data={data}
+            onAssignments={(id) => navigate("assignments", id)}
+          />
+        ) : null}
         {tab === "schedule" ? (
           <StudySchedule courses={data.courses} timezone={data.timezone} />
         ) : null}
-        {tab === "grades" ? <StudyGrades records={data.records} /> : null}
-        {tab === "syllabi" ? <StudySyllabi courses={data.courses} /> : null}
+        {tab === "grades" ? (
+          <StudyGrades
+            records={data.records}
+            workspace={data}
+            courseId={courseId}
+          />
+        ) : null}
+        {tab === "syllabi" ? (
+          <StudySyllabi
+            courses={data.courses}
+            initialCourseId={courseId}
+            onCourseChange={setCourseId}
+          />
+        ) : null}
         {tab === "map" ? <StudyCampusMap /> : null}
         {tab === "calculator" ? (
           <div className="space-y-4">
-            {!data.courses.length ? (
-              <p className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 text-sm text-zinc-400">
-                Курсы пока не добавлены. Импортируй учебный план, затем обнови
-                этот экран.
-              </p>
-            ) : (
+            {data.courses.length ? (
               <label className="block text-sm text-zinc-300">
                 Предмет
                 <select
-                  className="mt-2 min-h-11 w-full min-w-0 max-w-full rounded-lg border border-white/[0.12] bg-graphite-900 px-3 py-3 text-base text-white"
+                  className={studyInputClass}
                   value={course?.id}
                   onChange={(event) => setCourseId(event.target.value)}
                 >
@@ -190,6 +296,11 @@ export function StudyScreen() {
                   ))}
                 </select>
               </label>
+            ) : (
+              <p className={cx(studyPanelClass, "text-sm text-zinc-400")}>
+                Курсы пока не добавлены. Подключи источник или импортируй
+                учебный план.
+              </p>
             )}
             {course && draft ? (
               <StudyCalculator
@@ -202,10 +313,10 @@ export function StudyScreen() {
                   setErrors((current) => ({ ...current, [course.id]: null }));
                 }}
                 onReset={() => {
-                  if (course.calculator)
+                  if (calculator)
                     setDrafts((current) => ({
                       ...current,
-                      [course.id]: createStudyDraft(course.calculator!),
+                      [course.id]: createStudyDraft(calculator),
                     }));
                   setErrors((current) => ({ ...current, [course.id]: null }));
                 }}
@@ -226,8 +337,8 @@ export function StudyScreen() {
                           ...current,
                           [course.id]:
                             error instanceof ApiError && error.status === 409
-                              ? "Данные курса изменились. Обнови их и попробуй сохранить ещё раз. Твои введённые значения останутся на экране."
-                              : "Не удалось сохранить сценарий. Проверь подключение и повтори сохранение.",
+                              ? "Схема изменилась. Обнови данные и проверь введённые значения."
+                              : "Не удалось сохранить сценарий. Повтори сохранение.",
                         })),
                     },
                   );
@@ -238,10 +349,19 @@ export function StudyScreen() {
                 onRefresh={() => void query.refetch()}
               />
             ) : course ? (
-              <p className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 text-sm text-zinc-400">
-                Для этого предмета ещё нет схемы расчёта. Добавь её в учебный
-                план и обнови экран. Оценки Moodle доступны на вкладке «Оценки».
-              </p>
+              <div className={studyPanelClass}>
+                <p className="text-sm text-zinc-400">
+                  Для предмета нет проверенной схемы. Загрузи PDF и настрой
+                  компоненты.
+                </p>
+                <button
+                  type="button"
+                  className="mt-3 min-h-11 text-sm text-cyan-200"
+                  onClick={() => navigate("syllabi", course.id)}
+                >
+                  Открыть силлабусы
+                </button>
+              </div>
             ) : null}
           </div>
         ) : null}

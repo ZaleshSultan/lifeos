@@ -7,6 +7,7 @@ import {
   studyDaySessions,
   studyDays,
   studyWeekday,
+  studySessionIsOnline,
 } from "./model";
 
 const sessionLabels: Record<string, string> = {
@@ -115,9 +116,11 @@ export function StudySchedule({
                     aria-hidden="true"
                   />
                   <span className="min-w-0 break-words">
-                    {schedule.room
-                      ? `Аудитория ${schedule.room}`
-                      : "Аудитория не указана"}
+                    {studySessionIsOnline(schedule)
+                      ? "Онлайн"
+                      : schedule.room
+                        ? `Аудитория ${schedule.room}`
+                        : "Аудитория не указана"}
                   </span>
                 </p>
                 {schedule.instructorName ? (
