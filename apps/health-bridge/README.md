@@ -1,6 +1,6 @@
 # LifeOS Health Bridge
 
-Android scaffold for syncing Xiaomi Watch 4 data into LifeOS through the
+Android app for syncing Xiaomi Watch 4 data into LifeOS through the
 Samsung Galaxy S23+ and Android Health Connect:
 
 ```text
@@ -13,18 +13,19 @@ metric to Health Connect before the bridge can read it.
 
 ## Scope
 
-- Kotlin Android app scaffold
+- Kotlin Android app
 - Health Connect client structure
 - WorkManager worker structure
-- Basic Compose `MainActivity`
-- `SecureConfigStore` placeholder implementation backed by private `SharedPreferences`
+- Russian Compose connection and sync screen
+- Android Keystore AES-GCM token encryption (with migration from legacy plain preferences)
 - Previous-day Health Connect aggregation in the phone's local timezone
 - `LifeOsApiClient` for `POST /api/health/ingest`
 - Schedules:
   - `00:01` nightly previous-day sync
-  - `00:15` retry
+  - WorkManager exponential retry on transient network failures
   - `06:00` morning reconcile
-  - manual sync from UI
+  - foreground manual sync for today and yesterday; foreground seven-day historical import
+- in-app success/error status and Health Connect background-read permission
 
 ## Required Permissions
 
@@ -41,6 +42,7 @@ Declared Health Connect read permissions:
 - `android.permission.health.READ_STEPS`
 - `android.permission.health.READ_TOTAL_CALORIES_BURNED`
 - `android.permission.health.READ_WEIGHT`
+- `android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND` (optional, only on supported devices)
 
 Network permission:
 
@@ -64,7 +66,7 @@ Then from this folder:
 ./gradlew :app:lintDebug
 ```
 
-This scaffold does not include a checked-in Gradle wrapper binary. Generate one from a machine with Gradle installed:
+The repository does not check in a Gradle wrapper. Generate one from a machine with Gradle installed:
 
 ```bash
 gradle wrapper
@@ -77,11 +79,9 @@ Open the app and save:
 - LifeOS API base URL, for example `https://your-lifeos-backend.example.com`
 - Health session token issued by the backend endpoint `POST /api/tma/health/ingest-token`
 
-Then grant Health Connect permissions and tap **Sync now** for a manual
-previous-day sync. Start with manual sync; scheduled sync can be enabled after
-record availability is verified on the Samsung Galaxy S23+.
+Then grant the desired Health Connect permissions and tap **Отправить данные за сегодня и вчера**. Check the in-app sync status with **Обновить результат**. Manual sync works without background access while the app is open. Automated background sync is best-effort, available only with permission and device support.
 
-The bridge stores only the per-user health session token on the Android phone and sends it as `Authorization: Bearer <token>`. The APK no longer accepts or sends a user id; the backend binds ingested metrics only to the user encoded in that signed token.
+The bridge encrypts the per-user health session token in Android Keystore on the phone and sends it as `Authorization: Bearer <token>`. The APK no longer accepts or sends a user id; the backend binds ingested metrics only to the user encoded in that signed token.
 
 ## Xiaomi Watch 4 Verification
 
@@ -89,7 +89,7 @@ The bridge stores only the per-user health session token on the Android phone an
 2. In Android Health Connect, confirm Mi Fitness has write access.
 3. Confirm records such as steps or sleep are visible from Mi Fitness.
 4. Grant this bridge read access.
-5. Tap **Sync now**.
+5. Tap **Отправить данные за сегодня и вчера** (keep the app open).
 6. Check `/health` in Telegram and the TMA Health screen.
 
 If Mi Fitness does not publish a metric to Health Connect, use `/health_log` or
@@ -131,9 +131,9 @@ Reference: [Health Connect reads and pagination](https://developer.android.com/h
 
 ## TODOs Before Production
 
-- Replace `SharedPreferencesSecureConfigStore` with AndroidX Security or platform-backed encrypted storage.
-- Add validation/error messages around backend config fields.
-- Add user-visible WorkManager status history.
+- Build/debug and install an APK on the actual Galaxy S23+ with Android Studio.
+- Verify background sync runs with granted `READ_HEALTH_DATA_IN_BACKGROUND`, battery optimization and supported Health Connect version.
+- Upgrade from one-record sync status to a rolling WorkManager history.
 - Add instrumentation tests with fake Health Connect data.
 - Verify exact record availability on target devices and Health Connect provider apps.
 - Configure Play Console Health Connect data access declarations before release.
@@ -144,3 +144,15 @@ Reference: [Health Connect reads and pagination](https://developer.android.com/h
 per-user signed Bearer token issued by the authenticated TMA session. The Android
 APK does not contain a shared backend secret and does not send a configurable
 LifeOS user id.
+
+## Functional updates
+
+- Manual send now uploads **today so far plus yesterday**; seven-day backfill has a separate action.
+- Automatic sync uses periodic WorkManager tasks; manual sync runs in the open Activity to support devices without Health Connect background-read support. The app must remain open during manual import. Exact delivery at 00:01 or 06:00 is **not guaranteed** by Android.
+- An optional background Health Connect read permission is requested separately only on devices supporting it; otherwise manually run the app in foreground.
+- API requires HTTPS and stores the per-user token encrypted with the Android Keystore. Invalid/expired tokens produce actionable 401/403 status.
+- A zero-result sync is not reported as a successful upload. Open Mi Fitness and Health Connect permissions to confirm whether data is exported.
+
+## Token renewal
+
+Health tokens generated by the existing TMA endpoint expire after **30 days**. If the app shows HTTP 401/403, open LifeOS Mini App → Health → Connect watch, request a new token and paste it into this app. Never use a shared backend service-role key.
