@@ -153,6 +153,127 @@ export type FinanceReceiptStatus =
 export interface Database {
   public: {
     Tables: {
+      study_scheme_templates: TableDefinition<
+        {
+          key: string;
+          course_codes: Json;
+          course_titles: Json;
+          definition: Json;
+          document: Json;
+          created_at: string;
+        },
+        {
+          key: string;
+          course_codes: Json;
+          course_titles: Json;
+          definition: Json;
+          document: Json;
+          created_at?: string;
+        }
+      >;
+      syllabus_documents: TableDefinition<
+        {
+          id: string;
+          user_id: string;
+          study_course_id: string;
+          version: number;
+          file_name: string;
+          sha256: string;
+          pdf_base64: string | null;
+          storage_bucket: string | null;
+          storage_object_path: string | null;
+          content_bytes: number | null;
+          storage_verified_at: string | null;
+          has_content: boolean;
+          extraction_status: string;
+          source_pages: Json;
+          notes: Json;
+          uploaded_at: string;
+        },
+        {
+          id?: string;
+          user_id: string;
+          study_course_id: string;
+          version?: number;
+          file_name: string;
+          sha256: string;
+          pdf_base64?: string | null;
+          storage_bucket?: string | null;
+          storage_object_path?: string | null;
+          content_bytes?: number | null;
+          storage_verified_at?: string | null;
+          extraction_status?: string;
+          source_pages?: Json;
+          notes?: Json;
+          uploaded_at?: string;
+        }
+      >;
+      grading_schemes: TableDefinition<
+        {
+          id: string;
+          user_id: string;
+          study_course_id: string;
+          document_id: string | null;
+          version: number;
+          definition: Json;
+          verification: string;
+          is_active: boolean;
+          created_at: string;
+        },
+        {
+          id?: string;
+          user_id: string;
+          study_course_id: string;
+          document_id?: string | null;
+          version?: number;
+          definition: Json;
+          verification?: string;
+          is_active?: boolean;
+          created_at?: string;
+        }
+      >;
+      assessment_grade_overrides: TableDefinition<
+        {
+          id: string;
+          user_id: string;
+          study_course_id: string;
+          assessment_id: string;
+          earned: number;
+          max_score: number;
+          note: string | null;
+          updated_at: string;
+        },
+        {
+          id?: string;
+          user_id: string;
+          study_course_id: string;
+          assessment_id: string;
+          earned: number;
+          max_score: number;
+          note?: string | null;
+          updated_at?: string;
+        }
+      >;
+      assessment_component_mappings: TableDefinition<
+        {
+          id: string;
+          user_id: string;
+          study_course_id: string;
+          assessment_id: string;
+          component_id: string;
+          scheme_id: string;
+          updated_at: string;
+        },
+        {
+          id?: string;
+          user_id: string;
+          study_course_id: string;
+          assessment_id: string;
+          component_id: string;
+          scheme_id: string;
+          updated_at?: string;
+        }
+      >;
       profiles: TableDefinition<
         {
           user_id: string;
@@ -1996,6 +2117,19 @@ export interface Database {
       };
     };
     Functions: {
+      register_study_storage_document: {
+        Args: { p_user_id: string; p_course_id: string; p_file_name: string; p_sha256: string; p_content_bytes: number;
+          p_source_pages?: Json; p_notes?: Json; p_extraction_status?: string };
+        Returns: string;
+      };
+      ensure_study_verified_document_scheme: {
+        Args: { p_user_id: string; p_course_id: string; p_document_id: string; p_definition: Json };
+        Returns: string;
+      };
+      activate_study_grading_scheme: {
+        Args: { p_user_id: string; p_course_id: string; p_scheme_id: string };
+        Returns: undefined;
+      };
       purge_expired_google_oauth_state_nonces: {
         Args: Record<string, never>;
         Returns: number;

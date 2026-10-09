@@ -1,11 +1,26 @@
 import { calculateGrade, type GradeAssessmentInput } from "./grade-engine.js";
 
+export type StudyPeriod = "att1" | "att2" | "exam";
+export type StudyVerification = "verified" | "needs_review";
+
+export interface StudyRequirement {
+  id: string;
+  label: string;
+  kind: "period_minimum" | "component_minimum" | "attendance_minimum";
+  period?: StudyPeriod;
+  fieldId?: string;
+  minimumPercent: number;
+  verification: StudyVerification;
+  sourcePage?: number;
+}
+
 export interface StudyCalculatorField {
   id: string;
   label: string;
   period: "att1" | "att2" | "exam";
   /** Percentage within this period, not within the final course grade. */
   weightPercent: number;
+  verification?: StudyVerification;
 }
 
 export interface StudyCalculatorDefinition {
@@ -13,6 +28,8 @@ export interface StudyCalculatorDefinition {
   sourceName: string;
   /** A threshold supplied by the imported profile, not an institutional policy. */
   attestationThreshold: number;
+  requirements?: StudyRequirement[];
+  verification?: StudyVerification;
   fields: StudyCalculatorField[];
 }
 

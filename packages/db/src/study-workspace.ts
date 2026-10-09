@@ -6,6 +6,8 @@ import {
 } from "../../core/src/study.js";
 import { builtinStudyCalculatorState } from "../../core/src/study-syllabi.js";
 import type { Database, Json } from "./types.js";
+import { StudyWorkspaceError } from "./study-errors.js";
+export { StudyWorkspaceError } from "./study-errors.js";
 
 type Client = SupabaseClient<Database>;
 
@@ -28,18 +30,6 @@ export interface StudyWorkspaceCourse {
   externalCourseKey: string | null;
   schedules: StudySchedule[];
   calculator: StudyCalculatorState | null;
-}
-
-export class StudyWorkspaceError extends Error {
-  constructor(
-    public readonly code:
-      | "study_course_not_found"
-      | "study_calculator_not_configured"
-      | "invalid_study_calculator"
-      | "study_calculator_conflict",
-  ) {
-    super(code);
-  }
 }
 
 function object(value: unknown): Record<string, unknown> {

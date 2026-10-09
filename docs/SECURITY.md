@@ -23,6 +23,36 @@ Browser apps may use public URLs and public client identifiers only. They must n
 - Prefer service-role access only from backend and trusted worker environments.
 - Rotate service-role keys if a local machine or deployment target is compromised.
 
+### Study PDF signed uploads
+
+The backend checks course ownership before signing an immutable
+`user_id/course_id/sha256.pdf` path in the private `lifeos-study-syllabi` bucket.
+Large PDFs use 6 MiB binary TUS chunks. Signed uploads use
+`/storage/v1/upload/resumable/sign` with `x-signature` on POST, HEAD and PATCH;
+the plain `/resumable` route instead requires a JWT in `Authorization`.
+See the [Supabase signed TUS example](https://github.com/supabase/supabase/blob/master/examples/storage/resumable-upload-signed-uppy/index.html)
+and [Storage acceptance tests](https://github.com/supabase/storage/blob/master/acceptance/specs/tus.test.ts).
+
+TUS requests carry no `Authorization` or backend `apikey`: the signed token
+authorizes that object. The SDK handles the backend API key when creating the
+signature; both `sb_secret_...` and legacy service-role JWT keys can be used in
+`SUPABASE_SERVICE_ROLE_KEY`. Never treat a signed upload token or opaque secret
+key as an Auth JWT. [Supabase API key formats](https://supabase.com/docs/guides/getting-started/api-keys#known-limitations).
+Resume URLs must stay on the same Storage origin and signed route; obsolete
+unsigned checkpoints start a fresh signed session without deleting objects.
+Full downloaded bytes are checked against SHA-256 and length before DB
+registration; repeated imports preserve existing documents and versions.
+
+For the Russian C1 HTTP 400 incident, the JWT route was receiving only
+`x-signature`, so Storage parsed an empty Bearer as a JWT (`Invalid Compact JWS`,
+role `anon`). This is a client routing fix; do not reapply migrations `00300` or
+`00400`, change bucket privacy, or rotate/change env for this fix. After operator
+approval, retry from the repository root:
+
+```bash
+corepack pnpm exec tsx scripts/import-study-syllabi.ts --env apps/bot/.env --course 'K(RUSSIAN)L51-RU' --apply
+```
+
 ## Telegram
 
 - Use `TELEGRAM_WEBHOOK_SECRET`.
