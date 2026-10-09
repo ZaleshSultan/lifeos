@@ -1,0 +1,121 @@
+diff --git a/workers/daily-digest-worker/daily_digest_worker.py b/workers/daily-digest-worker/daily_digest_worker.py
+index c6860bc..32c6f60 100644
+--- a/workers/daily-digest-worker/daily_digest_worker.py
++++ b/workers/daily-digest-worker/daily_digest_worker.py
+@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+ 
+ REQUEST_TIMEOUT_SECONDS = 30
+ DEFAULT_TIMEZONE = "Asia/Almaty"
+-DEFAULT_DIGEST_TIME = "08:00"
++DEFAULT_DIGEST_TIME = "06:00"
+ DEFAULT_SEND_WINDOW_MINUTES = 720
+ WEEKDAYS = (
+     "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"
+@@ -435,6 +435,56 @@ def digest_greeting(local_now: datetime) -> str:
+     return "Добрый вечер"
+ 
+ 
++def first_class_lines(
++    local_now: datetime, courses: list[JsonObject], schedule: list[JsonObject]
++) -> list[str]:
++    """Highlight the earliest valid class, even if schedule rows are unsorted."""
++    if not schedule:
++        return ["<b>🎓 Сегодня пар нет</b>"]
++
++    timed_classes: list[tuple[str, JsonObject]] = []
++    for row in schedule:
++        clock = str(row.get("start_time") or "")[:5]
++        if re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", clock):
++            timed_classes.append((clock, row))
++
++    if not timed_classes:
++        return ["<b>🎓 Пары сегодня есть — проверь время в расписании</b>"]
++
++    start, first = min(timed_classes, key=lambda item: item[0])
++    course_map = {str(course.get("id")): course for course in courses}
++    course = course_map.get(str(first.get("study_course_id")), {})
++    title = html.escape(str(course.get("title") or course.get("code") or "Предмет"))
++    room = str(first.get("room") or "").strip()
++    room_suffix = f" · {html.escape(room)}" if room else ""
++
++    first_at = local_now.replace(
++        hour=int(start[:2]), minute=int(start[3:]), second=0, microsecond=0
++    )
++    minutes_until = int((first_at - local_now).total_seconds() // 60)
++    if minutes_until >= 0:
++        hours, minutes = divmod(minutes_until, 60)
++        duration = " ".join(
++            part for part in (f"{hours} ч" if hours else "", f"{minutes} мин" if minutes else "")
++            if part
++        ) or "меньше минуты"
++        status = f"До первой пары: {duration}"
++    else:
++        end = str(first.get("end_time") or "")[:5]
++        end_at = (
++            local_now.replace(hour=int(end[:2]), minute=int(end[3:]), second=0, microsecond=0)
++            if re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", end)
++            else None
++        )
++        status = (
++            "Первая пара идёт сейчас" if end_at and local_now < end_at
++            else "Первая пара уже началась" if end_at is None
++            else "Первая пара уже закончилась"
++        )
++
++    return [f"<b>🚨 Первая пара: {start} — {title}{room_suffix}</b>", status]
++
++
+ def build_digest(
+     local_now: datetime,
+     timezone_name: str,
+@@ -446,6 +496,7 @@ def build_digest(
+ ) -> str:
+     course_map = {str(course.get("id")): course for course in courses}
+     lines = [f"<b>{digest_greeting(local_now)} · {local_now:%d.%m.%Y}</b>"]
++    lines.extend(["", *first_class_lines(local_now, courses, schedule)])
+     weather_lines = weather_digest_lines(weather)
+     if weather_lines:
+         lines.extend(["", *weather_lines])
+diff --git a/workers/daily-digest-worker/daily_digest_worker_test.py b/workers/daily-digest-worker/daily_digest_worker_test.py
+index 91c1372..e296055 100644
+--- a/workers/daily-digest-worker/daily_digest_worker_test.py
++++ b/workers/daily-digest-worker/daily_digest_worker_test.py
+@@ -69,6 +69,38 @@ class DailyDigestTest(unittest.TestCase):
+         self.assertIn("06.10 17:00", text)
+ 
+ 
++    def test_first_class_highlight_before_weather_and_tasks(self) -> None:
++        local = datetime(2026, 10, 5, 6, 0, tzinfo=worker.resolve_timezone("Asia/Almaty"))
++        text = worker.build_digest(
++            local, "Asia/Almaty", [{"title": "Домашка"}],
++            [{"id": "c1", "title": "DBMS <2026>"}, {"id": "c2", "title": "OS"}],
++            [
++                {"study_course_id": "c2", "start_time": "12:00:00", "end_time": "12:50:00"},
++                {"study_course_id": "c1", "start_time": "10:00:00", "end_time": "10:50:00", "room": "C1.2.223"},
++            ],
++            [], {"location_name": "Astana", "temperature": 4, "weather_label": "пасмурно"},
++        )
++        self.assertIn("🚨 Первая пара: 10:00 — DBMS &lt;2026&gt; · C1.2.223", text)
++        self.assertIn("До первой пары: 4 ч", text)
++        self.assertLess(text.index("🚨 Первая пара"), text.index("Astana"))
++        self.assertLess(text.index("🚨 Первая пара"), text.index("✅ Дела на сегодня"))
++        self.assertIn("12:00–12:50", text)
++
++    def test_first_class_empty_schedule_and_started_finished(self) -> None:
++        tz = worker.resolve_timezone("Asia/Almaty")
++        self.assertEqual(worker.first_class_lines(datetime(2026, 10, 5, 6, tzinfo=tz), [], []),
++                         ["<b>🎓 Сегодня пар нет</b>"])
++        self.assertIn("проверь время", worker.first_class_lines(
++            datetime(2026, 10, 5, 6, tzinfo=tz), [], [{"start_time": "unknown"}]
++        )[0])
++        class_rows = [{"start_time": "10:00:00", "end_time": "10:50:00"}]
++        self.assertIn("идёт сейчас", worker.first_class_lines(
++            datetime(2026, 10, 5, 10, 30, tzinfo=tz), [], class_rows
++        )[1])
++        self.assertIn("уже закончилась", worker.first_class_lines(
++            datetime(2026, 10, 5, 11, tzinfo=tz), [], class_rows
++        )[1])
++
+     def test_build_digest_includes_personal_weather(self) -> None:
+         local = datetime(2026, 10, 5, 8, 0, tzinfo=worker.resolve_timezone("Asia/Almaty"))
+         text = worker.build_digest(

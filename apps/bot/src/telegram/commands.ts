@@ -56,7 +56,7 @@ import {
   geocodeWeatherLocation,
   type WeatherSnapshot,
 } from "../weather.js";
-import { createWebSessionToken } from "../web-session.js";
+import { createWebLoginToken } from "../web-session.js";
 
 interface ParsedCommand {
   command: string;
@@ -2592,7 +2592,7 @@ async function handleWebCommand(
   const url = new URL("login", webBase);
   url.searchParams.set(
     "token",
-    createWebSessionToken(user!.userId, runtime.webSessionSecret),
+    createWebLoginToken(user!.userId, runtime.webSessionSecret),
   );
   await runtime.telegram.sendMessage({
     chatId: message.chat.id,

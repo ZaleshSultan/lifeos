@@ -43,7 +43,11 @@ import { pipeline } from "node:stream/promises";
 import { handleWorkoutRoute } from "./workout-routes.js";
 import { handleStudyRoutes } from "./study-routes.js";
 import { fetchWeatherSnapshot } from "./weather.js";
-import { verifyWebSessionToken } from "./web-session.js";
+import {
+  createWebSessionToken,
+  verifyWebLoginToken,
+  verifyWebSessionToken,
+} from "./web-session.js";
 import {
   cancelReminderGoogleCalendarEvent,
   syncReminderToGoogleCalendar,
@@ -2460,6 +2464,65 @@ async function handleRequest(
       writeRedirect(response, googleOAuthTmaRedirect(options, "error"));
       return;
     }
+  }
+
+  if (requestUrl.pathname === "/api/web/session/exchange") {
+    if (request.method !== "POST") {
+      writeJson(response, 404, {
+        error: "not_found",
+      });
+      return;
+    }
+
+    if (!options.store || !options.webSessionSecret) {
+      writeJson(response, 503, {
+        error: "web_session_not_configured",
+      });
+      return;
+    }
+
+    const login = verifyWebLoginToken(
+      bearerToken(request),
+      options.webSessionSecret,
+    );
+
+    if (!login) {
+      writeJson(response, 401, {
+        error: "invalid_web_login_token",
+      });
+      return;
+    }
+
+    const user = await options.store.resolveUserById(login.userId);
+
+    if (!user) {
+      writeJson(response, 401, {
+        error: "invalid_web_login_token",
+      });
+      return;
+    }
+
+    if (user.status !== "active") {
+      writeJson(response, 403, {
+        error:
+          user.status === "pending"
+            ? "telegram_user_pending"
+            : "telegram_user_blocked",
+      });
+      return;
+    }
+
+    const token = createWebSessionToken(user.userId, options.webSessionSecret);
+
+    writeJson(
+      response,
+      200,
+      tmaData({
+        token,
+        expiresInSeconds: 30 * 24 * 60 * 60,
+      }),
+    );
+    return;
   }
 
   if (requestUrl.pathname === "/api/tma/session") {
