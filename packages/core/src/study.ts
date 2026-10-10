@@ -139,3 +139,73 @@ export function calculateStudyScenario(state: StudyCalculatorState): StudyScenar
     targetStatus: minimumFinal >= state.target ? "achieved" : maximumFinal < state.target ? "impossible" : "possible",
   };
 }
+
+
+/** Weighted what-if forecast. Unknown work is never interpreted as a zero. */
+export interface StudyTargetPlan {
+  target: number;
+  earnedFinalPoints: number;
+  minimumFinal: number;
+  maximumFinal: number;
+  remainingFinalWeight: number;
+  requiredAverage: number | null;
+  targetPossible: boolean;
+  missing: Array<{
+    id: string;
+    label: string;
+    period: StudyCalculatorField["period"];
+    weightInFinal: number;
+    requiredIfOthersAtTarget: number;
+  }>;
+  attestationWarnings: string[];
+}
+
+export function calculateStudyTargetPlan(state: StudyCalculatorState): StudyTargetPlan {
+  // Validate through the same centralized engine as the original calculator.
+  const existing = calculateStudyScenario(state);
+  const toFinalWeight = (field: StudyCalculatorField) =>
+    field.weightPercent * (field.period === "exam" ? 0.4 : 0.3);
+  const missing = state.definition.fields.filter((field) => state.values[field.id] == null);
+  const remainingFinalWeight = missing.reduce((sum, field) => sum + toFinalWeight(field), 0);
+  const earnedFinalPoints = existing.minimumFinal;
+  const needed = remainingFinalWeight > 0
+    ? (state.target - earnedFinalPoints) * 100 / remainingFinalWeight
+    : null;
+  const requiredAverage = needed === null
+    ? null
+    : Math.round(Math.max(0, needed) * 10) / 10;
+  const maximumFinal = existing.maximumFinal;
+  const targetPossible = maximumFinal + 1e-8 >= state.target;
+  const attestationWarnings: string[] = [];
+  for (const period of ["att1", "att2"] as const) {
+    const fields = state.definition.fields.filter((field) => field.period === period);
+    const earned = fields.reduce((sum, field) => sum + (state.values[field.id] ?? 0) * field.weightPercent / 100, 0);
+    const max = earned + fields.filter((field) => state.values[field.id] == null)
+      .reduce((sum, field) => sum + field.weightPercent, 0);
+    if (max + 1e-8 < state.definition.attestationThreshold) {
+      attestationWarnings.push(`${period === "att1" ? "Первая" : "Вторая"} аттестация: максимум ${Math.round(max * 10) / 10}, ниже порога ${state.definition.attestationThreshold}.`);
+    }
+  }
+  return {
+    target: state.target,
+    earnedFinalPoints,
+    minimumFinal: existing.minimumFinal,
+    maximumFinal,
+    remainingFinalWeight: Math.round(remainingFinalWeight * 1000) / 1000,
+    requiredAverage,
+    targetPossible,
+    missing: missing.map((field) => {
+      const weightInFinal = toFinalWeight(field);
+      const otherWeight = remainingFinalWeight - weightInFinal;
+      const necessary = (state.target - earnedFinalPoints - otherWeight * state.target / 100) * 100 / weightInFinal;
+      return {
+        id: field.id,
+        label: field.label,
+        period: field.period,
+        weightInFinal,
+        requiredIfOthersAtTarget: Math.round(Math.max(0, necessary) * 10) / 10,
+      };
+    }),
+    attestationWarnings,
+  };
+}
