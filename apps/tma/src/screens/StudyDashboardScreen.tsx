@@ -8,7 +8,7 @@ import { studyScoreLabel } from "../components/study/model";
 import { matchSyllabusProfile } from "../components/study/syllabus-profiles";
 
 interface Props {
-  onOpenCalculator: () => void;
+  onOpenCalculator: (courseId: string) => void;
   onOpenStudy: () => void;
   onOpenLms: () => void;
 }
@@ -34,7 +34,7 @@ function gradeInsight(record: AcademicRecord): string {
 function CourseForecast({ course, records, onOpenCalculator }: {
   course: StudyWorkspaceCourse;
   records: AcademicRecord[];
-  onOpenCalculator: () => void;
+  onOpenCalculator: (courseId: string) => void;
 }) {
   const profile = matchSyllabusProfile(course.title, course.code);
   const state = course.calculator;
@@ -109,7 +109,7 @@ function CourseForecast({ course, records, onOpenCalculator }: {
       ) : null}
       <button
         type="button"
-        onClick={onOpenCalculator}
+        onClick={() => onOpenCalculator(course.id)}
         className="mt-4 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#2c4442] px-3 text-sm font-bold text-emerald-100"
       >
         Открыть прогноз и калькулятор <ArrowRight className="h-4 w-4" />
