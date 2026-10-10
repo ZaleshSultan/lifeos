@@ -68,7 +68,7 @@ export function AppShell({
   const selectScreen = (next: ScreenId) => {
     onScreenChange(next);
     setMoreOpen(false);
-    window.scrollTo({ top: 0, behavior: "instant" });
+    window.scrollTo({ top: 0, behavior: "auto" });
   };
   const activeGroup = screen === "lms" ? "study" : screen;
   const moreSelected = secondaryTabs.some((item) => item.id === screen);
