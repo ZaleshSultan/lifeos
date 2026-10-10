@@ -3,6 +3,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   LockKeyhole,
+  CheckCircle2,
+  ChevronDown,
+  Info,
+  RotateCw,
   RefreshCw,
   ShieldCheck,
   Trash2,
@@ -37,77 +41,56 @@ export function LmsConnectionDetails({
 }: {
   connection: LmsConnection;
 }) {
+  const connected = connection.configured;
+  const status = connection.state === "syncing" ? "syncing" : connected ? "connected" : "not_connected";
+
   return (
-    <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
-      <h2 className="text-sm font-semibold text-white">
-        Состояние подключения
-      </h2>
-      <p className="mt-2 text-sm text-cyan-200">
-        {lmsConnectionLabels[connection.state] ?? "Состояние неизвестно"}
-      </p>
-      <dl className="mt-4 space-y-3 text-sm">
-        <div>
-          <dt className="text-xs text-zinc-400">
-            Последняя успешная синхронизация
-          </dt>
-          <dd className="mt-1 text-zinc-200">
-            {lmsDateLabel(
-              connection.lastSyncSuccessAt,
-              undefined,
-              "Ещё не было",
-            )}
-          </dd>
+    <section className="lo-lms-hero" aria-label="Состояние подключения">
+      <div className="flex items-center gap-3">
+        <div className="lo-lms-hero-icon">
+          <LockKeyhole className="h-5 w-5" aria-hidden="true" />
         </div>
-        <div>
-          <dt className="text-xs text-zinc-400">Последняя попытка</dt>
-          <dd className="mt-1 text-zinc-200">
-            {lmsDateLabel(
-              connection.lastSyncAttemptAt,
-              undefined,
-              "Ещё не было",
-            )}
-          </dd>
+        <div className="min-w-0">
+          <div className="lo-lms-eyebrow">УНИВЕРСИТЕТ · AITU</div>
+          <div className="mt-1 text-lg font-bold tracking-tight text-white">Moodle LMS</div>
         </div>
-        <div>
-          <dt className="text-xs text-zinc-400">Лимит хранения сессии</dt>
-          <dd className="mt-1 text-zinc-200">
-            {lmsDateLabel(connection.sessionExpiresAt)}
-          </dd>
+      </div>
+      <div className="lo-lms-status" data-state={status}>
+        {connection.state === "syncing"
+          ? "Обновляем учебные данные"
+          : lmsConnectionLabels[connection.state] ?? "Состояние неизвестно"}
+      </div>
+      <dl className="lo-lms-details">
+        <div className="lo-lms-detail">
+          <dt>Последнее успешное обновление</dt>
+          <dd>{lmsDateLabel(connection.lastSyncSuccessAt, undefined, "Пока не было")}</dd>
+        </div>
+        <div className="lo-lms-detail">
+          <dt>Сессия хранится до</dt>
+          <dd>{lmsDateLabel(connection.sessionExpiresAt, undefined, "Не подключена")}</dd>
         </div>
       </dl>
-      <p className="mt-2 text-xs text-zinc-400">
-        Даты показаны в часовом поясе устройства. Microsoft может потребовать
-        повторный вход раньше лимита хранения.
-      </p>
-      {connection.lastErrorCategory ? (
-        <p className="mt-3 text-sm leading-relaxed text-amber-200">
-          {lmsErrorCategoryMessage(connection.lastErrorCategory)}
-        </p>
-      ) : null}
-      {connection.syncRequestedAt ? (
-        <p className="mt-3 text-sm text-zinc-300">
-          Синхронизация запрошена: {lmsDateLabel(connection.syncRequestedAt)}.
-          Это ещё не подтверждение успешного обновления.
-        </p>
-      ) : null}
-      {connection.unsupportedFeatures.length > 0 ? (
-        <div className="mt-3">
-          <p className="text-xs font-medium text-amber-200">
-            Недоступные данные LMS
-          </p>
-          <ul className="mt-1 space-y-1 text-xs leading-relaxed text-zinc-300">
-            {connection.unsupportedFeatures.map((feature, index) => (
-              <li key={index}>{lmsFeatureLabel(feature)}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-      {connection.state === "legacy_configuration" ? (
-        <p className="mt-3 text-xs leading-relaxed text-zinc-400">
-          Прежняя конфигурация сохранена. Замена сессии не отключает старые
-          службы автоматически; избегай одновременной синхронизации одного
-          аккаунта.
-        </p>
+      {(connection.lastErrorCategory || connection.unsupportedFeatures.length > 0 || connection.syncRequestedAt || connection.state === "legacy_configuration") ? (
+        <details className="lo-lms-advanced">
+          <summary>Подробности подключения</summary>
+          {connection.lastErrorCategory ? (
+            <p className="text-amber-200">{lmsErrorCategoryMessage(connection.lastErrorCategory)}</p>
+          ) : null}
+          {connection.syncRequestedAt ? (
+            <p>Запрос на синхронизацию: {lmsDateLabel(connection.syncRequestedAt)}. Это ещё не подтверждение завершения.</p>
+          ) : null}
+          {connection.unsupportedFeatures.length > 0 ? (
+            <ul className="mt-2 space-y-1 text-xs text-zinc-300">
+              {connection.unsupportedFeatures.map((feature, index) => (
+                <li key={index}>• {lmsFeatureLabel(feature)}</li>
+              ))}
+            </ul>
+          ) : null}
+          {connection.state === "legacy_configuration" ? (
+            <p>Старый синхронизатор может работать отдельно. Избегай одновременной синхронизации одного аккаунта.</p>
+          ) : null}
+          <p>Последняя попытка: {lmsDateLabel(connection.lastSyncAttemptAt, undefined, "Не было")}. Даты показаны по времени устройства.</p>
+        </details>
       ) : null}
     </section>
   );
@@ -264,7 +247,7 @@ export function LmsConnectionScreen({ onBack }: { onBack: () => void }) {
       <button
         type="button"
         onClick={onBack}
-        className="inline-flex min-h-11 items-center gap-2 rounded-lg px-2 text-sm text-cyan-200 hover:bg-white/[0.06] active:scale-[0.98]"
+        className="inline-flex min-h-11 items-center gap-2 rounded-xl px-2 text-sm text-zinc-300 hover:bg-white/[0.06] active:scale-[0.98]"
       >
         <ArrowLeft className="h-4 w-4" />
         Назад в учёбу
@@ -272,10 +255,10 @@ export function LmsConnectionScreen({ onBack }: { onBack: () => void }) {
       <header>
         <h1 className="flex items-center gap-2 text-xl font-semibold text-white">
           <LockKeyhole className="h-5 w-5 shrink-0 text-cyan-400" />
-          AITU LMS Connection
+          Подключение AITU
         </h1>
         <p className="mt-2 text-sm leading-relaxed text-zinc-400">
-          Подключи собственную сессию Microsoft SSO для чтения данных Moodle.
+          Оценки, задания и дедлайны из университета — в одном месте.
         </p>
       </header>
       {query.isLoading ? (
@@ -305,21 +288,18 @@ export function LmsConnectionScreen({ onBack }: { onBack: () => void }) {
         autoComplete="off"
         className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4"
       >
-        <h2 className="text-sm font-semibold text-white">
-          {query.data?.configured ? "Заменить сессию" : "Подключить заново"}
-        </h2>
-        <p
-          id="lms-session-help"
-          className="mt-2 text-xs leading-relaxed text-zinc-400"
-        >
-          В своём браузере войди в AITU LMS через Microsoft и скопируй только
-          значение cookie ESTSAUTHPERSISTENT из хранилища Microsoft. Вставляй
-          значение без имени cookie, кавычек, заголовка Cookie и других cookies.
-          Telegram не может прочитать cookies другого сайта.
-          Успешный вход в Firefox не гарантирует, что одной cookie достаточно
-          для входа LifeOS: Microsoft может требовать MFA или дополнительные
-          подтверждения в браузере.
-        </p>
+        <div className="lo-lms-step">
+          <div className="lo-lms-number">1</div>
+          <div>
+            <h2>{query.data?.configured ? "Обновить доступ" : "Подключить аккаунт"}</h2>
+            <p>Подтверди сессию Microsoft, чтобы LifeOS мог читать учебные данные.</p>
+          </div>
+        </div>
+        <details id="lms-session-help" className="lo-lms-advanced mb-3">
+          <summary>Где найти ESTSAUTHPERSISTENT?</summary>
+          <p>Войди в AITU LMS в своём браузере, открой инструменты разработчика и найди cookie ESTSAUTHPERSISTENT для login.microsoftonline.com. Вставь только значение, без имени, кавычек и других cookies.</p>
+          <p>LifeOS не обходит интерактивный вход или MFA. Сессия должна быть действующей.</p>
+        </details>
         <label
           htmlFor="lms-session-cookie"
           className="mt-4 block text-sm font-medium text-zinc-200"
@@ -356,7 +336,7 @@ export function LmsConnectionScreen({ onBack }: { onBack: () => void }) {
         <button
           disabled={!hasInput || busy || syncing}
           type="submit"
-          className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-cyan-400/25 bg-cyan-400/10 px-3 text-sm font-medium text-cyan-200 hover:bg-cyan-400/15 active:scale-[0.98] disabled:opacity-50"
+          className="lo-lms-primary mt-4 disabled:opacity-50"
         >
           <ShieldCheck className="h-4 w-4" />
           {operation === "validate" ? "Проверяем…" : "Проверить без сохранения"}
@@ -367,7 +347,7 @@ export function LmsConnectionScreen({ onBack }: { onBack: () => void }) {
               disabled={busy || syncing}
               type="button"
               onClick={save}
-              className="min-h-11 w-full rounded-lg bg-cyan-300 px-3 text-sm font-semibold text-graphite-950 hover:bg-cyan-200 active:scale-[0.98] disabled:opacity-50"
+              className="lo-lms-primary disabled:opacity-50"
             >
               Сохранить проверенную сессию
             </button>
@@ -391,7 +371,7 @@ export function LmsConnectionScreen({ onBack }: { onBack: () => void }) {
       {notice ? (
         <p
           role="status"
-          className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 text-sm leading-relaxed text-zinc-200"
+          className="lo-lms-notice"
         >
           {notice}
         </p>
@@ -402,6 +382,7 @@ export function LmsConnectionScreen({ onBack }: { onBack: () => void }) {
         </div>
       ) : null}
       <section className="space-y-3 rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
+        <div className="lo-lms-step"><div className="lo-lms-number">2</div><div><h2>Обновить данные</h2><p>Синхронизируй оценки и дедлайны после подключения.</p></div></div>
         <button
           type="button"
           disabled={busy || syncing || !query.data?.configured}
@@ -417,7 +398,7 @@ export function LmsConnectionScreen({ onBack }: { onBack: () => void }) {
               await refreshStudy();
             })
           }
-          className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-cyan-400/25 bg-cyan-400/10 px-3 text-sm font-medium text-cyan-200 hover:bg-cyan-400/15 active:scale-[0.98] disabled:opacity-50"
+          className="lo-lms-primary disabled:opacity-50"
         >
           <RefreshCw className="h-4 w-4" />
           {operation === "sync" || syncing
@@ -428,7 +409,7 @@ export function LmsConnectionScreen({ onBack }: { onBack: () => void }) {
           type="button"
           disabled={busy || query.isFetching}
           onClick={() => void query.refetch()}
-          className="min-h-11 w-full rounded-lg border border-white/[0.08] px-3 text-sm text-zinc-300 hover:bg-white/[0.06] active:scale-[0.98] disabled:opacity-50"
+          className="lo-lms-secondary w-full disabled:opacity-50"
         >
           Обновить состояние
         </button>
