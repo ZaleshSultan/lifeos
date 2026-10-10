@@ -275,6 +275,7 @@ export function StudyScreen({ onOpenLms }: { onOpenLms: () => void }) {
               <StudyCalculator
                 key={course.id}
                 course={course}
+                records={data.records}
                 draft={draft}
                 onChange={(next) => {
                   setDrafts((current) => ({ ...current, [course.id]: next }));
