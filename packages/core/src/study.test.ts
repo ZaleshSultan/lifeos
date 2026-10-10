@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   calculateStudyScenario,
+  calculateStudyTargetPlan,
   validateStudyCalculatorDefinition,
   validateStudyCalculatorValues,
   type StudyCalculatorDefinition,
@@ -103,5 +104,45 @@ describe("study calculator", () => {
     expect(validateStudyCalculatorDefinition({ ...profile, attestationThreshold: -1 })).toBe(false);
     expect(() => calculateStudyScenario({ definition: profile, values: {}, target: Infinity })).toThrow(RangeError);
     expect(() => calculateStudyScenario({ definition: profile, values: { exam: 200 }, target: 70 })).toThrow(RangeError);
+  });
+});
+
+
+describe("target planning for unfinished work", () => {
+  it("does not mistake unknown assessments for zeros", () => {
+    const state = { definition: definition([20, 20, 20, 10, 30]), values: {
+      "att1-0": 90, "att1-1": 90, "att1-2": 90,
+      "att1-3": 50, "att1-4": 50,
+    }, target: 70 };
+    const plan = calculateStudyTargetPlan(state);
+    expect(plan.earnedFinalPoints).toBeCloseTo(22.2);
+    expect(plan.maximumFinal).toBeCloseTo(92.2);
+    expect(plan.remainingFinalWeight).toBeCloseTo(70);
+    expect(plan.requiredAverage).toBeCloseTo(68.3);
+    expect(plan.missing.length).toBe(6);
+    expect(plan.targetPossible).toBe(true);
+  });
+
+  it("separately checks the minimum attestation threshold", () => {
+    const plan = calculateStudyTargetPlan({
+      definition: definition([100]),
+      values: { "att1-0": 10, "att2-0": 20 },
+      target: 50,
+    });
+    expect(plan.attestationWarnings.length).toBe(2);
+    expect(plan.maximumFinal).toBe(49);
+    expect(plan.targetPossible).toBe(false);
+  });
+
+  it("distinguishes no missing grades from a requirement of zero", () => {
+    const plan = calculateStudyTargetPlan({
+      definition: definition([100]),
+      values: { "att1-0": 80, "att2-0": 80, exam: 80 },
+      target: 70,
+    });
+    expect(plan.requiredAverage).toBeNull();
+    expect(plan.remainingFinalWeight).toBe(0);
+    expect(plan.missing).toEqual([]);
+    expect(plan.earnedFinalPoints).toBe(80);
   });
 });
