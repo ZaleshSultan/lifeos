@@ -5,6 +5,8 @@ import {
   type StudyCalculatorState,
 } from "../../../../../packages/core/src/study.js";
 import type { StudyWorkspaceCourse } from "../../api/study";
+import type { AcademicRecord } from "../../api/types";
+import { previewMoodleGrades } from "./grade-import";
 import { cx } from "../../lib/styles";
 import {
   parseStudyDraft,
@@ -217,6 +219,7 @@ export function StudyTargetForecast({ state }: { state: StudyCalculatorState }) 
 
 export function StudyCalculator({
   course,
+  records,
   draft,
   onChange,
   onSave,
@@ -227,6 +230,7 @@ export function StudyCalculator({
   onRefresh,
 }: {
   course: StudyWorkspaceCourse;
+  records: AcademicRecord[];
   draft: StudyDraft;
   onChange: (draft: StudyDraft) => void;
   onSave: (state: StudyCalculatorState) => void;
@@ -238,6 +242,7 @@ export function StudyCalculator({
 }) {
   const parsed = parseStudyDraft(draft);
   const dirty = studyDraftIsDirty(draft);
+  const importPreview = previewMoodleGrades(course, draft, records);
   const definitionChanged =
     JSON.stringify(draft.definition) !==
     JSON.stringify(course.calculator?.definition);
@@ -266,6 +271,33 @@ export function StudyCalculator({
         <p className="mt-2 break-words text-xs text-zinc-400">
           Схема: {draft.definition.sourceName}
         </p>
+        <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.035] p-3">
+          <p className="text-xs font-semibold text-white">Импорт оценок из Moodle</p>
+          <p className="mt-1 text-xs leading-relaxed text-zinc-400">
+            LifeOS подставит только однозначно найденные оценки отдельных работ,
+            не перезаписывая ручные значения и не изменяя Moodle.
+            Квизы-агрегаты и неоднозначные Midterm не угадываются.
+          </p>
+          <button
+            type="button"
+            disabled={saving || definitionChanged || importPreview.matches === 0}
+            onClick={() => onChange({
+              ...draft,
+              inputs: { ...draft.inputs, ...importPreview.updates },
+            })}
+            className="mt-3 min-h-11 w-full rounded-xl border border-emerald-300/20 bg-emerald-300/10 px-3 text-sm font-semibold text-emerald-200 disabled:opacity-50"
+          >
+            Подставить подтверждённые оценки ({importPreview.matches})
+          </button>
+          {importPreview.ambiguous > 0 ? (
+            <p className="mt-2 text-xs text-amber-200">
+              {importPreview.ambiguous} элементов пропущено: в Moodle несколько возможных оценок.
+            </p>
+          ) : null}
+          <p className="mt-2 text-[11px] text-zinc-400">
+            После подстановки проверь числа и нажми «Сохранить сценарий».
+          </p>
+        </div>
         {definitionChanged ? (
           <p className="mt-3 text-sm text-amber-200" role="alert">
             Схема курса изменилась. Твои значения остались на экране. Нажми
