@@ -136,9 +136,10 @@ export default function App() {
         <StudyDashboardScreen
           onOpenStudy={() => setScreen("study")}
           onOpenLms={() => setScreen("lms")}
-          onOpenCalculator={() => {
+          onOpenCalculator={(courseId) => {
             const url = new URL(window.location.href);
             url.searchParams.set("studyTab", "calculator");
+            url.searchParams.set("courseId", courseId);
             window.history.replaceState(null, "", url);
             setScreen("study");
           }}
