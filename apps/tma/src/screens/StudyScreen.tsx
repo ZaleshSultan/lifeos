@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ApiError } from "../api/client";
-import { useSaveStudyCalculatorMutation, useStudyQuery } from "../api/study";
+import { useConfigureStudyCalculatorMutation, useSaveStudyCalculatorMutation, useStudyQuery } from "../api/study";
 import { ErrorPanel, LoadingPanel } from "../components/AsyncState";
 import { StudyCalculator } from "../components/study/StudyCalculator";
 import { StudyCampusMap } from "../components/study/StudyCampusMap";
@@ -23,6 +23,7 @@ import {
   type StudyDraft,
 } from "../components/study/model";
 import { cx } from "../lib/styles";
+import { matchSyllabusProfile } from "../components/study/syllabus-profiles";
 
 const tabs = [
   { id: "schedule", label: "Расписание", icon: CalendarDays },
@@ -44,6 +45,8 @@ function initialStudyTab(): StudyTabId {
 export function StudyScreen({ onOpenLms }: { onOpenLms: () => void }) {
   const query = useStudyQuery();
   const save = useSaveStudyCalculatorMutation();
+  const configure = useConfigureStudyCalculatorMutation();
+  const [pendingProfile, setPendingProfile] = useState<string | null>(null);
   const [tab, setTab] = useState<StudyTabId>(initialStudyTab);
   const [courseId, setCourseId] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, StudyDraft>>({});
@@ -100,6 +103,8 @@ export function StudyScreen({ onOpenLms }: { onOpenLms: () => void }) {
     ? (drafts[course.id] ?? createStudyDraft(course.calculator))
     : null;
   const dirtyCount = Object.values(drafts).filter(studyDraftIsDirty).length;
+  const syllabusProfile = course ? matchSyllabusProfile(course.title, course.code) : null;
+  const profileApplied = Boolean(syllabusProfile && course?.calculator?.definition.sourceName === syllabusProfile.definition.sourceName);
   return (
     <div className="min-w-0 space-y-4">
       <header className="flex items-start justify-between gap-3">
@@ -209,6 +214,63 @@ export function StudyScreen({ onOpenLms }: { onOpenLms: () => void }) {
                 </select>
               </label>
             )}
+            {course && syllabusProfile && !profileApplied ? (
+              <section className="rounded-2xl border border-emerald-300/20 bg-emerald-300/[0.06] p-4">
+                <div className="text-[11px] font-bold uppercase tracking-widest text-emerald-200">
+                  Схема найдена в силабусе
+                </div>
+                <h2 className="mt-1 text-base font-bold text-white">{syllabusProfile.title}</h2>
+                <p className="mt-2 text-xs text-zinc-300">
+                  {syllabusProfile.source} · стр. {syllabusProfile.sourcePage}.
+                  Применение обновит веса калькулятора этого предмета.
+                  Данные Moodle не изменятся. Текущий ручной сценарий будет заменён.
+                </p>
+                {pendingProfile === course.id ? (
+                  <div className="mt-3 flex flex-col gap-2">
+                    <button
+                      type="button"
+                      disabled={configure.isPending}
+                      onClick={() => {
+                        configure.mutate(
+                          { courseId: course.id, definition: syllabusProfile.definition, target: 70 },
+                          {
+                            onSuccess: () => {
+                              setPendingProfile(null);
+                              setSavedCourse(null);
+                            },
+                            onError: () => setPendingProfile(null),
+                          },
+                        );
+                      }}
+                      className="min-h-11 rounded-xl bg-emerald-200 px-3 text-sm font-bold text-graphite-950 disabled:opacity-50"
+                    >
+                      {configure.isPending ? "Применяем…" : "Подтвердить: применить веса"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPendingProfile(null)}
+                      className="min-h-11 rounded-xl border border-white/10 text-sm text-zinc-300"
+                    >
+                      Отмена
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={configure.isPending}
+                    onClick={() => setPendingProfile(course.id)}
+                    className="mt-3 min-h-11 w-full rounded-xl bg-emerald-200 px-3 text-sm font-bold text-graphite-950 disabled:opacity-50"
+                  >
+                    Использовать формулу из силабуса
+                  </button>
+                )}
+              </section>
+            ) : null}
+            {configure.isError ? (
+              <p role="alert" className="text-sm text-rose-200">
+                Не удалось применить схему. Проверь соединение и попробуй снова.
+              </p>
+            ) : null}
             {course && draft ? (
               <StudyCalculator
                 key={course.id}
