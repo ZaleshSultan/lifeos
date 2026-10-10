@@ -46,16 +46,16 @@ describe("Secure LMS connection screen", () => {
         createElement(LmsConnectionScreen, { onBack: () => undefined }),
       ),
     );
-    expect(html).toContain("AITU LMS Connection");
+    expect(html).toContain("Подключение AITU");
     expect(html).toContain('type="password"');
     expect(html).toContain('autoComplete="off"');
     expect(html).toContain("ESTSAUTHPERSISTENT");
     expect(html).toContain("Поле очищается сразу при проверке");
     expect(html).toContain("не отправляется AI");
-    expect(html).toContain("Успешный вход в Firefox не гарантирует");
+    expect(html).toContain("Сессия должна быть действующей");
     expect(html).toContain("MFA");
     expect(html).toContain("Сессия истекла");
-    expect(html).toContain("Последняя успешная синхронизация");
+    expect(html).toContain("Последнее успешное обновление");
     expect(html).not.toContain("validationToken");
     expect(fetch).not.toHaveBeenCalled();
     client.clear();

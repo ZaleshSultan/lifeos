@@ -503,9 +503,12 @@ class AcademicPersistenceTest(unittest.TestCase):
         self.assertEqual(len(db.tables["reminders"]), 1)
         reminder = db.tables["reminders"][0]
         self.assertEqual(reminder["dedup_key"], "academic_grade_posted:academic:moodle:42:901")
+        self.assertTrue(reminder["message"].startswith(
+            "Оценка по «Database Management Systems | Teacher»: Assignment 1 — 0/10"
+        ))
+        self.assertIn("ниже ориентира", reminder["message"])
         self.assertEqual(
-            reminder["message"],
-            "Оценка по «Database Management Systems | Teacher»: Assignment 1 — 0/10 (0%)",
+            db.tables["academic_records"][0]["raw_json"]["_lifeos_grade_analysis"]["percentage"], 0
         )
         self.assertEqual(reminder["metadata_json"]["notification_kind"], "instant_academic")
         self.assertIsNone(reminder["source_event_id"])
@@ -526,9 +529,13 @@ class AcademicPersistenceTest(unittest.TestCase):
 
         self.assertEqual((first.reminders_created, second.reminders_created), (1, 0))
         self.assertEqual(len(db.tables["reminders"]), 1)
-        self.assertEqual(
-            db.tables["reminders"][0]["message"],
-            "Оценка по «Database Management Systems | Teacher»: Quiz 1 — 8.5",
+        self.assertTrue(db.tables["reminders"][0]["message"].startswith(
+            "Оценка по «Database Management Systems | Teacher»: Quiz 1 — 8.5"
+        ))
+        self.assertIn("максимума баллов", db.tables["reminders"][0]["message"])
+        self.assertIsNone(
+            next(record for record in db.tables["academic_records"] if record["title"] == "Quiz 1")
+            ["raw_json"]["_lifeos_grade_analysis"]["percentage"]
         )
 
     def test_first_moodle_sync_does_not_announce_a_batch_after_platonus_or_partial_run(self):

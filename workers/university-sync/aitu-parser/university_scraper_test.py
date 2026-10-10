@@ -44,6 +44,31 @@ class ClassifyRecordTypeTest(unittest.TestCase):
         self.assertEqual(university_scraper.classify_record_type("Lab Report 3"), "assignment")
 
 
+
+class GradeAnalysisTest(unittest.TestCase):
+    def test_strong_grade_creates_structured_commentary(self) -> None:
+        item = university_scraper.build_grade_analysis(81, 100)
+        self.assertEqual(item["version"], 1)
+        self.assertEqual(item["basis"], "single_graded_item")
+        self.assertEqual(item["percentage"], 81)
+        self.assertEqual(item["delta_percent_points"], 11)
+        self.assertEqual(item["status"], "on_target")
+        message = university_scraper.grade_posted_message("DBMS", "Quiz Midterm", 81, 100)
+        self.assertIn("11.0 п.п.", message)
+        self.assertIn("не прогноз итоговой оценки", message)
+
+    def test_no_maximum_does_not_invent_percentage(self) -> None:
+        item = university_scraper.build_grade_analysis(15, None)
+        self.assertIsNone(item["percentage"])
+        self.assertIsNone(item["delta_percent_points"])
+        self.assertEqual(item["status"], "unknown")
+
+    def test_zero_is_real_graded_score(self) -> None:
+        item = university_scraper.build_grade_analysis(0, 20)
+        self.assertEqual(item["percentage"], 0)
+        self.assertEqual(item["delta_percent_points"], -70)
+        self.assertEqual(item["status"], "needs_attention")
+
 class MoodleAssignmentWsTest(unittest.TestCase):
     def make_client(self, token: str | None = "test-token") -> university_scraper.MoodleClient:
         base = university_scraper.BaseSettings(

@@ -1,9 +1,12 @@
 import { AlertTriangle, Calculator, Save } from "lucide-react";
 import {
   calculateStudyScenario,
+  calculateStudyTargetPlan,
   type StudyCalculatorState,
 } from "../../../../../packages/core/src/study.js";
 import type { StudyWorkspaceCourse } from "../../api/study";
+import type { AcademicRecord } from "../../api/types";
+import { previewMoodleGrades } from "./grade-import";
 import { cx } from "../../lib/styles";
 import {
   parseStudyDraft,
@@ -125,6 +128,7 @@ export function StudyScenarioResult({
           </span>
         </p>
       ) : null}
+      <StudyTargetForecast state={state} />
       <p className="text-xs leading-relaxed text-zinc-400">
         Расчёт по твоему учебному плану. Порог каждой аттестации:{" "}
         {state.definition.attestationThreshold}. Официальную оценку определяет
@@ -134,8 +138,88 @@ export function StudyScenarioResult({
   );
 }
 
+/**
+ * The forecast is a what-if projection, not a prediction of Moodle results.
+ * All future fields stay unknown until explicitly entered by the user.
+ */
+export function StudyTargetForecast({ state }: { state: StudyCalculatorState }) {
+  const plan = calculateStudyTargetPlan(state);
+  const value = (score: number | null) =>
+    score == null ? "—" : `${studyScoreLabel(score)} / 100`;
+
+  return (
+    <div className="mt-4 space-y-3 rounded-2xl border border-emerald-300/20 bg-emerald-300/[0.06] p-4">
+      <div>
+        <p className="text-[11px] font-bold uppercase tracking-[.11em] text-emerald-200">План до цели</p>
+        <h4 className="mt-1 text-lg font-bold text-white">Как закрыть предмет на {studyScoreLabel(plan.target)}+</h4>
+        <p className="mt-1 text-xs leading-relaxed text-zinc-300">
+          Точная формула по весам курса. Будущие оценки не считаются нулями.
+        </p>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="rounded-xl bg-white/[0.05] p-3">
+          <p className="text-[11px] text-zinc-400">Уже набрано в итог</p>
+          <p className="mt-1 text-xl font-bold tabular-nums text-white">{studyScoreLabel(plan.earnedFinalPoints)}</p>
+          <p className="text-[10px] text-zinc-400">из 100 итоговых баллов</p>
+        </div>
+        <div className="rounded-xl bg-white/[0.05] p-3">
+          <p className="text-[11px] text-zinc-400">Нужно в среднем дальше</p>
+          <p className="mt-1 text-xl font-bold tabular-nums text-emerald-200">{value(plan.requiredAverage)}</p>
+          <p className="text-[10px] text-zinc-400">по оставшемуся весу {studyScoreLabel(plan.remainingFinalWeight)}%</p>
+        </div>
+      </div>
+      <p className="text-sm text-zinc-200">
+        Возможный итог: <strong>{studyScoreLabel(plan.minimumFinal)}–{studyScoreLabel(plan.maximumFinal)}</strong>.
+      </p>
+      {!plan.targetPossible ? (
+        <p role="status" className="text-sm font-semibold text-amber-200">
+          Цель уже недостижима даже при 100 баллах за все оставшиеся работы.
+        </p>
+      ) : plan.requiredAverage === null ? (
+        <p className="text-sm text-emerald-200">Все оценки введены: расчёт завершён.</p>
+      ) : plan.requiredAverage > 100 ? (
+        <p role="status" className="text-sm font-semibold text-amber-200">
+          Понадобилось бы в среднем больше 100. Измени цель либо проверь исходные оценки.
+        </p>
+      ) : (
+        <p className="text-xs leading-relaxed text-zinc-300">
+          Если получишь примерно <strong className="text-emerald-200">{studyScoreLabel(Math.ceil(plan.requiredAverage))}+</strong> за каждую оставшуюся работу, итог достигнет цели (при соблюдении порогов аттестаций).
+        </p>
+      )}
+      {plan.missing.length > 0 ? (
+        <details className="border-t border-white/10 pt-3">
+          <summary className="min-h-10 cursor-pointer text-sm font-semibold text-white">Что нужно на следующих работах ({plan.missing.length})</summary>
+          <p className="mt-2 text-xs text-zinc-400">Для каждой строки показан ориентир, если по всем другим ещё неизвестным работам будет {studyScoreLabel(plan.target)}/100. Это отдельные сценарии, а не требования получить все эти баллы одновременно.</p>
+          <ul className="mt-3 divide-y divide-white/10">
+            {plan.missing.map((item) => (
+              <li className="flex items-center justify-between gap-3 py-3" key={item.id}>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-white">{item.label}</p>
+                  <p className="text-[11px] text-zinc-400">
+                    {item.period === "att1" ? "Аттестация 1" : item.period === "att2" ? "Аттестация 2" : "Экзамен"} · вес в итог {studyScoreLabel(item.weightInFinal)}%
+                  </p>
+                </div>
+                <div className={item.requiredIfOthersAtTarget > 100 ? "shrink-0 text-sm font-bold tabular-nums text-amber-200" : "shrink-0 text-sm font-bold tabular-nums text-emerald-200"}>
+                  {studyScoreLabel(item.requiredIfOthersAtTarget)}+
+                </div>
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+      {plan.attestationWarnings.map((warning) => (
+        <p key={warning} role="status" className="text-xs font-semibold text-amber-200">{warning}</p>
+      ))}
+      <p className="text-[11px] text-zinc-400">
+        Прогноз не является официальной оценкой. Для предметов без явно указанного в силабусе минимального порога проверяй условия допуска отдельно.
+      </p>
+    </div>
+  );
+}
+
 export function StudyCalculator({
   course,
+  records,
   draft,
   onChange,
   onSave,
@@ -146,6 +230,7 @@ export function StudyCalculator({
   onRefresh,
 }: {
   course: StudyWorkspaceCourse;
+  records: AcademicRecord[];
   draft: StudyDraft;
   onChange: (draft: StudyDraft) => void;
   onSave: (state: StudyCalculatorState) => void;
@@ -157,6 +242,7 @@ export function StudyCalculator({
 }) {
   const parsed = parseStudyDraft(draft);
   const dirty = studyDraftIsDirty(draft);
+  const importPreview = previewMoodleGrades(course, draft, records);
   const definitionChanged =
     JSON.stringify(draft.definition) !==
     JSON.stringify(course.calculator?.definition);
@@ -185,6 +271,33 @@ export function StudyCalculator({
         <p className="mt-2 break-words text-xs text-zinc-400">
           Схема: {draft.definition.sourceName}
         </p>
+        <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.035] p-3">
+          <p className="text-xs font-semibold text-white">Импорт оценок из Moodle</p>
+          <p className="mt-1 text-xs leading-relaxed text-zinc-400">
+            LifeOS подставит только однозначно найденные оценки отдельных работ,
+            не перезаписывая ручные значения и не изменяя Moodle.
+            Квизы-агрегаты и неоднозначные Midterm не угадываются.
+          </p>
+          <button
+            type="button"
+            disabled={saving || definitionChanged || importPreview.matches === 0}
+            onClick={() => onChange({
+              ...draft,
+              inputs: { ...draft.inputs, ...importPreview.updates },
+            })}
+            className="mt-3 min-h-11 w-full rounded-xl border border-emerald-300/20 bg-emerald-300/10 px-3 text-sm font-semibold text-emerald-200 disabled:opacity-50"
+          >
+            Подставить подтверждённые оценки ({importPreview.matches})
+          </button>
+          {importPreview.ambiguous > 0 ? (
+            <p className="mt-2 text-xs text-amber-200">
+              {importPreview.ambiguous} элементов пропущено: в Moodle несколько возможных оценок.
+            </p>
+          ) : null}
+          <p className="mt-2 text-[11px] text-zinc-400">
+            После подстановки проверь числа и нажми «Сохранить сценарий».
+          </p>
+        </div>
         {definitionChanged ? (
           <p className="mt-3 text-sm text-amber-200" role="alert">
             Схема курса изменилась. Твои значения остались на экране. Нажми
