@@ -114,3 +114,7 @@ For hosted Supabase, link once and push:
 supabase link --project-ref YOUR_PROJECT_REF
 supabase db push
 ```
+
+## LMS session migration
+
+`20261010141237_secure_lms_sessions.sql` adds optional encrypted AITU SSO-only sessions, credential-free metadata, queue/state fields and service-only per-user sync leases with atomic session mutation RPCs. Existing password/WS/iCal configurations and academic records remain intact. Browser roles cannot read/write credentials. Test with `bash scripts/test-lms-migration.sh` against disposable PostgreSQL; see [LMS_SESSIONS.md](LMS_SESSIONS.md) for the approved-deployment procedure.

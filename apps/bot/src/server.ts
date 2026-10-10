@@ -1,3 +1,5 @@
+import { LmsSessionService } from "./lms-sessions.js";
+import { handleLmsRoute } from "./lms-routes.js";
 import {
   createServer,
   type IncomingMessage,
@@ -42,6 +44,11 @@ import {
 } from "./syncthing.js";
 import { pipeline } from "node:stream/promises";
 import { handleWorkoutRoute } from "./workout-routes.js";
+import {
+  createConfiguredLifeosAiService,
+  type LifeosAiService,
+} from "./lifeos-ai.js";
+import { handlePlanningRoute } from "./planning-routes.js";
 import { fetchWeatherSnapshot } from "./weather.js";
 import { verifyWebSessionToken } from "./web-session.js";
 import {
@@ -92,6 +99,8 @@ interface TmaSessionStatus {
 }
 
 export interface BotServerOptions {
+  lmsSessions?: LmsSessionService;
+  ai?: LifeosAiService;
   startedAt?: Date;
   version?: string;
   config?: Partial<
@@ -146,6 +155,8 @@ interface HealthResponse {
 }
 
 interface ResolvedBotServerOptions {
+  lmsSessions: LmsSessionService;
+  ai: LifeosAiService;
   startedAt: Date;
   version: string;
   dependencies: {
@@ -1188,6 +1199,7 @@ async function resolveTmaSessionStatus(
 async function resolveTmaUser(
   request: IncomingMessage,
   options: ResolvedBotServerOptions,
+  telegramOnly = false,
 ): Promise<
   | { ok: true; user: TelegramUserRecord }
   | { ok: false; statusCode: number; error: string }
@@ -1197,7 +1209,7 @@ async function resolveTmaUser(
     options.webSessionSecret,
   );
 
-  if (webSession) {
+  if (webSession && !telegramOnly) {
     if (!options.store) {
       return { ok: false, statusCode: 503, error: "database_not_configured" };
     }
@@ -1262,7 +1274,7 @@ async function resolveTmaUser(
     }
   }
 
-  if (unsafeTmaDevAuthAllowed(options)) {
+  if (!telegramOnly && unsafeTmaDevAuthAllowed(options)) {
     return {
       ok: true,
       user: {
@@ -2502,7 +2514,9 @@ async function handleRequest(
   }
 
   if (requestUrl.pathname.startsWith("/api/tma/")) {
-    const auth = await resolveTmaUser(request, options);
+    const lmsRoute = requestUrl.pathname.startsWith("/api/tma/lms/");
+    if (lmsRoute) response.setHeader("Cache-Control", "no-store");
+    const auth = await resolveTmaUser(request, options, lmsRoute);
 
     if (!auth.ok) {
       writeJson(response, auth.statusCode, {
@@ -2519,6 +2533,18 @@ async function handleRequest(
       });
       return;
     }
+
+    if (await handleLmsRoute({
+      request,response,url:requestUrl,user:auth.user,store,
+      sessions:options.lmsSessions,readJsonBody,writeJson,
+    })) return;
+
+    if (
+      await handlePlanningRoute({
+        request, response, url: requestUrl, user: auth.user, store,
+        ai: options.ai, readJsonBody, writeJson,
+      })
+    ) return;
 
     if (
       request.method === "POST" &&
@@ -3577,6 +3603,8 @@ async function handleRequest(
 
 export function createBotServer(options: BotServerOptions = {}): Server {
   const resolvedOptions: ResolvedBotServerOptions = {
+    ai: options.ai ?? createConfiguredLifeosAiService(),
+    lmsSessions: options.lmsSessions ?? new LmsSessionService(),
     startedAt: options.startedAt ?? new Date(),
     version: options.version ?? "0.0.0",
     dependencies: {
@@ -3615,7 +3643,7 @@ export function createBotServer(options: BotServerOptions = {}): Server {
     telegram: options.telegram,
   };
 
-  return createServer((request: IncomingMessage, response: ServerResponse) => {
+  const server = createServer((request: IncomingMessage, response: ServerResponse) => {
     void handleRequest(request, response, resolvedOptions).catch((error) => {
       if (error instanceof RequestBodyError) {
         writeJson(response, error.statusCode, {
@@ -3631,4 +3659,6 @@ export function createBotServer(options: BotServerOptions = {}): Server {
       });
     });
   });
+  server.on("close", () => resolvedOptions.lmsSessions.close());
+  return server;
 }

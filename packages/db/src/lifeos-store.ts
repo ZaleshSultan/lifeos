@@ -73,6 +73,11 @@ import {
   type WorkoutProgramSet,
 } from "@lifeos/core";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  loadPlanningSnapshot,
+  type PlanningSnapshot,
+  type PlanningSnapshotRange,
+} from "./planning-snapshot.js";
 import type { StudyCalculatorState } from "../../core/src/study.js";
 import { configureStudyCalculator, loadStudyWorkspaceCourses, saveStudyCalculator, type StudyWorkspaceCourse } from "./study-workspace.js";
 import type {
@@ -102,6 +107,8 @@ import type {
   StudyCourseStatus,
   WorkoutIntensity,
 } from "./types.js";
+
+import { getLmsConnection, saveLmsSession, deleteLmsSession, requestLmsSync, getLmsWork, addManualStudyWork, loadLmsTaskEvents, loadLinkedAssignmentGrades, type LmsSessionStore, type ManualStudyWork } from "./lms-store.js";
 
 type LifeOSSupabaseClient = SupabaseClient<Database>;
 type WorkoutRow = Database["public"]["Tables"]["workouts"]["Row"];
@@ -1376,7 +1383,11 @@ export interface TmaStudySummary {
   records: AcademicRecord[];
 }
 
-export interface LifeOSStore {
+export interface LifeOSStore extends LmsSessionStore {
+  getPlanningSnapshot(
+    userId: string,
+    range: PlanningSnapshotRange,
+  ): Promise<PlanningSnapshot>;
   resolveTelegramUser(
     telegramUserId: number,
   ): Promise<TelegramUserRecord | null>;
@@ -3443,6 +3454,19 @@ export interface SupabaseLifeOSStoreOptions {
 }
 
 export class SupabaseLifeOSStore implements LifeOSStore {
+  getLmsConnection(userId:string) { return getLmsConnection(this.client,userId); }
+  saveLmsSession(input:{userId:string;encryptedCookie:string;expiresAt:string}) { return saveLmsSession(this.client,input); }
+  deleteLmsSession(userId:string) { return deleteLmsSession(this.client,userId); }
+  requestLmsSync(userId:string) { return requestLmsSync(this.client,userId); }
+  getLmsWork(userId:string,timezone:string) { return getLmsWork(this.client,userId,timezone); }
+  addManualStudyWork(userId:string,work:ManualStudyWork) { return addManualStudyWork(this.client,userId,work); }
+
+  getPlanningSnapshot(
+    userId: string,
+    range: PlanningSnapshotRange,
+  ): Promise<PlanningSnapshot> {
+    return loadPlanningSnapshot(this.client, userId, range);
+  }
   private readonly adminTelegramUserIds: ReadonlySet<number>;
   private readonly encryptionKey: Buffer | undefined;
   private readonly allowPlaintextSecrets: boolean;
@@ -6576,27 +6600,9 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     nowIso?: string,
   ): Promise<UpcomingAssignmentDeadlinesResult> {
     const now = nowIso ? new Date(nowIso) : new Date();
-    const sevenDaysAgo = new Date(
-      now.getTime() - 7 * 24 * 60 * 60 * 1000,
-    ).toISOString();
-
-    const { data: events, error } = await this.client
-      .from("source_events")
-      .select("*")
-      .eq("user_id", userId)
-      .eq("source_key", "university_platform")
-      .eq("event_type", "task")
-      .eq("status", "active")
-      .not("due_at", "is", null)
-      .gte("due_at", sevenDaysAgo)
-      .order("due_at", { ascending: true });
-
-    if (error) {
-      throwSupabaseError(
-        error,
-        "Failed to list upcoming assignment deadlines from source_events",
-      );
-    }
+    const { rows: events, truncated } = await loadLmsTaskEvents(this.client,userId,true);
+    // The Study work API exposes truncation. Keep legacy arrays compatible.
+    void truncated;
 
     if (!events || events.length === 0) {
       return { upcoming: [], overdue: [] };
@@ -6615,75 +6621,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       }
     }
 
-    // Map: related_grade_external_id -> { score, maxScore, percentage }
-    const gradeMap = new Map<
-      string,
-      { score: number | null; maxScore: number | null; percentage: number | null }
-    >();
-
-    if (gradeExternalIds.length > 0) {
-      const uniqueGradeExternalIds = [...new Set(gradeExternalIds)];
-      const { data: gradeEvents, error: gradeEventsError } = await this.client
-        .from("source_events")
-        .select("id, external_id")
-        .eq("user_id", userId)
-        .eq("source_key", "university_platform")
-        .in("external_id", uniqueGradeExternalIds);
-
-      if (gradeEventsError) {
-        throwSupabaseError(
-          gradeEventsError,
-          "Failed to load grade source events for assignments",
-        );
-      }
-
-      if (gradeEvents && gradeEvents.length > 0) {
-        const gradeEventIds = gradeEvents.map((g) => g.id);
-        const eventIdToExternalId = new Map<string, string>();
-        for (const g of gradeEvents) {
-          if (g.external_id) {
-            eventIdToExternalId.set(g.id, g.external_id);
-          }
-        }
-
-        const { data: academicRows, error: academicError } = await this.client
-          .from("academic_records")
-          .select("source_event_id, score, max_score, percentage")
-          .eq("user_id", userId)
-          .in("source_event_id", gradeEventIds);
-
-        if (academicError) {
-          throwSupabaseError(
-            academicError,
-            "Failed to load academic records for assignments",
-          );
-        }
-
-        if (academicRows) {
-          for (const row of academicRows) {
-            if (row.source_event_id) {
-              const extId = eventIdToExternalId.get(row.source_event_id);
-              if (extId) {
-                const score = row.score !== null ? Number(row.score) : null;
-                const maxScore =
-                  row.max_score !== null ? Number(row.max_score) : null;
-                let percentage =
-                  row.percentage !== null ? Number(row.percentage) : null;
-                if (
-                  percentage === null &&
-                  score !== null &&
-                  maxScore !== null &&
-                  maxScore > 0
-                ) {
-                  percentage = Math.round(((score / maxScore) * 100) * 10) / 10;
-                }
-                gradeMap.set(extId, { score, maxScore, percentage });
-              }
-            }
-          }
-        }
-      }
-    }
+    const gradeMap = await loadLinkedAssignmentGrades(this.client,userId,gradeExternalIds);
 
     const upcoming: AssignmentDeadlineRecord[] = [];
     const overdue: AssignmentDeadlineRecord[] = [];
@@ -6726,7 +6664,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
         upcoming.push(record);
       } else {
         // Overdue: only if not yet graded
-        if (record.score === null) {
+        if (record.score === null && ["not_submitted", "overdue"].includes(String(raw?.submission_status))) {
           overdue.push(record);
         }
       }

@@ -1,4 +1,11 @@
-import { BookOpen, BookText, Calculator, CalendarDays, MapPinned, RefreshCw } from "lucide-react";
+import {
+  BookOpen,
+  BookText,
+  Calculator,
+  CalendarDays,
+  MapPinned,
+  RefreshCw,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { ApiError } from "../api/client";
 import { useSaveStudyCalculatorMutation, useStudyQuery } from "../api/study";
@@ -8,6 +15,7 @@ import { StudyCampusMap } from "../components/study/StudyCampusMap";
 import { StudyGrades } from "../components/study/StudyGrades";
 import { StudySchedule } from "../components/study/StudySchedule";
 import { StudySyllabi } from "../components/study/StudySyllabi";
+import { StudyLmsOverview } from "../components/study/StudyLmsOverview";
 import {
   createStudyDraft,
   reconcileStudyDraft,
@@ -33,7 +41,7 @@ function initialStudyTab(): StudyTabId {
     : "schedule";
 }
 
-export function StudyScreen() {
+export function StudyScreen({ onOpenLms }: { onOpenLms: () => void }) {
   const query = useStudyQuery();
   const save = useSaveStudyCalculatorMutation();
   const [tab, setTab] = useState<StudyTabId>(initialStudyTab);
@@ -64,14 +72,23 @@ export function StudyScreen() {
     });
   }, [query.data]);
 
-  if (query.isLoading) return <LoadingPanel title="Загружаем учёбу…" />;
+  if (query.isLoading)
+    return (
+      <div className="min-w-0 space-y-4">
+        <StudyLmsOverview key="lms-overview" onOpenConnection={onOpenLms} />
+        <LoadingPanel title="Загружаем учёбу…" />
+      </div>
+    );
   if (!query.data)
     return (
-      <ErrorPanel
-        title="Не удалось загрузить учёбу"
-        detail="Проверь подключение и попробуй ещё раз."
-        onRetry={() => void query.refetch()}
-      />
+      <div className="min-w-0 space-y-4">
+        <StudyLmsOverview key="lms-overview" onOpenConnection={onOpenLms} />
+        <ErrorPanel
+          title="Не удалось загрузить учёбу"
+          detail="Проверь подключение и попробуй ещё раз."
+          onRetry={() => void query.refetch()}
+        />
+      </div>
     );
 
   const data = query.data;
@@ -103,6 +120,7 @@ export function StudyScreen() {
           <RefreshCw className="h-5 w-5" aria-hidden="true" />
         </button>
       </header>
+      <StudyLmsOverview key="lms-overview" onOpenConnection={onOpenLms} />
       {query.isError ? (
         <ErrorPanel
           title="Не удалось обновить данные"

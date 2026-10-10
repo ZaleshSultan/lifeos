@@ -9,6 +9,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 TEST_FILES = (
     ROOT / "common" / "lifeos_sync_test.py",
+    ROOT / "common" / "lms_sessions_test.py",
+    ROOT / "common" / "lms_sync_lease_test.py",
+    ROOT / "common" / "academic_sync_test.py",
     ROOT / "reminder-worker" / "reminder_worker_test.py",
     ROOT / "daily-digest-worker" / "daily_digest_worker_test.py",
     ROOT / "google-sync" / "google_sync_test.py",
@@ -17,6 +20,7 @@ TEST_FILES = (
     ROOT / "obsidian-mirror" / "obsidian_mirror_test.py",
     ROOT / "university-sync" / "platonus" / "platonus_sync_test.py",
     ROOT / "university-sync" / "aitu-parser" / "university_scraper_test.py",
+    ROOT / "university-sync" / "aitu-parser" / "moodle_session_security_test.py",
     ROOT / "university-sync" / "aitu-parser" / "academic_pipeline_test.py",
     ROOT / "university-sync" / "lms_grades_worker_test.py",
     ROOT.parent / "scripts" / "diagnose_moodle_course_test.py",

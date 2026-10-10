@@ -35,13 +35,14 @@ import sys
 import time
 import unicodedata
 import urllib.parse
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 # ── Path bootstrap (workers/university-sync/aitu-parser → workers/) ──────────
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from common.lifeos_sync import (  # noqa: E402
     BaseSettings,
@@ -62,6 +63,9 @@ from common.lifeos_sync import (  # noqa: E402
 
 from common.academic_sync import load_courses, match_course, sync_assessment, mark_missing_grades, link_course
 from common.moodle_grades import normalize_title, number, parse_report
+from common.lms_sync_lease import LmsSyncLease, guard_lms_client
+from moodle_session_security import MoodleSessionError, SsoDiagnostics, safe_url, secure_request, valid_sso_cookie, MOODLE_HOST, MICROSOFT_HOST
+from moodle_activities import AssignmentSnapshot, GradeSnapshot, UnsupportedMoodlePage, activity_links, parse_activity
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 BASE_URL = "https://lms.astanait.edu.kz"
@@ -192,6 +196,7 @@ def _requests_session() -> Any:
     try:
         import requests  # type: ignore
         session = requests.Session()
+        session.trust_env = False
         # A self-identifying UA (e.g. "LifeOS AITU Sync/1.0") or the default
         # python-requests UA both got blocked outright by AITU's edge (confirmed
         # via manual diagnostic: default requests UA -> 403; browser-like UA ->
@@ -284,6 +289,18 @@ class MoodleClient:
         self._moodle_user_id: int | None = None
         self.is_mocked = False
         self._mock_reason = ""
+        self.unsupported_features: list[str] = []
+        self._timezone_name = settings.base.timezone_name
+        self._enrolled_courses: list[tuple[int, str]] | None = None
+        self._sso_diagnostics = SsoDiagnostics()
+
+    def close(self) -> None:
+        if self._session is not None:
+            self._session.cookies.clear()
+            self._session.close()
+        self._session = None
+        self._sso_cookie = self._ws_token = None
+        self._username = self._password = ""
 
     # ── Strategy 1: Web Services API ─────────────────────────────────────────
     def _ws_call(self, function: str, **params: Any) -> Any:
@@ -295,14 +312,14 @@ class MoodleClient:
             "moodlewsrestformat": "json",
             **params,
         }
-        resp = session.post(WS_URL, data=payload, timeout=REQUEST_TIMEOUT)
+        resp = secure_request(session, "POST", WS_URL, data=payload, moodle_only=True)
         resp.raise_for_status()
         data = resp.json()
         # Moodle WS signals errors as {"exception": ..., "errorcode": ...}
         if isinstance(data, dict) and "exception" in data:
-            raise SyncError(
-                f"Moodle WS error [{data.get('errorcode')}]: {data.get('message', data)}"
-            )
+            code = str(data.get("errorcode") or "unknown")
+            code = code if re.fullmatch(r"[a-z0-9_]{1,64}", code) else "unknown"
+            raise SyncError(f"Moodle WS error [{code}]: request rejected")
         return data
 
     def _ws_get_userid(self) -> int:
@@ -418,181 +435,137 @@ class MoodleClient:
 
     # ── Strategy 2: Session login + HTML scraping ─────────────────────────────
     def _sso_cookie_login(self) -> bool:
-        """
-        Authenticate via a Microsoft Entra ID (Azure AD) persistent SSO session
-        cookie (ESTSAUTHPERSISTENT), for institutions like AITU where Moodle has
-        no native username/password login at all — only "OpenID Connect".
-
-        The cookie is obtained once by the human: sign into AITU normally in a
-        browser, open devtools → Application → Cookies →
-        https://login.microsoftonline.com → copy the ESTSAUTHPERSISTENT value.
-        It is a long-lived (weeks) persistent-session cookie, not a short-lived
-        access token, which is why this can run unattended in a daemon.
-
-        Mechanics: we seed that cookie on the microsoftonline.com domain, then
-        walk the same redirect chain a browser would when Moodle bounces us to
-        Microsoft's OAuth "authorize" endpoint. Because a valid persistent
-        session cookie is already present, Microsoft's login page auto-approves
-        without prompting for credentials — but the final hop back to Moodle is
-        typically an OIDC `response_mode=form_post`: an HTML page with an
-        auto-submitting <form> (via a bit of inline JS) that POSTs the id_token
-        back to Moodle's redirect_uri. `requests` doesn't execute JS, so we
-        parse that form's hidden inputs and POST them ourselves — the same
-        submission a real browser's JS would have performed instantly.
-        """
+        """Walk only approved origins and the OIDC form-post callback, never login forms."""
         self._session = None
         self._moodle_user_id = None
+        trace = self._sso_diagnostics = SsoDiagnostics()
         if not self._sso_cookie:
             return False
-
+        if not valid_sso_cookie(self._sso_cookie):
+            trace.record("cookie_validation", "rejected")
+            raise MoodleSessionError("unsupported_auth_flow")
+        trace.record("cookie_validation", "accepted")
         session = _requests_session()
-        session.cookies.set(
-            "ESTSAUTHPERSISTENT",
-            self._sso_cookie,
-            domain="login.microsoftonline.com",
-        )
-
+        deadline = time.monotonic() + 55
         try:
-            # Hit the actual "OpenID Connect" login entrypoint directly — Moodle's
-            # generic /login/index.php shows a picker page (native form + this
-            # button) rather than auto-redirecting, so GETing it alone never
-            # starts the Microsoft SSO flow at all.
-            r = session.get(OIDC_LOGIN_URL, timeout=REQUEST_TIMEOUT, allow_redirects=True)
-
-            # Replicate what a real browser's JS does across up to a few hops:
-            #   1. A "BssoInterrupt" page (no <form>, just a JS $Config blob with
-            #      a "urlPost" field carrying &sso_reload=True) — the browser's
-            #      inline JS re-requests that URL to force Microsoft to retry
-            #      silent SSO using the persistent cookie. We GET it manually.
-            #   2. A response_mode=form_post page — an auto-submitting <form>
-            #      (code/state/session_state) targeting Moodle's redirect_uri.
-            #      We parse the hidden inputs and POST them manually.
-            for _ in range(4):
-                soup = _bs4_parse(r.text)
-                form = soup.find("form")
-
-                if form:
-                    action = form.get("action")
-                    inputs = {
-                        tag.get("name"): tag.get("value", "")
-                        for tag in soup.find_all("input")
-                        if tag.get("name")
-                    }
-                    if not action or not inputs:
-                        break
-                    r = session.post(
-                        action, data=inputs, timeout=REQUEST_TIMEOUT, allow_redirects=True
-                    )
+            response = secure_request(session, "GET", OIDC_LOGIN_URL, cookie=self._sso_cookie, deadline=deadline, diagnostics=trace)
+            for _ in range(5):
+                current = response.url
+                user_id = _authenticated_moodle_user_id(response.text, current)
+                if user_id:
+                    trace.record("authenticated_moodle_session", "identity_verified")
+                    self._moodle_user_id, self._session = user_id, session
+                    logging.info("Moodle SSO session validated.")
+                    return True
+                soup = _bs4_parse(response.text)
+                trace.record("microsoft_login_page" if urllib.parse.urlsplit(current).hostname == MICROSOFT_HOST else "moodle_callback", "page_received")
+                forms = soup.find_all("form")
+                if forms:
+                    if urllib.parse.urlsplit(current).hostname != MICROSOFT_HOST:
+                        return False
+                    callback = None
+                    for form in forms:
+                        action = form.get("action")
+                        if not action:
+                            continue
+                        trace.record("oidc_form_post", "target_rejected")
+                        destination = safe_url(action, current)
+                        parsed = urllib.parse.urlsplit(destination)
+                        # Entra's form_post response is the sole cross-origin POST.
+                        if parsed.hostname != MOODLE_HOST or parsed.path.rstrip("/") not in {"/auth/oidc", "/auth/oidc/index.php"}:
+                            continue
+                        if form.get("method", "get").lower() != "post":
+                            trace.record("oidc_form_post", "callback_method_invalid")
+                            raise MoodleSessionError("unsupported_auth_flow")
+                        tags = form.find_all("input")
+                        if not tags or any(tag.get("type", "text").lower() not in {"hidden", "submit"} for tag in tags):
+                            trace.record("oidc_form_post", "callback_controls_invalid")
+                            raise MoodleSessionError("unsupported_auth_flow")
+                        inputs = {tag.get("name"): tag.get("value", "") for tag in tags if tag.get("name") and tag.get("type", "text").lower() == "hidden"}
+                        if (not inputs or len(inputs) > 8 or "state" not in inputs
+                                or not ({"code", "id_token", "error"} & inputs.keys())
+                                or set(inputs) - {"code", "id_token", "state", "session_state", "error", "error_description"}
+                                or any(len(value) > 65536 for value in inputs.values())):
+                            trace.record("oidc_form_post", "callback_fields_invalid")
+                            raise MoodleSessionError("unsupported_auth_flow")
+                        if "error" in inputs:
+                            return False
+                        if callback:
+                            trace.record("oidc_form_post", "callback_ambiguous")
+                            raise MoodleSessionError("unsupported_auth_flow")
+                        callback = destination, inputs
+                    if callback:
+                        trace.record("oidc_form_post", "accepted")
+                        response = secure_request(session, "POST", callback[0], data=callback[1], cookie=self._sso_cookie, deadline=deadline, diagnostics=trace, stage="moodle_callback")
+                        continue
+                    return False
+                match = re.search(r'"urlPost"\s*:\s*("(?:[^"\\]|\\.)*")', response.text)
+                if match:
+                    trace.record("javascript_continuation", "target_rejected")
+                    if urllib.parse.urlsplit(current).hostname != MICROSOFT_HOST:
+                        raise MoodleSessionError("unsupported_auth_flow")
+                    try:
+                        destination = safe_url(json.loads(match.group(1)), current)
+                    except (ValueError, TypeError):
+                        raise MoodleSessionError("unsupported_auth_flow") from None
+                    if urllib.parse.urlsplit(destination).hostname != MICROSOFT_HOST:
+                        raise MoodleSessionError("unsupported_auth_flow")
+                    response = secure_request(session, "GET", destination, cookie=self._sso_cookie, deadline=deadline, diagnostics=trace, stage="javascript_continuation")
                     continue
-
-                m_urlpost = re.search(r'"urlPost"\s*:\s*"([^"]+)"', r.text)
-                if m_urlpost:
-                    next_url = m_urlpost.group(1).encode().decode("unicode_escape")
-                    if next_url.startswith("/"):
-                        next_url = "https://login.microsoftonline.com" + next_url
-                    r = session.get(next_url, timeout=REQUEST_TIMEOUT, allow_redirects=True)
-                    continue
-
-                break
-
-            user_id = _authenticated_moodle_user_id(r.text, r.url)
-            if user_id is None:
-                logging.warning(
-                    "SSO cookie login did not yield a real Moodle session "
-                    "(no positive userid on the Moodle host). The SSO session "
-                    "may have expired or require interactive sign-in."
-                )
                 return False
+            trace.record("javascript_continuation", "transition_limit")
+            raise MoodleSessionError("unsupported_auth_flow")
+        except MoodleSessionError:
+            session.close()
+            raise
+        except Exception:
+            session.close()
+            raise MoodleSessionError("connection_failed") from None
+        finally:
+            if self._session is None:
+                session.close()
 
-            self._moodle_user_id = user_id
-            self._session = session
-            logging.info(
-                "SSO cookie login succeeded (user_id=%s).", self._moodle_user_id
-            )
-            return True
-
-        except Exception as exc:
-            raise SyncError(f"SSO cookie login network error: {exc}") from exc
+    def validate_sso_session(self) -> None:
+        if not self._sso_cookie_login():
+            raise MoodleSessionError("session_expired")
 
     def _form_login(self) -> bool:
-        """
-        Attempt standard Moodle form-based login.
-
-        Returns True on success.  Sets self._session for subsequent requests.
-
-        Failure modes:
-          - Microsoft SSO redirect → returns False (detectable by location)
-          - Wrong credentials → returns False
-          - Network error → raises SyncError
-        """
-        self._session = None
-        self._moodle_user_id = None
+        self._session, self._moodle_user_id = None, None
+        if not self._username or not self._password:
+            return False
         session = _requests_session()
         try:
-            # Step 1: GET the login page to extract logintoken (Moodle CSRF token)
-            r = session.get(LOGIN_URL, timeout=REQUEST_TIMEOUT, allow_redirects=True)
-            final_url = r.url
-
-            # Detect SSO redirect away from our domain
-            if "microsoftonline.com" in final_url or "login.microsoft" in final_url:
-                logging.warning(
-                    "AITU Moodle redirects to Microsoft SSO (%s). "
-                    "Standard form login is not possible. "
-                    "Set UNIVERSITY_WS_TOKEN to use the Web Services API instead.",
-                    final_url,
-                )
+            response = secure_request(session, "GET", LOGIN_URL)
+            if urllib.parse.urlsplit(response.url).hostname != MOODLE_HOST:
                 return False
-
-            soup = _bs4_parse(r.text)
-            token_tag = soup.find("input", {"name": "logintoken"})
-            login_token = token_tag["value"] if token_tag else ""
-
-            # Step 2: POST credentials
-            payload = {
-                "username": self._username,
-                "password": self._password,
-                "logintoken": login_token,
-                "anchor": "",
-            }
-            r2 = session.post(LOGIN_URL, data=payload, timeout=REQUEST_TIMEOUT, allow_redirects=True)
-
-            # Moodle signals failure by keeping us on the login page
-            if "login" in r2.url and "id=username" in r2.text:
-                logging.warning("Moodle form login failed: invalid credentials or account locked.")
+            soup = _bs4_parse(response.text)
+            token = soup.find("input", {"name": "logintoken"})
+            payload = {"username": self._username, "password": self._password,
+                       "logintoken": token.get("value", "") if token else "", "anchor": ""}
+            response = secure_request(session, "POST", LOGIN_URL, data=payload)
+            user_id = _authenticated_moodle_user_id(response.text, response.url)
+            if not user_id:
                 return False
-
-            # Try to extract Moodle user id from the page JS (used for grade report URL)
-            user_id = _authenticated_moodle_user_id(r2.text, r2.url)
-            if user_id is None:
-                # We didn't land on the visible "wrong credentials" page, but we
-                # also never got a real session (no userid in the response). This
-                # happens on institutions where the native form silently accepts
-                # the POST without authenticating (e.g. accounts that are actually
-                # SSO/OpenID-Connect-only and have no real Moodle-native password).
-                # Treating this as "success" previously caused a false-positive
-                # empty sync (0 courses, sync_run marked success) instead of a
-                # real, surfaced failure.
-                logging.warning(
-                    "Moodle form login did not return a real session (no positive "
-                    "userid on the Moodle host). This account may be SSO/OpenID-Connect-only with no "
-                    "native Moodle password; a UNIVERSITY_WS_TOKEN is required."
-                )
-                return False
-
-            self._moodle_user_id = user_id
-            self._session = session
-            logging.info("Moodle session login succeeded (user_id=%s).", self._moodle_user_id)
+            self._moodle_user_id, self._session = user_id, session
             return True
+        finally:
+            if self._session is None:
+                session.close()
 
-        except Exception as exc:
-            raise SyncError(f"Moodle form login network error: {exc}") from exc
+    def _moodle_get(self, url: str):
+        if self._session is None:
+            raise MoodleSessionError("session_expired")
+        response = secure_request(self._session, "GET", url, moodle_only=True)
+        if self._moodle_user_id and _authenticated_moodle_user_id(response.text, response.url) != self._moodle_user_id:
+            raise MoodleSessionError("session_expired")
+        return response
 
     def _scrape_enrolled_course_ids(self) -> list[tuple[int, str]]:
         """
         Parse the My Courses page to discover enrolled course IDs and titles.
         Returns list of (course_id, course_title).
         """
-        r = self._session.get(MY_COURSES_URL, timeout=REQUEST_TIMEOUT)
+        r = self._moodle_get(MY_COURSES_URL)
         r.raise_for_status()
         soup = _bs4_parse(r.text)
         results: list[tuple[int, str]] = []
@@ -610,6 +583,7 @@ class MoodleClient:
             if cid not in seen:
                 seen.add(cid)
                 deduped.append((cid, ctitle))
+        self._enrolled_courses = deduped
         return deduped
 
     def _scrape_grade_report(self, course_id: int, course_title: str) -> list[dict[str, Any]]:
@@ -623,7 +597,7 @@ class MoodleClient:
         if self._moodle_user_id:
             params["userid"] = self._moodle_user_id
         url = GRADE_REPORT_URL + "?" + urllib.parse.urlencode(params)
-        r = self._session.get(url, timeout=REQUEST_TIMEOUT)
+        r = self._moodle_get(url)
         r.raise_for_status()
         soup = _bs4_parse(r.text)
 
@@ -641,6 +615,8 @@ class MoodleClient:
         for cid, ctitle in enrolled:
             try:
                 all_records.extend(self._scrape_grade_report(cid, ctitle))
+            except MoodleSessionError:
+                raise
             except Exception as exc:
                 raise SyncError(
                     f"Incomplete Moodle snapshot: course {cid} failed: "
@@ -682,40 +658,24 @@ class MoodleClient:
                 logging.info("Moodle WS API: fetched %d grade records.", len(records))
                 return records
             except SyncError as exc:
-                logging.warning("Moodle WS API failed (%s). Falling back to session scrape.", exc)
+                logging.warning("Moodle WS API unavailable; trying session access (%s).", _safe_assignment_ws_error(exc))
 
         # Strategy 2: Microsoft SSO persistent-cookie login. Preferred over form
         # login for institutions (like AITU) that have no native Moodle password
         # at all — form login there produces a false-positive "success" with no
         # real session (see _form_login's userid check).
         if self._sso_cookie:
-            try:
-                logged_in = self._sso_cookie_login()
-            except SyncError as exc:
-                logged_in = False
-                logging.warning(
-                    "SSO cookie login failed (%s). Falling back to form login.", exc
-                )
-            if logged_in:
-                # A failed report after successful authentication is a data
-                # fetch failure, not a reason to discard this session or mock.
-                records = self.fetch_via_scrape()
-                logging.info(
-                    "SSO cookie + HTML scrape: fetched %d grade records.",
-                    len(records),
-                )
-                return records
+            self.validate_sso_session()
+            return self._safe_html_grades()
 
         # Strategy 3: Form login + HTML scrape
         try:
             logged_in = self._form_login()
         except SyncError as exc:
             logged_in = False
-            logging.warning("Moodle form login failed (%s).", exc)
+            logging.warning("Moodle form login failed (%s).", _safe_grade_report_error(exc))
         if logged_in:
-            records = self.fetch_via_scrape()
-            logging.info("HTML scrape: fetched %d grade records.", len(records))
-            return records
+            return self._safe_html_grades()
 
         # Strategy 4: Mock fallback — only if explicitly allowed. A live sync
         # failure must surface as a failed sync_run, never as silent mock
@@ -740,27 +700,79 @@ class MoodleClient:
         logging.warning("[MOCK] %s", self._mock_reason)
         return self._mock_grades()
 
+    def _safe_html_grades(self) -> GradeSnapshot:
+        try:
+            return GradeSnapshot(self.fetch_via_scrape(), complete=False)
+        except MoodleSessionError:
+            raise
+        except SyncError:
+            self.unsupported_features.append("grade_html_incomplete")
+            logging.warning("Moodle grade HTML unsupported or incomplete; existing grades are preserved.")
+            return GradeSnapshot([], complete=False)
+
+    def _scrape_activities(self) -> AssignmentSnapshot:
+        enrolled = self._enrolled_courses or self._scrape_enrolled_course_ids()
+        if not enrolled or len(enrolled) > 100:
+            raise UnsupportedMoodlePage("course_inventory_unsupported")
+        records: list[dict[str, Any]] = []
+        identities: set[int] = set()
+        verified_pages = 0
+        now = datetime.now(timezone.utc)
+        for cid, title in enrolled:
+            response = self._moodle_get(f"{BASE_URL}/course/view.php?id={cid}")
+            try:
+                links = activity_links(_bs4_parse(response.text), cid)
+            except UnsupportedMoodlePage as exc:
+                self.unsupported_features.append(exc.code)
+                continue
+            if not links:
+                verified_pages += 1
+            for kind, cmid, url in links:
+                if cmid in identities or len(identities) >= 500:
+                    raise UnsupportedMoodlePage("activity_inventory_ambiguous")
+                identities.add(cmid)
+                response = self._moodle_get(url)
+                parsed = urllib.parse.urlsplit(response.url)
+                if parsed.path != f"/mod/{kind}/view.php" or urllib.parse.parse_qs(parsed.query).get("id") != [str(cmid)]:
+                    raise UnsupportedMoodlePage("activity_identity_unsupported")
+                try:
+                    record = parse_activity(_bs4_parse(response.text), course_id=cid, course_title=title, cmid=cmid,
+                                            module_type=kind, timezone_name=self._timezone_name, now=now)
+                except UnsupportedMoodlePage as exc:
+                    self.unsupported_features.append(exc.code)
+                    continue
+                records.append(record)
+                verified_pages += 1
+                self.unsupported_features.extend(record["parser_warnings"])
+        self.unsupported_features.append("html_inventory_not_provably_complete")
+        self.unsupported_features = sorted(set(self.unsupported_features))[:20]
+        return AssignmentSnapshot(records, complete=False, verified_pages=verified_pages)
+
     def fetch_assignments(self) -> list[dict[str, Any]] | None:
-        """Return due assignments, or None when the optional WS feed is unavailable."""
+        """WS is optional: authenticated HTML reads also discover ungraded activities."""
         if self.is_mocked:
             return None
-        if not self._ws_token:
-            logging.info("Moodle assignment deadlines unavailable: no WS token configured.")
-            return None
+        if self._ws_token:
+            try:
+                user_id = self._ws_get_userid()
+                records = self._ws_get_assignments(self._ws_get_enrolled_courses(user_id))
+                return AssignmentSnapshot(records, complete=True)
+            except Exception as exc:
+                logging.warning("mod_assign_get_assignments failed (%s); trying HTML access.", _safe_assignment_ws_error(exc))
         try:
-            user_id = self._ws_get_userid()
-            courses = self._ws_get_enrolled_courses(user_id)
-            records = self._ws_get_assignments(courses)
-        except Exception as exc:
-            # No partial snapshot may cancel existing deadlines. In particular,
-            # a token without mod_assign_get_assignments must not fail grades.
-            logging.warning(
-                "Moodle assignment deadlines unavailable: mod_assign_get_assignments failed (%s); grade sync continues.",
-                _safe_assignment_ws_error(exc),
-            )
+            if self._session is None:
+                if self._sso_cookie:
+                    self.validate_sso_session()
+                elif not self._form_login():
+                    self.unsupported_features.append("session_html_unavailable")
+                    return None
+            return self._scrape_activities()
+        except MoodleSessionError:
+            raise
+        except (SyncError, ValueError, KeyError):
+            self.unsupported_features.append("activity_html_incomplete")
+            logging.warning("Moodle activity HTML unsupported or incomplete; previous records are preserved.")
             return None
-        logging.info("Moodle WS API: fetched %d due assignments.", len(records))
-        return records
 
 
 # ── Sync pipeline ─────────────────────────────────────────────────────────────
@@ -785,12 +797,14 @@ def _grade_for_assignment(
         raw = grade.get("raw")
         if not isinstance(raw, dict):
             continue
+        module_type = assignment.get("module_type", "assign")
         instance_match = (
-            raw.get("itemmodule") == "assign"
+            assignment.get("source") != "html"
+            and raw.get("itemmodule") == module_type
             and _positive_moodle_id(raw.get("iteminstance")) == assignment["assignment_id"]
         )
         cmid_match = (
-            raw.get("moodle_module") == "assign"
+            raw.get("moodle_module") == module_type
             and assignment.get("cmid")
             and _positive_moodle_id(raw.get("moodle_cmid")) == assignment["cmid"]
         )
@@ -873,18 +887,47 @@ def sync_assignments(
     """Persist deadlines and announce only post-baseline, still-relevant tasks."""
     if db.settings.user_id != settings.base.user_id:
         raise SyncError("Moodle assignment sync user scope mismatch")
-    prepared: list[tuple[dict[str, Any], datetime, str]] = []
+    prepared: list[tuple[dict[str, Any], datetime | None, str]] = []
     seen: set[str] = set()
     title_counts: dict[tuple[str, str], int] = {}
+    module_ids: set[tuple[str, str, str]] = set()
     for assignment in assignments:
         course_id = _positive_moodle_id(assignment.get("course_id"))
         assignment_id = _positive_moodle_id(assignment.get("assignment_id"))
         due_at = parse_datetime(str(assignment.get("due_at") or ""))
         title = str(assignment.get("title") or "").strip()
-        if not course_id or not assignment_id or not due_at or not title:
+        html = assignment.get("source") == "html"
+        if not course_id or not assignment_id or (not html and not due_at) or not title:
             raise SyncError("Invalid Moodle assignment deadline")
         record = {**assignment, "course_id": course_id, "assignment_id": assignment_id, "title": title}
         external_id = f"assignment:moodle:{course_id}:{assignment_id}"
+        kind = assignment.get("module_type", "assign")
+        cmid = _positive_moodle_id(assignment.get("cmid"))
+        if html:
+            if kind not in {"assign", "quiz"} or not cmid:
+                raise SyncError("Invalid Moodle activity identity")
+            external_id = f"activity:moodle:{course_id}:{kind}:{cmid}"
+        if cmid:
+            module_id = course_id, kind, cmid
+            if module_id in module_ids:
+                raise SyncError("Duplicate Moodle module identity in snapshot")
+            module_ids.add(module_id)
+            # Exact scoped lookup preserves identity across HTML/WS migration;
+            # a bounded scan of the first N historical events could miss it.
+            matches = db.request("GET", "source_events", query={
+                "select": "external_id,raw_json,due_at,status", "user_id": f"eq.{db.settings.user_id}",
+                "source_key": "eq.university_platform", "event_type": "eq.task",
+                "raw_json->>moodle_course_id": f"eq.{course_id}",
+                "raw_json->>moodle_cmid": f"eq.{cmid}", "limit": "2",
+            }) or []
+            previous = [row for row in matches if isinstance(row.get("raw_json"), dict)
+                        and row["raw_json"].get("module_type", "assign") == kind
+                        and str(row.get("external_id", "")).startswith(("assignment:moodle:", "activity:moodle:"))]
+            if len(previous) > 1:
+                raise SyncError("Ambiguous Moodle activity identity")
+            if len(previous) == 1:
+                external_id = previous[0]["external_id"]
+                record["_previous_event"] = previous[0]
         if external_id in seen:
             raise SyncError("Duplicate Moodle assignment identity in snapshot")
         seen.add(external_id)
@@ -897,9 +940,45 @@ def sync_assignments(
         course_title = str(assignment.get("course_title") or "Курс Moodle").strip()
         grade = _grade_for_assignment(assignment, grades)
         graded = bool(grade and grade.get("score") is not None)
+        submission_status = assignment.get("submission_status", "unknown")
+        if submission_status not in {"not_submitted", "submitted", "graded", "overdue", "unknown"}:
+            raise SyncError("Invalid Moodle submission state")
+        if graded:
+            submission_status = "graded"
         related_grade_id = (
             f"academic:moodle:{assignment['course_id']}:{grade['item_id']}" if grade else None
         )
+        parser_warnings = set(assignment.get("parser_warnings", []))
+        previous = assignment.get("_previous_event") or {}
+        previous_raw = previous.get("raw_json") or {}
+        retained_dates = {"opens_at": assignment.get("opens_at"), "closes_at": assignment.get("closes_at")}
+        if not getattr(assignments, "complete", True):
+            # A partial read supplies no evidence that known dates, links, or
+            # completed work have ceased to exist. Keep the last verified data
+            # and make its retention explicit to callers.
+            if due_at is None:
+                known_due = parse_datetime(str(previous.get("due_at") or ""))
+                if known_due:
+                    due_at = known_due
+                    parser_warnings.add("previous_due_date_retained")
+            for key in retained_dates:
+                if retained_dates[key] is None:
+                    known_date = parse_datetime(str(previous_raw.get(key) or ""))
+                    if known_date:
+                        retained_dates[key] = iso_utc(known_date)
+                        parser_warnings.add(f"previous_{key}_retained")
+            known_link = previous_raw.get("related_grade_external_id")
+            if related_grade_id is None and isinstance(known_link, str) and re.fullmatch(
+                    rf"academic:moodle:{assignment['course_id']}:[1-9]\d*", known_link):
+                related_grade_id = known_link
+                parser_warnings.add("grade_link_retained")
+            if previous_raw.get("submission_status") == "graded" and submission_status != "graded":
+                submission_status = "graded"
+                parser_warnings.add("grade_status_retained")
+            elif submission_status == "unknown" and previous_raw.get("submission_status") == "submitted":
+                submission_status = "submitted"
+                parser_warnings.add("submission_status_retained")
+        terminal = graded or submission_status in {"submitted", "graded"}
         cmid = _positive_moodle_id(assignment.get("cmid"))
         event = {
             "source_key": "university_platform",
@@ -907,15 +986,21 @@ def sync_assignments(
             "event_type": "task",
             "title": assignment["title"],
             "description": f"Дедлайн задания по курсу «{course_title}»",
-            "due_at": iso_utc(due_at),
-            "status": "completed" if graded else "active",
-            "source_url": f"{BASE_URL}/mod/assign/view.php?id={cmid}" if cmid else None,
+            "due_at": iso_utc(due_at) if due_at else None,
+            "status": "completed" if terminal else "active",
+            "source_url": f"{BASE_URL}/mod/{assignment.get('module_type', 'assign')}/view.php?id={cmid}" if cmid else None,
             "raw_json": {
                 "moodle_course_id": assignment["course_id"],
                 "moodle_assignment_id": assignment["assignment_id"],
                 "moodle_cmid": cmid,
                 "course_title": course_title,
                 "related_grade_external_id": related_grade_id,
+                "module_type": assignment.get("module_type", "assign"),
+                "submission_status": submission_status,
+                "assessment_type": assignment.get("assessment_type", "assignment"),
+                **retained_dates,
+                "parser_warnings": sorted(parser_warnings),
+                "ingestion_complete": bool(getattr(assignments, "complete", True)),
             },
         }
         synced_event, created, reminder_stats = db.upsert_event(event, mode)
@@ -929,7 +1014,7 @@ def sync_assignments(
         # every post-bootstrap event; the user-scoped dedup key prevents repeats.
         first_seen_at = parse_datetime(synced_event.get("created_at"))
         if (baseline_at and first_seen_at and first_seen_at > baseline_at
-                and due_at > datetime.now(timezone.utc) and not graded
+                and due_at and due_at > datetime.now(timezone.utc) and not terminal
                 and not (grade is None and _has_unique_scored_grade_title(assignment, grades, title_counts))):
             local_due = due_at.astimezone(timezone_for(settings.base.timezone_name))
             message = (
@@ -939,7 +1024,8 @@ def sync_assignments(
             if db.enqueue_instant_notification(synced_event, "assignment_added", message, mode):
                 stats.reminders_created += 1
 
-    stats.missing = _mark_missing_assignments(db, seen)
+    if getattr(assignments, "complete", True):
+        stats.missing = _mark_missing_assignments(db, seen)
     return stats
 
 
@@ -1008,7 +1094,7 @@ def sync_grades(
                 "GET",
                 "academic_records",
                 query={
-                    "select": "id,score,raw_json",
+                    "select": "id,score,max_score,percentage,raw_json",
                     "user_id": f"eq.{db.settings.user_id}",
                     "source_event_id": f"eq.{source_event_id}",
                     "limit": "1",
@@ -1038,6 +1124,18 @@ def sync_grades(
                 "percentage": round(percentage, 4) if percentage is not None else None,
                 "raw_json": academic_raw_json,
             }
+            if existing and score is None and existing[0].get("score") is not None:
+                # A hidden/unavailable grade is unknown, not evidence that a
+                # previously recorded numeric result should be erased.
+                for key in ("score", "max_score", "percentage"):
+                    academic_payload.pop(key, None)
+                academic_raw_json["_grade_visibility_unknown"] = True
+                academic_raw_json["_last_known_score"] = existing[0]["score"]
+                if existing[0].get("max_score") is not None:
+                    academic_raw_json["_last_known_max_score"] = existing[0]["max_score"]
+                db.request("PATCH", "source_events", query={
+                    "id": f"eq.{source_event_id}", "user_id": f"eq.{settings.base.user_id}"},
+                    body={"raw_json": academic_raw_json})
 
             if existing:
                 academic_record_id = str(existing[0]["id"])
@@ -1081,7 +1179,7 @@ def sync_grades(
                     body={"raw_json": raw_json},
                 )
 
-        if not is_mocked:
+        if not is_mocked and getattr(records, "complete", True):
             stats.missing = mark_missing_grades(db, seen_external_ids, ("academic:moodle:", "academic:grade:"))
         if assignments is not None and not is_mocked:
             assignment_stats = sync_assignments(
@@ -1094,10 +1192,11 @@ def sync_grades(
             stats.reminders_created += assignment_stats.reminders_created
             stats.reminders_updated += assignment_stats.reminders_updated
             stats.reminders_cancelled += assignment_stats.reminders_cancelled
-        metadata = {"moodle_grades_synced": True} if not is_mocked else None
+        metadata = {"moodle_grades_synced": bool(records) or bool(getattr(records, "complete", True)), "moodle_grade_inventory_complete": bool(getattr(records, "complete", True))} if not is_mocked else None
         if assignments is not None and not is_mocked:
             assert metadata is not None
-            metadata["moodle_assignments_synced"] = True
+            metadata["moodle_assignments_synced"] = getattr(assignments, "verified_pages", 1) > 0
+            metadata["moodle_assignment_inventory_complete"] = bool(getattr(assignments, "complete", True))
         db.finish_sync_run(run_id, "success", stats, metadata=metadata)
         logging.info(
             "university_sync done seen=%d created=%d updated=%d missing=%d reminders_created=%d",
@@ -1106,38 +1205,38 @@ def sync_grades(
         return stats
 
     except Exception as exc:
-        db.finish_sync_run(run_id, "failed", stats, str(exc))
+        db.finish_sync_run(run_id, "failed", stats, safe_sync_error(exc))
         raise
 
 
 # ── Top-level commands ────────────────────────────────────────────────────────
+def safe_sync_error(exc: Exception) -> str:
+    category = getattr(exc, "category", None)
+    return category if category in {"session_expired", "connection_failed", "unsupported_auth_flow"} else "sync_failed"
+
+
 def sync_once(settings: Settings) -> SyncStats:
     moodle = MoodleClient(settings)
     db = SupabaseRestClient(settings.base)
-
-    # Open the sync_run before attempting the live fetch. Otherwise a fetch
-    # failure (e.g. mock mode disabled and live scraping down) never gets
-    # recorded, and the TMA dashboard keeps showing a stale "success" from
-    # the last time the sync actually worked.
-    source = db.ensure_source("university_platform", "university", "University Platform")
-    run_id = db.start_sync_run(source)
-
-    try:
-        records = moodle.fetch_grades()
-        assignments = moodle.fetch_assignments()
-    except Exception as exc:
-        db.finish_sync_run(run_id, "failed", SyncStats(), str(exc))
-        raise
-
-    try:
-        mode = db.get_reminder_mode()
-    except Exception as exc:
-        db.finish_sync_run(run_id, "failed", SyncStats(), str(exc))
-        raise
-    return sync_grades(
-        db, settings, records, mode, moodle.is_mocked,
-        run_id=run_id, assignments=assignments,
-    )
+    with LmsSyncLease(db, settings.base.user_id, "aitu_moodle") as lease:
+        if not lease.acquired:
+            return SyncStats()
+        guard_lms_client(db, lease)
+        source = db.ensure_source("university_platform", "university", "University Platform")
+        run_id = db.start_sync_run(source)
+        try:
+            records = moodle.fetch_grades()
+            assignments = moodle.fetch_assignments()
+            mode = db.get_reminder_mode()
+            lease.assert_held()
+        except Exception as exc:
+            db.finish_sync_run(run_id, "failed", SyncStats(), safe_sync_error(exc))
+            raise
+        finally:
+            moodle.close()
+        persistence_settings = replace(settings, username="", password="", ws_token=None, sso_cookie=None)
+        return sync_grades(db, persistence_settings, records, mode, moodle.is_mocked,
+                           run_id=run_id, assignments=assignments)
 
 
 def status_cmd(settings: Settings) -> None:
@@ -1160,7 +1259,7 @@ def run_loop(settings: Settings) -> None:
             stats = sync_once(settings)
             logging.info("university_sync complete stats=%s", stats)
         except Exception as exc:  # noqa: BLE001
-            logging.exception("university_sync iteration failed: %s", exc)
+            logging.error("university_sync iteration failed (%s)", safe_sync_error(exc))
         time.sleep(settings.poll_seconds)
 
 
@@ -1208,7 +1307,7 @@ def main(argv: list[str] | None = None) -> int:
             run_loop(settings)
         return 0
     except (SyncError, OSError, ValueError) as exc:
-        logging.error("%s", exc)
+        logging.error("%s", safe_sync_error(exc))
         return 1
 
 

@@ -8,6 +8,7 @@ Never commit real values for:
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_WEBHOOK_SECRET`
 - `LIFEOS_HEALTH_INGEST_JWT_SECRET`
+- `GEMINI_API_KEY`
 - Android bridge endpoint secrets
 
 Only `.env.example` placeholder values belong in the repository.
@@ -15,6 +16,18 @@ Only `.env.example` placeholder values belong in the repository.
 ## Frontend Boundary
 
 Browser apps may use public URLs and public client identifiers only. They must not contain Supabase service-role keys, per-user health session tokens, bot tokens, or vault paths.
+
+## Optional LifeOS AI
+
+- Gemini credentials stay in `apps/bot`; no provider credentials reach TMA/Web.
+- Today and AI routes use the existing authenticated active-profile boundary.
+- AI reads a bounded, owned projection; health/finance details, raw payloads,
+  credentials and unnecessary identifiers are excluded or masked.
+- AI endpoints cannot write, even when a prompt or request claims approval.
+- Schedule suggestions are validated by the pure deterministic planner before
+  presentation. Conversation is not persisted or logged by LifeOS.
+- Live configuration is separate and no voice endpoint is enabled.
+- See [LifeOS AI](LIFEOS_AI.md) for context, retention and per-process usage limits.
 
 ## Supabase
 
@@ -103,3 +116,6 @@ Browser apps may use public URLs and public client identifiers only. They must n
 - Use least-privilege deploy tokens where platforms support them.
 - Keep production, preview, and local env values separate.
 - Review logs before sharing, since webhook payloads can contain personal data.
+## AITU LMS sessions
+
+AITU session management requires valid Telegram initData even when web/dev authentication exists elsewhere. Credentials use owner-bound AES-256-GCM envelopes, fail closed without a valid key, expire by default after 24 hours, and are never selected into AI context or returned to browsers. Session rotation/deletion and both LMS workers share a per-user lease; database mutations validate that lease atomically. See [LMS_SESSIONS.md](LMS_SESSIONS.md) for routes, retention, migration and deployment sequencing.

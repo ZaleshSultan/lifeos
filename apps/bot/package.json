@@ -9,6 +9,7 @@
     "typecheck": "tsc -p ../../tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@google/genai": "^2.28.0",
     "@lifeos/core": "workspace:*",
     "@lifeos/db": "workspace:*",
     "@lifeos/obsidian": "workspace:*",

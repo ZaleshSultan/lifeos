@@ -22,18 +22,21 @@ import { AcademicGrades } from "../components/AcademicGrades";
 import { IntegrationStatusCard } from "../components/IntegrationStatusCard";
 import { MetricTile } from "../components/MetricTile";
 import { ProgressRing } from "../components/ProgressRing";
+import { TodayPanel } from "../components/TodayPanel";
 import { formatDateTime } from "../lib/format";
 import { integrationCardsForSession } from "../lib/session-status";
 
 interface HomeScreenProps {
   onOpenWorkout: () => void;
   onOpenStudy: () => void;
+  onOpenAi: (date: string) => void;
   session: TmaSessionStatus;
 }
 
 export function HomeScreen({
   onOpenWorkout,
   onOpenStudy,
+  onOpenAi,
   session,
 }: HomeScreenProps) {
   const query = useHomeQuery();
@@ -98,6 +101,8 @@ export function HomeScreen({
         </div>
       </section>
 
+      <TodayPanel date={home.localDate} onOpenAi={onOpenAi} />
+
       <section className="rounded-xl border border-cyan-400/15 bg-cyan-400/[0.05] p-4 shadow-panel">
         <div className="flex items-start gap-3">
           <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-cyan-400/20 bg-cyan-400/10 text-cyan-300">
@@ -130,7 +135,8 @@ export function HomeScreen({
             <div className="min-w-0 flex-1">
               <div className="text-sm font-semibold text-white">Погода</div>
               <p className="mt-1 text-xs leading-relaxed text-zinc-500">
-                Выбери город в боте командой /weather Astana — он будет отдельным для каждого пользователя.
+                Выбери город в боте командой /weather Astana — он будет
+                отдельным для каждого пользователя.
               </p>
             </div>
           )}

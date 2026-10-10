@@ -1,5 +1,16 @@
 # LifeOS Architecture
 
+## Optional internal AI and external consumers
+
+Daily planning is deterministic in `packages/core`; optional Gemini text
+assistance runs through the authenticated `apps/bot` boundary. Supabase remains
+authoritative. TMA Today and AI screens use bounded read-only context; model
+suggestions cannot write user data. Existing OpenRouter flows remain separate.
+See [LifeOS AI](LIFEOS_AI.md) for configuration, contracts and limitations.
+
+Agata remains an independent external authenticated read-only API consumer. It
+is not embedded into LifeOS, its clients, workers or internal AI architecture.
+
 LifeOS is a personal operating system monorepo. The center of the system is a Supabase-backed kernel of life entities, with specialized layers for health, fitness, finance, Telegram capture, a Telegram Mini App, a web dashboard, Android Health Connect ingestion, and an Obsidian mirror.
 
 ## Repository Map

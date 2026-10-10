@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { useSessionQuery } from "./api/hooks";
 import { AppShell } from "./components/AppShell";
 import { ErrorPanel, LoadingPanel } from "./components/AsyncState";
@@ -12,11 +12,20 @@ import { RemindersScreen } from "./screens/RemindersScreen";
 import { SourcesScreen } from "./screens/SourcesScreen";
 import { WorkoutScreen } from "./screens/WorkoutScreen";
 import { StudyScreen } from "./screens/StudyScreen";
+import { AiScreen } from "./screens/AiScreen";
 import type { ScreenId } from "./types";
+
+const LmsConnectionScreen = lazy(() =>
+  import("./screens/LmsConnectionScreen").then((module) => ({
+    default: module.LmsConnectionScreen,
+  })),
+);
 
 const SCREENS: ScreenId[] = [
   "home",
+  "ai",
   "study",
+  "lms",
   "workout",
   "health",
   "focus",
@@ -39,6 +48,7 @@ function initialScreen(): ScreenId {
 
 export default function App() {
   const [screen, setScreen] = useState<ScreenId>(initialScreen);
+  const [aiDate, setAiDate] = useState<string>();
   const sessionQuery = useSessionQuery();
 
   if (sessionQuery.isLoading) {
@@ -109,11 +119,27 @@ export default function App() {
         <HomeScreen
           onOpenWorkout={() => setScreen("workout")}
           onOpenStudy={() => setScreen("study")}
+          onOpenAi={(date) => {
+            setAiDate(date);
+            setScreen("ai");
+          }}
           session={sessionQuery.data}
         />
       ) : null}
+      {screen === "ai" ? (
+        <AiScreen date={aiDate} onBack={() => setScreen("home")} />
+      ) : null}
       {screen === "workout" ? <WorkoutScreen /> : null}
-      {screen === "study" ? <StudyScreen /> : null}
+      {screen === "study" ? (
+        <StudyScreen onOpenLms={() => setScreen("lms")} />
+      ) : null}
+      {screen === "lms" ? (
+        <Suspense
+          fallback={<LoadingPanel title="Загружаем подключение LMS…" />}
+        >
+          <LmsConnectionScreen onBack={() => setScreen("study")} />
+        </Suspense>
+      ) : null}
       {screen === "health" ? <HealthScreen /> : null}
       {screen === "focus" ? <FocusScreen /> : null}
       {screen === "finance" ? <FinanceScreen /> : null}

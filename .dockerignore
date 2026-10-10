@@ -1,0 +1,14 @@
+.git
+**/node_modules
+**/.env
+**/.env.*
+**/.venv
+**/venv
+**/__pycache__
+**/*.pyc
+**/dist
+**/.next
+**/.cache
+secrets
+supabase/.temp
+external-skills

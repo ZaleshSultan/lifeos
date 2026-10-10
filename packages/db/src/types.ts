@@ -241,6 +241,34 @@ export interface Database {
           created_at?: string;
         }
       >;
+      user_lms_settings: TableDefinition<
+        {
+          id: string; user_id: string; platform_type: "aitu_moodle" | "platonus";
+          username: string | null; encrypted_password: string | null;
+          ws_token_encrypted: string | null; ical_feed_url: string | null;
+          is_active: boolean; is_token_valid: boolean;
+          last_sync_attempt_at: string | null; last_sync_success_at: string | null;
+          created_at: string; updated_at: string;
+          auth_mode: "password" | "session"; sso_cookie_encrypted: string | null;
+          session_expires_at: string | null; session_version: string;
+          session_state: "not_configured" | "connected" | "session_expired" | "reauthentication_required" | "syncing" | "error";
+          last_error_category: string | null; sync_requested_at: string | null;
+          unsupported_features: string[];
+        },
+        {
+          id?: string; user_id: string; platform_type: "aitu_moodle" | "platonus";
+          username?: string | null; encrypted_password?: string | null;
+          ws_token_encrypted?: string | null; ical_feed_url?: string | null;
+          is_active?: boolean; is_token_valid?: boolean;
+          last_sync_attempt_at?: string | null; last_sync_success_at?: string | null;
+          created_at?: string; updated_at?: string;
+          auth_mode?: "password" | "session"; sso_cookie_encrypted?: string | null;
+          session_expires_at?: string | null; session_version?: string;
+          session_state?: "not_configured" | "connected" | "session_expired" | "reauthentication_required" | "syncing" | "error";
+          last_error_category?: string | null; sync_requested_at?: string | null;
+          unsupported_features?: string[];
+        }
+      >;
       user_oauth_connections: TableDefinition<
         {
           id: string;
@@ -1996,6 +2024,18 @@ export interface Database {
       };
     };
     Functions: {
+      save_lms_session: {Args:{p_user_id:string;p_owner:string;p_encrypted_cookie:string;p_expires_at:string};Returns:boolean};
+      delete_lms_session: {Args:{p_user_id:string;p_owner:string};Returns:boolean};
+
+      claim_lms_sync_lease: {
+        Args: {p_user_id:string; p_platform_type:string; p_owner:string; p_ttl_seconds?:number};
+        Returns: boolean;
+      };
+      release_lms_sync_lease: {
+        Args: {p_user_id:string; p_platform_type:string; p_owner:string};
+        Returns: boolean;
+      };
+
       purge_expired_google_oauth_state_nonces: {
         Args: Record<string, never>;
         Returns: number;

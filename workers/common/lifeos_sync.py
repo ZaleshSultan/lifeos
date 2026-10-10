@@ -449,7 +449,7 @@ class SupabaseRestClient:
         self.request(
             "PATCH",
             "sync_runs",
-            {"id": f"eq.{run_id}"},
+            {"id": f"eq.{run_id}", "user_id": f"eq.{self.settings.user_id}"},
             {
                 "status": status,
                 "finished_at": utc_now(),

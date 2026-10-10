@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { telegram } from "../telegram";
 import { api } from "./client";
+import { todayQueryKey } from "./planning";
 
 export const queryKeys = {
   session: ["session"] as const,
@@ -244,6 +245,7 @@ export function useSaveModeMutation() {
     onSuccess(data) {
       telegram.hapticImpact("medium");
       queryClient.setQueryData(queryKeys.mode, data);
+      void queryClient.invalidateQueries({ queryKey: todayQueryKey });
       void queryClient.invalidateQueries({ queryKey: queryKeys.home });
       void queryClient.invalidateQueries({ queryKey: queryKeys.focus });
       void queryClient.invalidateQueries({ queryKey: queryKeys.workout });
@@ -259,6 +261,7 @@ export function useClearModeMutation() {
     onSuccess(data) {
       telegram.hapticImpact("light");
       queryClient.setQueryData(queryKeys.mode, data);
+      void queryClient.invalidateQueries({ queryKey: todayQueryKey });
       void queryClient.invalidateQueries({ queryKey: queryKeys.home });
       void queryClient.invalidateQueries({ queryKey: queryKeys.focus });
       void queryClient.invalidateQueries({ queryKey: queryKeys.workout });
@@ -288,6 +291,7 @@ export function useCreateReminderMutation() {
     onSuccess(data) {
       telegram.hapticImpact("light");
       queryClient.setQueryData(queryKeys.sources, data);
+      void queryClient.invalidateQueries({ queryKey: todayQueryKey });
       void queryClient.invalidateQueries({ queryKey: queryKeys.home });
       void queryClient.invalidateQueries({ queryKey: queryKeys.reminders });
     },
@@ -301,6 +305,7 @@ export function useCancelReminderMutation() {
     mutationFn: api.cancelReminder,
     onSuccess() {
       telegram.hapticImpact("light");
+      void queryClient.invalidateQueries({ queryKey: todayQueryKey });
       void queryClient.invalidateQueries({ queryKey: queryKeys.reminders });
       void queryClient.invalidateQueries({ queryKey: queryKeys.sources });
     },

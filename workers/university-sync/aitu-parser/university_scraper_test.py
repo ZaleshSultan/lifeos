@@ -86,6 +86,7 @@ class MoodleAssignmentWsTest(unittest.TestCase):
         with (
             patch.object(client, "_ws_get_userid", return_value=55),
             patch.object(client, "_ws_get_enrolled_courses", return_value=[{"id": 42}]),
+            patch.object(client, "_form_login", return_value=False),
             patch.object(client, "_ws_call", side_effect=university_scraper.SyncError(
                 "Moodle WS error [accessexception]: token=secret denied"
             )),
@@ -104,7 +105,7 @@ class MoodleAssignmentWsTest(unittest.TestCase):
 
     def test_missing_token_keeps_deadline_feed_unavailable(self) -> None:
         client = self.make_client(token=None)
-        with patch.object(client, "_ws_call") as ws_call:
+        with patch.object(client, "_ws_call") as ws_call, patch.object(client, "_form_login", return_value=False):
             self.assertIsNone(client.fetch_assignments())
         ws_call.assert_not_called()
 
@@ -245,13 +246,13 @@ class MoodleClientSsoCookieLoginTest(unittest.TestCase):
 
         self.assertTrue(result)
         self.assertEqual(client._moodle_user_id, 555)
-        mock_session.cookies.set.assert_called_once_with(
-            "ESTSAUTHPERSISTENT", "fake-estsauth-value", domain="login.microsoftonline.com"
-        )
+        # A direct Moodle response needs no Microsoft cookie. Never seed it on Moodle.
+        mock_session.cookies.set.assert_not_called()
         mock_session.get.assert_called_once_with(
             university_scraper.OIDC_LOGIN_URL,
             timeout=university_scraper.REQUEST_TIMEOUT,
-            allow_redirects=True,
+            allow_redirects=False,
+            stream=True,
         )
 
     def test_matches_real_moodle_camel_case_userid_key(self) -> None:
@@ -307,7 +308,8 @@ class MoodleClientSsoCookieLoginTest(unittest.TestCase):
             "https://lms.astanait.edu.kz/auth/oidc/index.php",
             data={"id_token": "tok123", "state": "abc"},
             timeout=university_scraper.REQUEST_TIMEOUT,
-            allow_redirects=True,
+            allow_redirects=False,
+            stream=True,
         )
 
     def test_bsso_interrupt_urlpost_hop_then_form_post(self) -> None:
@@ -361,7 +363,8 @@ class MoodleClientSsoCookieLoginTest(unittest.TestCase):
             "https://lms.astanait.edu.kz/auth/oidc/",
             data={"code": "authcode123", "state": "st1", "session_state": "ss1"},
             timeout=university_scraper.REQUEST_TIMEOUT,
-            allow_redirects=True,
+            allow_redirects=False,
+            stream=True,
         )
 
     def test_expired_cookie_returns_false(self) -> None:
@@ -448,10 +451,8 @@ class MoodleLoginIdentityTest(unittest.TestCase):
         for method in ("_form_login", "_sso_cookie_login"):
             with self.subTest(method=method):
                 client = self._client()
-                self.assertFalse(self._login(
-                    client, method, '<script>{"userid":14505}</script>',
-                    "https://example.org/redirect",
-                ))
+                with self.assertRaises(university_scraper.MoodleSessionError):
+                    self._login(client, method, '<script>{"userid":14505}</script>', "https://example.org/redirect")
                 self.assertIsNone(client._session)
 
     def test_form_login_accepts_current_positive_moodle_userid(self):

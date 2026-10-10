@@ -43,15 +43,12 @@ def sync_assessment(db: SupabaseRestClient, course: dict[str, Any], record: dict
         raise SyncError("Duplicate external assessment identity")
     if existing and existing[0]["source"] != "aitu_moodle":
         raise SyncError("Refusing to overwrite a non-Moodle assessment")
-    payload = {
-        "title": record["title"], "assessment_type": record["record_type"],
-        "actual_score": record["score"], "max_score": record["max_score"],
-        "raw_json": raw_json,
-    }
+    payload = {"title": record["title"], "assessment_type": record["record_type"], "raw_json": raw_json}
     if record["score"] is not None:
+        payload.update({"actual_score": record["score"], "max_score": record["max_score"]})
         payload["status"] = "graded"
-    elif not existing or existing[0]["status"] == "graded":
-        payload["status"] = "pending"
+    elif not existing:
+        payload.update({"actual_score": None, "max_score": record["max_score"], "status": "pending"})
     if existing:
         db.request("PATCH", "assessment_items", query={**query, "id": f"eq.{existing[0]['id']}"}, body=payload)
     else:

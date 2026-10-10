@@ -10,6 +10,9 @@ export * from "./health-ingest.js";
 export * from "./modes.js";
 export * from "./monthly-review.js";
 export * from "./parsers.js";
+export * from "./planner.js";
 export * from "./source-events.js";
 export * from "./types.js";
 export * from "./workout.js";
+
+export * from "./lms-work.js";

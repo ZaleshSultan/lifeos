@@ -299,6 +299,15 @@ export function tmaStore(events: string[] = []): LifeOSStore {
     async resolveTelegramUser() {
       return null;
     },
+      async getLmsConnection() { return {configured:false,state:"not_configured" as const,lastSyncSuccessAt:null,lastSyncAttemptAt:null,lastErrorCategory:null,sessionExpiresAt:null,syncRequestedAt:null,unsupportedFeatures:[]}; },
+    async saveLmsSession() { return {configured:false,state:"not_configured" as const,lastSyncSuccessAt:null,lastSyncAttemptAt:null,lastErrorCategory:null,sessionExpiresAt:null,syncRequestedAt:null,unsupportedFeatures:[]}; },
+    async deleteLmsSession() { return {configured:false,state:"not_configured" as const,lastSyncSuccessAt:null,lastSyncAttemptAt:null,lastErrorCategory:null,sessionExpiresAt:null,syncRequestedAt:null,unsupportedFeatures:[]}; },
+    async requestLmsSync() {},
+    async getLmsWork() { return {timezone:"UTC",lastSyncSuccessAt:null,lastSyncAttemptAt:null,stale:true,truncated:false,warnings:[],unsupportedFeatures:[],items:[]}; },
+    async addManualStudyWork() {},
+  async getPlanningSnapshot() {
+      return { tasks: [], events: [], reminders: [], projects: [], courses: [], schedules: [], assessments: [], history: [], truncated: false, historyTruncated: false };
+    },
     async resolveUserById(userId) {
       return userId === "user-1" ? activeTelegramUser() : null;
     },

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import copy
+from contextlib import nullcontext
+from types import SimpleNamespace
 import fnmatch
 import sys
 import traceback
@@ -47,8 +49,9 @@ class MemoryDb(SupabaseRestClient):
         self.queries.append((method, table, query, copy.deepcopy(body)))
         rows = self.tables[table]
         def value_for(row, key):
-            if key.startswith("metadata_json->>"):
-                value = (row.get("metadata_json") or {}).get(key.split("->>", 1)[1])
+            if "->>" in key:
+                column, field = key.split("->>", 1)
+                value = (row.get(column) or {}).get(field)
                 return str(value).lower() if isinstance(value, bool) else str(value)
             return str(row.get(key))
         matches = [row for row in rows if all(
@@ -263,9 +266,10 @@ class ActualMoodleLayoutTest(unittest.TestCase):
                     patch.object(client, "fetch_via_scrape", side_effect=failure),
                     patch.object(client, "_mock_grades") as mock,
                 ):
-                    with self.assertRaises(SyncError) as caught:
-                        client.fetch_grades()
-                self.assertIs(caught.exception, failure)
+                    records = client.fetch_grades()
+                self.assertEqual(records, [])
+                self.assertFalse(records.complete)
+                self.assertIn("grade_html_incomplete", client.unsupported_features)
                 if strategy == "sso":
                     sso.assert_called_once()
                     form.assert_not_called()
@@ -277,7 +281,7 @@ class ActualMoodleLayoutTest(unittest.TestCase):
                 self.assertIs(client._session, session)
                 self.assertEqual(client._moodle_user_id, 14505)
 
-    def test_failed_sso_login_still_tries_form_login(self):
+    def test_failed_sso_login_requires_reconnection_without_password_fallback(self):
         for result in (False, SyncError("SSO connection failed")):
             with self.subTest(result=type(result).__name__):
                 client = scraper.MoodleClient(replace(SETTINGS, sso_cookie="test-cookie"))
@@ -286,8 +290,9 @@ class ActualMoodleLayoutTest(unittest.TestCase):
                     patch.object(client, "_form_login", return_value=True) as form,
                     patch.object(client, "fetch_via_scrape", return_value=[RECORD]),
                 ):
-                    self.assertEqual(client.fetch_grades(), [RECORD])
-                form.assert_called_once()
+                    with self.assertRaises(SyncError):
+                        client.fetch_grades()
+                form.assert_not_called()
 
     def test_ws_preserves_unknown_and_skips_aggregates(self):
         client = scraper.MoodleClient(SETTINGS)
@@ -313,6 +318,8 @@ class AssignmentDeadlinePersistenceTest(unittest.TestCase):
         settings = replace(SETTINGS, ws_token="test-token")
         with (
             patch.object(scraper, "SupabaseRestClient", return_value=db),
+            patch.object(scraper, "LmsSyncLease", return_value=nullcontext(SimpleNamespace(acquired=True, assert_held=lambda: None))),
+            patch.object(scraper.MoodleClient, "_form_login", return_value=False),
             patch.object(scraper.MoodleClient, "fetch_grades", return_value=[RECORD]),
             patch.object(scraper.MoodleClient, "_ws_get_userid", return_value=55),
             patch.object(scraper.MoodleClient, "_ws_get_enrolled_courses", return_value=[{"id": 42}]),
@@ -330,7 +337,7 @@ class AssignmentDeadlinePersistenceTest(unittest.TestCase):
         db = MemoryDb()
         scraper.sync_grades(db, SETTINGS, [RECORD], "normal", False)
         historical = [
-            {**ASSIGNMENT, "assignment_id": str(1000 + index), "title": f"Work {index}"}
+            {**ASSIGNMENT, "assignment_id": str(1000 + index), "cmid": str(2000 + index), "title": f"Work {index}"}
             for index in range(25)
         ]
 
@@ -582,7 +589,7 @@ class AcademicPersistenceTest(unittest.TestCase):
         self.assertEqual(len(db.tables["reminders"]), 1)
         self.assertNotIn("_grade_notification_pending", db.tables["academic_records"][0]["raw_json"])
 
-    def test_repeated_sync_rename_grade_removal_and_manual_fields(self):
+    def test_repeated_sync_rename_hidden_grade_and_manual_fields(self):
         db = MemoryDb()
         scraper.sync_grades(db, SETTINGS, [RECORD], "normal", False)
         item = db.tables["assessment_items"][0]
@@ -597,7 +604,9 @@ class AcademicPersistenceTest(unittest.TestCase):
         self.assertEqual(item["title"], "Renamed")
         self.assertEqual({key: item[key] for key in manual}, manual)
         scraper.sync_grades(db, SETTINGS, [RECORD], "normal", False)
-        self.assertEqual(item["status"], "pending")
+        self.assertEqual(item["status"], "graded")
+        self.assertEqual(item["actual_score"], 0)
+        self.assertEqual(db.tables["academic_records"][0]["score"], 0)
         for table in ("assessment_items", "academic_records", "source_events"):
             self.assertEqual(len(db.tables[table]), 1)
 
@@ -658,7 +667,7 @@ class AcademicPersistenceTest(unittest.TestCase):
     def test_fetch_failure_is_recorded_before_any_sync_write(self):
         db = MagicMock()
         db.start_sync_run.return_value = "run-a"
-        with patch.object(scraper, "SupabaseRestClient", return_value=db), patch.object(scraper.MoodleClient, "fetch_grades", side_effect=SyncError("no session")):
+        with patch.object(scraper, "SupabaseRestClient", return_value=db), patch.object(scraper, "LmsSyncLease", return_value=nullcontext(SimpleNamespace(acquired=True, assert_held=lambda: None))), patch.object(scraper.MoodleClient, "fetch_grades", side_effect=SyncError("no session")):
             with self.assertRaises(SyncError):
                 scraper.sync_once(SETTINGS)
         self.assertEqual(db.finish_sync_run.call_args.args[:2], ("run-a", "failed"))

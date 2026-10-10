@@ -1369,7 +1369,7 @@ describe("SupabaseLifeOSStore Academic Engine Phase 1", () => {
       expect(await store.listAllAssessmentItems("user-nonexistent")).toEqual([]);
     });
 
-    it("lists upcoming assignment deadlines and overdue assignments without grade", async () => {
+    it("lists deadlines with verified overdue state including unfinished work older than seven days", async () => {
       const client = new FakeSupabaseClient();
       const nowIso = "2026-10-01T12:00:00.000Z";
 
@@ -1404,7 +1404,7 @@ describe("SupabaseLifeOSStore Academic Engine Phase 1", () => {
             related_grade_external_id: null,
           },
         },
-        // 3. Overdue task (3 days ago) without grade
+        // 3. Explicitly unfinished overdue task (3 days ago)
         {
           id: "event-task-3",
           user_id: "user-a",
@@ -1416,6 +1416,7 @@ describe("SupabaseLifeOSStore Academic Engine Phase 1", () => {
           status: "active",
           raw_json: {
             course_title: "Database Management Systems",
+            submission_status: "not_submitted",
             related_grade_external_id: "academic:moodle:102:502",
           },
         },
@@ -1434,7 +1435,7 @@ describe("SupabaseLifeOSStore Academic Engine Phase 1", () => {
             related_grade_external_id: "academic:moodle:103:503",
           },
         },
-        // 5. Overdue older than 7 days (should be excluded!)
+        // 5. Verified unfinished task older than 7 days remains visible
         {
           id: "event-task-5",
           user_id: "user-a",
@@ -1446,6 +1447,7 @@ describe("SupabaseLifeOSStore Academic Engine Phase 1", () => {
           status: "active",
           raw_json: {
             course_title: "History",
+            submission_status: "not_submitted",
           },
         },
         // 6. Completed task (should be excluded!)
@@ -1511,11 +1513,12 @@ describe("SupabaseLifeOSStore Academic Engine Phase 1", () => {
       expect(result.upcoming[1].maxScore).toBe(10);
       expect(result.upcoming[1].percentage).toBe(80);
 
-      // Overdue: only Quiz 1 (ungraded), Lab 1 was graded so excluded
-      expect(result.overdue).toHaveLength(1);
-      expect(result.overdue[0].title).toBe("Quiz 1");
-      expect(result.overdue[0].courseTitle).toBe("Database Management Systems");
-      expect(result.overdue[0].score).toBeNull();
+      // Both explicitly unfinished records remain, oldest first.
+      expect(result.overdue).toHaveLength(2);
+      expect(result.overdue[0].title).toBe("Old Task");
+      expect(result.overdue[1].title).toBe("Quiz 1");
+      expect(result.overdue[1].courseTitle).toBe("Database Management Systems");
+      expect(result.overdue[1].score).toBeNull();
 
       // Empty for nonexistent user
       const empty = await store.listUpcomingAssignmentDeadlines("user-nonexistent", nowIso);
