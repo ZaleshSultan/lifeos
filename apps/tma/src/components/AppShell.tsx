@@ -5,6 +5,7 @@ import {
   HeartPulse,
   House,
   GraduationCap,
+  LayoutDashboard,
   MoreHorizontal,
   PlugZap,
   Settings2,
@@ -29,12 +30,13 @@ type NavigationItem = { id: ScreenId; label: string; icon: LucideIcon };
 
 const primaryTabs: NavigationItem[] = [
   { id: "home", label: "Сегодня", icon: House },
+  { id: "dashboard", label: "Дашборд", icon: LayoutDashboard },
   { id: "study", label: "Учёба", icon: GraduationCap },
   { id: "ai", label: "AI", icon: Sparkles },
-  { id: "health", label: "Здоровье", icon: HeartPulse },
 ];
 
 const secondaryTabs: NavigationItem[] = [
+  { id: "health", label: "Здоровье", icon: HeartPulse },
   { id: "workout", label: "Тренировки", icon: Dumbbell },
   { id: "focus", label: "Фокус", icon: Activity },
   { id: "finance", label: "Финансы", icon: WalletCards },
@@ -45,6 +47,7 @@ const secondaryTabs: NavigationItem[] = [
 
 const screenNames: Partial<Record<ScreenId, string>> = {
   home: "Обзор дня",
+  dashboard: "Академический дашборд",
   study: "Учебный центр",
   lms: "Подключение LMS",
   ai: "AI-помощник",
