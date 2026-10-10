@@ -59,6 +59,43 @@ class HealthDayMathTest {
         assertEquals(sampled, minuteHeartRateSamples(points.reversed(), range))
     }
 
+    @Test fun `overnight sleep belongs entirely to wake date`() {
+        val wakeDay = localDayRange(LocalDate.parse("2026-10-10"), ZoneId.of("UTC"))
+        val night = interval("2026-10-09T23:14:00Z", "2026-10-10T06:47:00Z")
+        val sessions = listOf(SleepSessionIntervals(
+            interval = night,
+            stages = listOf(SleepStageInterval(night, SleepStageKind.ASLEEP)),
+        ))
+        assertEquals(453L, sleepTotalsForWakeDay(sessions, wakeDay).sleepMinutes)
+        assertNull(sleepTotalsForWakeDay(sessions, localDayRange(LocalDate.parse("2026-10-09"), ZoneId.of("UTC"))).sleepMinutes)
+    }
+
+    @Test fun `sleep without stages uses recorded session not fabricated stages`() {
+        val wakeDay = localDayRange(LocalDate.parse("2026-10-10"), ZoneId.of("UTC"))
+        val result = sleepTotalsForWakeDay(listOf(SleepSessionIntervals(
+            interval("2026-10-09T23:14:00Z", "2026-10-10T06:47:00Z"), emptyList(),
+        )), wakeDay)
+        assertEquals(453L, result.sleepMinutes)
+        assertNull(result.deepMinutes)
+        assertNull(result.remMinutes)
+    }
+
+    @Test fun `sleep stages exclude wake and merge duplicated providers`() {
+        val wakeDay = localDayRange(LocalDate.parse("2026-10-10"), ZoneId.of("UTC"))
+        val night = interval("2026-10-09T23:00:00Z", "2026-10-10T07:00:00Z")
+        val stages = listOf(
+            SleepStageInterval(interval("2026-10-09T23:00:00Z", "2026-10-10T03:00:00Z"), SleepStageKind.DEEP),
+            SleepStageInterval(interval("2026-10-10T03:00:00Z", "2026-10-10T04:00:00Z"), SleepStageKind.AWAKE),
+            SleepStageInterval(interval("2026-10-10T04:00:00Z", "2026-10-10T07:00:00Z"), SleepStageKind.REM),
+        )
+        val duplicate = SleepSessionIntervals(night, stages)
+        val result = sleepTotalsForWakeDay(listOf(duplicate, duplicate), wakeDay)
+        assertEquals(420L, result.sleepMinutes)
+        assertEquals(240L, result.deepMinutes)
+        assertEquals(180L, result.remMinutes)
+        assertEquals(60L, result.awakeMinutes)
+    }
+
     @Test fun `pagination follows tokens and accepts empty terminal token`() = runBlocking {
         val seen = mutableListOf<String?>()
         val records = readEveryPage { token ->

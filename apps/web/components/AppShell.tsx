@@ -91,9 +91,15 @@ export function AppShell({ children, systemStatus, userName }: AppShellProps) {
             <span className="min-w-0 flex-1 truncate text-xs font-medium text-zinc-300">
               {userName || "LifeOS user"}
             </span>
-            <Link href="/logout" aria-label="Выйти" className="text-zinc-600 transition hover:text-zinc-300">
-              <LogOut className="h-3.5 w-3.5" />
-            </Link>
+            <form action="/web/logout" method="post">
+              <button
+                type="submit"
+                aria-label="Выйти"
+                className="text-zinc-600 transition hover:text-zinc-300"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+              </button>
+            </form>
           </div>
         </div>
 

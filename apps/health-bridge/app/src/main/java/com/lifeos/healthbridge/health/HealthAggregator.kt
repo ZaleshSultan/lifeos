@@ -46,26 +46,32 @@ class HealthAggregator(private val healthConnectClient: HealthConnectClient) {
                 timeRangeFilter = filter,
             ),
         )
-        val sleepRecords = readAll<SleepSessionRecord>(filter).distinctBy { it.metadata.id }
+        // Read back into yesterday: a session starting at 23:14 and ending
+        // today at 06:47 must be attributed wholly to its wake-up day.
+        val sleepFilter = TimeRangeFilter.between(range.start.minus(Duration.ofDays(1)), range.end)
+        val sleepRecords = readAll<SleepSessionRecord>(sleepFilter).distinctBy { it.metadata.id }
         val exerciseRecords = readAll<ExerciseSessionRecord>(filter).distinctBy { it.metadata.id }
         val heartRateRecords = readAll<HeartRateRecord>(filter).distinctBy { it.metadata.id }
         val hrvRecords = readAll<HeartRateVariabilityRmssdRecord>(filter).distinctBy { it.metadata.id }
         val oxygenRecords = readAll<OxygenSaturationRecord>(filter).distinctBy { it.metadata.id }
-        val sleep = sleepTotals(
-            sleepRecords.flatMap { session ->
-                session.stages.map { stage ->
-                    SleepStageInterval(
-                        HealthInterval(maxOf(stage.startTime, session.startTime), minOf(stage.endTime, session.endTime)),
-                        when (stage.stage) {
-                            SleepSessionRecord.STAGE_TYPE_SLEEPING, SleepSessionRecord.STAGE_TYPE_LIGHT -> SleepStageKind.ASLEEP
-                            SleepSessionRecord.STAGE_TYPE_DEEP -> SleepStageKind.DEEP
-                            SleepSessionRecord.STAGE_TYPE_REM -> SleepStageKind.REM
-                            SleepSessionRecord.STAGE_TYPE_AWAKE, SleepSessionRecord.STAGE_TYPE_AWAKE_IN_BED,
-                            SleepSessionRecord.STAGE_TYPE_OUT_OF_BED -> SleepStageKind.AWAKE
-                            else -> SleepStageKind.UNKNOWN
-                        },
-                    )
-                }
+        val sleep = sleepTotalsForWakeDay(
+            sleepRecords.map { session ->
+                SleepSessionIntervals(
+                    interval = HealthInterval(session.startTime, session.endTime),
+                    stages = session.stages.map { stage ->
+                        SleepStageInterval(
+                            HealthInterval(stage.startTime, stage.endTime),
+                            when (stage.stage) {
+                                SleepSessionRecord.STAGE_TYPE_SLEEPING, SleepSessionRecord.STAGE_TYPE_LIGHT -> SleepStageKind.ASLEEP
+                                SleepSessionRecord.STAGE_TYPE_DEEP -> SleepStageKind.DEEP
+                                SleepSessionRecord.STAGE_TYPE_REM -> SleepStageKind.REM
+                                SleepSessionRecord.STAGE_TYPE_AWAKE, SleepSessionRecord.STAGE_TYPE_AWAKE_IN_BED,
+                                SleepSessionRecord.STAGE_TYPE_OUT_OF_BED -> SleepStageKind.AWAKE
+                                else -> SleepStageKind.UNKNOWN
+                            },
+                        )
+                    },
+                )
             },
             range,
         )

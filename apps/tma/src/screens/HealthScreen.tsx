@@ -94,13 +94,23 @@ export function HealthScreen() {
           label="Active kcal"
           tone="rose"
           value={
-            health.activeEnergyKcal != null ? `${health.activeEnergyKcal} kcal` : "n/a"
+            health.activeEnergyKcal != null ? `${health.activeEnergyKcal.toFixed(1)} kcal` : "n/a"
           }
         />
         <MetricTile
           label="Steps"
           tone="amber"
           value={health.steps?.toLocaleString() ?? "n/a"}
+        />
+        <MetricTile
+          label="Average HR"
+          tone="rose"
+          value={health.averageHeartRate != null ? `${Math.round(health.averageHeartRate)} bpm` : "n/a"}
+        />
+        <MetricTile
+          label="SpO₂"
+          tone="cyan"
+          value={health.spo2Avg != null ? `${health.spo2Avg.toFixed(1)}%` : "n/a"}
         />
       </section>
 

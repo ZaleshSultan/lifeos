@@ -57,6 +57,64 @@ internal fun sleepTotals(stages: List<SleepStageInterval>, range: PreviousDayRan
     )
 }
 
+// A completed night belongs to its wake-up date, not to the calendar day
+// containing each individual minute. SleepSessionRecord without stages still
+// provides a measured session interval (time in bed); use it as a fallback,
+// but do not fabricate deep/REM/awake stage durations.
+internal data class SleepSessionIntervals(
+    val interval: HealthInterval,
+    val stages: List<SleepStageInterval>,
+)
+
+internal fun sleepTotalsForWakeDay(
+    sessions: List<SleepSessionIntervals>,
+    wakeDay: PreviousDayRange,
+): SleepTotals {
+    val completed = sessions.filter { session ->
+        session.interval.start < session.interval.end &&
+            session.interval.end > wakeDay.start &&
+            session.interval.end <= wakeDay.end
+    }
+    if (completed.isEmpty()) return SleepTotals(null, null, null, null)
+
+    val fullRange = wakeDay.copy(
+        start = completed.minOf { it.interval.start },
+        end = completed.maxOf { it.interval.end },
+    )
+    val asleep = mutableListOf<HealthInterval>()
+    val deep = mutableListOf<HealthInterval>()
+    val rem = mutableListOf<HealthInterval>()
+    val awake = mutableListOf<HealthInterval>()
+    for (session in completed) {
+        val stages = session.stages.mapNotNull { stage ->
+            val start = maxOf(stage.interval.start, session.interval.start)
+            val end = minOf(stage.interval.end, session.interval.end)
+            if (start < end) stage.copy(interval = HealthInterval(start, end)) else null
+        }
+        // Some Mi Fitness versions publish a session without stages.
+        // A stage-less session can supply total duration but not stage totals.
+        if (stages.isEmpty()) asleep.add(session.interval)
+        for (stage in stages) {
+            when (stage.kind) {
+                SleepStageKind.ASLEEP -> asleep.add(stage.interval)
+                SleepStageKind.DEEP -> {
+                    deep.add(stage.interval)
+                    asleep.add(stage.interval)
+                }
+                SleepStageKind.REM -> {
+                    rem.add(stage.interval)
+                    asleep.add(stage.interval)
+                }
+                SleepStageKind.AWAKE -> awake.add(stage.interval)
+                SleepStageKind.UNKNOWN -> Unit
+            }
+        }
+    }
+    fun minutes(intervals: List<HealthInterval>): Long? =
+        intervals.takeIf { it.isNotEmpty() }?.let { intervalMinutes(it, fullRange) }
+    return SleepTotals(minutes(asleep), minutes(deep), minutes(rem), minutes(awake))
+}
+
 internal data class HeartRatePoint(val time: Instant, val beatsPerMinute: Long, val origin: String)
 
 // A real reading per minute keeps the daily request bounded. The daily average

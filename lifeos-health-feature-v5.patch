@@ -1,0 +1,196 @@
+diff --git a/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/health/HealthDayMath.kt b/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/health/HealthDayMath.kt
+--- a/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/health/HealthDayMath.kt
++++ b/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/health/HealthDayMath.kt
+@@ -56,5 +56,64 @@
+         awakeMinutes = minutes(setOf(SleepStageKind.AWAKE)),
+     )
++}
++
++
++// A completed night belongs to its wake-up date, not to the calendar day
++// containing each individual minute. SleepSessionRecord without stages still
++// provides a measured session interval (time in bed); use it as a fallback,
++// but do not fabricate deep/REM/awake stage durations.
++internal data class SleepSessionIntervals(
++    val interval: HealthInterval,
++    val stages: List<SleepStageInterval>,
++)
++
++internal fun sleepTotalsForWakeDay(
++    sessions: List<SleepSessionIntervals>,
++    wakeDay: PreviousDayRange,
++): SleepTotals {
++    val completed = sessions.filter { session ->
++        session.interval.start < session.interval.end &&
++            session.interval.end > wakeDay.start &&
++            session.interval.end <= wakeDay.end
++    }
++    if (completed.isEmpty()) return SleepTotals(null, null, null, null)
++
++    val fullRange = wakeDay.copy(
++        start = completed.minOf { it.interval.start },
++        end = completed.maxOf { it.interval.end },
++    )
++    val asleep = mutableListOf<HealthInterval>()
++    val deep = mutableListOf<HealthInterval>()
++    val rem = mutableListOf<HealthInterval>()
++    val awake = mutableListOf<HealthInterval>()
++    for (session in completed) {
++        val stages = session.stages.mapNotNull { stage ->
++            val start = maxOf(stage.interval.start, session.interval.start)
++            val end = minOf(stage.interval.end, session.interval.end)
++            if (start < end) stage.copy(interval = HealthInterval(start, end)) else null
++        }
++        // Some Mi Fitness versions publish a session without stages.
++        // A stage-less session can supply total duration but not stage totals.
++        if (stages.isEmpty()) asleep.add(session.interval)
++        for (stage in stages) {
++            when (stage.kind) {
++                SleepStageKind.ASLEEP -> asleep.add(stage.interval)
++                SleepStageKind.DEEP -> {
++                    deep.add(stage.interval)
++                    asleep.add(stage.interval)
++                }
++                SleepStageKind.REM -> {
++                    rem.add(stage.interval)
++                    asleep.add(stage.interval)
++                }
++                SleepStageKind.AWAKE -> awake.add(stage.interval)
++                SleepStageKind.UNKNOWN -> Unit
++            }
++        }
++    }
++    fun minutes(intervals: List<HealthInterval>): Long? =
++        intervals.takeIf { it.isNotEmpty() }?.let { intervalMinutes(it, fullRange) }
++    return SleepTotals(minutes(asleep), minutes(deep), minutes(rem), minutes(awake))
+ }
+ 
+ internal data class HeartRatePoint(val time: Instant, val beatsPerMinute: Long, val origin: String)
+diff --git a/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/health/HealthAggregator.kt b/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/health/HealthAggregator.kt
+--- a/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/health/HealthAggregator.kt
++++ b/apps/health-bridge/app/src/main/java/com/lifeos/healthbridge/health/HealthAggregator.kt
+@@ -54,5 +54,8 @@
++        // Fetch from the previous calendar day as well, since a night ending
++        // today often starts before midnight yesterday.
++        val sleepFilter = TimeRangeFilter.between(range.start.minus(Duration.ofDays(1)), range.end)
+         val sleepRecords = if (permitted(HealthPermission.getReadPermission(SleepSessionRecord::class)))
+-            readAll<SleepSessionRecord>(filter).distinctBy { it.metadata.id } else emptyList()
++            readAll<SleepSessionRecord>(sleepFilter).distinctBy { it.metadata.id } else emptyList()
+         val exerciseRecords = if (permitted(HealthPermission.getReadPermission(ExerciseSessionRecord::class)))
+             readAll<ExerciseSessionRecord>(filter).distinctBy { it.metadata.id } else emptyList()
+         val heartRateRecords = if (permitted(HealthPermission.getReadPermission(HeartRateRecord::class)))
+@@ -61,21 +64,24 @@
+             readAll<HeartRateVariabilityRmssdRecord>(filter).distinctBy { it.metadata.id } else emptyList()
+         val oxygenRecords = if (permitted(HealthPermission.getReadPermission(OxygenSaturationRecord::class)))
+             readAll<OxygenSaturationRecord>(filter).distinctBy { it.metadata.id } else emptyList()
+-        val sleep = sleepTotals(
+-            sleepRecords.flatMap { session ->
+-                session.stages.map { stage ->
+-                    SleepStageInterval(
+-                        HealthInterval(maxOf(stage.startTime, session.startTime), minOf(stage.endTime, session.endTime)),
+-                        when (stage.stage) {
+-                            SleepSessionRecord.STAGE_TYPE_SLEEPING, SleepSessionRecord.STAGE_TYPE_LIGHT -> SleepStageKind.ASLEEP
+-                            SleepSessionRecord.STAGE_TYPE_DEEP -> SleepStageKind.DEEP
+-                            SleepSessionRecord.STAGE_TYPE_REM -> SleepStageKind.REM
+-                            SleepSessionRecord.STAGE_TYPE_AWAKE, SleepSessionRecord.STAGE_TYPE_AWAKE_IN_BED,
+-                            SleepSessionRecord.STAGE_TYPE_OUT_OF_BED -> SleepStageKind.AWAKE
+-                            else -> SleepStageKind.UNKNOWN
+-                        },
+-                    )
+-                }
++        val sleep = sleepTotalsForWakeDay(
++            sleepRecords.map { session ->
++                SleepSessionIntervals(
++                    interval = HealthInterval(session.startTime, session.endTime),
++                    stages = session.stages.map { stage ->
++                        SleepStageInterval(
++                            HealthInterval(stage.startTime, stage.endTime),
++                            when (stage.stage) {
++                                SleepSessionRecord.STAGE_TYPE_SLEEPING, SleepSessionRecord.STAGE_TYPE_LIGHT -> SleepStageKind.ASLEEP
++                                SleepSessionRecord.STAGE_TYPE_DEEP -> SleepStageKind.DEEP
++                                SleepSessionRecord.STAGE_TYPE_REM -> SleepStageKind.REM
++                                SleepSessionRecord.STAGE_TYPE_AWAKE, SleepSessionRecord.STAGE_TYPE_AWAKE_IN_BED,
++                                SleepSessionRecord.STAGE_TYPE_OUT_OF_BED -> SleepStageKind.AWAKE
++                                else -> SleepStageKind.UNKNOWN
++                            },
++                        )
++                    },
++                )
+             },
+             range,
+         )
+diff --git a/apps/tma/src/screens/HealthScreen.tsx b/apps/tma/src/screens/HealthScreen.tsx
+--- a/apps/tma/src/screens/HealthScreen.tsx
++++ b/apps/tma/src/screens/HealthScreen.tsx
+@@ -93,7 +93,7 @@
+           label="Active kcal"
+           tone="rose"
+           value={
+-            health.activeEnergyKcal != null ? `${health.activeEnergyKcal} kcal` : "n/a"
++            health.activeEnergyKcal != null ? `${health.activeEnergyKcal.toFixed(1)} kcal` : "n/a"
+           }
+         />
+         <MetricTile
+@@ -101,6 +101,16 @@
+           tone="amber"
+           value={health.steps?.toLocaleString() ?? "n/a"}
+         />
++        <MetricTile
++          label="Average HR"
++          tone="rose"
++          value={health.averageHeartRate != null ? `${Math.round(health.averageHeartRate)} bpm` : "n/a"}
++        />
++        <MetricTile
++          label="SpO₂"
++          tone="cyan"
++          value={health.spo2Avg != null ? `${health.spo2Avg.toFixed(1)}%` : "n/a"}
++        />
+       </section>
+ 
+       <section className="grid grid-cols-2 gap-2">
+diff --git a/apps/health-bridge/app/src/test/java/com/lifeos/healthbridge/health/HealthDayMathTest.kt b/apps/health-bridge/app/src/test/java/com/lifeos/healthbridge/health/HealthDayMathTest.kt
+--- a/apps/health-bridge/app/src/test/java/com/lifeos/healthbridge/health/HealthDayMathTest.kt
++++ b/apps/health-bridge/app/src/test/java/com/lifeos/healthbridge/health/HealthDayMathTest.kt
+@@ -59,4 +59,42 @@
+         assertEquals(sampled, minuteHeartRateSamples(points.reversed(), range))
++    }
++
++    @Test fun `overnight sleep belongs entirely to wake date`() {
++        val now = Instant.parse("2026-10-12T12:00:00Z")
++        val wakeDay = dayRange(LocalDate.parse("2026-10-10"), now, ZoneId.of("UTC"))
++        val night = interval("2026-10-09T23:14:00Z", "2026-10-10T06:47:00Z")
++        val sessions = listOf(SleepSessionIntervals(
++            interval = night,
++            stages = listOf(SleepStageInterval(night, SleepStageKind.ASLEEP)),
++        ))
++        assertEquals(453L, sleepTotalsForWakeDay(sessions, wakeDay).sleepMinutes)
++        assertNull(sleepTotalsForWakeDay(sessions, dayRange(LocalDate.parse("2026-10-09"), now, ZoneId.of("UTC"))).sleepMinutes)
++    }
++
++    @Test fun `sleep without stages uses recorded session not fabricated stages`() {
++        val wakeDay = dayRange(LocalDate.parse("2026-10-10"), Instant.parse("2026-10-12T12:00:00Z"), ZoneId.of("UTC"))
++        val result = sleepTotalsForWakeDay(listOf(SleepSessionIntervals(
++            interval("2026-10-09T23:14:00Z", "2026-10-10T06:47:00Z"), emptyList(),
++        )), wakeDay)
++        assertEquals(453L, result.sleepMinutes)
++        assertNull(result.deepMinutes)
++        assertNull(result.remMinutes)
++    }
++
++    @Test fun `sleep stages exclude wake and merge duplicated providers`() {
++        val wakeDay = dayRange(LocalDate.parse("2026-10-10"), Instant.parse("2026-10-12T12:00:00Z"), ZoneId.of("UTC"))
++        val night = interval("2026-10-09T23:00:00Z", "2026-10-10T07:00:00Z")
++        val stages = listOf(
++            SleepStageInterval(interval("2026-10-09T23:00:00Z", "2026-10-10T03:00:00Z"), SleepStageKind.DEEP),
++            SleepStageInterval(interval("2026-10-10T03:00:00Z", "2026-10-10T04:00:00Z"), SleepStageKind.AWAKE),
++            SleepStageInterval(interval("2026-10-10T04:00:00Z", "2026-10-10T07:00:00Z"), SleepStageKind.REM),
++        )
++        val duplicate = SleepSessionIntervals(night, stages)
++        val result = sleepTotalsForWakeDay(listOf(duplicate, duplicate), wakeDay)
++        assertEquals(420L, result.sleepMinutes)
++        assertEquals(240L, result.deepMinutes)
++        assertEquals(180L, result.remMinutes)
++        assertEquals(60L, result.awakeMinutes)
+     }
+ 
+     @Test fun `pagination follows tokens and accepts empty terminal token`() = runBlocking {

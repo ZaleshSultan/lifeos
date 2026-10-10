@@ -16,10 +16,15 @@ fun previousDayRange(
     zoneId: ZoneId = ZoneId.systemDefault(),
 ): PreviousDayRange {
     val date = now.atZone(zoneId).toLocalDate().minusDays(1)
-    return PreviousDayRange(
-        date = date,
-        start = date.atStartOfDay(zoneId).toInstant(),
-        end = date.plusDays(1).atStartOfDay(zoneId).toInstant(),
-        zoneId = zoneId,
-    )
+    return localDayRange(date, zoneId)
 }
+
+fun localDayRange(
+    date: LocalDate,
+    zoneId: ZoneId = ZoneId.systemDefault(),
+): PreviousDayRange = PreviousDayRange(
+    date = date,
+    start = date.atStartOfDay(zoneId).toInstant(),
+    end = date.plusDays(1).atStartOfDay(zoneId).toInstant(),
+    zoneId = zoneId,
+)

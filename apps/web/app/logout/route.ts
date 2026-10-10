@@ -5,15 +5,11 @@ function publicWebUrl(path: string): URL {
     process.env.NEXT_PUBLIC_WEB_APP_URL?.trim() ||
     "https://lifeos.zalewko.me/web";
 
-  return new URL(
-    `${base.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`,
-  );
+  return new URL(`${base.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`);
 }
 
-export async function GET() {
-  const response = NextResponse.redirect(
-    publicWebUrl("access"),
-  );
+export async function POST() {
+  const response = NextResponse.redirect(publicWebUrl("access"), 303);
 
   response.cookies.set("lifeos_web_session", "", {
     httpOnly: true,
@@ -22,6 +18,8 @@ export async function GET() {
     path: "/",
     maxAge: 0,
   });
+
+  response.headers.set("Cache-Control", "no-store");
 
   return response;
 }
