@@ -48,7 +48,7 @@ export function StudyScreen({ onOpenLms }: { onOpenLms: () => void }) {
   const configure = useConfigureStudyCalculatorMutation();
   const [pendingProfile, setPendingProfile] = useState<string | null>(null);
   const [tab, setTab] = useState<StudyTabId>(initialStudyTab);
-  const [courseId, setCourseId] = useState<string | null>(null);
+  const [courseId, setCourseId] = useState<string | null>(() => new URLSearchParams(window.location.search).get("courseId"));
   const [drafts, setDrafts] = useState<Record<string, StudyDraft>>({});
   const [errors, setErrors] = useState<Record<string, string | null>>({});
   const [savedCourse, setSavedCourse] = useState<string | null>(null);
