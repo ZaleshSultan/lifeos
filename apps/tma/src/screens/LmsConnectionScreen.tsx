@@ -3,10 +3,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   LockKeyhole,
-  CheckCircle2,
-  ChevronDown,
-  Info,
-  RotateCw,
   RefreshCw,
   ShieldCheck,
   Trash2,
