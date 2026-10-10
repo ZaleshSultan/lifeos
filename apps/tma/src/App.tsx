@@ -12,6 +12,7 @@ import { RemindersScreen } from "./screens/RemindersScreen";
 import { SourcesScreen } from "./screens/SourcesScreen";
 import { WorkoutScreen } from "./screens/WorkoutScreen";
 import { StudyScreen } from "./screens/StudyScreen";
+import { StudyDashboardScreen } from "./screens/StudyDashboardScreen";
 import { AiScreen } from "./screens/AiScreen";
 import type { ScreenId } from "./types";
 
@@ -25,6 +26,7 @@ const SCREENS: ScreenId[] = [
   "home",
   "ai",
   "study",
+  "dashboard",
   "lms",
   "workout",
   "health",
@@ -130,6 +132,18 @@ export default function App() {
         <AiScreen date={aiDate} onBack={() => setScreen("home")} />
       ) : null}
       {screen === "workout" ? <WorkoutScreen /> : null}
+      {screen === "dashboard" ? (
+        <StudyDashboardScreen
+          onOpenStudy={() => setScreen("study")}
+          onOpenLms={() => setScreen("lms")}
+          onOpenCalculator={() => {
+            const url = new URL(window.location.href);
+            url.searchParams.set("studyTab", "calculator");
+            window.history.replaceState(null, "", url);
+            setScreen("study");
+          }}
+        />
+      ) : null}
       {screen === "study" ? (
         <StudyScreen onOpenLms={() => setScreen("lms")} />
       ) : null}
