@@ -1154,6 +1154,11 @@ def sync_grades(
             retry_pending = isinstance(previous_raw, dict) and previous_raw.get("_grade_notification_pending") is True
             notify_grade = score is not None and (retry_pending or (notify_new_grades and newly_graded))
             academic_raw_json = dict(raw_json)
+            if score is None and isinstance(previous_raw, dict):
+                # Preserve an earlier explanation when Moodle hides the score.
+                earlier_analysis = previous_raw.get("_lifeos_grade_analysis")
+                if isinstance(earlier_analysis, dict):
+                    academic_raw_json["_lifeos_grade_analysis"] = earlier_analysis
             if notify_grade:
                 # The academic row is written before the reminder. If a later
                 # write fails, the next sync can still retry the notification.
