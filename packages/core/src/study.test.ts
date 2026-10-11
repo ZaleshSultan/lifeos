@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   calculateStudyScenario,
   calculateStudyTargetPlan,
+  studyCalculatorStatesMatch,
   validateStudyCalculatorDefinition,
   validateStudyCalculatorValues,
   type StudyCalculatorDefinition,
+  type StudyCalculatorState,
 } from "./study.js";
 
 function definition(weights: number[]): StudyCalculatorDefinition {
@@ -13,13 +15,86 @@ function definition(weights: number[]): StudyCalculatorDefinition {
     sourceName: "User-supplied study profile",
     attestationThreshold: 25,
     fields: [
-      ...(["att1", "att2"] as const).flatMap((period) => weights.map((weightPercent, index) => ({
-        id: `${period}-${index}`, label: `Assessment ${index + 1}`, period, weightPercent,
-      }))),
+      ...(["att1", "att2"] as const).flatMap((period) =>
+        weights.map((weightPercent, index) => ({
+          id: `${period}-${index}`,
+          label: `Assessment ${index + 1}`,
+          period,
+          weightPercent,
+        })),
+      ),
       { id: "exam", label: "Final exam", period: "exam", weightPercent: 100 },
     ],
   };
 }
+
+describe("study calculator state comparison", () => {
+  function state(): StudyCalculatorState {
+    return {
+      definition: definition([60, 40]),
+      values: { "att1-0": 0, "att1-1": null, exam: 80 },
+      target: 70,
+    };
+  }
+
+  it("compares absent states explicitly", () => {
+    expect(studyCalculatorStatesMatch(null, null)).toBe(true);
+    expect(studyCalculatorStatesMatch(state(), null)).toBe(false);
+    expect(studyCalculatorStatesMatch(null, state())).toBe(false);
+  });
+
+  it("compares equivalent scenarios independently of field and value order", () => {
+    const left = state();
+    const right = structuredClone(left);
+    right.definition.fields.reverse();
+    right.values = Object.fromEntries(Object.entries(right.values).reverse());
+    expect(studyCalculatorStatesMatch(left, right)).toBe(true);
+  });
+
+  it.each([
+    "target",
+    "version",
+    "sourceName",
+    "threshold",
+    "id",
+    "label",
+    "period",
+    "weight",
+    "fieldCount",
+  ] as const)("detects changes to %s before replacing a scenario", (change) => {
+    const left = state();
+    const right = structuredClone(left);
+    if (change === "target") right.target = 80;
+    if (change === "version") Object.assign(right.definition, { version: 2 });
+    if (change === "sourceName") right.definition.sourceName = "Updated source";
+    if (change === "threshold") right.definition.attestationThreshold = 50;
+    if (change === "id") right.definition.fields[0].id = "renamed";
+    if (change === "label") right.definition.fields[0].label = "Project";
+    if (change === "period") right.definition.fields[0].period = "att2";
+    if (change === "weight") right.definition.fields[0].weightPercent = 50;
+    if (change === "fieldCount") right.definition.fields.pop();
+    expect(studyCalculatorStatesMatch(left, right)).toBe(false);
+    expect(studyCalculatorStatesMatch(right, left)).toBe(false);
+  });
+
+  it("distinguishes missing, null, zero, and changed scores", () => {
+    const left = state();
+    const changedValues: Array<StudyCalculatorState["values"]> = [
+      { "att1-1": null, exam: 80 },
+      { "att1-0": null, "att1-1": null, exam: 80 },
+      { "att1-0": 0, exam: 80 },
+      { "att1-0": 0, "att1-1": 0, exam: 80 },
+      { "att1-0": 0, "att1-1": null, exam: 81 },
+      { "att1-0": 0, "att1-1": null, exam: 80, "att2-0": null },
+      { "att1-0": 0, "att1-1": null, "att2-0": 80 },
+    ];
+    for (const values of changedValues) {
+      const right = { ...left, values };
+      expect(studyCalculatorStatesMatch(left, right)).toBe(false);
+      expect(studyCalculatorStatesMatch(right, left)).toBe(false);
+    }
+  });
+});
 
 describe("study calculator", () => {
   it.each([
@@ -28,23 +103,44 @@ describe("study calculator", () => {
     ["language", [60, 40]],
     ["networks", [60, 40]],
     ["digital logic", [60, 40]],
-  ] as const)("reproduces %s attestation and 30/30/40 coefficients", (_name, weights) => {
-    const profile = definition([...weights]);
-    expect(validateStudyCalculatorDefinition(profile)).toBe(true);
-    const values = Object.fromEntries(profile.fields.map((field) => [field.id,
-      field.period === "att1" ? 80 : field.period === "att2" ? 60 : 90]));
-    const result = calculateStudyScenario({ definition: profile, values, target: 78 });
-    expect(result.att1.score).toBeCloseTo(80);
-    expect(result.att2.score).toBeCloseTo(60);
-    expect(result.finalScore).toBe(78);
-    expect(result.requiredExamScore).toBe(90);
-    expect(result.targetStatus).toBe("achieved");
-  });
+  ] as const)(
+    "reproduces %s attestation and 30/30/40 coefficients",
+    (_name, weights) => {
+      const profile = definition([...weights]);
+      expect(validateStudyCalculatorDefinition(profile)).toBe(true);
+      const values = Object.fromEntries(
+        profile.fields.map((field) => [
+          field.id,
+          field.period === "att1" ? 80 : field.period === "att2" ? 60 : 90,
+        ]),
+      );
+      const result = calculateStudyScenario({
+        definition: profile,
+        values,
+        target: 78,
+      });
+      expect(result.att1.score).toBeCloseTo(80);
+      expect(result.att2.score).toBeCloseTo(60);
+      expect(result.finalScore).toBe(78);
+      expect(result.requiredExamScore).toBe(90);
+      expect(result.targetStatus).toBe("achieved");
+    },
+  );
 
   it("applies unequal weights within a period", () => {
     const profile = definition([20, 20, 20, 10, 30]);
-    const values = { "att1-0": 100, "att1-1": 80, "att1-2": 50, "att1-3": 0, "att1-4": 90 };
-    const result = calculateStudyScenario({ definition: profile, values, target: 70 });
+    const values = {
+      "att1-0": 100,
+      "att1-1": 80,
+      "att1-2": 50,
+      "att1-3": 0,
+      "att1-4": 90,
+    };
+    const result = calculateStudyScenario({
+      definition: profile,
+      values,
+      target: 70,
+    });
     expect(result.att1.score).toBe(73);
     expect(result.att2.score).toBeNull();
     expect(result.minimumFinal).toBe(21.9);
@@ -53,7 +149,11 @@ describe("study calculator", () => {
 
   it("does not treat unknown scores as failed attestations or a completed final", () => {
     const profile = definition([60, 40]);
-    const result = calculateStudyScenario({ definition: profile, values: {}, target: 70 });
+    const result = calculateStudyScenario({
+      definition: profile,
+      values: {},
+      target: 70,
+    });
     expect(result.att1).toEqual({ score: null, earned: 0, complete: false });
     expect(result.att2.score).toBeNull();
     expect(result.examScore).toBeNull();
@@ -67,7 +167,11 @@ describe("study calculator", () => {
 
   it("preserves a real zero and distinguishes it from a cleared field", () => {
     const profile = definition([60, 40]);
-    const result = calculateStudyScenario({ definition: profile, values: { "att1-0": 0, "att1-1": 0, exam: null }, target: 80 });
+    const result = calculateStudyScenario({
+      definition: profile,
+      values: { "att1-0": 0, "att1-1": 0, exam: null },
+      target: 80,
+    });
     expect(result.att1).toEqual({ score: 0, earned: 0, complete: true });
     expect(result.belowThreshold).toBe(true);
     expect(result.maximumFinal).toBe(70);
@@ -76,7 +180,11 @@ describe("study calculator", () => {
 
   it("keeps the exact threshold boundary and reports an impossible required exam", () => {
     const profile = definition([100]);
-    const result = calculateStudyScenario({ definition: profile, values: { "att1-0": 25, "att2-0": 25 }, target: 70 });
+    const result = calculateStudyScenario({
+      definition: profile,
+      values: { "att1-0": 25, "att2-0": 25 },
+      target: 70,
+    });
     expect(result.belowThreshold).toBe(false);
     expect(result.requiredExamScore).toBe(137.5);
     expect(result.targetStatus).toBe("impossible");
@@ -85,35 +193,117 @@ describe("study calculator", () => {
 
   it("reports achieved targets and requires no negative exam score", () => {
     const profile = definition([100]);
-    const result = calculateStudyScenario({ definition: profile, values: { "att1-0": 100, "att2-0": 100 }, target: 50 });
+    const result = calculateStudyScenario({
+      definition: profile,
+      values: { "att1-0": 100, "att2-0": 100 },
+      target: 50,
+    });
     expect(result.requiredExamScore).toBe(0);
     expect(result.targetStatus).toBe("achieved");
     expect(result.finalScore).toBeNull();
   });
 
-  it.each([NaN, Infinity, -1, 101, "80", undefined, true])("rejects invalid numeric input %s", (badScore) => {
-    const profile = definition([100]);
-    expect(validateStudyCalculatorValues({ exam: badScore }, profile)).toBe(false);
-  });
+  it.each([NaN, Infinity, -1, 101, "80", undefined, true])(
+    "rejects invalid numeric input %s",
+    (badScore) => {
+      const profile = definition([100]);
+      expect(validateStudyCalculatorValues({ exam: badScore }, profile)).toBe(
+        false,
+      );
+    },
+  );
 
   it("rejects foreign fields, duplicate identifiers, bad weights and invalid targets", () => {
     const profile = definition([100]);
-    expect(validateStudyCalculatorValues({ "other-course": 50 }, profile)).toBe(false);
-    expect(validateStudyCalculatorDefinition({ ...profile, fields: [...profile.fields, profile.fields[0]] })).toBe(false);
+    expect(validateStudyCalculatorValues({ "other-course": 50 }, profile)).toBe(
+      false,
+    );
+    expect(
+      validateStudyCalculatorDefinition({
+        ...profile,
+        fields: [...profile.fields, profile.fields[0]],
+      }),
+    ).toBe(false);
     expect(validateStudyCalculatorDefinition(definition([60, 50]))).toBe(false);
-    expect(validateStudyCalculatorDefinition({ ...profile, attestationThreshold: -1 })).toBe(false);
-    expect(() => calculateStudyScenario({ definition: profile, values: {}, target: Infinity })).toThrow(RangeError);
-    expect(() => calculateStudyScenario({ definition: profile, values: { exam: 200 }, target: 70 })).toThrow(RangeError);
+    expect(
+      validateStudyCalculatorDefinition({
+        ...profile,
+        attestationThreshold: -1,
+      }),
+    ).toBe(false);
+    expect(() =>
+      calculateStudyScenario({
+        definition: profile,
+        values: {},
+        target: Infinity,
+      }),
+    ).toThrow(RangeError);
+    expect(() =>
+      calculateStudyScenario({
+        definition: profile,
+        values: { exam: 200 },
+        target: 70,
+      }),
+    ).toThrow(RangeError);
   });
 });
 
-
 describe("target planning for unfinished work", () => {
+  it("rounds minimum recommendations upward so following them reaches the target", () => {
+    const profile = definition([100]);
+    const state = {
+      definition: profile,
+      values: { "att1-0": 79.94 },
+      target: 70,
+    };
+    const plan = calculateStudyTargetPlan(state);
+    expect(plan.requiredAverage).toBe(65.8);
+    const filled = {
+      ...state.values,
+      "att2-0": plan.requiredAverage!,
+      exam: plan.requiredAverage!,
+    };
+    expect(
+      calculateStudyScenario({ ...state, values: filled }).minimumFinal,
+    ).toBeGreaterThanOrEqual(70);
+    const exam = plan.missing.find((item) => item.id === "exam")!;
+    expect(exam.requiredIfOthersAtTarget).toBe(62.6);
+    expect(
+      calculateStudyScenario({
+        ...state,
+        values: {
+          ...state.values,
+          "att2-0": 70,
+          exam: exam.requiredIfOthersAtTarget,
+        },
+      }).minimumFinal,
+    ).toBeGreaterThanOrEqual(70);
+  });
+
+  it("does not increase a requirement already at an exact tenth", () => {
+    const plan = calculateStudyTargetPlan({
+      definition: definition([100]),
+      values: {},
+      target: 76.9,
+    });
+    expect(plan.requiredAverage).toBe(76.9);
+    expect(
+      plan.missing.every((item) => item.requiredIfOthersAtTarget === 76.9),
+    ).toBe(true);
+  });
+
   it("does not mistake unknown assessments for zeros", () => {
-    const state = { definition: definition([20, 20, 20, 10, 30]), values: {
-      "att1-0": 90, "att1-1": 90, "att1-2": 90,
-      "att1-3": 50, "att1-4": 50,
-    }, target: 70 };
+    const state = {
+      definition: definition([20, 20, 20, 10, 30]),
+      values: {
+        "att1-0": 90,
+        "att1-1": 90,
+        "att1-2": 90,
+        "att1-3": 50,
+        "att1-4": 50,
+      },
+      target: 70,
+    };
     const plan = calculateStudyTargetPlan(state);
     expect(plan.earnedFinalPoints).toBeCloseTo(22.2);
     expect(plan.maximumFinal).toBeCloseTo(92.2);

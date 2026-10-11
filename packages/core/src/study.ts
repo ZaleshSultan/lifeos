@@ -22,6 +22,52 @@ export interface StudyCalculatorState {
   target: number;
 }
 
+/** Compare complete scenarios before replacing a previously loaded state. */
+export function studyCalculatorStatesMatch(
+  left: StudyCalculatorState | null,
+  right: StudyCalculatorState | null,
+): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  const leftDefinition = left.definition;
+  const rightDefinition = right.definition;
+  if (
+    left.target !== right.target ||
+    leftDefinition.version !== rightDefinition.version ||
+    leftDefinition.sourceName !== rightDefinition.sourceName ||
+    leftDefinition.attestationThreshold !==
+      rightDefinition.attestationThreshold ||
+    leftDefinition.fields.length !== rightDefinition.fields.length
+  )
+    return false;
+
+  const rightFields = new Map(
+    rightDefinition.fields.map((field) => [field.id, field]),
+  );
+  if (rightFields.size !== leftDefinition.fields.length) return false;
+  const leftIds = new Set(leftDefinition.fields.map((field) => field.id));
+  if (leftIds.size !== leftDefinition.fields.length) return false;
+  for (const field of leftDefinition.fields) {
+    const other = rightFields.get(field.id);
+    if (
+      !other ||
+      field.label !== other.label ||
+      field.period !== other.period ||
+      field.weightPercent !== other.weightPercent
+    )
+      return false;
+  }
+
+  const leftValues = Object.entries(left.values);
+  return (
+    leftValues.length === Object.keys(right.values).length &&
+    leftValues.every(
+      ([id, score]) =>
+        Object.hasOwn(right.values, id) && right.values[id] === score,
+    )
+  );
+}
+
 export interface StudyPeriodResult {
   score: number | null;
   earned: number;
@@ -45,54 +91,94 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 function isPercent(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100;
+  return (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    value >= 0 &&
+    value <= 100
+  );
 }
 
 export function validateStudyCalculatorDefinition(
   value: unknown,
 ): value is StudyCalculatorDefinition {
-  if (!isObject(value) || value.version !== 1 ||
-    typeof value.sourceName !== "string" || !value.sourceName.trim() || value.sourceName.length > 200 ||
-    !isPercent(value.attestationThreshold) || !Array.isArray(value.fields) ||
-    value.fields.length < 3 || value.fields.length > 100) return false;
+  if (
+    !isObject(value) ||
+    value.version !== 1 ||
+    typeof value.sourceName !== "string" ||
+    !value.sourceName.trim() ||
+    value.sourceName.length > 200 ||
+    !isPercent(value.attestationThreshold) ||
+    !Array.isArray(value.fields) ||
+    value.fields.length < 3 ||
+    value.fields.length > 100
+  )
+    return false;
 
   const ids = new Set<string>();
   const weights = { att1: 0, att2: 0, exam: 0 };
   let examCount = 0;
   for (const field of value.fields) {
-    if (!isObject(field) || typeof field.id !== "string" ||
+    if (
+      !isObject(field) ||
+      typeof field.id !== "string" ||
       !/^[a-z0-9][a-z0-9_-]{0,79}$/.test(field.id) ||
-      ["constructor", "prototype"].includes(field.id) || ids.has(field.id) ||
-      typeof field.label !== "string" || !field.label.trim() || field.label.length > 300 ||
-      (field.period !== "att1" && field.period !== "att2" && field.period !== "exam") ||
-      !isPercent(field.weightPercent) || field.weightPercent === 0) return false;
+      ["constructor", "prototype"].includes(field.id) ||
+      ids.has(field.id) ||
+      typeof field.label !== "string" ||
+      !field.label.trim() ||
+      field.label.length > 300 ||
+      (field.period !== "att1" &&
+        field.period !== "att2" &&
+        field.period !== "exam") ||
+      !isPercent(field.weightPercent) ||
+      field.weightPercent === 0
+    )
+      return false;
     ids.add(field.id);
     weights[field.period] += field.weightPercent;
     if (field.period === "exam") examCount += 1;
   }
-  return examCount === 1 && Object.values(weights).every((weight) => Math.abs(weight - 100) < 1e-7);
+  return (
+    examCount === 1 &&
+    Object.values(weights).every((weight) => Math.abs(weight - 100) < 1e-7)
+  );
 }
 
 export function validateStudyCalculatorValues(
   value: unknown,
   definition: StudyCalculatorDefinition,
 ): value is Record<string, number | null> {
-  if (!isObject(value) || !validateStudyCalculatorDefinition(definition)) return false;
+  if (!isObject(value) || !validateStudyCalculatorDefinition(definition))
+    return false;
   const ids = new Set(definition.fields.map((field) => field.id));
-  return Object.entries(value).every(([id, score]) => ids.has(id) && (score === null || isPercent(score)));
+  return Object.entries(value).every(
+    ([id, score]) => ids.has(id) && (score === null || isPercent(score)),
+  );
 }
 
 /** A manual what-if scenario; this never changes or infers an LMS grade. */
-export function calculateStudyScenario(state: StudyCalculatorState): StudyScenarioResult {
-  if (!state || !validateStudyCalculatorDefinition(state.definition) ||
-    !validateStudyCalculatorValues(state.values, state.definition) || !isPercent(state.target)) {
+export function calculateStudyScenario(
+  state: StudyCalculatorState,
+): StudyScenarioResult {
+  if (
+    !state ||
+    !validateStudyCalculatorDefinition(state.definition) ||
+    !validateStudyCalculatorValues(state.values, state.definition) ||
+    !isPercent(state.target)
+  ) {
     throw new RangeError("Invalid study calculator state");
   }
 
   const { fields, attestationThreshold } = state.definition;
   const scoreFor = (field: StudyCalculatorField): number | null =>
-    Object.hasOwn(state.values, field.id) ? state.values[field.id] ?? null : null;
-  const asAssessment = (field: StudyCalculatorField, factor = 1): GradeAssessmentInput => {
+    Object.hasOwn(state.values, field.id)
+      ? (state.values[field.id] ?? null)
+      : null;
+  const asAssessment = (
+    field: StudyCalculatorField,
+    factor = 1,
+  ): GradeAssessmentInput => {
     const score = scoreFor(field);
     return {
       weightPercent: field.weightPercent * factor,
@@ -103,7 +189,9 @@ export function calculateStudyScenario(state: StudyCalculatorState): StudyScenar
   };
   const period = (name: "att1" | "att2"): StudyPeriodResult => {
     const items = fields.filter((field) => field.period === name);
-    const calculation = calculateGrade(items.map((field) => asAssessment(field)));
+    const calculation = calculateGrade(
+      items.map((field) => asAssessment(field)),
+    );
     const complete = items.every((field) => scoreFor(field) !== null);
     return {
       score: complete ? calculation.earnedWeightedPercent : null,
@@ -115,31 +203,51 @@ export function calculateStudyScenario(state: StudyCalculatorState): StudyScenar
   const att1 = period("att1");
   const att2 = period("att2");
   const examScore = scoreFor(fields.find((field) => field.period === "exam")!);
-  const final = calculateGrade(fields.map((field) => asAssessment(field, field.period === "exam" ? 0.4 : 0.3)));
+  const final = calculateGrade(
+    fields.map((field) =>
+      asAssessment(field, field.period === "exam" ? 0.4 : 0.3),
+    ),
+  );
   // Normalize floating point artifacts without rounding the user's inputs.
   const stable = (score: number): number => Math.round(score * 1e10) / 1e10;
   const minimumFinal = stable(final.earnedWeightedPercent);
-  const maximumFinal = stable(final.earnedWeightedPercent + final.remainingWeightPercent);
+  const maximumFinal = stable(
+    final.earnedWeightedPercent + final.remainingWeightPercent,
+  );
   const attestationsComplete = att1.score !== null && att2.score !== null;
-  const belowThreshold = (att1.score !== null && att1.score < attestationThreshold) ||
+  const belowThreshold =
+    (att1.score !== null && att1.score < attestationThreshold) ||
     (att2.score !== null && att2.score < attestationThreshold)
-    ? true : attestationsComplete ? false : null;
+      ? true
+      : attestationsComplete
+        ? false
+        : null;
 
   return {
     att1,
     att2,
     examScore,
-    finalScore: attestationsComplete && examScore !== null ? minimumFinal : null,
+    finalScore:
+      attestationsComplete && examScore !== null ? minimumFinal : null,
     minimumFinal,
     maximumFinal,
     requiredExamScore: attestationsComplete
-      ? stable(Math.max(0, (state.target - 0.3 * att1.score! - 0.3 * att2.score!) / 0.4))
+      ? stable(
+          Math.max(
+            0,
+            (state.target - 0.3 * att1.score! - 0.3 * att2.score!) / 0.4,
+          ),
+        )
       : null,
     belowThreshold,
-    targetStatus: minimumFinal >= state.target ? "achieved" : maximumFinal < state.target ? "impossible" : "possible",
+    targetStatus:
+      minimumFinal >= state.target
+        ? "achieved"
+        : maximumFinal < state.target
+          ? "impossible"
+          : "possible",
   };
 }
-
 
 /** Weighted what-if forecast. Unknown work is never interpreted as a zero. */
 export interface StudyTargetPlan {
@@ -160,30 +268,51 @@ export interface StudyTargetPlan {
   attestationWarnings: string[];
 }
 
-export function calculateStudyTargetPlan(state: StudyCalculatorState): StudyTargetPlan {
+export function calculateStudyTargetPlan(
+  state: StudyCalculatorState,
+): StudyTargetPlan {
   // Validate through the same centralized engine as the original calculator.
   const existing = calculateStudyScenario(state);
   const toFinalWeight = (field: StudyCalculatorField) =>
     field.weightPercent * (field.period === "exam" ? 0.4 : 0.3);
-  const missing = state.definition.fields.filter((field) => state.values[field.id] == null);
-  const remainingFinalWeight = missing.reduce((sum, field) => sum + toFinalWeight(field), 0);
+  const missing = state.definition.fields.filter(
+    (field) => state.values[field.id] == null,
+  );
+  const remainingFinalWeight = missing.reduce(
+    (sum, field) => sum + toFinalWeight(field),
+    0,
+  );
   const earnedFinalPoints = existing.minimumFinal;
-  const needed = remainingFinalWeight > 0
-    ? (state.target - earnedFinalPoints) * 100 / remainingFinalWeight
-    : null;
-  const requiredAverage = needed === null
-    ? null
-    : Math.round(Math.max(0, needed) * 10) / 10;
+  const needed =
+    remainingFinalWeight > 0
+      ? ((state.target - earnedFinalPoints) * 100) / remainingFinalWeight
+      : null;
+  // A displayed minimum must still reach the target. The tolerance removes
+  // floating point noise at exact tenths without rounding requirements down.
+  const minimumTenth = (score: number): number =>
+    Math.max(0, Math.ceil(Math.max(0, score) * 10 - 1e-9) / 10);
+  const requiredAverage = needed === null ? null : minimumTenth(needed);
   const maximumFinal = existing.maximumFinal;
   const targetPossible = maximumFinal + 1e-8 >= state.target;
   const attestationWarnings: string[] = [];
   for (const period of ["att1", "att2"] as const) {
-    const fields = state.definition.fields.filter((field) => field.period === period);
-    const earned = fields.reduce((sum, field) => sum + (state.values[field.id] ?? 0) * field.weightPercent / 100, 0);
-    const max = earned + fields.filter((field) => state.values[field.id] == null)
-      .reduce((sum, field) => sum + field.weightPercent, 0);
+    const fields = state.definition.fields.filter(
+      (field) => field.period === period,
+    );
+    const earned = fields.reduce(
+      (sum, field) =>
+        sum + ((state.values[field.id] ?? 0) * field.weightPercent) / 100,
+      0,
+    );
+    const max =
+      earned +
+      fields
+        .filter((field) => state.values[field.id] == null)
+        .reduce((sum, field) => sum + field.weightPercent, 0);
     if (max + 1e-8 < state.definition.attestationThreshold) {
-      attestationWarnings.push(`${period === "att1" ? "Первая" : "Вторая"} аттестация: максимум ${Math.round(max * 10) / 10}, ниже порога ${state.definition.attestationThreshold}.`);
+      attestationWarnings.push(
+        `${period === "att1" ? "Первая" : "Вторая"} аттестация: максимум ${Math.round(max * 10) / 10}, ниже порога ${state.definition.attestationThreshold}.`,
+      );
     }
   }
   return {
@@ -197,13 +326,18 @@ export function calculateStudyTargetPlan(state: StudyCalculatorState): StudyTarg
     missing: missing.map((field) => {
       const weightInFinal = toFinalWeight(field);
       const otherWeight = remainingFinalWeight - weightInFinal;
-      const necessary = (state.target - earnedFinalPoints - otherWeight * state.target / 100) * 100 / weightInFinal;
+      const necessary =
+        ((state.target -
+          earnedFinalPoints -
+          (otherWeight * state.target) / 100) *
+          100) /
+        weightInFinal;
       return {
         id: field.id,
         label: field.label,
         period: field.period,
         weightInFinal,
-        requiredIfOthersAtTarget: Math.round(Math.max(0, necessary) * 10) / 10,
+        requiredIfOthersAtTarget: minimumTenth(necessary),
       };
     }),
     attestationWarnings,

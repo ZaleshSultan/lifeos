@@ -1,5 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { StudyCalculatorState } from "../../../../packages/core/src/study.js";
+import {
+  studyCalculatorStatesMatch,
+  type StudyCalculatorState,
+} from "../../../../packages/core/src/study.js";
 import { telegram } from "../telegram";
 import { request } from "./client";
 import type { AcademicRecord } from "./types";
@@ -41,6 +44,14 @@ export interface StudyWorkspace {
 }
 
 export const studyQueryKey = ["study"] as const;
+
+export interface ConfigureStudyCalculatorInput {
+  courseId: string;
+  definition: StudyCalculatorState["definition"];
+  target?: number;
+  values?: StudyCalculatorState["values"];
+  expectedState?: StudyCalculatorState | null;
+}
 
 export function useStudyQuery() {
   return useQuery({
@@ -96,36 +107,49 @@ export function useConfigureStudyCalculatorMutation() {
       courseId,
       definition,
       target,
-    }: {
-      courseId: string;
-      definition: StudyCalculatorState["definition"];
-      target?: number;
-    }) =>
+      values,
+      expectedState,
+    }: ConfigureStudyCalculatorInput) =>
       request<StudyCalculatorState>(
         `/api/tma/study/courses/${encodeURIComponent(courseId)}/syllabus`,
         {
           method: "PUT",
-          body: JSON.stringify({ definition, target }),
+          body: JSON.stringify({ definition, target, values, expectedState }),
         },
       ),
     async onMutate() {
       await queryClient.cancelQueries({ queryKey: studyQueryKey });
     },
-    async onSuccess(state, { courseId }) {
+    async onSuccess(state, { courseId, expectedState }) {
       await queryClient.cancelQueries({ queryKey: studyQueryKey });
+      let newerState = false;
       queryClient.setQueryData<StudyWorkspace>(studyQueryKey, (current) =>
         current
           ? {
               ...current,
-              courses: current.courses.map((course) =>
-                course.id === courseId
-                  ? { ...course, calculator: state }
-                  : course,
-              ),
+              courses: current.courses.map((course) => {
+                if (course.id !== courseId) return course;
+                // An automatic response may arrive after a newer refresh or
+                // custom edit. Preserve that state until the next server read.
+                if (
+                  expectedState !== undefined &&
+                  !studyCalculatorStatesMatch(
+                    course.calculator,
+                    expectedState,
+                  ) &&
+                  !studyCalculatorStatesMatch(course.calculator, state)
+                ) {
+                  newerState = true;
+                  return course;
+                }
+                return { ...course, calculator: state };
+              }),
             }
           : current,
       );
-      telegram.hapticImpact("light");
+      if (newerState)
+        await queryClient.invalidateQueries({ queryKey: studyQueryKey });
+      if (expectedState === undefined) telegram.hapticImpact("light");
     },
   });
 }
