@@ -1,3 +1,4 @@
+import type { ScholarshipConfig } from "../../core/src/scholarship.js";
 import { createHash } from "node:crypto";
 import { SupabaseAssistantStore, type AssistantStore } from "./assistant-store.js";
 import {
@@ -80,7 +81,7 @@ import {
   type PlanningSnapshotRange,
 } from "./planning-snapshot.js";
 import type { StudyCalculatorState } from "../../core/src/study.js";
-import { configureStudyCalculator, loadStudyWorkspaceCourses, saveStudyCalculator, type StudyWorkspaceCourse } from "./study-workspace.js";
+import { configureStudyCalculator, loadStudyWorkspaceCourses, saveScholarshipPlan, saveStudyCalculator, type StudyWorkspaceCourse } from "./study-workspace.js";
 import type {
   AcademicTermStatus,
   AssessmentItemStatus,
@@ -1545,6 +1546,7 @@ export interface LifeOSStore extends LmsSessionStore {
   getTmaSourcesSummary(userId: string): Promise<TmaSourcesSummary>;
   getTmaAcademicSummary(userId: string): Promise<TmaAcademicSummary>;
   getTmaStudySummary(userId: string, timezone: string): Promise<TmaStudySummary>;
+  saveScholarshipPlan?(userId: string, courseId: string, input: unknown): Promise<ScholarshipConfig>;
   saveStudyCalculator(userId: string, courseId: string, input: unknown): Promise<StudyCalculatorState>;
   configureStudyCalculator(userId: string, courseId: string, input: unknown): Promise<StudyCalculatorState>;
   upsertExternalSource(
@@ -5478,6 +5480,10 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       this.listAcademicRecords(userId),
     ]);
     return { timezone, courses, records };
+  }
+
+  async saveScholarshipPlan(userId: string, courseId: string, input: unknown): Promise<ScholarshipConfig> {
+    return saveScholarshipPlan(this.client, userId, courseId, input);
   }
 
   async saveStudyCalculator(userId: string, courseId: string, input: unknown): Promise<StudyCalculatorState> {

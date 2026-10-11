@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { ScholarshipPlannerScreen } from "./ScholarshipPlannerScreen";
 import {
   ArrowRight,
   BookOpen,
@@ -123,9 +125,9 @@ function CourseForecast({
             />
           </div>
           <p className="mt-2 text-xs leading-relaxed text-zinc-400">
-            Гарантированно набрано {studyScoreLabel(plan.earnedFinalPoints)} из
+            По сохранённым значениям набрано {studyScoreLabel(plan.earnedFinalPoints)} из
             100; максимально возможно {studyScoreLabel(plan.maximumFinal)}.
-            Неизвестные оценки остаются неизвестными.
+            Ручные значения могут быть гипотетическими. Подтверждённый диапазон Moodle — во вкладке «Стипендия». Неизвестные оценки остаются неизвестными.
           </p>
           {!plan.targetPossible ? (
             <p className="mt-2 text-xs font-semibold text-amber-200">
@@ -226,7 +228,7 @@ function CourseForecast({
   );
 }
 
-export function StudyDashboardScreen({
+export function AcademicDashboardScreen({
   onOpenCalculator,
   onOpenStudy,
   onOpenLms,
@@ -475,4 +477,12 @@ export function StudyDashboardScreen({
       </button>
     </div>
   );
+}
+
+export function StudyDashboardScreen(props: Props) {
+  const [overview,setOverview]=useState(false);
+  return <div className="space-y-4"><div className="grid grid-cols-2 gap-2" role="group" aria-label="Учебные дашборды">
+    <button type="button" className="min-h-11 rounded-xl border border-white/15 px-3 text-sm text-cyan-200" aria-pressed={!overview} onClick={()=>setOverview(false)}>Стипендия</button>
+    <button type="button" className="min-h-11 rounded-xl border border-white/15 px-3 text-sm text-zinc-300" aria-pressed={overview} onClick={()=>setOverview(true)}>Обзор учёбы</button>
+    </div>{overview?<AcademicDashboardScreen {...props}/>:<ScholarshipPlannerScreen {...props}/>}</div>;
 }

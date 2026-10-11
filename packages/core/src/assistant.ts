@@ -7,6 +7,7 @@ export const ASSISTANT_TOOL_NAMES = [
   "study.grades",
   "study.changes",
   "study.forecast",
+  "study.scholarship",
   "productivity.tasks",
   "productivity.reminders",
   "productivity.calendar",
@@ -193,6 +194,8 @@ export function parseAssistantToolCall(value: unknown): AssistantToolCall {
     allowed = ["course", "target"];
     required = ["course"];
   }
+  if (tool === "study.scholarship")
+    allowed = ["course", "target", "assignmentScore"];
   if (tool === "productivity.calendar") allowed = ["date", "limit"];
   if (tool === "productivity.availability") {
     allowed = ["date", "startTime", "endTime", "durationMinutes"];
@@ -229,6 +232,11 @@ export function parseAssistantToolCall(value: unknown): AssistantToolCall {
     throw new Error("Invalid course");
   if (Object.hasOwn(args, "target") && !numberIn(args.target, 0, 100))
     throw new Error("Invalid target");
+  if (
+    Object.hasOwn(args, "assignmentScore") &&
+    !numberIn(args.assignmentScore, 0, 100)
+  )
+    throw new Error("Invalid assignment score");
   if (Object.hasOwn(args, "date") && !isAssistantDate(args.date))
     throw new Error("Invalid date");
   for (const name of ["startTime", "endTime"])

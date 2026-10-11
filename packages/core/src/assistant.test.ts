@@ -342,3 +342,40 @@ describe("assistant strict schemas and memory", () => {
       expect(() => validateAssistantToolOutput(bad)).toThrow();
   });
 });
+
+describe("scholarship assistant requests", () => {
+  it.each([
+    "Как мне сохранить стипендию?",
+    "По какому предмету у меня самый большой риск?",
+    "На какую работу стоит потратить больше всего времени?",
+  ])("routes %s to the bounded read tool", (text) => {
+    expect(routeAssistantIntent(text, context)).toEqual({
+      tool: "study.scholarship",
+      args: {},
+    });
+  });
+  it("understands DBMS and assignment-only what-if without authorizing writes", () => {
+    expect(
+      routeAssistantIntent("Сколько нужно получить по DBMS?", context),
+    ).toEqual({ tool: "study.scholarship", args: { course: "DBMS" } });
+    expect(
+      routeAssistantIntent(
+        "Что если все оставшиеся асики будут на 70?",
+        context,
+      ),
+    ).toEqual({ tool: "study.scholarship", args: { assignmentScore: 70 } });
+    expect(assistantToolPermission("study.scholarship")).toBe("READ");
+    expect(() =>
+      parseAssistantToolCall({
+        tool: "study.scholarship",
+        args: { assignmentScore: 101 },
+      }),
+    ).toThrow();
+    expect(() =>
+      parseAssistantToolCall({
+        tool: "study.scholarship",
+        args: { sql: "select" },
+      }),
+    ).toThrow();
+  });
+});

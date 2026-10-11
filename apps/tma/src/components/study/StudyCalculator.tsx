@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { AlertTriangle, Calculator, Save } from "lucide-react";
 import {
   calculateStudyScenario,
@@ -327,6 +328,28 @@ export function StudyCalculator({
   const definitionChanged =
     JSON.stringify(draft.definition) !==
     JSON.stringify(course.calculator?.definition);
+  const lastImport = useRef("");
+  const importSignature = JSON.stringify([
+    course.id,
+    records.map((row) => [row.id, row.updatedAt, row.score, row.maxScore]),
+  ]);
+  useEffect(() => {
+    if (saving || definitionChanged || lastImport.current === importSignature)
+      return;
+    lastImport.current = importSignature;
+    if (importPreview.matches > 0)
+      onChange({
+        ...draft,
+        inputs: { ...draft.inputs, ...importPreview.updates },
+      });
+  }, [
+    importSignature,
+    saving,
+    definitionChanged,
+    draft,
+    onChange,
+    importPreview,
+  ]);
   return (
     <form
       className="space-y-4"
@@ -357,9 +380,11 @@ export function StudyCalculator({
             Импорт оценок из Moodle
           </p>
           <p className="mt-1 text-xs leading-relaxed text-zinc-400">
-            LifeOS подставит только однозначно найденные оценки отдельных работ,
-            не перезаписывая ручные значения и не изменяя Moodle. Квизы-агрегаты
-            и неоднозначные Midterm не угадываются.
+            Пустые поля автоматически получают однозначно найденные оценки
+            Moodle, не перезаписывая ручные значения и не изменяя Moodle.
+            Квизы-агрегаты и неоднозначные Midterm не угадываются. Для DBMS:
+            Lecture Async 1/2 → Quiz соответствующей аттестации, Quiz Midterm →
+            Midterm; Register используется только для сверки.
           </p>
           <button
             type="button"

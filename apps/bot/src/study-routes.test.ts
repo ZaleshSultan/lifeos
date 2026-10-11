@@ -48,6 +48,10 @@ async function fixture() {
   const saveStudyCalculator = vi.fn(
     async (_user: string, _id: string, input: unknown) => input,
   );
+  const saveScholarshipPlan = vi.fn(
+    async (_user: string, _id: string, input: unknown) =>
+      (input as { config: unknown }).config,
+  );
   const store = {
     resolveTelegramUser: async () => ({
       userId: "owner",
@@ -58,6 +62,7 @@ async function fixture() {
     }),
     getTmaStudySummary,
     saveStudyCalculator,
+    saveScholarshipPlan,
   } as unknown as LifeOSStore;
   const server = createBotServer({
     store,
@@ -69,6 +74,7 @@ async function fixture() {
     base: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
     getTmaStudySummary,
     saveStudyCalculator,
+    saveScholarshipPlan,
   };
 }
 
@@ -129,4 +135,49 @@ describe("study routes", () => {
       error: "study_course_not_found",
     });
   });
+});
+
+it("protects scholarship settings with Telegram auth, owner scoping and conflict responses", async () => {
+  const f = await fixture();
+  const id = "11111111-1111-4111-8111-111111111111";
+  const path = `${f.base}/api/tma/study/courses/${id}/scholarship`;
+  expect(
+    (
+      await fetch(path, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      })
+    ).status,
+  ).toBe(401);
+  expect(f.saveScholarshipPlan).not.toHaveBeenCalled();
+  const options = {
+    method: "PUT",
+    headers: authHeaders(),
+    body: JSON.stringify({
+      config: { version: 1 },
+      expectedConfig: null,
+      userId: "other",
+    }),
+  };
+  expect(
+    (await fetch(`${f.base}/api/tma/study/courses/bad/scholarship`, options))
+      .status,
+  ).toBe(400);
+  expect((await fetch(path, options)).status).toBe(200);
+  expect(f.saveScholarshipPlan).toHaveBeenCalledWith("owner", id, {
+    config: { version: 1 },
+    expectedConfig: null,
+    userId: "other",
+  });
+  for (const [code, status] of [
+    ["study_course_not_found", 404],
+    ["study_calculator_conflict", 409],
+    ["invalid_scholarship_plan", 400],
+  ] as const) {
+    f.saveScholarshipPlan.mockRejectedValueOnce(new StudyWorkspaceError(code));
+    const response = await fetch(path, options);
+    expect(response.status).toBe(status);
+    await expect(response.json()).resolves.toEqual({ error: code });
+  }
 });

@@ -1,5 +1,6 @@
 import { DateTime } from "luxon";
 import {
+  calculateScholarshipDashboard,
   calculateStudyScenario,
   calculateStudyTargetPlan,
   matchSyllabusProfile,
@@ -172,6 +173,85 @@ export async function executeStudyTool(
             .join("\n")}`
         : `No classes are recorded for ${day.toISODate()}.`,
       "Saved study timetable",
+    );
+  }
+  if (call.tool === "study.scholarship") {
+    const workspace = await store.getTmaStudySummary(
+      user.userId,
+      user.timezone,
+    );
+    const courses =
+      typeof call.args.course === "string"
+        ? [chooseCourse(workspace.courses, call.args.course)]
+        : workspace.courses;
+    let work: Awaited<ReturnType<LifeOSStore["getLmsWork"]>> | null = null;
+    try {
+      work = await store.getLmsWork(user.userId, user.timezone);
+    } catch {
+      /* Grades remain useful without deadlines. */
+    }
+    const dashboard = calculateScholarshipDashboard(
+      courses,
+      workspace.records,
+      {
+        target:
+          typeof call.args.target === "number" ? call.args.target : undefined,
+        assignmentScore:
+          typeof call.args.assignmentScore === "number"
+            ? call.args.assignmentScore
+            : undefined,
+        work: work?.items ?? [],
+        now: now.toISOString(),
+      },
+    );
+    const number = (value: number | null) =>
+      value === null
+        ? "неизвестно"
+        : String(Math.round((value + Number.EPSILON) * 100) / 100);
+    const risk = {
+      unknown: "недостаточно данных",
+      impossible: "порог математически недостижим",
+      at_risk: "есть риск",
+      narrow: "малый запас до 75",
+      safe: "запас 75+",
+    };
+    const lines = [
+      "Стипендия · план по сохранённым оценкам Moodle",
+      "Числа не гарантируют выплату: проверьте допуск и остальные правила университета.",
+      `Предметов: ${dashboard.relevantCount}; риск: ${dashboard.atRiskCount}; недостижимый порог: ${dashboard.impossibleCount}; недостаточно данных: ${dashboard.unknownCount}.`,
+    ];
+    if (typeof call.args.assignmentScore === "number")
+      lines.push(
+        `Допущение: все оставшиеся Assignments на ${call.args.assignmentScore}; прежние прогнозы этих заданий заменены, затронутые итоги аттестаций пересчитаны по компонентам. Подтверждённые оценки сохранены.`,
+      );
+    for (const plan of dashboard.courses.slice(0, 10)) {
+      const realistic = plan.scenarios?.realistic;
+      lines.push(
+        `${visible(plan.title)}: ${risk[plan.risk]}${plan.included ? "" : " (исключён из общей проверки)"}. Цель ${number(plan.target)}, порог ${number(plan.threshold)}.`,
+        `Диапазон ${number(plan.minimum)}–${number(plan.maximum)}; взвешенное среднее на остаток ${number(plan.requiredAverage)}.`,
+        `Сценарии: пессимистичный ${number(plan.scenarios?.pessimistic.finalScore ?? null)}, реалистичный ${number(realistic?.finalScore ?? null)}, оптимистичный ${number(plan.scenarios?.optimistic.finalScore ?? null)}.`,
+        `Нужный Final Exam: ${number(realistic?.requiredExam ?? null)}; при ATT1 = ${number(realistic?.att1 ?? null)}, ATT2 = ${number(realistic?.att2 ?? null)}. Гипотетических оценок: ${realistic?.assumedFields ?? 0}.`,
+      );
+      if (typeof call.args.course === "string")
+        for (const action of plan.actions.slice(0, 20))
+          lines.push(
+            `${visible(action.label, 100)}: нужно ${number(action.requiredUnderScenario)} при остальных оценках реалистичного сценария; +10 → +${number(action.gainPer10)} к итогу.`,
+          );
+      lines.push(...plan.warnings.map((warning) => visible(warning, 400)));
+    }
+    for (const action of dashboard.priorities.slice(0, 3))
+      lines.push(
+        `Приоритет: ${visible(action.courseTitle, 100)} · ${visible(action.label, 100)}; +10 → +${number(action.gainPer10)} к итогу${action.dueAt ? `; срок ${clock(action.dueAt, user.timezone)}` : "; срок неизвестен"}.`,
+      );
+    if (!courses.length)
+      lines.push("Нет активных предметов. Добавьте курсы в разделе Учёба.");
+    lines.push(
+      "Неизвестные оценки не считаются фактическими нулями. Нижняя граница предполагает 0 за остаток, верхняя — 100. Сценарии гипотетические; ориентиры каждой работы рассчитаны отдельно. Числа не гарантируют выплату: проверьте допуск и остальные правила университета.",
+    );
+    return response(
+      lines.join("\n"),
+      "Сохранённые оценки Moodle и настройки стипендии",
+      work?.lastSyncSuccessAt ?? null,
     );
   }
   if (call.tool === "study.forecast") {

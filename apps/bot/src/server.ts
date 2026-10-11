@@ -2955,6 +2955,23 @@ async function handleRequest(
       return;
     }
 
+    const scholarshipMatch = requestUrl.pathname.match(/^\/api\/tma\/study\/courses\/([^/]+)\/scholarship$/);
+    if (request.method === "PUT" && scholarshipMatch) {
+      const courseId = scholarshipMatch[1];
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(courseId)) {
+        writeJson(response, 400, { error: "invalid_study_course_id" }); return;
+      }
+      if (!store.saveScholarshipPlan) { writeJson(response, 503, { error: "scholarship_unavailable" }); return; }
+      const body = await readJsonBody(request);
+      try {
+        writeJson(response, 200, tmaData(await store.saveScholarshipPlan(auth.user.userId, courseId, body)));
+      } catch (error) {
+        if (!(error instanceof StudyWorkspaceError)) throw error;
+        writeJson(response, error.code === "study_course_not_found" ? 404 : error.code === "study_calculator_conflict" ? 409 : 400, { error: error.code });
+      }
+      return;
+    }
+
     const studySyllabusMatch = requestUrl.pathname.match(/^\/api\/tma\/study\/courses\/([^/]+)\/syllabus$/);
     if (request.method === "PUT" && studySyllabusMatch) {
       const courseId = studySyllabusMatch[1];

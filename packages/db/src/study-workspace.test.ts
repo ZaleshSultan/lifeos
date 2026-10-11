@@ -1,9 +1,11 @@
+import { defaultScholarshipConfig } from "../../core/src/scholarship.js";
 import { createClient } from "@supabase/supabase-js";
 import { describe, expect, it } from "vitest";
 import {
   configureStudyCalculator,
   loadStudyWorkspaceCourses,
   saveStudyCalculator,
+  saveScholarshipPlan,
 } from "./study-workspace.js";
 import type { Database } from "./types.js";
 
@@ -437,5 +439,83 @@ describe("study workspace", () => {
         target: 70,
       }),
     ).rejects.toThrow("study_calculator_conflict");
+  });
+});
+
+describe("scholarship course metadata", () => {
+  it("saves and reloads three scenarios while preserving calculator and unrelated metadata", async () => {
+    const f = fixture();
+    const config = defaultScholarshipConfig(80);
+    config.scenarios.realistic.defaults.assignment = 70;
+    const original = structuredClone(f.courses[0].metadata);
+    await expect(
+      saveScholarshipPlan(f.client, "owner", courseId, {
+        config,
+        expectedConfig: null,
+      }),
+    ).resolves.toEqual(config);
+    expect(f.courses[0].metadata).toEqual({
+      ...(original as object),
+      scholarship_planner_v1: config,
+    });
+    const courses = await loadStudyWorkspaceCourses(f.client, "owner");
+    expect(courses[0].scholarship).toEqual(config);
+    const patch = f.requests.find((r) => r.method === "PATCH")!;
+    expect(patch.url.searchParams.get("user_id")).toBe("eq.owner");
+    expect(patch.url.searchParams.get("updated_at")).toBe(
+      "eq.2026-09-24T00:00:00Z",
+    );
+    await saveStudyCalculator(f.client, "owner", courseId, {
+      values: { att1: 72.1 },
+      target: 70,
+    });
+    expect(
+      (f.courses[0].metadata as Record<string, unknown>).scholarship_planner_v1,
+    ).toEqual(config);
+  });
+  it("blocks other owners, completed courses, stale settings and concurrent metadata writes", async () => {
+    const config = defaultScholarshipConfig();
+    const input = { config, expectedConfig: null };
+    const f = fixture();
+    await expect(
+      saveScholarshipPlan(f.client, "other", courseId, input),
+    ).rejects.toThrow("study_course_not_found");
+    await expect(
+      saveScholarshipPlan(f.client, "owner", String(f.courses[2].id), input),
+    ).rejects.toThrow("study_course_not_found");
+    await saveScholarshipPlan(f.client, "owner", courseId, input);
+    await expect(
+      saveScholarshipPlan(f.client, "owner", courseId, input),
+    ).rejects.toThrow("study_calculator_conflict");
+    f.setConflict();
+    await expect(
+      saveScholarshipPlan(f.client, "owner", courseId, {
+        config,
+        expectedConfig: config,
+      }),
+    ).rejects.toThrow("study_calculator_conflict");
+  });
+  it("rejects invalid configurations and missing comparison state before writing", async () => {
+    const f = fixture();
+    for (const input of [
+      { config: defaultScholarshipConfig() },
+      {
+        config: { ...defaultScholarshipConfig(), threshold: 101 },
+        expectedConfig: null,
+      },
+      { config: defaultScholarshipConfig(), expectedConfig: {} },
+    ])
+      await expect(
+        saveScholarshipPlan(f.client, "owner", courseId, input),
+      ).rejects.toThrow("invalid_scholarship_plan");
+    expect(f.requests.some((r) => r.method === "PATCH")).toBe(false);
+  });
+  it("ignores malformed saved planning settings without losing a valid calculator", async () => {
+    const f = fixture();
+    (f.courses[0].metadata as Record<string, unknown>).scholarship_planner_v1 =
+      { target: Infinity };
+    const [c] = await loadStudyWorkspaceCourses(f.client, "owner");
+    expect(c.scholarship).toBeNull();
+    expect(c.calculator).not.toBeNull();
   });
 });

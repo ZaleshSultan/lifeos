@@ -114,7 +114,7 @@ export function studyDateLabel(date: string): string {
 export function studyScoreLabel(score: number | null): string {
   return score === null
     ? "—"
-    : new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 }).format(
+    : new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(
         score,
       );
 }

@@ -269,6 +269,25 @@ export function routeAssistantIntent(
   );
   if (grades)
     return call("study.grades", grades[1] ? { course: grades[1] } : {});
+  if (
+    /^(?:стипендия|как\s+(?:мне\s+)?сохранить\s+стипендию|по\s+какому\s+предмету\s+(?:у\s+меня\s+)?самый\s+большой\s+риск|на\s+какую\s+работу\s+стоит\s+потратить\s+больше\s+всего\s+времени)$/iu.test(
+      query,
+    )
+  )
+    return call("study.scholarship");
+  const scholarshipCourse = query.match(
+    /^сколько\s+(?:мне\s+)?нужно\s+(?:получить|набрать)\s+по\s+([^?]+)$/iu,
+  );
+  if (scholarshipCourse && !/чтобы|для|цель/iu.test(scholarshipCourse[1]))
+    return call("study.scholarship", { course: scholarshipCourse[1] });
+  const assignments = query.match(
+    /^что\s+если\s+все\s+оставшиеся\s+(?:асики|асайменты|задания|assignments)\s+(?:будут\s+)?(?:на\s+)?(\d{1,3}(?:[.,]\d+)?)(?:\s+по\s+(.+))?$/iu,
+  );
+  if (assignments)
+    return call("study.scholarship", {
+      assignmentScore: Number(assignments[1].replace(",", ".")),
+      ...(assignments[2] ? { course: assignments[2] } : {}),
+    });
   let forecast =
     query.match(
       /^what\s+do\s+i\s+need\s+to\s+score\s+in\s+(.+?)\s+to\s+(?:finish\s+with|get|achieve)\s+(\d{1,3}(?:\.\d+)?)$/iu,

@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  defaultScholarshipConfig,
+  builtinStudyCalculatorState,
   calculateStudyScenario,
   calculateStudyTargetPlan,
   type StudyCalculatorState,
@@ -290,5 +292,73 @@ describe("assistant academic adapters", () => {
       execute("classes.today", { userId: "other-user" }),
     ).rejects.toThrow();
     expect(store.getTmaStudySummary).not.toHaveBeenCalled();
+  });
+});
+
+describe("scholarship assistant summaries", () => {
+  it("uses saved Moodle grades, the DBMS rubric and hypothetical ATT2 for the exam requirement", async () => {
+    const c = course({
+      code: "DMS52-EN",
+      title: "Database Management Systems",
+      calculator: builtinStudyCalculatorState("DMS52-EN"),
+      scholarship: defaultScholarshipConfig(),
+    });
+    c.scholarship!.scenarios.realistic.periodTotals.att2 = 80;
+    const f = setup([c]);
+    const records = [
+      {
+        id: "att1",
+        courseTitle: c.title,
+        title: "ATT1",
+        score: 72.1,
+        maxScore: 100,
+        updatedAt: "2026-10-11T00:00:00Z",
+      },
+    ];
+    f.store.getTmaStudySummary.mockResolvedValue({
+      timezone: user.timezone,
+      courses: [c],
+      records,
+    } as never);
+    const result = await f.execute("study.scholarship", { course: "DBMS" });
+    expect(result.text).toContain("Нужный Final Exam: 60.93");
+    expect(result.text).toContain("ATT2 = 80");
+    expect(result.text).toContain("не гарантируют выплату");
+    expect(result.text).not.toContain("internal-course");
+    expect(f.store.getTmaStudySummary).toHaveBeenCalledWith(
+      user.userId,
+      user.timezone,
+    );
+  });
+  it("applies an assignment-only what-if without writing settings or grades", async () => {
+    const c = course({
+      code: "OS52-EN",
+      title: "Operating Systems",
+      calculator: builtinStudyCalculatorState("OS52-EN"),
+    });
+    const f = setup([c]);
+    const before = structuredClone(c);
+    const result = await f.execute("study.scholarship", {
+      assignmentScore: 70,
+    });
+    expect(result.text).toContain("все оставшиеся Assignments на 70");
+    expect(result.text).toContain("Нужный Final Exam: 70");
+    expect(c).toEqual(before);
+  });
+  it("still answers when deadlines are unavailable and reports missing formulas", async () => {
+    const f = setup();
+    f.store.getLmsWork.mockRejectedValue(new Error("unavailable"));
+    const result = await f.execute("study.scholarship");
+    expect(result.text).toContain("Нет подтверждённой схемы оценивания");
+    expect(result.text).toContain("недостаточно данных");
+  });
+  it("requires an unambiguous course instead of reading unrelated subjects", async () => {
+    const f = setup([
+      course({ code: "DMS52-EN", title: "DBMS | A" }),
+      course({ code: "DMS52-EN", title: "DBMS | B" }),
+    ]);
+    await expect(
+      f.execute("study.scholarship", { course: "DBMS" }),
+    ).rejects.toThrow("Several courses");
   });
 });

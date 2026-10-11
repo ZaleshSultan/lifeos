@@ -159,6 +159,37 @@ describe("safe optional Moodle grade import", () => {
     updatedAt: "2026-10-10T00:00:00Z",
   });
 
+  it("imports the confirmed DBMS rubric into an empty calculator and preserves manual edits", () => {
+    const rows = [
+      grade("a1", "Assignment 1", 75),
+      grade("a2", "Assignment 2", 50),
+      grade("a3", "Assignment 3", 70),
+      {
+        ...grade("q1", "Lecture Async 1", 88),
+        rawJson: { itemtype: "category" },
+      },
+      grade("m", "Quiz Midterm", 81),
+      grade("total", "Calculated grade Register Midterm", 72.1),
+      { ...grade("q2", "Lecture Async 2", 0), score: null },
+    ];
+    const preview = previewMoodleGrades(course, draft, rows);
+    expect(preview.updates).toEqual({
+      assignment_1: "75",
+      assignment_2: "50",
+      assignment_3: "70",
+      quiz_1: "88",
+      midterm: "81",
+    });
+    expect(preview.updates.quiz_2).toBeUndefined();
+    const manual = {
+      ...draft,
+      inputs: { ...draft.inputs, quiz_1: "65", midterm: "60" },
+    };
+    const safe = previewMoodleGrades(course, manual, rows);
+    expect(safe.updates.quiz_1).toBeUndefined();
+    expect(safe.updates.midterm).toBeUndefined();
+  });
+
   it("accepts exact unique assignments but refuses ambiguous duplicates", () => {
     const preview = previewMoodleGrades(course, draft, [
       grade("a", "Assignment 1", 90),

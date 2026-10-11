@@ -119,6 +119,7 @@ export default function App() {
     <AppShell onScreenChange={setScreen} screen={screen}>
       {screen === "home" ? (
         <HomeScreen
+          onOpenScholarship={() => setScreen("dashboard")}
           onOpenWorkout={() => setScreen("workout")}
           onOpenStudy={() => setScreen("study")}
           onOpenAi={(date) => {

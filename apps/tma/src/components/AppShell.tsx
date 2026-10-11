@@ -30,7 +30,7 @@ type NavigationItem = { id: ScreenId; label: string; icon: LucideIcon };
 
 const primaryTabs: NavigationItem[] = [
   { id: "home", label: "Сегодня", icon: House },
-  { id: "dashboard", label: "Дашборд", icon: LayoutDashboard },
+  { id: "dashboard", label: "Стипендия", icon: LayoutDashboard },
   { id: "study", label: "Учёба", icon: GraduationCap },
   { id: "ai", label: "AI", icon: Sparkles },
 ];
@@ -47,7 +47,7 @@ const secondaryTabs: NavigationItem[] = [
 
 const screenNames: Partial<Record<ScreenId, string>> = {
   home: "Обзор дня",
-  dashboard: "Академический дашборд",
+  dashboard: "Стипендия",
   study: "Учебный центр",
   lms: "Подключение LMS",
   ai: "AI-помощник",

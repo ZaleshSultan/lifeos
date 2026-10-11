@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { StudyWorkspace, StudyWorkspaceCourse } from "../api/study";
 import type { AcademicRecord } from "../api/types";
 import { syllabusProfiles } from "../components/study/syllabus-profiles";
-import { StudyDashboardScreen } from "./StudyDashboardScreen";
+import { AcademicDashboardScreen as StudyDashboardScreen } from "./StudyDashboardScreen";
 
 const mocks = vi.hoisted(() => ({
   study: vi.fn(),
@@ -86,7 +86,7 @@ describe("Study dashboard syllabus forecasts", () => {
     expect(text).toContain("Цель 70");
     expect(text).toContain("Нужно дальше 70");
     expect(text).toContain(
-      "Гарантированно набрано 0 из 100; максимально возможно 100.",
+      "По сохранённым значениям набрано 0 из 100; максимально возможно 100.",
     );
     expect(html).not.toContain("Практики / лабораторные");
     expect(mocks.profiles).toHaveBeenCalledWith(
@@ -160,7 +160,7 @@ describe("Study dashboard syllabus forecasts", () => {
       }),
     ]);
     expect(text).toContain(
-      "Гарантированно набрано 6 из 100; максимально возможно 100.",
+      "По сохранённым значениям набрано 6 из 100; максимально возможно 100.",
     );
     expect(text).toContain("Нужно дальше 68,1");
     expect(text).toContain("Ориентиры по работам (10)");
@@ -190,7 +190,7 @@ describe("Study dashboard syllabus forecasts", () => {
     ]);
     expect(html).toContain("Пользовательская схема");
     expect(html).not.toContain("Силабус подтверждён");
-    expect(text).toContain("Гарантированно набрано 9 из 100");
+    expect(text).toContain("По сохранённым значениям набрано 9 из 100");
     expect(text).toContain("Цель 80");
   });
 
@@ -211,7 +211,7 @@ describe("Study dashboard syllabus forecasts", () => {
     ]);
     expect(html).toContain("Силабус подтверждён");
     expect(html).not.toContain("Пользовательская схема");
-    expect(text).toContain("Гарантированно набрано 6 из 100");
+    expect(text).toContain("По сохранённым значениям набрано 6 из 100");
   });
 
   it("clearly marks an impossible target with the actual maximum", () => {

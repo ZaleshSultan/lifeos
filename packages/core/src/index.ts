@@ -4,6 +4,8 @@ export * from "./finance-types.js";
 export * from "./focus.js";
 export * from "./grade-engine.js";
 export * from "./study.js";
+export * from "./study-evidence.js";
+export * from "./scholarship.js";
 export * from "./study-syllabi.js";
 export * from "./health.js";
 export * from "./health-ingest.js";

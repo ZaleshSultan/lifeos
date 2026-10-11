@@ -1,3 +1,4 @@
+import { type ScholarshipConfig } from "../../../../packages/core/src/scholarship.js";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   studyCalculatorStatesMatch,
@@ -35,6 +36,7 @@ export interface StudyWorkspaceCourse {
   externalCourseKey: string | null;
   schedules: StudySchedule[];
   calculator: StudyCalculatorState | null;
+  scholarship?: ScholarshipConfig | null;
 }
 
 export interface StudyWorkspace {
@@ -56,6 +58,8 @@ export interface ConfigureStudyCalculatorInput {
 export function useStudyQuery() {
   return useQuery({
     queryKey: studyQueryKey,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
     queryFn: () => request<StudyWorkspace>("/api/tma/study"),
   });
 }
@@ -150,6 +154,47 @@ export function useConfigureStudyCalculatorMutation() {
       if (newerState)
         await queryClient.invalidateQueries({ queryKey: studyQueryKey });
       if (expectedState === undefined) telegram.hapticImpact("light");
+    },
+  });
+}
+
+export function useSaveScholarshipPlanMutation() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      courseId,
+      config,
+      expectedConfig,
+    }: {
+      courseId: string;
+      config: ScholarshipConfig;
+      expectedConfig: ScholarshipConfig | null;
+    }) =>
+      request<ScholarshipConfig>(
+        `/api/tma/study/courses/${encodeURIComponent(courseId)}/scholarship`,
+        {
+          method: "PUT",
+          body: JSON.stringify({ config, expectedConfig }),
+        },
+      ),
+    async onMutate() {
+      await client.cancelQueries({ queryKey: studyQueryKey });
+    },
+    async onSuccess(config, { courseId }) {
+      await client.cancelQueries({ queryKey: studyQueryKey });
+      client.setQueryData<StudyWorkspace>(studyQueryKey, (current) =>
+        current
+          ? {
+              ...current,
+              courses: current.courses.map((course) =>
+                course.id === courseId
+                  ? { ...course, scholarship: config }
+                  : course,
+              ),
+            }
+          : current,
+      );
+      telegram.hapticImpact("light");
     },
   });
 }

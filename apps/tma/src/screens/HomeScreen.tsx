@@ -1,3 +1,4 @@
+import { ScholarshipDailySummary } from "../components/scholarship/ScholarshipDailySummary";
 import {
   Activity,
   CalendarClock,
@@ -27,6 +28,7 @@ import { formatDateTime } from "../lib/format";
 import { integrationCardsForSession } from "../lib/session-status";
 
 interface HomeScreenProps {
+  onOpenScholarship?: () => void;
   onOpenWorkout: () => void;
   onOpenStudy: () => void;
   onOpenAi: (date: string) => void;
@@ -34,6 +36,7 @@ interface HomeScreenProps {
 }
 
 export function HomeScreen({
+  onOpenScholarship,
   onOpenWorkout,
   onOpenStudy,
   onOpenAi,
@@ -102,6 +105,7 @@ export function HomeScreen({
       </section>
 
       <TodayPanel date={home.localDate} onOpenAi={onOpenAi} />
+      {onOpenScholarship ? <ScholarshipDailySummary onOpen={onOpenScholarship}/> : null}
 
       <section className="rounded-xl border border-cyan-400/15 bg-cyan-400/[0.05] p-4 shadow-panel">
         <div className="flex items-start gap-3">

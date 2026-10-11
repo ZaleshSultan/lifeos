@@ -6,6 +6,11 @@ import {
   type StudyCalculatorState,
 } from "../../core/src/study.js";
 import { resolveStudyCalculator } from "../../core/src/study-syllabi.js";
+import {
+  validateScholarshipConfig,
+  scholarshipConfigsMatch,
+  type ScholarshipConfig,
+} from "../../core/src/scholarship.js";
 import type { Database, Json } from "./types.js";
 
 type Client = SupabaseClient<Database>;
@@ -29,6 +34,7 @@ export interface StudyWorkspaceCourse {
   externalCourseKey: string | null;
   schedules: StudySchedule[];
   calculator: StudyCalculatorState | null;
+  scholarship?: ScholarshipConfig | null;
 }
 
 export class StudyWorkspaceError extends Error {
@@ -37,6 +43,7 @@ export class StudyWorkspaceError extends Error {
       | "study_course_not_found"
       | "study_calculator_not_configured"
       | "invalid_study_calculator"
+      | "invalid_scholarship_plan"
       | "study_calculator_conflict",
   ) {
     super(code);
@@ -121,6 +128,7 @@ export async function loadStudyWorkspaceCourses(
             code: course.code,
             calculator: null,
           }),
+        scholarship: scholarshipFromMetadata(course.metadata),
         schedules: schedules
           .filter((slot) => slot.study_course_id === course.id)
           .map((slot) => ({
@@ -275,4 +283,58 @@ export async function saveStudyCalculator(
   if (saveError) throw new Error("Failed to save study calculator");
   if (!saved) throw new StudyWorkspaceError("study_calculator_conflict");
   return state;
+}
+
+function scholarshipFromMetadata(metadata: Json): ScholarshipConfig | null {
+  const config = object(metadata).scholarship_planner_v1;
+  return validateScholarshipConfig(config) ? config : null;
+}
+
+/** Shares the course CAS with calculator saves; unrelated metadata stays intact. */
+export async function saveScholarshipPlan(
+  client: Client,
+  userId: string,
+  courseId: string,
+  input: unknown,
+): Promise<ScholarshipConfig> {
+  const body = object(input);
+  if (
+    !validateScholarshipConfig(body.config) ||
+    !Object.hasOwn(body, "expectedConfig") ||
+    (body.expectedConfig !== null &&
+      !validateScholarshipConfig(body.expectedConfig))
+  )
+    throw new StudyWorkspaceError("invalid_scholarship_plan");
+  const { data: course, error } = await client
+    .from("study_courses")
+    .select("metadata,updated_at")
+    .eq("user_id", userId)
+    .eq("id", courseId)
+    .eq("status", "active")
+    .maybeSingle();
+  if (error) throw new Error("Failed to load scholarship plan");
+  if (!course) throw new StudyWorkspaceError("study_course_not_found");
+  if (
+    !scholarshipConfigsMatch(
+      scholarshipFromMetadata(course.metadata),
+      body.expectedConfig as ScholarshipConfig | null,
+    )
+  )
+    throw new StudyWorkspaceError("study_calculator_conflict");
+  const metadata = {
+    ...object(course.metadata),
+    scholarship_planner_v1: body.config,
+  } as unknown as Json;
+  const { data: saved, error: saveError } = await client
+    .from("study_courses")
+    .update({ metadata })
+    .eq("user_id", userId)
+    .eq("id", courseId)
+    .eq("status", "active")
+    .eq("updated_at", course.updated_at)
+    .select("id")
+    .maybeSingle();
+  if (saveError) throw new Error("Failed to save scholarship plan");
+  if (!saved) throw new StudyWorkspaceError("study_calculator_conflict");
+  return body.config;
 }

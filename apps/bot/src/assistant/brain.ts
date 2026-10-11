@@ -369,6 +369,7 @@ export class AssistantBrain {
 }
 
 export const MODEL_READ_TOOLS = [
+  "study.scholarship",
   "classes.today",
   "classes.tomorrow",
   "classes.next",
