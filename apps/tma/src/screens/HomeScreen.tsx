@@ -46,7 +46,7 @@ export function HomeScreen({
   const startGoogleOAuth = useStartGoogleOAuthMutation();
 
   if (query.isLoading) {
-    return <LoadingPanel title="Loading home" />;
+    return <LoadingPanel title="Загружаем твой день…" />;
   }
 
   if (query.isError) {
@@ -54,7 +54,7 @@ export function HomeScreen({
       <ErrorPanel
         detail={query.error.message}
         onRetry={() => void query.refetch()}
-        title="Home unavailable"
+        title="Не удалось загрузить главную"
       />
     );
   }
@@ -63,7 +63,7 @@ export function HomeScreen({
     return (
       <ErrorPanel
         onRetry={() => void query.refetch()}
-        title="Home returned no data"
+        title="Данные главной пока недоступны"
       />
     );
   }
@@ -86,15 +86,15 @@ export function HomeScreen({
 
   return (
     <div className="space-y-4">
-      <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
+      <section className="lo-today-hero rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
         <div className="flex items-center gap-4">
           <ProgressRing label="focus" value={home.focusScore ?? 0} />
           <div className="min-w-0 flex-1">
-            <p className="text-sm text-zinc-500">{home.localDate}</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400">{home.localDate}</p>
             <h2 className="mt-1 truncate text-[26px] font-semibold leading-tight tracking-tight text-white">
-              {home.displayName ? `Hi, ${home.displayName}` : "LifeOS ready"}
+              {home.displayName ? `Привет, ${home.displayName}` : "Твой день, твой ритм"}
             </h2>
-            <div className="mt-3 inline-flex rounded-full border border-cyan-400/20 bg-cyan-400/[0.08] px-2.5 py-1 text-xs font-medium text-cyan-300">
+            <div className="mt-3 inline-flex rounded-full border border-emerald-300/20 bg-emerald-300/[0.08] px-2.5 py-1 text-xs font-semibold text-emerald-200">
               {home.modeLabel}
             </div>
           </div>
@@ -145,7 +145,7 @@ export function HomeScreen({
 
       <section className="grid grid-cols-3 gap-2">
         <MetricTile
-          label="Health"
+          label="Здоровье"
           tone="mint"
           value={
             home.healthCompletenessScore === null ||
@@ -154,9 +154,9 @@ export function HomeScreen({
               : `${Math.round(home.healthCompletenessScore)}%`
           }
         />
-        <MetricTile label="Focus" value={home.focusScore ?? "n/a"} />
+        <MetricTile label="Фокус" value={home.focusScore ?? "n/a"} />
         <MetricTile
-          label="Sync"
+          label="Синхр."
           tone={home.pendingSyncCount ? "amber" : "mint"}
           value={home.pendingSyncCount ?? 0}
         />

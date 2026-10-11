@@ -162,16 +162,60 @@ def classify_record_type(item_name: str) -> str:
     return "assignment"
 
 
+def build_grade_analysis(score: float | None, max_score: float | None, target_percent: float = 70.0) -> dict[str, Any]:
+    """Deterministic commentary for one grade; not an AI or final-course prediction."""
+    if score is None or max_score is None or max_score <= 0:
+        return {
+            "version": 1,
+            "basis": "single_graded_item",
+            "target_percent": target_percent,
+            "percentage": None,
+            "delta_percent_points": None,
+            "status": "unknown",
+            "summary": "Нет подтверждённого максимума баллов: сравнить оценку в процентах нельзя.",
+        }
+    pct = round(score / max_score * 100.0, 1)
+    delta = round(pct - target_percent, 1)
+    if pct >= 85:
+        status = "strong"
+        comment = "Сильный результат. Сохрани такой уровень в следующих работах."
+    elif pct >= target_percent:
+        status = "on_target"
+        comment = "Результат выше или равен ориентиру. Следи за следующими контрольными."
+    elif pct >= 50:
+        status = "below_target"
+        comment = "Ниже ориентира. Полезно разобрать ошибки и уделить внимание следующей работе."
+    else:
+        status = "needs_attention"
+        comment = "Низкий результат. Приоритет — разобрать ошибки и уточнить возможность пересдачи."
+    return {
+        "version": 1,
+        "basis": "single_graded_item",
+        "target_percent": target_percent,
+        "percentage": pct,
+        "delta_percent_points": delta,
+        "status": status,
+        "summary": comment,
+    }
+
+
 def grade_posted_message(course_title: str, item_title: str, score: float, max_score: float | None) -> str:
     grade = f"{score:.15g}"
     if max_score is not None:
         grade += f"/{max_score:.15g}"
         if max_score > 0:
-            pct = round(score / max_score * 100, 1)
-            # Format without trailing .0 for whole numbers
-            pct_str = f"{pct:.15g}"
-            grade += f" ({pct_str}%)"
-    return f"Оценка по «{course_title}»: {item_title} — {grade}"
+            grade += f" ({score / max_score * 100:.1f}%)"
+    analysis = build_grade_analysis(score, max_score)
+    if analysis["percentage"] is None:
+        return f"Оценка по «{course_title}»: {item_title} — {grade}\n\n{analysis['summary']}"
+    relative = analysis["delta_percent_points"]
+    direction = "выше" if relative >= 0 else "ниже"
+    return (
+        f"Оценка по «{course_title}»: {item_title} — {grade}\n\n"
+        f"📊 {abs(relative):.1f} п.п. {direction} ориентира {analysis['target_percent']:.0f}% "
+        f"для этой работы. {analysis['summary']}\n"
+        "Это не прогноз итоговой оценки. Подробнее — в LifeOS → Дашборд."
+    )
 
 
 def moodle_grade_notifications_enabled(db: SupabaseRestClient) -> bool:
@@ -1069,6 +1113,8 @@ def sync_grades(
 
             raw_json: dict[str, Any] = dict(rec.get("raw") or rec)
             raw_json.update({"_is_mocked": is_mocked, "moodle_course_id": str(rec["course_id"]), "moodle_item_id": str(rec["item_id"])})
+            if score is not None and not is_mocked:
+                raw_json["_lifeos_grade_analysis"] = build_grade_analysis(score, max_score)
 
             # ── 1. Stage into source_events ───────────────────────────────────
             event_dict: dict[str, Any] = {
@@ -1108,6 +1154,11 @@ def sync_grades(
             retry_pending = isinstance(previous_raw, dict) and previous_raw.get("_grade_notification_pending") is True
             notify_grade = score is not None and (retry_pending or (notify_new_grades and newly_graded))
             academic_raw_json = dict(raw_json)
+            if score is None and isinstance(previous_raw, dict):
+                # Preserve an earlier explanation when Moodle hides the score.
+                earlier_analysis = previous_raw.get("_lifeos_grade_analysis")
+                if isinstance(earlier_analysis, dict):
+                    academic_raw_json["_lifeos_grade_analysis"] = earlier_analysis
             if notify_grade:
                 # The academic row is written before the reminder. If a later
                 # write fails, the next sync can still retry the notification.

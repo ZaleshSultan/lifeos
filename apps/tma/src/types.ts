@@ -2,6 +2,7 @@ export type ScreenId =
   | "home"
   | "ai"
   | "study"
+  | "dashboard"
   | "lms"
   | "workout"
   | "health"

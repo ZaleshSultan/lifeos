@@ -1,10 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
+  studyCalculatorStatesMatch,
   validateStudyCalculatorDefinition,
   validateStudyCalculatorValues,
   type StudyCalculatorState,
 } from "../../core/src/study.js";
-import { builtinStudyCalculatorState } from "../../core/src/study-syllabi.js";
+import { resolveStudyCalculator } from "../../core/src/study-syllabi.js";
 import type { Database, Json } from "./types.js";
 
 type Client = SupabaseClient<Database>;
@@ -115,7 +116,11 @@ export async function loadStudyWorkspaceCourses(
         externalCourseKey: course.external_course_key,
         calculator:
           calculatorFromMetadata(course.metadata) ??
-          builtinStudyCalculatorState(course.code),
+          resolveStudyCalculator({
+            title: course.title,
+            code: course.code,
+            calculator: null,
+          }),
         schedules: schedules
           .filter((slot) => slot.study_course_id === course.id)
           .map((slot) => ({
@@ -141,7 +146,7 @@ export async function configureStudyCalculator(
 ): Promise<StudyCalculatorState> {
   const { data: course, error } = await client
     .from("study_courses")
-    .select("metadata,updated_at,code")
+    .select("metadata,updated_at,code,title")
     .eq("user_id", userId)
     .eq("id", courseId)
     .eq("status", "active")
@@ -155,11 +160,36 @@ export async function configureStudyCalculator(
 
   const current =
     calculatorFromMetadata(course.metadata) ??
-    builtinStudyCalculatorState((course as { code?: string }).code ?? "");
+    resolveStudyCalculator({
+      title: course.title,
+      code: course.code,
+      calculator: null,
+    });
+  // Automatic upgrades must not replace a formula or scores edited since load.
+  // The updated_at condition below also protects edits after this read.
+  if (Object.hasOwn(body, "expectedState")) {
+    const expected =
+      body.expectedState === null
+        ? null
+        : calculatorFromMetadata({
+            study_calculator_v1: body.expectedState,
+          } as Json);
+    if (body.expectedState !== null && !expected)
+      throw new StudyWorkspaceError("invalid_study_calculator");
+    if (!studyCalculatorStatesMatch(current, expected))
+      throw new StudyWorkspaceError("study_calculator_conflict");
+  }
+  if (
+    Object.hasOwn(body, "values") &&
+    !validateStudyCalculatorValues(body.values, body.definition)
+  )
+    throw new StudyWorkspaceError("invalid_study_calculator");
   const nextIds = new Set(body.definition.fields.map((field) => field.id));
-  const values = Object.fromEntries(
-    Object.entries(current?.values ?? {}).filter(([id]) => nextIds.has(id)),
-  );
+  const values = Object.hasOwn(body, "values")
+    ? (body.values as Record<string, number | null>)
+    : Object.fromEntries(
+        Object.entries(current?.values ?? {}).filter(([id]) => nextIds.has(id)),
+      );
   const requestedTarget = body.target;
   const target =
     typeof requestedTarget === "number" &&
@@ -199,7 +229,7 @@ export async function saveStudyCalculator(
 ): Promise<StudyCalculatorState> {
   const { data: course, error } = await client
     .from("study_courses")
-    .select("metadata,updated_at,code")
+    .select("metadata,updated_at,code,title")
     .eq("user_id", userId)
     .eq("id", courseId)
     .eq("status", "active")
@@ -208,7 +238,11 @@ export async function saveStudyCalculator(
   if (!course) throw new StudyWorkspaceError("study_course_not_found");
   const current =
     calculatorFromMetadata(course.metadata) ??
-    builtinStudyCalculatorState((course as { code?: string }).code ?? "");
+    resolveStudyCalculator({
+      title: course.title,
+      code: course.code,
+      calculator: null,
+    });
   if (!current)
     throw new StudyWorkspaceError("study_calculator_not_configured");
   const body = object(input);

@@ -8,7 +8,11 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ApiError } from "../api/client";
-import { useSaveStudyCalculatorMutation, useStudyQuery } from "../api/study";
+import {
+  useConfigureStudyCalculatorMutation,
+  useSaveStudyCalculatorMutation,
+  useStudyQuery,
+} from "../api/study";
 import { ErrorPanel, LoadingPanel } from "../components/AsyncState";
 import { StudyCalculator } from "../components/study/StudyCalculator";
 import { StudyCampusMap } from "../components/study/StudyCampusMap";
@@ -23,6 +27,12 @@ import {
   type StudyDraft,
 } from "../components/study/model";
 import { cx } from "../lib/styles";
+import { matchSyllabusProfile } from "../components/study/syllabus-profiles";
+import { useStudySyllabusProfiles } from "../components/study/useStudySyllabusProfiles";
+import {
+  studySyllabusAutoApplication,
+  studySyllabusDefinitionMatches,
+} from "../../../../packages/core/src/study-syllabi.js";
 
 const tabs = [
   { id: "schedule", label: "Расписание", icon: CalendarDays },
@@ -43,9 +53,14 @@ function initialStudyTab(): StudyTabId {
 
 export function StudyScreen({ onOpenLms }: { onOpenLms: () => void }) {
   const query = useStudyQuery();
+  const syllabi = useStudySyllabusProfiles(query.data);
   const save = useSaveStudyCalculatorMutation();
+  const configure = useConfigureStudyCalculatorMutation();
+  const [pendingProfile, setPendingProfile] = useState<string | null>(null);
   const [tab, setTab] = useState<StudyTabId>(initialStudyTab);
-  const [courseId, setCourseId] = useState<string | null>(null);
+  const [courseId, setCourseId] = useState<string | null>(() =>
+    new URLSearchParams(window.location.search).get("courseId"),
+  );
   const [drafts, setDrafts] = useState<Record<string, StudyDraft>>({});
   const [errors, setErrors] = useState<Record<string, string | null>>({});
   const [savedCourse, setSavedCourse] = useState<string | null>(null);
@@ -58,10 +73,9 @@ export function StudyScreen({ onOpenLms }: { onOpenLms: () => void }) {
   }, [tab]);
 
   useEffect(() => {
-    if (!query.data) return;
     setDrafts((current) => {
       const updated = { ...current };
-      for (const course of query.data.courses) {
+      for (const course of syllabi.courses) {
         if (course.calculator)
           updated[course.id] = reconcileStudyDraft(
             current[course.id],
@@ -70,7 +84,7 @@ export function StudyScreen({ onOpenLms }: { onOpenLms: () => void }) {
       }
       return updated;
     });
-  }, [query.data]);
+  }, [syllabi.courses]);
 
   if (query.isLoading)
     return (
@@ -91,7 +105,7 @@ export function StudyScreen({ onOpenLms }: { onOpenLms: () => void }) {
       </div>
     );
 
-  const data = query.data;
+  const data = { ...query.data, courses: syllabi.courses };
   const course =
     data.courses.find((item) => item.id === courseId) ??
     data.courses.find((item) => item.calculator) ??
@@ -100,6 +114,23 @@ export function StudyScreen({ onOpenLms }: { onOpenLms: () => void }) {
     ? (drafts[course.id] ?? createStudyDraft(course.calculator))
     : null;
   const dirtyCount = Object.values(drafts).filter(studyDraftIsDirty).length;
+  const syllabusProfile = course
+    ? matchSyllabusProfile(course.title, course.code)
+    : null;
+  const profileApplied = Boolean(
+    syllabusProfile &&
+    course?.calculator &&
+    studySyllabusDefinitionMatches(
+      course.calculator.definition,
+      syllabusProfile.definition,
+    ),
+  );
+  const storedCourse = query.data.courses.find(
+    (item) => item.id === course?.id,
+  );
+  const autoApplication = storedCourse
+    ? studySyllabusAutoApplication(storedCourse)
+    : null;
   return (
     <div className="min-w-0 space-y-4">
       <header className="flex items-start justify-between gap-3">
@@ -113,7 +144,12 @@ export function StudyScreen({ onOpenLms }: { onOpenLms: () => void }) {
         <button
           type="button"
           onClick={() => void query.refetch()}
-          disabled={query.isFetching || save.isPending}
+          disabled={
+            query.isFetching ||
+            save.isPending ||
+            configure.isPending ||
+            syllabi.pending
+          }
           aria-label="Обновить учёбу"
           className="grid min-h-11 min-w-11 shrink-0 place-items-center rounded-lg border border-white/[0.08] text-zinc-300 hover:bg-white/[0.05] active:scale-[0.98] disabled:opacity-50"
         >
@@ -121,6 +157,31 @@ export function StudyScreen({ onOpenLms }: { onOpenLms: () => void }) {
         </button>
       </header>
       <StudyLmsOverview key="lms-overview" onOpenConnection={onOpenLms} />
+      {syllabi.pending ? (
+        <p role="status" className="text-xs text-emerald-200">
+          Сохраняем формулы из силабусов для найденных предметов…
+        </p>
+      ) : null}
+      {Object.keys(syllabi.errors).length > 0 ? (
+        <div
+          role="alert"
+          className="rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-4 text-sm text-amber-100"
+        >
+          <p>
+            Формулы показаны на экране, но ещё не сохранены для{" "}
+            {Object.keys(syllabi.errors).length} курсов.
+          </p>
+          <p className="mt-1 text-xs">{Object.values(syllabi.errors)[0]}</p>
+          <button
+            type="button"
+            onClick={syllabi.retry}
+            disabled={syllabi.pending}
+            className="mt-2 min-h-11 rounded-lg border border-white/10 px-3 hover:bg-white/5 active:scale-[0.98] disabled:opacity-50"
+          >
+            Повторить сохранение формул
+          </button>
+        </div>
+      ) : null}
       {query.isError ? (
         <ErrorPanel
           title="Не удалось обновить данные"
@@ -209,10 +270,83 @@ export function StudyScreen({ onOpenLms }: { onOpenLms: () => void }) {
                 </select>
               </label>
             )}
+            {course && syllabusProfile && !profileApplied ? (
+              <section className="rounded-2xl border border-emerald-300/20 bg-emerald-300/[0.06] p-4">
+                <div className="text-[11px] font-bold uppercase tracking-widest text-emerald-200">
+                  Схема найдена в силабусе
+                </div>
+                <h2 className="mt-1 text-base font-bold text-white">
+                  {syllabusProfile.title}
+                </h2>
+                <p className="mt-2 text-xs text-zinc-300">
+                  {syllabusProfile.source} · стр. {syllabusProfile.sourcePage}.
+                  У курса сохранена собственная формула. Она сохранена без
+                  изменений. По подтверждению можно заменить её формулой из
+                  силабуса. Сохранятся только оценки с теми же идентификаторами
+                  работ.
+                </p>
+                {pendingProfile === course.id ? (
+                  <div className="mt-3 flex flex-col gap-2">
+                    <button
+                      type="button"
+                      disabled={configure.isPending || save.isPending}
+                      onClick={() => {
+                        configure.mutate(
+                          {
+                            courseId: course.id,
+                            definition: syllabusProfile.definition,
+                            target: course.calculator?.target ?? 70,
+                            expectedState: storedCourse?.calculator ?? null,
+                          },
+                          {
+                            onSuccess: (state) => {
+                              setDrafts((current) => ({
+                                ...current,
+                                [course.id]: createStudyDraft(state),
+                              }));
+                              setPendingProfile(null);
+                              setSavedCourse(null);
+                            },
+                            onError: () => setPendingProfile(null),
+                          },
+                        );
+                      }}
+                      className="min-h-11 rounded-xl bg-emerald-200 px-3 text-sm font-bold text-graphite-950 disabled:opacity-50"
+                    >
+                      {configure.isPending
+                        ? "Применяем…"
+                        : "Подтвердить: применить веса"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPendingProfile(null)}
+                      className="min-h-11 rounded-xl border border-white/10 text-sm text-zinc-300"
+                    >
+                      Отмена
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={configure.isPending || save.isPending}
+                    onClick={() => setPendingProfile(course.id)}
+                    className="mt-3 min-h-11 w-full rounded-xl bg-emerald-200 px-3 text-sm font-bold text-graphite-950 disabled:opacity-50"
+                  >
+                    Использовать формулу из силабуса
+                  </button>
+                )}
+              </section>
+            ) : null}
+            {configure.isError ? (
+              <p role="alert" className="text-sm text-rose-200">
+                Не удалось применить схему. Проверь соединение и попробуй снова.
+              </p>
+            ) : null}
             {course && draft ? (
               <StudyCalculator
                 key={course.id}
-                course={course}
+                course={storedCourse ?? course}
+                records={data.records}
                 draft={draft}
                 onChange={(next) => {
                   setDrafts((current) => ({ ...current, [course.id]: next }));
@@ -250,7 +384,12 @@ export function StudyScreen({ onOpenLms }: { onOpenLms: () => void }) {
                     },
                   );
                 }}
-                saving={save.isPending}
+                saving={
+                  save.isPending ||
+                  configure.isPending ||
+                  Boolean(autoApplication && syllabi.pending)
+                }
+                syllabusUnpersisted={Boolean(autoApplication)}
                 saved={savedCourse === course.id}
                 saveError={errors[course.id] ?? null}
                 onRefresh={() => void query.refetch()}

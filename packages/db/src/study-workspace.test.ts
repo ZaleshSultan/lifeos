@@ -149,17 +149,82 @@ describe("study workspace", () => {
     f.courses[0].metadata = { untouched: "keep" };
     const result = await loadStudyWorkspaceCourses(f.client, "owner");
     expect(result[0].calculator?.definition.fields).toHaveLength(11);
-    expect(result[0].calculator?.definition.sourceName).toContain("built-in");
+    expect(result[0].calculator?.definition.sourceName).toContain("Syllabus");
+  });
+
+  it("uses the same known-title fallback when the course code is imported from Moodle", async () => {
+    const f = fixture();
+    f.courses[0].title = "Computer Networks | Teacher";
+    f.courses[0].code = "MOODLE-123";
+    f.courses[0].metadata = { untouched: "keep" };
+    const [course] = await loadStudyWorkspaceCourses(f.client, "owner");
+    expect(course.calculator?.definition.fields).toHaveLength(12);
+    expect(
+      course.calculator?.definition.fields.find((field) => field.id === "cisco")
+        ?.label,
+    ).toBe("Cisco certificate");
+    const saved = await saveStudyCalculator(f.client, "owner", courseId, {
+      values: { assignment_1: 0, cisco: 80 },
+      target: 70,
+    });
+    expect(saved.definition).toEqual(course.calculator?.definition);
+    expect(saved.values).toEqual({ assignment_1: 0, cisco: 80 });
+  });
+
+  it.each([
+    ["Русский язык B2", "K(RUSSIAN)L51-RU"],
+    ["Computer Networks", "OS52-EN"],
+  ])(
+    "does not infer a fallback for conflicting subject %s / %s",
+    async (title, code) => {
+      const f = fixture();
+      Object.assign(f.courses[0], { title, code, metadata: {} });
+      const [course] = await loadStudyWorkspaceCourses(f.client, "owner");
+      expect(course.calculator).toBeNull();
+      await expect(
+        saveStudyCalculator(f.client, "owner", courseId, {
+          values: {},
+          target: 70,
+        }),
+      ).rejects.toThrow("study_calculator_not_configured");
+      expect(f.requests.some((request) => request.method === "PATCH")).toBe(
+        false,
+      );
+    },
+  );
+
+  it("checks configuration expectations against the same title-based fallback returned on load", async () => {
+    const f = fixture();
+    Object.assign(f.courses[0], {
+      title: "Digital Logic Design",
+      code: "MOODLE-456",
+      metadata: {},
+    });
+    const [course] = await loadStudyWorkspaceCourses(f.client, "owner");
+    const saved = await configureStudyCalculator(f.client, "owner", courseId, {
+      definition: course.calculator!.definition,
+      expectedState: course.calculator,
+      values: { assignment_1: 90 },
+    });
+    expect(saved.definition).toEqual(course.calculator!.definition);
+    expect(saved.values).toEqual({ assignment_1: 90 });
+    expect(saved.target).toBe(70);
   });
 
   it("stores a user syllabus definition and preserves matching calculator values", async () => {
     const f = fixture();
-    (f.courses[0].metadata as { study_calculator_v1: { values: Record<string, number> } })
-      .study_calculator_v1.values = { att1: 72 };
+    (
+      f.courses[0].metadata as {
+        study_calculator_v1: { values: Record<string, number> };
+      }
+    ).study_calculator_v1.values = { att1: 72 };
     const customDefinition = {
       ...definition,
       sourceName: "Networks syllabus Fall 2026",
-      fields: definition.fields.map((field) => ({ ...field, label: `Custom ${field.label}` })),
+      fields: definition.fields.map((field) => ({
+        ...field,
+        label: `Custom ${field.label}`,
+      })),
     };
 
     const saved = await configureStudyCalculator(f.client, "owner", courseId, {
@@ -185,9 +250,136 @@ describe("study workspace", () => {
       ),
     };
     await expect(
-      configureStudyCalculator(f.client, "owner", courseId, { definition: invalid }),
+      configureStudyCalculator(f.client, "owner", courseId, {
+        definition: invalid,
+      }),
     ).rejects.toThrow("invalid_study_calculator");
-    expect(f.requests.some((request) => request.method === "PATCH")).toBe(false);
+    expect(f.requests.some((request) => request.method === "PATCH")).toBe(
+      false,
+    );
+  });
+
+  it("atomically upgrades a formula with mapped scores and an unchanged expected scenario", async () => {
+    const f = fixture();
+    const expectedState = (
+      f.courses[0].metadata as {
+        study_calculator_v1: unknown;
+      }
+    ).study_calculator_v1;
+    const nextDefinition = {
+      ...definition,
+      fields: definition.fields.map((field) => ({
+        ...field,
+        id: `new_${field.id}`,
+      })),
+    };
+    const saved = await configureStudyCalculator(f.client, "owner", courseId, {
+      definition: nextDefinition,
+      expectedState,
+      values: { new_att1: 0, new_att2: null, new_exam: 90 },
+      target: 70,
+    });
+    expect(saved.values).toEqual({ new_att1: 0, new_att2: null, new_exam: 90 });
+    expect(f.courses[0].metadata).toMatchObject({
+      untouched: "keep",
+      study_calculator_v1: saved,
+    });
+    expect(
+      f.requests
+        .find((request) => request.method === "PATCH")
+        ?.url.searchParams.get("user_id"),
+    ).toBe("eq.owner");
+  });
+
+  it("configures a course with no matching fallback when its expected state is null", async () => {
+    const f = fixture();
+    f.courses[0].metadata = { untouched: "keep" };
+    const saved = await configureStudyCalculator(f.client, "owner", courseId, {
+      definition,
+      expectedState: null,
+      values: {},
+    });
+    expect(saved).toEqual({ definition, values: {}, target: 70 });
+    expect(f.courses[0].metadata).toMatchObject({
+      untouched: "keep",
+      study_calculator_v1: saved,
+    });
+  });
+
+  it("rejects an expected null state when a saved custom calculator already exists", async () => {
+    const f = fixture();
+    await expect(
+      configureStudyCalculator(f.client, "owner", courseId, {
+        definition,
+        expectedState: null,
+      }),
+    ).rejects.toThrow("study_calculator_conflict");
+    expect(f.requests.some((request) => request.method === "PATCH")).toBe(
+      false,
+    );
+  });
+
+  it("rejects a configuration if the course changes between the read and update", async () => {
+    const f = fixture();
+    f.setConflict();
+    await expect(
+      configureStudyCalculator(f.client, "owner", courseId, {
+        definition,
+        expectedState: (
+          f.courses[0].metadata as { study_calculator_v1: unknown }
+        ).study_calculator_v1,
+      }),
+    ).rejects.toThrow("study_calculator_conflict");
+    expect(f.courses[0].metadata).toMatchObject({
+      study_calculator_v1: { values: {} },
+    });
+  });
+
+  it.each(["definition", "values", "target"])(
+    "does not silently overwrite a concurrent %s edit during auto-application",
+    async (edited) => {
+      const f = fixture();
+      const expectedState = structuredClone(
+        (
+          f.courses[0].metadata as {
+            study_calculator_v1: {
+              definition: typeof definition;
+              values: Record<string, number>;
+              target: number;
+            };
+          }
+        ).study_calculator_v1,
+      );
+      const current = structuredClone(expectedState);
+      if (edited === "definition")
+        current.definition.sourceName = "Custom formula";
+      if (edited === "values") current.values = { att1: 85 };
+      if (edited === "target") current.target = 90;
+      f.courses[0].metadata = { study_calculator_v1: current };
+      await expect(
+        configureStudyCalculator(f.client, "owner", courseId, {
+          definition,
+          values: {},
+          expectedState,
+        }),
+      ).rejects.toThrow("study_calculator_conflict");
+      expect(f.requests.some((request) => request.method === "PATCH")).toBe(
+        false,
+      );
+    },
+  );
+
+  it("rejects invalid mapped values during configuration", async () => {
+    const f = fixture();
+    await expect(
+      configureStudyCalculator(f.client, "owner", courseId, {
+        definition,
+        values: { wrong_field: 70 },
+      }),
+    ).rejects.toThrow("invalid_study_calculator");
+    expect(f.requests.some((request) => request.method === "PATCH")).toBe(
+      false,
+    );
   });
 
   it("saves a scenario without changing its formula, Moodle link or unrelated metadata", async () => {
