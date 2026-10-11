@@ -8,6 +8,7 @@ import {
   parseLifeMode,
   resolveHealthMode,
   scoreFocus,
+  routeAssistantIntent,
   type FinanceParseResult,
   type HealthMetricType,
   type LifeMode,
@@ -57,6 +58,8 @@ import {
   type WeatherSnapshot,
 } from "../weather.js";
 import { createWebSessionToken } from "../web-session.js";
+import { AssistantError } from "../assistant/registry.js";
+import { assistantPrivateRequest } from "../assistant/brain.js";
 
 interface ParsedCommand {
   command: string;
@@ -4962,6 +4965,72 @@ export async function handleTelegramUpdate(
       ? MAIN_MENU_COMMANDS.get(message.text.trim())
       : undefined;
   const parsed = menuCommand ?? parseCommand(message.text);
+
+  if (
+    !menuCommand &&
+    !message.text.trim().startsWith("/") &&
+    message.chat.type === "private" &&
+    runtime.assistant?.status().assistantEnabled
+  ) {
+    const assistantUser = await resolveUser(message, runtime);
+    if (!assistantUser || !runtime.store) return;
+    let useAssistant = true;
+    if (
+      looksLikeQuickFinanceInput(message.text) ||
+      looksLikeFinanceQuestion(message.text)
+    ) {
+      try {
+        const direct = routeAssistantIntent(message.text, {
+          now: runtime.now?.() ?? new Date(),
+          timezone: assistantUser.timezone,
+        });
+        useAssistant = Boolean(
+          direct &&
+          (direct.tool.startsWith("memory.") ||
+            direct.tool === "reminders.create" ||
+            !assistantPrivateRequest(message.text)),
+        );
+      } catch {
+        // An explicit malformed write must receive a validation error, never a capture.
+      }
+    }
+    if (useAssistant) {
+      try {
+        const result = await runtime.assistant.handle({
+          user: assistantUser,
+          text: message.text.trim(),
+          requestId: `update-${update.update_id}`,
+          source: "telegram",
+        });
+        if (result) {
+          const freshness = result.sources
+            .map(
+              (source) =>
+                `${source.name}: ${source.updatedAt ?? "freshness unknown / дата обновления неизвестна"}`,
+            )
+            .join("\n");
+          const reply = `${result.answer}${freshness ? `\n\n${freshness}` : ""}`;
+          // Telegram HTML and 4096-character limits apply to saved source text too.
+          for (let offset = 0; offset < reply.length; offset += 2500)
+            await runtime.telegram.sendMessage({
+              chatId: message.chat.id,
+              text: escapeHtml(reply.slice(offset, offset + 2500)),
+            });
+          return;
+        }
+      } catch (error) {
+        const safe =
+          error instanceof AssistantError
+            ? error
+            : new AssistantError("assistant_unavailable");
+        await runtime.telegram.sendMessage({
+          chatId: message.chat.id,
+          text: escapeHtml(safe.message),
+        });
+        return;
+      }
+    }
+  }
 
   if (!parsed) {
     return;

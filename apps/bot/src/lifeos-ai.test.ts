@@ -54,6 +54,46 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe("optional Gemini read classification", () => {
+  it("uses the existing SDK and shares planning quotas", async () => {
+    const f = fixture({ requestsPerDay: 1 });
+    f.generateContent.mockResolvedValue({
+      text: JSON.stringify({ tool: "classes.next" }),
+    });
+    await expect(
+      f.service.classify("owner", "When is my upcoming class?"),
+    ).resolves.toEqual({ tool: "classes.next", args: {} });
+    await expect(
+      f.service.ask("owner", messages, context),
+    ).rejects.toMatchObject({ code: "ai_rate_limited" });
+    const request = f.generateContent.mock.calls[0][0];
+    expect(request.config?.responseMimeType).toBe("application/json");
+    expect(JSON.stringify(request)).not.toContain("secret-test-key");
+    expect(JSON.stringify(request)).not.toContain("Finish report");
+  });
+  it.each(["memory.delete", "shell.execute", "reminders.create"])(
+    "rejects model-selected non-read tool %s",
+    async (tool) => {
+      const f = fixture();
+      f.generateContent.mockResolvedValue({ text: JSON.stringify({ tool }) });
+      await expect(
+        f.service.classify("owner", "An ambiguous question"),
+      ).rejects.toMatchObject({ code: "ai_invalid_response" });
+    },
+  );
+  it.each([
+    "My password is private",
+    "мой вес 70 кг",
+    "уровень глюкозы 13",
+    "My bank account balance?",
+  ])("never classifies sensitive content: %s", async (text) => {
+    const f = fixture();
+    await expect(f.service.classify("owner", text)).resolves.toBeNull();
+    expect(f.generateContent).not.toHaveBeenCalled();
+    expect(f.get).not.toHaveBeenCalled();
+  });
+});
+
 describe("LifeOS Gemini configuration", () => {
   it("is disabled by default and separates configurable text and Live models", () => {
     expect(readLifeosAiConfig({})).toMatchObject({

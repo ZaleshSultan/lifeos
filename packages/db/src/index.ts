@@ -7,3 +7,4 @@ export * from "./study-workspace.js";
 export * from "./planning-snapshot.js";
 
 export * from "./lms-store.js";
+export * from "./assistant-store.js";

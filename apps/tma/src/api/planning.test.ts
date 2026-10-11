@@ -7,9 +7,11 @@ vi.mock("../telegram", () => ({
 import { ApiError } from "./client";
 import {
   aiUnavailableMessage,
+  confirmAiChatRequest,
   getAiStatus,
   getToday,
   planningErrorMessage,
+  prepareAiChatRequest,
   prepareAiMessages,
   sendAiChat,
   type AiMessage,
@@ -20,13 +22,11 @@ afterEach(() => vi.unstubAllGlobals());
 describe("Today and AI API boundary", () => {
   it("loads the selected planning date with Telegram authentication", async () => {
     const data = { plan: { date: "2026-10-11" }, ai: { enabled: false } };
-    const fetch = vi
-      .fn()
-      .mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({ data }),
-      });
+    const fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ data }),
+    });
     vi.stubGlobal("fetch", fetch);
 
     expect(await getToday("2026-10-11")).toEqual(data);
@@ -47,13 +47,11 @@ describe("Today and AI API boundary", () => {
       reason: "ai_disabled",
       liveEnabled: false,
     };
-    const fetch = vi
-      .fn()
-      .mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({ data }),
-      });
+    const fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ data }),
+    });
     vi.stubGlobal("fetch", fetch);
 
     expect(await getAiStatus()).toEqual(data);
@@ -62,20 +60,18 @@ describe("Today and AI API boundary", () => {
   });
 
   it("sends only bounded conversation and date, without browser-supplied identity or records", async () => {
-    const fetch = vi
-      .fn()
-      .mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          data: {
-            answer: "Review the deadline.",
-            suggestions: [],
-            provider: "gemini",
-            readOnly: true,
-          },
-        }),
-      });
+    const fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          answer: "Review the deadline.",
+          suggestions: [],
+          provider: "gemini",
+          readOnly: true,
+        },
+      }),
+    });
     vi.stubGlobal("fetch", fetch);
     const controller = new AbortController();
     await sendAiChat({
@@ -107,6 +103,53 @@ describe("Today and AI API boundary", () => {
       sendAiChat({ messages: [{ role: "user", text: "Plan today" }] }),
     ).rejects.toThrow("offline");
   });
+
+  it("confirms with a backend token and retries the original request identity", async () => {
+    const response = {
+      answer: "Reminder saved.",
+      provider: "lifeos",
+      readOnly: false,
+      suggestions: [],
+      tool: {
+        name: "reminders.create",
+        permission: "WRITE",
+        status: "completed",
+        summary: "Reminder saved.",
+      },
+    };
+    const fetch = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("connection lost after saving"))
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ data: response }),
+      });
+    vi.stubGlobal("fetch", fetch);
+    const original = prepareAiChatRequest(
+      [],
+      "Remind me tomorrow at 09:00 to study",
+      "2026-10-11",
+    );
+    const confirmed = confirmAiChatRequest(original, "backend-signed-token");
+    expect(confirmed.requestId).toBe(original.requestId);
+    expect(confirmed.messages).toBe(original.messages);
+    expect(original.confirmationToken).toBeUndefined();
+
+    await expect(sendAiChat(confirmed)).rejects.toThrow("connection lost");
+    expect(await sendAiChat(confirmed)).toEqual(response);
+    const firstBody = JSON.parse(fetch.mock.calls[0][1].body);
+    const retryBody = JSON.parse(fetch.mock.calls[1][1].body);
+    expect(firstBody).toEqual(retryBody);
+    expect(firstBody).toEqual({
+      messages: original.messages,
+      date: "2026-10-11",
+      requestId: original.requestId,
+      confirmationToken: "backend-signed-token",
+    });
+    expect(firstBody).not.toHaveProperty("confirmed");
+    expect(firstBody).not.toHaveProperty("userId");
+  });
 });
 
 describe("AI conversation limits and safe error copy", () => {
@@ -125,6 +168,27 @@ describe("AI conversation limits and safe error copy", () => {
         "u".repeat(2100),
       ).every((message) => message.text.length <= 2000),
     ).toBe(true);
+  });
+
+  it("generates a separate idempotency identity for each explicit request", () => {
+    const history = [
+      {
+        role: "assistant" as const,
+        text: "Your next class is DBMS.",
+        confirmationToken: "must-not-be-conversation-metadata",
+      },
+    ];
+    const first = prepareAiChatRequest(history, "  Show my tasks  ");
+    const second = prepareAiChatRequest(history, "Show my tasks");
+    expect(first.requestId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(first.requestId).not.toBe(second.requestId);
+    expect(first.messages).toEqual([
+      { role: "assistant", text: "Your next class is DBMS." },
+      { role: "user", text: "Show my tasks" },
+    ]);
+    expect(first).not.toHaveProperty("confirmationToken");
   });
 
   it("explains disabled, missing-credential, and unsupported-model states", () => {
@@ -172,5 +236,27 @@ describe("AI conversation limits and safe error copy", () => {
     expect(
       planningErrorMessage(new ApiError("secret debug payload", 500)),
     ).not.toContain("secret");
+  });
+
+  it("explains assistant safety failures without exposing backend metadata", () => {
+    const message = (code: string) =>
+      planningErrorMessage(
+        new ApiError(
+          JSON.stringify({ error: code, message: "secret token debug" }),
+          409,
+        ),
+      );
+    expect(message("assistant_confirmation_invalid")).toContain("confirmation");
+    expect(message("assistant_tool_unavailable")).toContain(
+      "tool is unavailable",
+    );
+    expect(message("assistant_permission_denied")).toContain(
+      "action is disabled",
+    );
+    expect(message("assistant_confirmation_unavailable")).toContain(
+      "Changes are currently unavailable",
+    );
+    expect(message("assistant_sensitive_data")).toContain("sensitive data");
+    expect(message("assistant_confirmation_invalid")).not.toContain("secret");
   });
 });

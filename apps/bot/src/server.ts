@@ -49,6 +49,7 @@ import {
   type LifeosAiService,
 } from "./lifeos-ai.js";
 import { handlePlanningRoute } from "./planning-routes.js";
+import { AssistantBrain, readAssistantConfig } from "./assistant/brain.js";
 import { fetchWeatherSnapshot } from "./weather.js";
 import { verifyWebSessionToken } from "./web-session.js";
 import {
@@ -99,6 +100,7 @@ interface TmaSessionStatus {
 }
 
 export interface BotServerOptions {
+  assistant?: AssistantBrain;
   lmsSessions?: LmsSessionService;
   ai?: LifeosAiService;
   startedAt?: Date;
@@ -155,6 +157,7 @@ interface HealthResponse {
 }
 
 interface ResolvedBotServerOptions {
+  assistant?: AssistantBrain;
   lmsSessions: LmsSessionService;
   ai: LifeosAiService;
   startedAt: Date;
@@ -1591,6 +1594,7 @@ async function handleTelegramWebhook(
     }
 
     await handleTelegramUpdate(update as TelegramUpdate, {
+      assistant: options.assistant,
       telegram,
       store: options.store,
       tmaUrl: options.tmaUrl,
@@ -2542,7 +2546,7 @@ async function handleRequest(
     if (
       await handlePlanningRoute({
         request, response, url: requestUrl, user: auth.user, store,
-        ai: options.ai, readJsonBody, writeJson,
+        ai: options.ai, assistant: options.assistant, readJsonBody, writeJson,
       })
     ) return;
 
@@ -3602,8 +3606,19 @@ async function handleRequest(
 }
 
 export function createBotServer(options: BotServerOptions = {}): Server {
+  const ai = options.ai ?? createConfiguredLifeosAiService();
+  const assistant = options.assistant ?? (options.store
+    ? new AssistantBrain({
+        store: options.store,
+        config: readAssistantConfig(),
+        classifier: ai.classify
+          ? (userId, text) => ai.classify!(userId, text)
+          : undefined,
+      })
+    : undefined);
   const resolvedOptions: ResolvedBotServerOptions = {
-    ai: options.ai ?? createConfiguredLifeosAiService(),
+    ai,
+    assistant,
     lmsSessions: options.lmsSessions ?? new LmsSessionService(),
     startedAt: options.startedAt ?? new Date(),
     version: options.version ?? "0.0.0",

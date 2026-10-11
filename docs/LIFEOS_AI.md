@@ -7,6 +7,16 @@ authenticates users, reads bounded owned data and optionally calls the official
 and seven-day task activity. Existing Home widgets and OpenRouter finance and
 monthly review flows remain available.
 
+With `LIFEOS_ASSISTANT_ENABLED=true`, the same chat endpoint first routes supported
+requests through local authorized tools and explicit memory. TMA writes use
+`requestId` plus a signed `confirmationToken` returned by the backend preview;
+client approval booleans never grant authority. Gemini remains read-only, and
+receives only the current permitted planning question, excluding previous tool
+and memory replies. The sections below describe Gemini-only behavior; the
+feature-flagged extension is documented in
+[assistant architecture](ASSISTANT_ARCHITECTURE.md) and
+[assistant operations](ASSISTANT_ROLLOUT.md).
+
 Agata is an independent external authenticated read-only consumer, outside this
 implementation. No Agata UI, agent, worker, write API or project changes are added.
 The old Agata prompt file is not an implementation instruction.

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { SupabaseAssistantStore, type AssistantStore } from "./assistant-store.js";
 import {
   decryptSecret,
   encryptSecret,
@@ -1384,6 +1385,7 @@ export interface TmaStudySummary {
 }
 
 export interface LifeOSStore extends LmsSessionStore {
+  assistant?: AssistantStore;
   getPlanningSnapshot(
     userId: string,
     range: PlanningSnapshotRange,
@@ -3454,6 +3456,7 @@ export interface SupabaseLifeOSStoreOptions {
 }
 
 export class SupabaseLifeOSStore implements LifeOSStore {
+  readonly assistant: AssistantStore;
   getLmsConnection(userId:string) { return getLmsConnection(this.client,userId); }
   saveLmsSession(input:{userId:string;encryptedCookie:string;expiresAt:string}) { return saveLmsSession(this.client,input); }
   deleteLmsSession(userId:string) { return deleteLmsSession(this.client,userId); }
@@ -3475,6 +3478,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     private readonly client: LifeOSSupabaseClient,
     options: SupabaseLifeOSStoreOptions = {},
   ) {
+    this.assistant = new SupabaseAssistantStore(client);
     this.adminTelegramUserIds = new Set(options.adminTelegramUserIds ?? []);
     const configuredKey =
       options.encryptionKey ?? options.oauthTokenEncryptionKey;

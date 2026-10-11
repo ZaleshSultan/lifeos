@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import type { AssistantBrain } from "../assistant/brain.js";
 import { normalizeFinanceCategory } from "@lifeos/core";
 import type {
   HealthIngestPayload,
@@ -1940,6 +1941,15 @@ function runtime(store = new FakeStore()): TelegramBotRuntime & {
 }
 
 describe("Telegram commands", () => {
+  it("keeps quick finance input on its existing path when assistant tools are enabled", async () => {
+    const context = runtime();
+    const handle = vi.fn();
+    context.assistant = { status: () => ({ assistantEnabled: true }), handle } as unknown as AssistantBrain;
+    await handleTelegramUpdate(update("оплатил 2000 за такси"), context);
+    expect(handle).not.toHaveBeenCalled();
+    expect(context.store.financeTransactions).toMatchObject([{ amount: 2000, transactionType: "expense" }]);
+  });
+
   it("returns /log usage when text is missing", async () => {
     const context = runtime();
 

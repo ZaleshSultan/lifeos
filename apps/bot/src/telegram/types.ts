@@ -1,4 +1,5 @@
 import type { LifeOSStore } from "@lifeos/db";
+import type { AssistantBrain } from "../assistant/brain.js";
 
 export interface TelegramPhotoSize {
   file_id: string;
@@ -87,6 +88,7 @@ export interface TelegramClient {
 }
 
 export interface TelegramBotRuntime {
+  assistant?: AssistantBrain;
   telegram: TelegramClient;
   store?: LifeOSStore;
   tmaUrl?: string;
