@@ -2,6 +2,17 @@
 
 Supabase Postgres is the durable LifeOS store.
 
+## Optional assistant persistence
+
+`20261011084249_assistant_brain_persistence.sql` adds separate user-owned
+`assistant_memories` and minimal `assistant_actions` tables, plus a service-role-only
+atomic memory/reminder mutation RPC. RLS is enabled, browser writes are revoked,
+and operational academic/calendar tables are unchanged. Apply only through an
+approved release; the feature defaults off. Local verification:
+`bash supabase/tests/test-assistant-migration.sh` creates a disposable PostgreSQL
+container and never reads hosted connection settings. See
+[assistant rollout and rollback](ASSISTANT_ROLLOUT.md).
+
 ## Migration Order
 
 Apply migrations in filename order:

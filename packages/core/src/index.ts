@@ -16,3 +16,6 @@ export * from "./types.js";
 export * from "./workout.js";
 
 export * from "./lms-work.js";
+
+export * from "./assistant.js";
+export * from "./assistant-router.js";

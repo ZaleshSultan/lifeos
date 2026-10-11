@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { DateTime } from "luxon";
 import { validatePlanSuggestions } from "@lifeos/core";
+import { randomUUID } from "node:crypto";
 import type { LifeOSStore, TelegramUserRecord } from "@lifeos/db";
 import {
   LifeosAiError,
@@ -13,26 +14,56 @@ import {
   planningDate,
   redactAiText,
 } from "./planning-context.js";
+import { AssistantBrain, assistantPrivateRequest } from "./assistant/brain.js";
+import { AssistantError } from "./assistant/registry.js";
 
-export function publicAiStatus(ai: LifeosAiService) {
+export function publicAiStatus(
+  ai: LifeosAiService,
+  assistant?: AssistantBrain,
+) {
   const status = ai.status();
   return {
     enabled: status.enabled,
     available: status.available,
     reason: status.reason,
     liveEnabled: false as const,
+    ...(assistant?.status().assistantEnabled ? { assistantEnabled: true } : {}),
   };
 }
 
-function parseChat(body: unknown): {
+function parseChat(
+  body: unknown,
+  assistantEnabled = false,
+): {
   messages: LifeosAiMessage[];
   date?: unknown;
+  requestId?: string;
+  confirmationToken?: string;
 } {
   if (!body || typeof body !== "object" || Array.isArray(body))
     throw new LifeosAiError("ai_invalid_request");
   const input = body as Record<string, unknown>;
   // Reject write/consent flags rather than allowing a prompt to grant tool authority.
-  if (Object.keys(input).some((key) => !["messages", "date"].includes(key)))
+  if (
+    Object.keys(input).some(
+      (key) =>
+        !(
+          assistantEnabled
+            ? ["messages", "date", "requestId", "confirmationToken"]
+            : ["messages", "date", "requestId"]
+        ).includes(key),
+    )
+  )
+    throw new LifeosAiError("ai_invalid_request");
+  if (
+    (input.requestId !== undefined &&
+      (typeof input.requestId !== "string" ||
+        !/^[A-Za-z0-9:_-]{1,100}$/.test(input.requestId))) ||
+    (input.confirmationToken !== undefined &&
+      (typeof input.confirmationToken !== "string" ||
+        input.confirmationToken.length > 8000)) ||
+    (input.confirmationToken !== undefined && input.requestId === undefined)
+  )
     throw new LifeosAiError("ai_invalid_request");
   if (
     !Array.isArray(input.messages) ||
@@ -54,12 +85,19 @@ function parseChat(body: unknown): {
       throw new LifeosAiError("ai_invalid_request");
     return {
       role: r.role as LifeosAiMessage["role"],
-      text: redactAiText(r.text.trim(), 2000),
+      text: assistantEnabled
+        ? r.text.trim()
+        : redactAiText(r.text.trim(), 2000),
     };
   });
   if (messages[messages.length - 1].role !== "user")
     throw new LifeosAiError("ai_invalid_request");
-  return { messages, date: input.date };
+  return {
+    messages,
+    date: input.date,
+    requestId: input.requestId as string | undefined,
+    confirmationToken: input.confirmationToken as string | undefined,
+  };
 }
 
 export async function handlePlanningRoute({
@@ -69,6 +107,7 @@ export async function handlePlanningRoute({
   user,
   store,
   ai,
+  assistant,
   readJsonBody,
   writeJson,
 }: {
@@ -78,6 +117,7 @@ export async function handlePlanningRoute({
   user: TelegramUserRecord;
   store: LifeOSStore;
   ai: LifeosAiService;
+  assistant?: AssistantBrain;
   readJsonBody: (
     request: IncomingMessage,
     maxBytes?: number,
@@ -111,7 +151,7 @@ export async function handlePlanningRoute({
   }
   try {
     if (path === "/api/tma/ai/status") {
-      send(publicAiStatus(ai));
+      send(publicAiStatus(ai, assistant));
       return true;
     }
     if (path === "/api/tma/today") {
@@ -125,12 +165,39 @@ export async function handlePlanningRoute({
         user,
         date,
       );
-      send({ plan, events, reminders, productivity, ai: publicAiStatus(ai) });
+      send({
+        plan,
+        events,
+        reminders,
+        productivity,
+        ai: publicAiStatus(ai, assistant),
+      });
       return true;
     }
-    const { messages, date: requestedDate } = parseChat(
-      await readJsonBody(request, 32_768),
-    );
+    const assistantEnabled = assistant?.status().assistantEnabled ?? false;
+    const {
+      messages,
+      date: requestedDate,
+      requestId,
+      confirmationToken,
+    } = parseChat(await readJsonBody(request, 32_768), assistantEnabled);
+    const date = planningDate(user, requestedDate, new Date());
+    if (assistantEnabled && assistant) {
+      const result = await assistant.handle({
+        user,
+        text: messages.at(-1)!.text,
+        date,
+        requestId: requestId ?? randomUUID(),
+        confirmationToken,
+        source: "tma",
+      });
+      if (result) {
+        if (result.confirmation && !requestId)
+          throw new AssistantError("assistant_invalid_request");
+        send(result);
+        return true;
+      }
+    }
     const status = ai.status();
     // Disabled AI must not even load user context or construct a provider client.
     if (!status.enabled) throw new LifeosAiError("ai_disabled");
@@ -140,9 +207,20 @@ export async function handlePlanningRoute({
           ? "ai_unsupported_model"
           : "ai_missing_credentials",
       );
-    const date = planningDate(user, requestedDate, new Date());
     const data = await loadPlanningData(store, user, date);
-    const reply = await ai.ask(user.userId, messages, data.aiContext);
+    // Tool results and explicit memories are local. They never enter provider history.
+    const providerMessages = assistantEnabled
+      ? [messages.at(-1)!].map((m) => ({
+          ...m,
+          text: redactAiText(m.text, 2000),
+        }))
+      : messages;
+    if (
+      assistantEnabled &&
+      assistantPrivateRequest(providerMessages.at(-1)!.text)
+    )
+      throw new AssistantError("assistant_sensitive_data");
+    const reply = await ai.ask(user.userId, providerMessages, data.aiContext);
     const seen = new Set<string>();
     const validated = [];
     for (const suggestion of reply.suggestions) {
@@ -179,7 +257,12 @@ export async function handlePlanningRoute({
       readOnly: true,
     });
   } catch (error) {
-    if (error instanceof LifeosAiError)
+    if (error instanceof AssistantError)
+      writeJson(response, error.statusCode, {
+        error: error.code,
+        message: error.message,
+      });
+    else if (error instanceof LifeosAiError)
       writeJson(response, error.statusCode, {
         error: error.code,
         message: error.message,

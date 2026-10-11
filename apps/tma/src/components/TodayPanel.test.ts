@@ -1,11 +1,17 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 vi.mock("../telegram", () => ({ telegram: { initData: "" } }));
 
 import type { TodaySummary } from "../api/planning";
-import { formatPlanTime, shiftPlanDate, TodayDetails } from "./TodayPanel";
+import {
+  formatPlanTime,
+  shiftPlanDate,
+  TodayDetails,
+  TodayPanel,
+} from "./TodayPanel";
 
 describe("Today planner presentation", () => {
   it("uses planner timezone rather than the browser timezone and handles date boundaries", () => {
@@ -82,5 +88,62 @@ describe("Today planner presentation", () => {
     expect(html).toContain("invalid deadline");
     expect(html).not.toContain("hidden-task-ref");
     expect(html).not.toContain("hidden-event-ref");
+  });
+
+  it("keeps the AI entry point available without a disabled warning when LifeOS tools are enabled", () => {
+    const date = "2026-10-11";
+    const summary: TodaySummary = {
+      plan: {
+        date,
+        timezone: "UTC",
+        mode: "normal",
+        window: {
+          startsAt: "2026-10-11T09:00:00Z",
+          endsAt: "2026-10-11T21:00:00Z",
+        },
+        availableMinutes: 720,
+        freeSlots: [],
+        conflicts: [],
+        rankedTasks: [],
+        blocks: [],
+        unscheduledTaskIds: [],
+        warnings: [],
+      },
+      events: [],
+      reminders: [],
+      productivity: {
+        startDate: "2026-10-05",
+        endDate: date,
+        timezone: "UTC",
+        daily: [],
+        totalCreated: 0,
+        totalCompleted: 0,
+        completionRate: null,
+        truncated: false,
+        warnings: [],
+      },
+      ai: {
+        enabled: false,
+        available: false,
+        reason: "ai_disabled",
+        liveEnabled: false,
+        assistantEnabled: true,
+      },
+    };
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    });
+    client.setQueryData(["today", date], summary);
+    const html = renderToStaticMarkup(
+      createElement(
+        QueryClientProvider,
+        { client },
+        createElement(TodayPanel, { date, onOpenAi: () => undefined }),
+      ),
+    );
+    client.clear();
+    expect(html).toContain("Ask LifeOS AI");
+    expect(html).not.toContain("AI assistance is disabled");
+    expect(html).not.toContain("AI assistance is unavailable");
   });
 });

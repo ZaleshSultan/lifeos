@@ -35,6 +35,7 @@ export interface AiStatus {
   available: boolean;
   reason: string | null;
   liveEnabled: false;
+  assistantEnabled?: boolean;
 }
 
 export interface TodaySummary {
@@ -69,8 +70,23 @@ export interface AiChatAnswer {
     title?: string;
     estimated?: boolean;
   }>;
-  provider: "gemini";
-  readOnly: true;
+  provider: "gemini" | "lifeos";
+  readOnly: boolean;
+  tool?: {
+    name: string;
+    permission: "READ" | "WRITE" | "SENSITIVE" | "DESTRUCTIVE";
+    status: "completed" | "pending_confirmation";
+    summary: string;
+  };
+  sources?: Array<{ name: string; updatedAt: string | null }>;
+  confirmation?: { token: string; summary: string };
+}
+
+export interface AiChatRequest {
+  messages: AiMessage[];
+  date?: string;
+  requestId?: string;
+  confirmationToken?: string;
 }
 
 export const AI_MAX_MESSAGES = 12;
@@ -88,14 +104,15 @@ export function getAiStatus(signal?: AbortSignal) {
   return request<AiStatus>("/api/tma/ai/status", { signal });
 }
 
-export function sendAiChat(input: {
-  messages: AiMessage[];
-  date?: string;
-  signal?: AbortSignal;
-}) {
+export function sendAiChat(input: AiChatRequest & { signal?: AbortSignal }) {
   return request<AiChatAnswer>("/api/tma/ai/chat", {
     method: "POST",
-    body: JSON.stringify({ messages: input.messages, date: input.date }),
+    body: JSON.stringify({
+      messages: input.messages,
+      date: input.date,
+      requestId: input.requestId,
+      confirmationToken: input.confirmationToken,
+    }),
     signal: input.signal,
   });
 }
@@ -132,9 +149,30 @@ export function prepareAiMessages(
     ...history.slice(-(AI_MAX_MESSAGES - 2)),
     { role: "user" as const, text: userText.trim() },
   ].map((message) => ({
-    ...message,
+    role: message.role,
     text: message.text.slice(0, AI_MAX_MESSAGE_CHARS),
   }));
+}
+
+export function prepareAiChatRequest(
+  history: AiMessage[],
+  userText: string,
+  date?: string,
+): AiChatRequest {
+  return {
+    messages: prepareAiMessages(history, userText),
+    date,
+    requestId: crypto.randomUUID(),
+  };
+}
+
+// The backend-issued token is the only confirmation authority. Keep the
+// original request identity so confirmation and retries cannot create duplicates.
+export function confirmAiChatRequest(
+  original: AiChatRequest,
+  token: string,
+): AiChatRequest {
+  return { ...original, confirmationToken: token };
 }
 
 export function aiUnavailableMessage(status: AiStatus): string {
@@ -173,6 +211,20 @@ export function planningErrorMessage(error: unknown): string {
       return "The configured AI model is unavailable. Your daily plan remains available.";
     if (code === "ai_invalid_response")
       return "AI returned an answer that could not be validated. Please try again.";
+    if (code === "assistant_confirmation_invalid")
+      return "This confirmation has expired or no longer matches the request. Send the request again to review a fresh confirmation.";
+    if (code === "assistant_tool_unavailable")
+      return "This assistant tool is unavailable. Check the connected source or try again later.";
+    if (code === "assistant_unavailable")
+      return "The assistant is temporarily unavailable. Please try again later.";
+    if (code === "assistant_invalid_request")
+      return "This request could not be validated. Check the details and send it again.";
+    if (code === "assistant_confirmation_unavailable")
+      return "Changes are currently unavailable. You can still ask for information.";
+    if (code === "assistant_permission_denied")
+      return "This action is disabled. You can still ask for information.";
+    if (code === "assistant_sensitive_data")
+      return "This request includes sensitive data the assistant cannot process. Remove credentials or private records and try again.";
     if (error.status === 401 || error.status === 403) {
       return "Reopen LifeOS from Telegram to refresh your access.";
     }

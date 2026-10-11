@@ -2,6 +2,13 @@
 
 The Telegram bot is the fastest input surface for LifeOS.
 
+With `LIFEOS_ASSISTANT_ENABLED=true`, private natural-language requests can read
+classes, grades, forecasts, tasks and availability, create explicitly dated
+reminders, and manage explicitly saved memories. Supported requests use the same
+Brain as the TMA AI screen. Existing slash/menu commands and quick finance flows
+retain their paths. Ordinary unmatched notes remain captures. Health/finance data
+stay in their existing workflows. See [assistant commands and safety](ASSISTANT_ROLLOUT.md).
+
 ## Implemented Commands
 
 - `/start` - onboarding and current availability.

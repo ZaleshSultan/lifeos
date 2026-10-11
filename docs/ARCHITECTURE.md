@@ -8,6 +8,13 @@ authoritative. TMA Today and AI screens use bounded read-only context; model
 suggestions cannot write user data. Existing OpenRouter flows remain separate.
 See [LifeOS AI](LIFEOS_AI.md) for configuration, contracts and limitations.
 
+An optional, disabled-by-default assistant Brain adds deterministic authorized
+tools and explicit persistent memory to the existing AI screen and private
+Telegram messages. Gemini remains the existing optional read-only planning
+provider. TMA changes require signed confirmation and atomic per-user receipts.
+See [assistant architecture](ASSISTANT_ARCHITECTURE.md) and
+[rollout](ASSISTANT_ROLLOUT.md).
+
 Agata remains an independent external authenticated read-only API consumer. It
 is not embedded into LifeOS, its clients, workers or internal AI architecture.
 

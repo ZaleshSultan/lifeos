@@ -359,7 +359,9 @@ export function TodayPanel({ date, onOpenAi }: TodayPanelProps) {
         <MessageCircle className="h-4 w-4" />
         Ask LifeOS AI
       </button>
-      {query.data && !query.data.ai.available ? (
+      {query.data &&
+      !query.data.ai.assistantEnabled &&
+      !query.data.ai.available ? (
         <p className="mt-2 text-xs leading-relaxed text-zinc-400">
           {query.data.ai.enabled
             ? "AI assistance is unavailable. The plan above uses deterministic rules."

@@ -26,3 +26,4 @@ jobs:
       - run: pip install -r workers/university-sync/requirements.txt -r workers/ics-sync/requirements.txt
       - run: pnpm test:workers
       - run: bash scripts/test-lms-migration.sh
+      - run: bash supabase/tests/test-assistant-migration.sh

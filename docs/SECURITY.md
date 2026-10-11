@@ -23,11 +23,22 @@ Browser apps may use public URLs and public client identifiers only. They must n
 - Today and AI routes use the existing authenticated active-profile boundary.
 - AI reads a bounded, owned projection; health/finance details, raw payloads,
   credentials and unnecessary identifiers are excluded or masked.
-- AI endpoints cannot write, even when a prompt or request claims approval.
+- Gemini cannot write, even when a prompt or request claims approval. The optional
+  assistant gateway accepts only deterministic explicit writes; TMA additionally
+  requires a backend-issued, user/request/action-bound confirmation token.
 - Schedule suggestions are validated by the pure deterministic planner before
   presentation. Conversation is not persisted or logged by LifeOS.
 - Live configuration is separate and no voice endpoint is enabled.
 - See [LifeOS AI](LIFEOS_AI.md) for context, retention and per-process usage limits.
+
+The assistant is disabled by default. Its model classification can select only
+allowlisted reads and never memory retrieval or writes. Memory/tool conversation
+history is excluded from Gemini in assistant mode. Health/finance tools are
+disabled, credential/sensitive prompts are blocked locally, and memory writes
+require explicit consent. Separate memory/audit tables use RLS, service-only
+writes and user scoping; transactional mutation receipts prevent duplicate
+reminders or memory writes. Permanent deletion has a separate disabled-by-default
+flag. See [assistant operations](ASSISTANT_ROLLOUT.md).
 
 ## Supabase
 
