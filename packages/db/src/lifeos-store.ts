@@ -1,3 +1,4 @@
+import { webSessionStore, type WebSessionStore } from "./web-session-store.js";
 import { createHash } from "node:crypto";
 import {
   decryptSecret,
@@ -1383,7 +1384,7 @@ export interface TmaStudySummary {
   records: AcademicRecord[];
 }
 
-export interface LifeOSStore extends LmsSessionStore {
+export interface LifeOSStore extends LmsSessionStore, WebSessionStore {
   getPlanningSnapshot(
     userId: string,
     range: PlanningSnapshotRange,
@@ -3454,6 +3455,19 @@ export interface SupabaseLifeOSStoreOptions {
 }
 
 export class SupabaseLifeOSStore implements LifeOSStore {
+  issueWebLoginToken(input: Parameters<WebSessionStore["issueWebLoginToken"]>[0]) {
+    return webSessionStore(this.client).issueWebLoginToken(input);
+  }
+  exchangeWebLoginToken(input: Parameters<WebSessionStore["exchangeWebLoginToken"]>[0]) {
+    return webSessionStore(this.client).exchangeWebLoginToken(input);
+  }
+  resolveWebSession(sessionHash: string) {
+    return webSessionStore(this.client).resolveWebSession(sessionHash);
+  }
+  revokeWebSession(userId: string, sessionHash: string) {
+    return webSessionStore(this.client).revokeWebSession(userId, sessionHash);
+  }
+
   getLmsConnection(userId:string) { return getLmsConnection(this.client,userId); }
   saveLmsSession(input:{userId:string;encryptedCookie:string;expiresAt:string}) { return saveLmsSession(this.client,input); }
   deleteLmsSession(userId:string) { return deleteLmsSession(this.client,userId); }

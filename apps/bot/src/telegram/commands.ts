@@ -56,7 +56,7 @@ import {
   geocodeWeatherLocation,
   type WeatherSnapshot,
 } from "../weather.js";
-import { createWebSessionToken } from "../web-session.js";
+import { issueWebLoginToken } from "../web-session.js";
 
 interface ParsedCommand {
   command: string;
@@ -2580,21 +2580,38 @@ async function handleWebCommand(
     return;
   }
 
+  if (message.chat.type !== "private") {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "Для входа отправь /web в личном чате с ботом.",
+    });
+    return;
+  }
+
   const webBase = runtime.webDashboardUrl.endsWith("/")
     ? runtime.webDashboardUrl
     : `${runtime.webDashboardUrl}/`;
   const url = new URL("login", webBase);
   url.searchParams.set(
     "token",
-    createWebSessionToken(user!.userId, runtime.webSessionSecret),
+    await issueWebLoginToken(
+      runtime.store!,
+      user!.userId,
+      runtime.webSessionSecret,
+    ),
   );
-  await runtime.telegram.sendMessage({
-    chatId: message.chat.id,
-    text: "🌐 Это твоя личная LifeOS web-панель. Данные в ней привязаны к твоему аккаунту, а не общие для всех.",
-    replyMarkup: {
-      inline_keyboard: [[{ text: "Открыть мой LifeOS Web", url: url.toString() }]],
-    },
-  });
+  try {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "🌐 Это твоя личная LifeOS web-панель. Ссылка одноразовая и действует 2 минуты. Для нового входа отправь /web.",
+      replyMarkup: {
+        inline_keyboard: [[{ text: "Открыть мой LifeOS Web", url: url.toString() }]],
+      },
+    });
+  } catch {
+    // Telegram errors can echo the reply payload, including the login URL.
+    throw new Error("Web login delivery failed");
+  }
 }
 
 async function handleRemindCommand(

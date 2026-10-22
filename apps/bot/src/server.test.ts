@@ -33,7 +33,7 @@ import type {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadBotConfig } from "./config.js";
 import { createBotServer, type BotServerOptions } from "./server.js";
-import { createWebSessionToken } from "./web-session.js";
+import { createWebSessionToken, hashWebToken } from "./web-session.js";
 import type { SendMessageInput, TelegramClient } from "./telegram/types.js";
 
 const servers: ReturnType<typeof createBotServer>[] = [];
@@ -296,6 +296,10 @@ export function tmaStore(events: string[] = []): LifeOSStore {
   });
 
   return {
+    async issueWebLoginToken() { return true; },
+    async exchangeWebLoginToken() { return null; },
+    async resolveWebSession() { return null; },
+    async revokeWebSession() {},
     async resolveTelegramUser() {
       return null;
     },
@@ -2498,7 +2502,7 @@ describe("bot server", () => {
     });
   });
 
-  it("accepts a signed personal web session and resolves the matching user", async () => {
+  it("accepts a stored personal web session and resolves the matching user", async () => {
     const store = tmaStore();
     store.resolveUserById = async (userId) =>
       userId === "user-1" ? activeTelegramUser({ displayName: "Web User" }) : null;
@@ -2511,12 +2515,8 @@ describe("bot server", () => {
     servers.push(server);
 
     const port = await listen(server);
-    const token = createWebSessionToken(
-      "user-1",
-      "web-session-secret",
-      60,
-      Math.floor(Date.now() / 1000),
-    );
+    const token = createWebSessionToken();
+    store.resolveWebSession = async (hash) => hash === hashWebToken(token) ? "user-1" : null;
     const response = await fetch(`http://127.0.0.1:${port}/api/tma/session`, {
       headers: { authorization: `Bearer ${token}` },
     });
