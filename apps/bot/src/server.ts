@@ -50,7 +50,8 @@ import {
 } from "./lifeos-ai.js";
 import { handlePlanningRoute } from "./planning-routes.js";
 import { fetchWeatherSnapshot } from "./weather.js";
-import { verifyWebSessionToken } from "./web-session.js";
+import { resolveWebSessionUser } from "./web-session.js";
+import { handleWebAuthRoute } from "./web-auth-routes.js";
 import {
   cancelReminderGoogleCalendarEvent,
   syncReminderToGoogleCalendar,
@@ -961,16 +962,14 @@ async function resolveTmaSessionIdentity(
     }
   | { ok: false; statusCode: number; error: string }
 > {
-  const webSession = verifyWebSessionToken(
-    bearerToken(request),
-    options.webSessionSecret,
-  );
-
-  if (webSession) {
+  if (request.headers.authorization !== undefined) {
     if (!options.store) {
       return { ok: false, statusCode: 503, error: "database_not_configured" };
     }
-    const webUser = await options.store.resolveUserById(webSession.userId);
+    const webUser = await resolveWebSessionUser(
+      options.store,
+      bearerToken(request),
+    );
     if (!webUser) {
       return { ok: false, statusCode: 401, error: "invalid_web_session" };
     }
@@ -1204,28 +1203,17 @@ async function resolveTmaUser(
   | { ok: true; user: TelegramUserRecord }
   | { ok: false; statusCode: number; error: string }
 > {
-  const webSession = verifyWebSessionToken(
-    bearerToken(request),
-    options.webSessionSecret,
-  );
-
-  if (webSession && !telegramOnly) {
+  // Explicit invalid credentials must not fall through to Telegram/dev identity.
+  if (!telegramOnly && request.headers.authorization !== undefined) {
     if (!options.store) {
       return { ok: false, statusCode: 503, error: "database_not_configured" };
     }
-    const webUser = await options.store.resolveUserById(webSession.userId);
+    const webUser = await resolveWebSessionUser(
+      options.store,
+      bearerToken(request),
+    );
     if (!webUser) {
       return { ok: false, statusCode: 401, error: "invalid_web_session" };
-    }
-    if (webUser.status !== "active") {
-      return {
-        ok: false,
-        statusCode: 403,
-        error:
-          webUser.status === "pending"
-            ? "telegram_user_pending"
-            : "telegram_user_blocked",
-      };
     }
     return { ok: true, user: webUser };
   }
@@ -2419,6 +2407,21 @@ async function handleRequest(
       return;
     }
   }
+
+  if (
+    requestUrl.pathname.startsWith("/api/tma/") ||
+    requestUrl.pathname.startsWith("/api/web/auth/")
+  ) {
+    response.setHeader("Cache-Control", "no-store");
+  }
+  if (await handleWebAuthRoute({
+    request, response,
+    pathname: requestUrl.pathname,
+    token: bearerToken(request),
+    store: options.store,
+    secret: options.webSessionSecret,
+    writeJson,
+  })) return;
 
   if (requestUrl.pathname === "/api/tma/session") {
     if (request.method !== "GET") {

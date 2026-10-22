@@ -2024,6 +2024,22 @@ export interface Database {
       };
     };
     Functions: {
+      issue_web_login_token: {
+        Args: { p_user_id: string; p_token_hash: string; p_expires_at: string };
+        Returns: boolean;
+      };
+      exchange_web_login_token: {
+        Args: { p_user_id: string; p_token_hash: string; p_session_hash: string };
+        Returns: string | null;
+      };
+      resolve_web_session: {
+        Args: { p_session_hash: string };
+        Returns: string | null;
+      };
+      revoke_web_session: {
+        Args: { p_user_id: string; p_session_hash: string };
+        Returns: undefined;
+      };
       save_lms_session: {Args:{p_user_id:string;p_owner:string;p_encrypted_cookie:string;p_expires_at:string};Returns:boolean};
       delete_lms_session: {Args:{p_user_id:string;p_owner:string};Returns:boolean};
 
