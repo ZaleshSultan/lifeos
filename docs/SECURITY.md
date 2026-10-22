@@ -119,3 +119,10 @@ Browser apps may use public URLs and public client identifiers only. They must n
 ## AITU LMS sessions
 
 AITU session management requires valid Telegram initData even when web/dev authentication exists elsewhere. Credentials use owner-bound AES-256-GCM envelopes, fail closed without a valid key, expire by default after 24 hours, and are never selected into AI context or returned to browsers. Session rotation/deletion and both LMS workers share a per-user lease; database mutations validate that lease atomically. See [LMS_SESSIONS.md](LMS_SESSIONS.md) for routes, retention, migration and deployment sequencing.
+
+## Web authentication
+
+Telegram `/web` links expire after 120 seconds and exchange once for a revocable,
+opaque browser session. Both the backend and Next.js enforce live session and
+profile checks. See [WEB_SESSIONS.md](WEB_SESSIONS.md) for the verified previous
+vulnerability, threat boundaries, revocation, rollout and remaining limits.

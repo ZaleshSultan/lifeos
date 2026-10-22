@@ -1,5 +1,14 @@
 # LifeOS Project Audit
 
+**2026-10-22 web-authentication update:** Verified that `/web` used reusable
+30-day signed bearer links and logout did not revoke them. Replaced this with
+120-second single-use exchange and persistent revocable sessions. Current
+profile checks already existed on protected resource routes. See
+[WEB_SESSIONS.md](WEB_SESSIONS.md) for implementation, validation and deployment
+requirements. Historical "no web auth" findings below are superseded for this
+scope; this is not a fresh audit of unrelated modules.
+
+
 **2026-09-24 targeted update:** Moodle parsing and assessment persistence, master LMS worker startup, platform-scoped reconciliation and TMA grade display are now covered by regression tests. Root typecheck now includes web/TMA (ARCH-06); `test:workers`/`test:all` expose the worker suite (ARCH-05). See [scope, verification and remaining work](ACADEMIC_SYNC_COMPLETION.md). Older findings below are historical, not a fresh production audit.
 
 **Date:** 2026-06-11 (original) — **re-verified 2026-08-24**
