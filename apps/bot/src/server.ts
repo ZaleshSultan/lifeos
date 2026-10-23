@@ -1,3 +1,4 @@
+import { corsOrigins, handleApiCors } from "./cors.js";
 import { isProduction, validateBotSecurity, webhookSecretHeader } from "./security-config.js";
 import { LmsSessionService } from "./lms-sessions.js";
 import { handleLmsRoute } from "./lms-routes.js";
@@ -109,6 +110,7 @@ export interface BotServerOptions {
     Pick<
       BotConfig,
       | "nodeEnv"
+      | "corsAllowedOrigins"
       | "telegramWebhookPath"
       | "telegramWebhookSecret"
       | "telegramBotToken"
@@ -159,6 +161,7 @@ interface HealthResponse {
 
 interface ResolvedBotServerOptions {
   nodeEnv?: string;
+  corsAllowedOrigins: ReadonlySet<string>;
   lmsSessions: LmsSessionService;
   ai: LifeosAiService;
   startedAt: Date;
@@ -269,22 +272,8 @@ function writeJson(
 ): void {
   response.writeHead(statusCode, {
     "content-type": "application/json; charset=utf-8",
-    "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-    "access-control-allow-headers":
-      "authorization,content-type,x-telegram-init-data,x-telegram-bot-api-secret-token",
   });
   response.end(JSON.stringify(body));
-}
-
-function writeNoContent(response: ServerResponse): void {
-  response.writeHead(204, {
-    "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-    "access-control-allow-headers":
-      "authorization,content-type,x-telegram-init-data,x-telegram-bot-api-secret-token",
-  });
-  response.end();
 }
 
 function writeHtml(
@@ -2304,10 +2293,7 @@ async function handleRequest(
     return;
   }
 
-  if (request.method === "OPTIONS" && requestUrl.pathname.startsWith("/api/")) {
-    writeNoContent(response);
-    return;
-  }
+  if (handleApiCors(request, response, requestUrl.pathname, options.corsAllowedOrigins)) return;
 
   if (await handleTmaStaticRequest(request, response, requestUrl, options)) {
     return;
@@ -3146,10 +3132,6 @@ async function handleRequest(
           "content-disposition": `inline; filename=\"receipt${mimeExtension(contentType)}\"`,
           "content-security-policy": "default-src 'none'; sandbox",
           "x-content-type-options": "nosniff",
-          "access-control-allow-origin": "*",
-          "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-          "access-control-allow-headers":
-            "authorization,content-type,x-telegram-init-data,x-telegram-bot-api-secret-token",
         });
         response.end(bytes);
       } catch (error) {
@@ -3616,6 +3598,7 @@ export function createBotServer(options: BotServerOptions = {}): Server {
   validateBotSecurity(options.config ?? {});
   const resolvedOptions: ResolvedBotServerOptions = {
     nodeEnv: options.config?.nodeEnv,
+    corsAllowedOrigins: corsOrigins(options.config?.corsAllowedOrigins ?? [], options.config?.nodeEnv),
     ai: options.ai ?? createConfiguredLifeosAiService(),
     lmsSessions: options.lmsSessions ?? new LmsSessionService(),
     startedAt: options.startedAt ?? new Date(),

@@ -3515,7 +3515,7 @@ describe("bot server", () => {
       body: JSON.stringify({ ...program, userId: "user-2" }),
     });
     expect(saved.status).toBe(200);
-    expect(saved.headers.get("access-control-allow-methods")).toContain("PUT");
+    expect(saved.headers.get("cache-control")).toBe("no-store");
     await expect(saved.json()).resolves.toMatchObject({ data: program });
     expect(store.saveWorkoutProgram).toHaveBeenCalledWith("user-1", program);
     const started = await fetch(`http://127.0.0.1:${port}/api/tma/workout/start`, {
