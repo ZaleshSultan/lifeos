@@ -1,3 +1,7 @@
+import {
+  issueHealthCredential,
+  resolveHealthCredential,
+} from "./health-credentials.js";
 import { corsOrigins, handleApiCors } from "./cors.js";
 import { isProduction, validateBotSecurity, webhookSecretHeader } from "./security-config.js";
 import { LmsSessionService } from "./lms-sessions.js";
@@ -225,7 +229,6 @@ const TMA_MIME_TYPES: Record<string, string> = {
 const TMA_INIT_DATA_MAX_AGE_SECONDS = 86_400;
 const TMA_INIT_DATA_MAX_FUTURE_SKEW_SECONDS = 300;
 const GOOGLE_OAUTH_STATE_MAX_AGE_SECONDS = 10 * 60;
-const HEALTH_INGEST_TOKEN_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 const GOOGLE_OAUTH_SCOPES = [
   "https://www.googleapis.com/auth/calendar.events",
   "https://www.googleapis.com/auth/tasks.readonly",
@@ -247,15 +250,6 @@ interface GoogleOAuthStatePayload {
   telegramUserId: number | null;
   nonce: string;
   issuedAt: number;
-}
-
-interface HealthIngestTokenPayload {
-  userId: string;
-  telegramUserId: number | null;
-  scope: "health_ingest";
-  nonce: string;
-  issuedAt: number;
-  expiresAt: number;
 }
 
 interface GoogleTokenExchangeResult {
@@ -677,98 +671,6 @@ function verifyGoogleOAuthState(
       telegramUserId: payload.telegramUserId,
       nonce: payload.nonce,
       issuedAt: payload.issuedAt,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function signHealthIngestToken(
-  user: TelegramUserRecord,
-  secret: string,
-  nowSeconds = Math.floor(Date.now() / 1000),
-): string {
-  const payload: HealthIngestTokenPayload = {
-    userId: user.userId,
-    telegramUserId: user.telegramUserId,
-    scope: "health_ingest",
-    nonce: randomBytes(16).toString("hex"),
-    issuedAt: nowSeconds,
-    expiresAt: nowSeconds + HEALTH_INGEST_TOKEN_MAX_AGE_SECONDS,
-  };
-  const header = Buffer.from(
-    JSON.stringify({ alg: "HS256", typ: "JWT" }),
-    "utf8",
-  ).toString("base64url");
-  const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString(
-    "base64url",
-  );
-  const signingInput = `${header}.${encoded}`;
-  const signature = createHmac("sha256", secret)
-    .update(signingInput)
-    .digest("base64url");
-
-  return `${signingInput}.${signature}`;
-}
-
-function verifyHealthIngestToken(
-  token: string | undefined,
-  secret: string | undefined,
-): HealthIngestTokenPayload | null {
-  if (!token || !secret) {
-    return null;
-  }
-
-  const parts = token.split(".");
-  if (parts.length !== 3 || !parts[0] || !parts[1] || !parts[2]) {
-    return null;
-  }
-
-  const signingInput = `${parts[0]}.${parts[1]}`;
-  const expectedSignature = createHmac("sha256", secret)
-    .update(signingInput)
-    .digest("base64url");
-
-  if (!secureCompare(parts[2], expectedSignature)) {
-    return null;
-  }
-
-  try {
-    const header = JSON.parse(
-      Buffer.from(parts[0], "base64url").toString("utf8"),
-    ) as { alg?: unknown; typ?: unknown };
-    const payload = JSON.parse(
-      Buffer.from(parts[1], "base64url").toString("utf8"),
-    ) as Partial<HealthIngestTokenPayload>;
-    if (header.alg !== "HS256" || header.typ !== "JWT") {
-      return null;
-    }
-    const now = Math.floor(Date.now() / 1000);
-
-    if (
-      typeof payload.userId !== "string" ||
-      !payload.userId ||
-      (typeof payload.telegramUserId !== "number" &&
-        payload.telegramUserId !== null) ||
-      payload.scope !== "health_ingest" ||
-      typeof payload.nonce !== "string" ||
-      !payload.nonce ||
-      typeof payload.issuedAt !== "number" ||
-      typeof payload.expiresAt !== "number" ||
-      payload.expiresAt < now ||
-      payload.issuedAt - now > TMA_INIT_DATA_MAX_FUTURE_SKEW_SECONDS ||
-      payload.expiresAt - payload.issuedAt > HEALTH_INGEST_TOKEN_MAX_AGE_SECONDS
-    ) {
-      return null;
-    }
-
-    return {
-      userId: payload.userId,
-      telegramUserId: payload.telegramUserId,
-      scope: "health_ingest",
-      nonce: payload.nonce,
-      issuedAt: payload.issuedAt,
-      expiresAt: payload.expiresAt,
     };
   } catch {
     return null;
@@ -2553,18 +2455,55 @@ async function handleRequest(
         return;
       }
 
-      writeJson(
-        response,
-        200,
-        tmaData({
-          token: signHealthIngestToken(
-            auth.user,
-            options.healthIngestJwtSecret,
-          ),
-          tokenType: "Bearer",
-          expiresInSeconds: HEALTH_INGEST_TOKEN_MAX_AGE_SECONDS,
-        }),
-      );
+      try {
+        const issued = await issueHealthCredential(
+          store,
+          auth.user,
+          options.healthIngestJwtSecret,
+        );
+        if (!issued)
+          writeJson(response, 403, { error: "health_ingest_access_denied" });
+        else writeJson(response, 200, tmaData(issued));
+      } catch {
+        writeJson(response, 503, { error: "health_authorization_unavailable" });
+      }
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      requestUrl.pathname === "/api/tma/health/devices"
+    ) {
+      try {
+        writeJson(
+          response,
+          200,
+          tmaData(await store.listHealthIngestCredentials(auth.user.userId)),
+        );
+      } catch {
+        writeJson(response, 503, { error: "health_authorization_unavailable" });
+      }
+      return;
+    }
+    const healthDeviceRoute = requestUrl.pathname.match(
+      /^\/api\/tma\/health\/devices\/([0-9a-f-]{36})$/i,
+    );
+    if (request.method === "DELETE" && healthDeviceRoute) {
+      const deviceId = healthDeviceRoute[1];
+      if (
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          deviceId,
+        )
+      ) {
+        writeJson(response, 400, { error: "invalid_health_device" });
+        return;
+      }
+      try {
+        await store.revokeHealthIngestCredential(auth.user.userId, deviceId);
+        writeJson(response, 200, tmaData({ revoked: true }));
+      } catch {
+        writeJson(response, 503, { error: "health_authorization_unavailable" });
+      }
       return;
     }
 
@@ -3454,13 +3393,22 @@ async function handleRequest(
     }
 
     let authenticatedUserId: string | undefined;
-    const tokenPayload = verifyHealthIngestToken(
-      bearerToken(request),
-      options.healthIngestJwtSecret,
-    );
-
-    if (tokenPayload) {
-      authenticatedUserId = tokenPayload.userId;
+    if (request.headers.authorization !== undefined) {
+      try {
+        authenticatedUserId =
+          (await resolveHealthCredential(
+            options.store,
+            bearerToken(request),
+            options.healthIngestJwtSecret,
+          )) ?? undefined;
+      } catch {
+        writeJson(response, 503, { error: "health_authorization_unavailable" });
+        return;
+      }
+      if (!authenticatedUserId) {
+        writeJson(response, 401, { error: "invalid_health_ingest_token" });
+        return;
+      }
     } else if (headerValue(request.headers["x-telegram-init-data"])) {
       const auth = await resolveTmaUser(request, options);
 
@@ -3484,6 +3432,7 @@ async function handleRequest(
     try {
       body = await readJsonBody(request);
     } catch (error) {
+      if (error instanceof RequestBodyError && error.statusCode === 413) throw error;
       writeJson(response, 400, {
         error: "invalid_health_ingest_payload",
         message: publicErrorMessage("request_failed"),

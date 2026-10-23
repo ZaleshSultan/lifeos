@@ -59,6 +59,10 @@ type ObsidianSettingsRecord = NonNullable<
 >;
 
 class FakeStore implements LifeOSStore {
+  async issueHealthIngestCredential() { return null; }
+  async resolveHealthIngestCredential() { return false; }
+  async revokeHealthIngestCredential() {}
+  async listHealthIngestCredentials() { return []; }
   async issueWebLoginToken() { return true; }
   async exchangeWebLoginToken() { return null; }
   async resolveWebSession() { return null; }

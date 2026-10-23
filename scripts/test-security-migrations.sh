@@ -20,5 +20,16 @@ done
     printf '\n'
   done
   cat "$task_root/scripts/security-test-fixtures/assertions.sql"
+  cat "$task_root/scripts/security-test-fixtures/health.sql"
 } | docker exec -i "$task_container" psql -X -q -U postgres -v ON_ERROR_STOP=1
 printf '%s\n' 'PASS: full migration chain, profile escalation baseline/fix, realistic roles, tenant isolation, RPC grants'
+
+# Competing transactions: whether issue or block wins the profile row lock,
+# the blocked user cannot retain an active credential.
+docker exec "$task_container" psql -X -qAt -U postgres -v ON_ERROR_STOP=1 -c "begin; set local role service_role; select public.issue_health_ingest_credential('00000000-0000-4000-8000-000000000001',repeat('f',64),clock_timestamp()+interval '1 day'); select pg_sleep(1); commit;" >/dev/null &
+task_issue_pid="$!"
+docker exec "$task_container" psql -X -qAt -U postgres -v ON_ERROR_STOP=1 -c "set role service_role; update public.profiles set status='blocked' where user_id='00000000-0000-4000-8000-000000000001';" >/dev/null
+wait "$task_issue_pid"
+task_live="$(docker exec "$task_container" psql -X -qAt -U postgres -v ON_ERROR_STOP=1 -c "select count(*) from public.health_ingest_credentials where user_id='00000000-0000-4000-8000-000000000001' and revoked_at is null;")"
+[[ "$task_live" == "0" ]]
+printf '%s\n' 'PASS: health ownership, expiry, revocation, block/unblock and concurrent issuance versus block'
