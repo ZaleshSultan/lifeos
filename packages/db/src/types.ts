@@ -2024,6 +2024,20 @@ export interface Database {
       };
     };
     Functions: {
+      issue_health_ingest_credential: {
+        Args: {p_user_id: string; p_token_hash: string; p_expires_at: string};
+        Returns: string | null;
+      };
+      resolve_health_ingest_credential: {
+        Args: {p_user_id: string; p_token_hash: string}; Returns: boolean;
+      };
+      revoke_health_ingest_credential: {
+        Args: {p_user_id: string; p_device_id: string}; Returns: undefined;
+      };
+      list_health_ingest_credentials: {
+        Args: {p_user_id: string};
+        Returns: {device_id: string; created_at: string; expires_at: string; revoked_at: string | null}[];
+      };
       issue_web_login_token: {
         Args: { p_user_id: string; p_token_hash: string; p_expires_at: string };
         Returns: boolean;

@@ -1,3 +1,4 @@
+import { hashHealthToken } from "./health-credentials.js";
 import type { AddressInfo } from "node:net";
 import { WorkoutStateError } from "@lifeos/db";
 import { createHmac } from "node:crypto";
@@ -35,6 +36,12 @@ import { loadBotConfig } from "./config.js";
 import { createBotServer, type BotServerOptions } from "./server.js";
 import { createWebSessionToken, hashWebToken } from "./web-session.js";
 import type { SendMessageInput, TelegramClient } from "./telegram/types.js";
+
+const registeredHealthTokens = new Map<string, string>();
+const healthAuthFixture = {
+  async resolveHealthIngestCredential(userId: string, hash: string) { return registeredHealthTokens.get(hash) === userId; },
+  async resolveUserById() { return activeTelegramUser(); },
+};
 
 const servers: ReturnType<typeof createBotServer>[] = [];
 const tempDirectories: string[] = [];
@@ -105,8 +112,9 @@ async function rawGet(
 
 function healthIngestStore(
   seen: HealthIngestPayload[],
-): Pick<LifeOSStore, "ingestHealthPayload"> {
+): Pick<LifeOSStore, "ingestHealthPayload" | "resolveHealthIngestCredential" | "resolveUserById"> {
   return {
+    ...healthAuthFixture,
     async ingestHealthPayload(payload) {
       seen.push(payload);
       return {
@@ -125,10 +133,11 @@ function healthIngestStore(
 
 function healthMetricsStore(
   seen: HealthMetricsIngestPayload[],
-): Pick<LifeOSStore, "upsertHealthMetrics"> {
+): Pick<LifeOSStore, "upsertHealthMetrics" | "resolveHealthIngestCredential" | "resolveUserById"> {
   const existing = new Set<string>();
 
   return {
+    ...healthAuthFixture,
     async upsertHealthMetrics(payload) {
       seen.push(payload);
       let created = 0;
@@ -296,6 +305,10 @@ export function tmaStore(events: string[] = []): LifeOSStore {
   });
 
   return {
+    async issueHealthIngestCredential() { return "00000000-0000-4000-8000-000000000003"; },
+    async resolveHealthIngestCredential() { return false; },
+    async revokeHealthIngestCredential() {},
+    async listHealthIngestCredentials() { return []; },
     async issueWebLoginToken() { return true; },
     async exchangeWebLoginToken() { return null; },
     async resolveWebSession() { return null; },
@@ -1288,7 +1301,7 @@ function signedHealthIngestToken(
     userId,
     telegramUserId,
     scope: "health_ingest",
-    nonce: "test-nonce",
+    nonce: "a".repeat(64),
     issuedAt: nowSeconds,
     expiresAt: nowSeconds + 30 * 24 * 60 * 60,
   };
@@ -1303,7 +1316,9 @@ function signedHealthIngestToken(
   const signature = createHmac("sha256", secret)
     .update(signingInput)
     .digest("base64url");
-  return `${signingInput}.${signature}`;
+  const token = `${signingInput}.${signature}`;
+  registeredHealthTokens.set(hashHealthToken(token), userId);
+  return token;
 }
 
 export function signedInitData(
@@ -1951,7 +1966,7 @@ describe("bot server", () => {
       .mockImplementation(() => {});
     const { store } = webhookCommandStore({
       async createLifeCapture() {
-        throw new Error("insert failed secret bot-token");
+        throw new Error("insert failed secret bot-token Bearer synthetic-device-token private-health-payload");
       },
     });
     const { port, sent } = await startWebhookServer({
@@ -1973,7 +1988,9 @@ describe("bot server", () => {
     expect(logged).toContain('"update_id":1');
     expect(logged).toContain('"update_type":"message"');
     expect(logged).toContain('"command":"/log"');
-    expect(logged).toContain("[redacted]");
+    expect(logged).toContain("update_processing_failed");
+    expect(logged).not.toContain("synthetic-device-token");
+    expect(logged).not.toContain("private-health-payload");
     expect(logged).not.toContain("bot-token");
     expect(logged).not.toContain("secret");
   });
@@ -3515,7 +3532,7 @@ describe("bot server", () => {
       body: JSON.stringify({ ...program, userId: "user-2" }),
     });
     expect(saved.status).toBe(200);
-    expect(saved.headers.get("access-control-allow-methods")).toContain("PUT");
+    expect(saved.headers.get("cache-control")).toBe("no-store");
     await expect(saved.json()).resolves.toMatchObject({ data: program });
     expect(store.saveWorkoutProgram).toHaveBeenCalledWith("user-1", program);
     const started = await fetch(`http://127.0.0.1:${port}/api/tma/workout/start`, {

@@ -36,6 +36,12 @@ Browser apps may use public URLs and public client identifiers only. They must n
 - Prefer service-role access only from backend and trusted worker environments.
 - Rotate service-role keys if a local machine or deployment target is compromised.
 
+## Phase 2 hardening
+
+See [security hardening phase 2](SECURITY_HARDENING_PHASE_2.md) for verified
+findings, migration order, CORS configuration and the required health-device
+reconnection after deployment.
+
 ## Telegram
 
 - Use `TELEGRAM_WEBHOOK_SECRET`.
@@ -74,7 +80,9 @@ Browser apps may use public URLs and public client identifiers only. They must n
 
 ## Health Ingest
 
-- Require `Authorization: Bearer <health-session-token>`.
+- Require `Authorization: Bearer <health-session-token>` registered by the backend.
+- Check its hash, revocation, expiry and current active profile on every request.
+- Blocking a profile revokes all device credentials; reapproval does not revive them.
 - Treat Health Connect payloads as untrusted input until parsed.
 - Store raw payloads only when useful and avoid adding secrets to `raw_payload`.
 

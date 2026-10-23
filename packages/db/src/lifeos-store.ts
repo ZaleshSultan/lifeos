@@ -1,3 +1,4 @@
+import { healthCredentialStore, type HealthCredentialStore } from "./health-credential-store.js";
 import { webSessionStore, type WebSessionStore } from "./web-session-store.js";
 import { createHash } from "node:crypto";
 import {
@@ -1384,7 +1385,7 @@ export interface TmaStudySummary {
   records: AcademicRecord[];
 }
 
-export interface LifeOSStore extends LmsSessionStore, WebSessionStore {
+export interface LifeOSStore extends LmsSessionStore, WebSessionStore, HealthCredentialStore {
   getPlanningSnapshot(
     userId: string,
     range: PlanningSnapshotRange,
@@ -3455,6 +3456,19 @@ export interface SupabaseLifeOSStoreOptions {
 }
 
 export class SupabaseLifeOSStore implements LifeOSStore {
+  issueHealthIngestCredential(input: Parameters<HealthCredentialStore["issueHealthIngestCredential"]>[0]) {
+    return healthCredentialStore(this.client).issueHealthIngestCredential(input);
+  }
+  resolveHealthIngestCredential(userId: string, tokenHash: string) {
+    return healthCredentialStore(this.client).resolveHealthIngestCredential(userId, tokenHash);
+  }
+  revokeHealthIngestCredential(userId: string, deviceId: string) {
+    return healthCredentialStore(this.client).revokeHealthIngestCredential(userId, deviceId);
+  }
+  listHealthIngestCredentials(userId: string) {
+    return healthCredentialStore(this.client).listHealthIngestCredentials(userId);
+  }
+
   issueWebLoginToken(input: Parameters<WebSessionStore["issueWebLoginToken"]>[0]) {
     return webSessionStore(this.client).issueWebLoginToken(input);
   }
