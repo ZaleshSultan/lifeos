@@ -1350,7 +1350,7 @@ function telegramCommand(update: unknown): string | undefined {
   }
 
   const command = head.slice(1).split("@")[0]?.toLowerCase();
-  return command ? `/${command}` : undefined;
+  return command && /^[a-z0-9_]{1,32}$/.test(command) ? `/${command}` : undefined;
 }
 
 function sensitiveLogValues(options: ResolvedBotServerOptions): string[] {
@@ -1397,14 +1397,15 @@ function sanitizeErrorMessage(
 
 function logTelegramWebhookError(
   error: unknown,
-  options: ResolvedBotServerOptions,
   context: TelegramWebhookLogContext,
 ): void {
   console.error("telegram_webhook_error", {
     update_id: context.updateId ?? null,
     update_type: context.updateType,
-    command: context.command ?? null,
-    error: sanitizeErrorMessage(error, options),
+    // Only the /log category affects error handling; never log arbitrary command text.
+    command: context.command === "/log" ? "/log" : context.command ? "other" : null,
+    // Upstream exception messages can contain user payloads or credentials.
+    error: error instanceof RequestBodyError ? error.errorCode : "update_processing_failed",
   });
 }
 
@@ -1499,7 +1500,7 @@ async function handleTelegramWebhook(
       writeJson(response, 413, { error: "request_body_too_large" });
       return;
     }
-    logTelegramWebhookError(error, options, context);
+    logTelegramWebhookError(error, context);
 
     try {
       await sendTelegramCommandError(
@@ -1510,7 +1511,7 @@ async function handleTelegramWebhook(
           : "❌ Ошибка обработки команды.",
       );
     } catch (sendError) {
-      logTelegramWebhookError(sendError, options, context);
+      logTelegramWebhookError(sendError, context);
     }
 
     telegramOk(response);

@@ -46,6 +46,22 @@ const update = {
   },
 };
 describe("webhook security", () => {
+  it("does not log malformed payload contents or credential-bearing exception messages", async () => {
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    const f = await fixture();
+    const response = await fetch(f.url, {
+      method: "POST",
+      headers: { "x-telegram-bot-api-secret-token": "test-webhook-secret" },
+      body: "invalid-json private-health-payload Bearer synthetic-device-token",
+    });
+    expect(response.status).toBe(200);
+    expect(JSON.stringify(errorLog.mock.calls)).toContain("invalid_json");
+    expect(JSON.stringify(errorLog.mock.calls)).not.toMatch(
+      /private-health-payload|synthetic-device-token|test-webhook-secret/,
+    );
+    errorLog.mockRestore();
+  });
+
   it("accepts valid authenticated Telegram updates", async () => {
     const f = await fixture();
     const response = await fetch(f.url, {

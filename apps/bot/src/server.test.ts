@@ -1966,7 +1966,7 @@ describe("bot server", () => {
       .mockImplementation(() => {});
     const { store } = webhookCommandStore({
       async createLifeCapture() {
-        throw new Error("insert failed secret bot-token");
+        throw new Error("insert failed secret bot-token Bearer synthetic-device-token private-health-payload");
       },
     });
     const { port, sent } = await startWebhookServer({
@@ -1988,7 +1988,9 @@ describe("bot server", () => {
     expect(logged).toContain('"update_id":1');
     expect(logged).toContain('"update_type":"message"');
     expect(logged).toContain('"command":"/log"');
-    expect(logged).toContain("[redacted]");
+    expect(logged).toContain("update_processing_failed");
+    expect(logged).not.toContain("synthetic-device-token");
+    expect(logged).not.toContain("private-health-payload");
     expect(logged).not.toContain("bot-token");
     expect(logged).not.toContain("secret");
   });
