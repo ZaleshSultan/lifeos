@@ -122,7 +122,11 @@ async function fixture() {
     upsertHealthMetrics,
   };
   const server = createBotServer({
-    config: { telegramBotToken: botToken, lifeosHealthIngestJwtSecret: secret },
+    config: {
+      telegramBotToken: botToken,
+      lifeosHealthIngestJwtSecret: secret,
+      corsAllowedOrigins: ["https://tma.example.com"],
+    },
     store: store as unknown as LifeOSStore,
   });
   servers.push(server);
@@ -131,9 +135,15 @@ async function fixture() {
   const issue = async (id = 1) => {
     const response = await fetch(url + "/api/tma/health/ingest-token", {
       method: "POST",
-      headers: { "x-telegram-init-data": initData(id) },
+      headers: {
+        "x-telegram-init-data": initData(id),
+        origin: "https://tma.example.com",
+      },
     });
     expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-allow-origin")).toBe(
+      "https://tma.example.com",
+    );
     expect(response.headers.get("cache-control")).toBe("no-store");
     return (
       (await response.json()) as {

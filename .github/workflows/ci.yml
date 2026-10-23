@@ -29,3 +29,4 @@ jobs:
       - run: pnpm test:workers
       - run: bash scripts/test-lms-migration.sh
       - run: bash scripts/test-web-session-migration.sh
+      - run: bash scripts/test-security-migrations.sh
