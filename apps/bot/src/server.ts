@@ -1,3 +1,4 @@
+import { isProduction, validateBotSecurity, webhookSecretHeader } from "./security-config.js";
 import { LmsSessionService } from "./lms-sessions.js";
 import { handleLmsRoute } from "./lms-routes.js";
 import {
@@ -107,6 +108,7 @@ export interface BotServerOptions {
   config?: Partial<
     Pick<
       BotConfig,
+      | "nodeEnv"
       | "telegramWebhookPath"
       | "telegramWebhookSecret"
       | "telegramBotToken"
@@ -156,6 +158,7 @@ interface HealthResponse {
 }
 
 interface ResolvedBotServerOptions {
+  nodeEnv?: string;
   lmsSessions: LmsSessionService;
   ai: LifeosAiService;
   startedAt: Date;
@@ -945,7 +948,7 @@ function unsafeTmaDevAuthAllowed(
   return Boolean(
     options.allowUnsafeTmaDevAuth &&
     options.defaultUserId !== undefined &&
-    process.env.NODE_ENV !== "production",
+    !isProduction(options.nodeEnv),
   );
 }
 
@@ -1601,6 +1604,10 @@ async function handleTelegramWebhook(
 
     telegramOk(response);
   } catch (error) {
+    if (error instanceof RequestBodyError && error.statusCode === 413) {
+      writeJson(response, 413, { error: "request_body_too_large" });
+      return;
+    }
     logTelegramWebhookError(error, options, context);
 
     try {
@@ -3571,21 +3578,21 @@ async function handleRequest(
     return;
   }
 
-  if (
-    request.method === "POST" &&
-    requestUrl.pathname === options.webhookPath
-  ) {
-    if (options.webhookSecret) {
-      const providedSecret = request.headers["x-telegram-bot-api-secret-token"];
-
-      if (
-        !secureCompare(headerValue(providedSecret) ?? "", options.webhookSecret)
-      ) {
-        writeJson(response, 401, {
-          error: "invalid_webhook_secret",
-        });
-        return;
-      }
+  if (requestUrl.pathname === options.webhookPath) {
+    response.setHeader("Cache-Control", "no-store");
+    if (request.method !== "POST") {
+      response.setHeader("Allow", "POST");
+      writeJson(response, 405, { error: "method_not_allowed" });
+      return;
+    }
+    if (!options.webhookSecret) {
+      writeJson(response, 503, { error: "webhook_auth_not_configured" });
+      return;
+    }
+    const providedSecret = webhookSecretHeader(request);
+    if (!providedSecret || !secureCompare(providedSecret, options.webhookSecret)) {
+      writeJson(response, 401, { error: "invalid_webhook_secret" });
+      return;
     }
 
     if (!options.telegram) {
@@ -3605,7 +3612,10 @@ async function handleRequest(
 }
 
 export function createBotServer(options: BotServerOptions = {}): Server {
+  // Also protect callers constructing the server without loadBotConfig().
+  validateBotSecurity(options.config ?? {});
   const resolvedOptions: ResolvedBotServerOptions = {
+    nodeEnv: options.config?.nodeEnv,
     ai: options.ai ?? createConfiguredLifeosAiService(),
     lmsSessions: options.lmsSessions ?? new LmsSessionService(),
     startedAt: options.startedAt ?? new Date(),

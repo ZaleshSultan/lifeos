@@ -1,3 +1,4 @@
+import { validateBotSecurity } from "./security-config.js";
 import { integerEnv, optionalEnv, type EnvSource } from "@lifeos/core";
 
 export interface BotConfig {
@@ -89,11 +90,9 @@ export function loadBotConfig(source: EnvSource = process.env): BotConfig {
     false,
   );
 
-  if (nodeEnv.toLowerCase() === "production" && allowUnsafeTmaDevAuth) {
-    throw new Error(
-      "ALLOW_UNSAFE_TMA_DEV_AUTH cannot be enabled when NODE_ENV=production",
-    );
-  }
+  // Whitespace-only absence fails closed; non-empty secrets are checked verbatim.
+  const telegramWebhookSecret = source.TELEGRAM_WEBHOOK_SECRET || undefined;
+  validateBotSecurity({ nodeEnv, telegramWebhookSecret, allowUnsafeTmaDevAuth });
 
   return {
     nodeEnv,
@@ -103,7 +102,7 @@ export function loadBotConfig(source: EnvSource = process.env): BotConfig {
     telegramWebhookPath:
       optionalEnv(source, "TELEGRAM_WEBHOOK_PATH", "/telegram/webhook") ??
       "/telegram/webhook",
-    telegramWebhookSecret: optionalEnv(source, "TELEGRAM_WEBHOOK_SECRET"),
+    telegramWebhookSecret,
     telegramWebAppUrl: optionalEnv(source, "TELEGRAM_WEBAPP_URL"),
     tmaUrl:
       optionalEnv(source, "TMA_URL") ??
