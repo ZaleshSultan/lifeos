@@ -2239,7 +2239,7 @@ function toReminderRecord(row: ReminderRow): ReminderRecord {
     lifeEntityId: row.life_entity_id,
     sourceEventId: row.source_event_id,
     channel: row.channel,
-    remindAt: row.remind_at,
+    remindAt: row.notification_at ?? row.remind_at,
     status: row.status,
     message: row.message,
     metadataJson: row.metadata_json,
@@ -5793,8 +5793,8 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       .select("*")
       .eq("user_id", userId)
       .eq("status", "pending")
-      .lte("remind_at", before)
-      .order("remind_at", { ascending: true });
+      .lte("notification_at", before)
+      .order("notification_at", { ascending: true });
 
     if (error) {
       throwSupabaseError(error, "Failed to list pending reminders");
@@ -5812,8 +5812,8 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       .select("*")
       .eq("user_id", userId)
       .eq("status", "pending")
-      .gte("remind_at", new Date().toISOString())
-      .order("remind_at", { ascending: true })
+      .gte("notification_at", new Date().toISOString())
+      .order("notification_at", { ascending: true })
       .limit(limit);
 
     if (error) {
@@ -5884,6 +5884,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
         status: "pending",
         remind_at: parsed.toISOString(),
         claimed_at: null,
+        next_attempt_at: null,
       })
       .eq("user_id", userId)
       .eq("id", reminderId)

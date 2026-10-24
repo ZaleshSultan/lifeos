@@ -125,3 +125,9 @@ supabase db push
 hash tables, atomic single-use exchange RPCs and profile-status invalidation.
 It changes no existing user data. See [WEB_SESSIONS.md](WEB_SESSIONS.md). Run
 `bash scripts/test-web-session-migration.sh` against its disposable container.
+
+## Notification delivery leases
+
+See [notification deliveries](NOTIFICATION_DELIVERIES.md) for additive migration
+`20261024192839_notification_delivery_leases.sql`, service-only lifecycle RPCs,
+legacy-state handling and required stop-old-workers rollout.
