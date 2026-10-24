@@ -8,6 +8,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 TEST_FILES = (
+    ROOT / "common" / "notification_delivery_test.py",
+    ROOT / "common" / "notification_time_test.py",
     ROOT / "common" / "lifeos_sync_test.py",
     ROOT / "common" / "lms_sessions_test.py",
     ROOT / "common" / "lms_sync_lease_test.py",
