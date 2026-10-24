@@ -64,6 +64,8 @@ export type SyncRunStatus = "running" | "success" | "partial" | "failed";
 export type ReminderStatus =
   | "pending"
   | "processing"
+  | "sending"
+  | "unknown"
   | "sent"
   | "cancelled"
   | "failed";
@@ -1645,6 +1647,8 @@ export interface Database {
           source_event_id: string | null;
           channel: string;
           remind_at: string;
+          next_attempt_at: string | null;
+          notification_at: string;
           status: ReminderStatus;
           message: string;
           metadata_json: Json;
@@ -1662,6 +1666,7 @@ export interface Database {
           source_event_id?: string | null;
           channel?: string;
           remind_at: string;
+          next_attempt_at?: string | null;
           status?: ReminderStatus;
           message: string;
           metadata_json?: Json;
