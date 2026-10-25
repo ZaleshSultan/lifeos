@@ -38,6 +38,8 @@ export type LifeEntityType =
 
 export type ObsidianSyncStatus =
   | "pending"
+  | "retry"
+  | "conflict"
   | "processing"
   | "completed"
   | "failed"
@@ -1799,6 +1801,9 @@ export interface Database {
           attempts: number;
           available_at: string;
           locked_at: string | null;
+          claim_token: string | null;
+          lease_expires_at: string | null;
+          last_error_code: string | null;
           completed_at: string | null;
           last_error: string | null;
           payload: Json;
@@ -1818,6 +1823,9 @@ export interface Database {
           attempts?: number;
           available_at?: string;
           locked_at?: string | null;
+          claim_token?: string | null;
+          lease_expires_at?: string | null;
+          last_error_code?: string | null;
           completed_at?: string | null;
           last_error?: string | null;
           payload?: Json;

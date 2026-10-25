@@ -9,7 +9,7 @@ cleanup() {
   rm -rf -- "$task_results"
 }
 trap cleanup EXIT
-docker run --rm -d --name "$task_container" -e POSTGRES_HOST_AUTH_METHOD=trust postgres:15-alpine >/dev/null
+docker run --rm -d --name "$task_container" --tmpfs /var/lib/postgresql/data:rw,size=256m -e POSTGRES_HOST_AUTH_METHOD=trust postgres:15-alpine >/dev/null
 task_ready=false
 for attempt in {1..120}; do
   if docker exec "$task_container" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; then task_ready=true; break; fi

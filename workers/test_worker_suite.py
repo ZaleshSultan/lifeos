@@ -11,6 +11,7 @@ TEST_FILES = (
     ROOT / "common" / "notification_delivery_test.py",
     ROOT / "common" / "notification_time_test.py",
     ROOT / "common" / "lifeos_sync_test.py",
+    ROOT / "common" / "obsidian_files_test.py",
     ROOT / "common" / "lms_sessions_test.py",
     ROOT / "common" / "lms_sync_lease_test.py",
     ROOT / "common" / "academic_sync_test.py",

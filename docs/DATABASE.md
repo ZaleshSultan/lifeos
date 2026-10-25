@@ -131,3 +131,10 @@ It changes no existing user data. See [WEB_SESSIONS.md](WEB_SESSIONS.md). Run
 See [notification deliveries](NOTIFICATION_DELIVERIES.md) for additive migration
 `20261024192839_notification_delivery_leases.sql`, service-only lifecycle RPCs,
 legacy-state handling and required stop-old-workers rollout.
+
+## Obsidian mirror recovery
+
+See [Obsidian recovery](OBSIDIAN_SYNC_RECOVERY.md) for the ordered additive
+`20261025042616_obsidian_sync_recovery.sql` and
+`20261025043139_obsidian_sync_leases.sql` migrations, service-only publication
+ledger, legacy quarantine and required stop-all-old-writers rollout.
