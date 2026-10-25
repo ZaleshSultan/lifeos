@@ -48,3 +48,18 @@ sudo systemctl enable --now lifeos-reminder-worker.service
 sudo systemctl status lifeos-reminder-worker.service
 journalctl -u lifeos-reminder-worker.service -f
 ```
+
+## Delivery guarantees and migration
+
+See [notification delivery protocol](../../docs/NOTIFICATION_DELIVERIES.md) for
+claims, retry budgets, unknown outcomes, recipient timezones and rollout.
+Apply `20261024192839_notification_delivery_leases.sql` with all old reminder and
+digest workers stopped. New workers require this migration and workers/common.
+
+The worker keeps the atomic SKIP LOCKED claim RPC, claims one row just before
+preparing it, and uses fenced owner/token/lease transitions. Quiet deferrals keep
+the original event time. Only definitely rejected sends retry automatically;
+timeouts and lost confirmation writes become explicit `unknown` outcomes.
+This is not exactly-once Telegram delivery. `status` prints aggregate queue
+health without content, secrets or Telegram calls. The old claim-timeout env is
+accepted for compatibility; DB-enforced leases are five/two minutes.

@@ -7,52 +7,56 @@ import argparse
 import json
 import logging
 import os
-import re
 import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
-from datetime import datetime, time as datetime_time, timedelta, timezone
+from dataclasses import dataclass, replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Protocol
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from common.notification_delivery import (
+    DeliveryStore,
+    TelegramApiClient,
+    TelegramDeliveryError,
+    WorkerError,
+)
+from common.notification_time import (
+    in_quiet_hours,
+    next_quiet_end as quiet_end,
+    quiet_hour_deferral_at,
+)
 
 JsonObject = dict[str, Any]
 
 LOCAL_TIMEZONE = "Asia/Qyzylorda"
-MAX_SEND_ATTEMPTS = 3
 REQUEST_TIMEOUT_SECONDS = 30
 
 
-class WorkerError(RuntimeError):
-    """Expected worker failure that can be logged without leaking secrets."""
-
-
 class SupabaseClientProtocol(Protocol):
-    def list_due_reminders(self, before: str, limit: int) -> list[JsonObject]: ...
-
     def claim_due_reminders(self, before: str, limit: int) -> list[JsonObject]: ...
-
-    def claim_reminder(self, reminder_id: str) -> JsonObject | None: ...
-
-    def resolve_reminder_recipient(self, reminder: JsonObject) -> str | None: ...
-
-    def mark_reminder_sent(self, reminder_id: str) -> JsonObject | None: ...
-
-    def record_send_failure(self, reminder: JsonObject, error: str) -> JsonObject | None: ...
-
+    def resolve_reminder_recipient(self, reminder: JsonObject) -> JsonObject | None: ...
     def fetch_reminder_context(self, reminder: JsonObject) -> JsonObject: ...
-
-    def defer_reminder(self, reminder_id: str, remind_at: str) -> JsonObject | None: ...
-
-    def release_stale_claims(self, before: str) -> None: ...
+    def begin_delivery(self, kind: str, claim: JsonObject) -> str | None: ...
+    def finish_delivery(
+        self,
+        kind: str,
+        claim: JsonObject,
+        outcome: str,
+        reason: str = "none",
+        message_id: int | None = None,
+        retry_after_seconds: int | None = None,
+    ) -> bool: ...
+    def defer_reminder_delivery(self, claim: JsonObject, not_before: str) -> bool: ...
+    def recover_deliveries(self, kind: str) -> JsonObject: ...
 
 
 class TelegramClientProtocol(Protocol):
-    def send_message(self, chat_id: str, text: str) -> None: ...
+    def send_message(self, chat_id: str, text: str) -> int: ...
 
 
 @dataclass(frozen=True)
@@ -66,6 +70,7 @@ class Settings:
     local_timezone: str = LOCAL_TIMEZONE
     quiet_hours_start: str = "23:00"
     quiet_hours_end: str = "08:00"
+    # Legacy environment compatibility; leases are enforced by PostgreSQL.
     claim_timeout_minutes: int = 5
 
 
@@ -75,6 +80,9 @@ class ProcessSummary:
     sent: int = 0
     send_failed: int = 0
     mark_failed: int = 0
+    unknown: int = 0
+    deferred: int = 0
+    stale: int = 0
 
 
 def utc_now() -> str:
@@ -172,7 +180,7 @@ def parse_datetime(value: str) -> datetime:
 def resolve_timezone(timezone_name: str):
     try:
         return ZoneInfo(timezone_name), timezone_name
-    except ZoneInfoNotFoundError:
+    except (ZoneInfoNotFoundError, ValueError, TypeError):
         if timezone_name == "Asia/Qyzylorda":
             return timezone(timedelta(hours=5)), timezone_name
         return timezone.utc, "UTC"
@@ -189,64 +197,7 @@ def local_time_label(value: str, timezone_name: str = LOCAL_TIMEZONE) -> str:
     return f"{local:%Y-%m-%d %H:%M} ({label})"
 
 
-SENSITIVE_ERROR_PATTERNS = [
-    (re.compile(r"(?i)(authorization\s*[:=]\s*bearer\s+)[^\s,;]+"), r"\1[REDACTED]"),
-    (re.compile(r"(?i)(bot)[0-9]{5,}:[A-Za-z0-9_-]{10,}"), r"\1[REDACTED]"),
-    (re.compile(r"(?i)(api[_-]?key|access[_-]?token|refresh[_-]?token|service[_-]?role[_-]?key|supabase[_-]?key|token|password|secret)(\s*[:=]\s*)[^\s,;]+"), r"\1\2[REDACTED]"),
-    (re.compile(r"(?i)([?&](?:access_token|refresh_token|api_key|apikey|token|password|key|secret)=)[^&#\s]+"), r"\1[REDACTED]"),
-]
-
-
-def redact_sensitive_error_text(value: str) -> str:
-    text = value
-    for pattern, replacement in SENSITIVE_ERROR_PATTERNS:
-        text = pattern.sub(replacement, text)
-    return text
-
-
-def truncate_error(error: object) -> str:
-    text = str(error).strip() or error.__class__.__name__
-    return redact_sensitive_error_text(text)[:2000]
-
-
-def metadata_with_send_failure(
-    reminder: JsonObject,
-    error: str,
-    failed_at: str,
-) -> tuple[JsonObject, int, str]:
-    metadata = reminder.get("metadata_json")
-
-    if not isinstance(metadata, dict):
-        metadata = {}
-    else:
-        metadata = dict(metadata)
-
-    worker_metadata = metadata.get("reminder_worker")
-
-    if not isinstance(worker_metadata, dict):
-        worker_metadata = {}
-    else:
-        worker_metadata = dict(worker_metadata)
-
-    try:
-        attempts = int(worker_metadata.get("attempts") or 0) + 1
-    except (TypeError, ValueError):
-        attempts = 1
-
-    worker_metadata.update(
-        {
-            "attempts": attempts,
-            "last_error": error,
-            "last_failed_at": failed_at,
-        }
-    )
-    metadata["reminder_worker"] = worker_metadata
-    status = "failed" if attempts >= MAX_SEND_ATTEMPTS else "pending"
-
-    return metadata, attempts, status
-
-
-class SupabaseRestClient:
+class SupabaseRestClient(DeliveryStore):
     def __init__(self, url: str, service_role_key: str) -> None:
         self.base_url = f"{url.rstrip('/')}/rest/v1"
         self.headers = {
@@ -279,13 +230,14 @@ class SupabaseRestClient:
         request = urllib.request.Request(url, data=data, headers=headers, method=method)
 
         try:
-            with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+            with urllib.request.urlopen(
+                request, timeout=REQUEST_TIMEOUT_SECONDS
+            ) as response:
                 raw = response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
-            raise WorkerError(f"Supabase {method} {table} failed: {exc.code} {detail}") from exc
+            raise WorkerError("supabase_request_failed") from None
         except urllib.error.URLError as exc:
-            raise WorkerError(f"Supabase {method} {table} failed: {exc.reason}") from exc
+            raise WorkerError("supabase_request_failed") from None
 
         if not raw:
             return None
@@ -334,142 +286,32 @@ class SupabaseRestClient:
         )
         return rows or []
 
-    def claim_reminder(self, reminder_id: str) -> JsonObject | None:
-        rows = self.request(
-            "PATCH",
-            "reminders",
-            {
-                "id": f"eq.{reminder_id}",
-                "status": "eq.pending",
-                "select": "*",
-            },
-            {
-                "status": "processing",
-                "claimed_at": utc_now(),
-            },
-            prefer="return=representation",
-        )
-        return rows[0] if rows else None
-
-    def resolve_reminder_recipient(self, reminder: JsonObject) -> str | None:
+    def resolve_reminder_recipient(self, reminder: JsonObject) -> JsonObject | None:
         user_id = str(reminder.get("user_id") or "").strip()
-
         if not user_id:
-            raise WorkerError("Cannot resolve reminder recipient without user_id")
-
+            raise WorkerError("reminder_owner_missing")
         rows = self.request(
             "GET",
             "profiles",
             {
-                "select": "telegram_user_id",
+                "select": "user_id,telegram_user_id,timezone,status",
                 "user_id": f"eq.{user_id}",
                 "status": "eq.active",
                 "limit": "1",
             },
         )
+        return rows[0] if rows and rows[0].get("telegram_user_id") is not None else None
 
-        if not rows:
-            return None
-
-        telegram_user_id = rows[0].get("telegram_user_id")
-
-        if telegram_user_id is None or str(telegram_user_id).strip() == "":
-            return None
-
-        return str(telegram_user_id)
-
-    def mark_reminder_sent(self, reminder_id: str) -> JsonObject | None:
-        now = utc_now()
-        rows = self.request(
-            "PATCH",
-            "reminders",
-            {
-                "id": f"eq.{reminder_id}",
-                "status": "eq.processing",
-                "select": "*",
-            },
-            {
-                "status": "sent",
-                "sent_at": now,
-                "claimed_at": None,
-                "updated_at": now,
-            },
-            prefer="return=representation",
-        )
-
-        return rows[0] if rows else None
-
-    def record_send_failure(self, reminder: JsonObject, error: str) -> JsonObject | None:
-        reminder_id = str(reminder.get("id") or "")
-
-        if not reminder_id:
-            raise WorkerError("Cannot record send failure without reminder id")
-
-        now = utc_now()
-        metadata, attempts, status = metadata_with_send_failure(reminder, error, now)
-        rows = self.request(
-            "PATCH",
-            "reminders",
-            {
-                "id": f"eq.{reminder_id}",
-                "status": "eq.processing",
-                "select": "*",
-            },
-            {
-                "status": status,
-                "metadata_json": metadata,
-                "claimed_at": None,
-                "updated_at": now,
-            },
-            prefer="return=representation",
-        )
-
-        if rows:
-            rows[0]["_reminder_worker_attempts"] = attempts
-
-        return rows[0] if rows else None
-
-    def defer_reminder(self, reminder_id: str, remind_at: str) -> JsonObject | None:
-        rows = self.request(
-            "PATCH",
-            "reminders",
-            {
-                "id": f"eq.{reminder_id}",
-                "status": "eq.processing",
-                "select": "*",
-            },
-            {
-                "status": "pending",
-                "remind_at": remind_at,
-                "claimed_at": None,
-                "updated_at": utc_now(),
-            },
-            prefer="return=representation",
-        )
-        return rows[0] if rows else None
-
-    def release_stale_claims(self, before: str) -> None:
-        self.request(
-            "PATCH",
-            "reminders",
-            {
-                "status": "eq.processing",
-                "claimed_at": f"lt.{before}",
-            },
-            {
-                "status": "pending",
-                "claimed_at": None,
-                "updated_at": utc_now(),
-            },
-        )
-
-    def fetch_one(self, table: str, row_id: str, select: str) -> JsonObject | None:
+    def fetch_one(
+        self, table: str, row_id: str, select: str, user_id: str
+    ) -> JsonObject | None:
         rows = self.request(
             "GET",
             table,
             {
                 "select": select,
                 "id": f"eq.{row_id}",
+                "user_id": f"eq.{user_id}",
                 "limit": "1",
             },
         )
@@ -487,12 +329,13 @@ class SupabaseRestClient:
                     "life_entities",
                     life_entity_id,
                     "id,title,source,entity_type",
+                    str(reminder["user_id"]),
                 )
             except WorkerError as exc:
                 logging.warning(
                     "reminder id=%s linked_life_entity_fetch_failed error=%s",
                     reminder.get("id"),
-                    truncate_error(exc),
+                    "context_unavailable",
                 )
 
         if isinstance(source_event_id, str) and source_event_id:
@@ -501,54 +344,16 @@ class SupabaseRestClient:
                     "source_events",
                     source_event_id,
                     "id,title,source_key,event_type",
+                    str(reminder["user_id"]),
                 )
             except WorkerError as exc:
                 logging.warning(
                     "reminder id=%s linked_source_event_fetch_failed error=%s",
                     reminder.get("id"),
-                    truncate_error(exc),
+                    "context_unavailable",
                 )
 
         return context
-
-
-class TelegramApiClient:
-    def __init__(self, bot_token: str) -> None:
-        self.api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-
-    def send_message(self, chat_id: str, text: str) -> None:
-        payload = {
-            "chat_id": chat_id,
-            "text": text,
-            "disable_web_page_preview": True,
-        }
-        request = urllib.request.Request(
-            self.api_url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "content-type": "application/json",
-                "accept": "application/json",
-            },
-            method="POST",
-        )
-
-        try:
-            with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
-                raw = response.read().decode("utf-8")
-        except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
-            raise WorkerError(f"Telegram send failed: {exc.code} {detail}") from exc
-        except urllib.error.URLError as exc:
-            raise WorkerError(f"Telegram send failed: {exc.reason}") from exc
-
-        try:
-            result = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise WorkerError("Telegram send failed: invalid JSON response") from exc
-
-        if not result.get("ok"):
-            description = result.get("description") or "unknown Telegram error"
-            raise WorkerError(f"Telegram send failed: {description}")
 
 
 def format_context_line(context: JsonObject) -> list[str]:
@@ -584,39 +389,30 @@ def reminder_metadata(reminder: JsonObject) -> JsonObject:
 
 
 def is_quiet_time(value: datetime, settings: Settings) -> bool:
-    tz, _label = resolve_timezone(settings.local_timezone)
-    local = value.astimezone(tz)
-    current = local.time().replace(tzinfo=None)
-    start = datetime_time.fromisoformat(settings.quiet_hours_start)
-    end = datetime_time.fromisoformat(settings.quiet_hours_end)
-    if start < end:
-        return start <= current < end
-    return current >= start or current < end
+    return in_quiet_hours(
+        value,
+        settings.quiet_hours_start,
+        settings.quiet_hours_end,
+        settings.local_timezone,
+    )
 
 
 def next_quiet_end(value: datetime, settings: Settings) -> datetime:
-    tz, _label = resolve_timezone(settings.local_timezone)
-    local = value.astimezone(tz)
-    end = datetime_time.fromisoformat(settings.quiet_hours_end)
-    target_day = local.date()
-    if local.time().replace(tzinfo=None) >= datetime_time.fromisoformat(
-        settings.quiet_hours_start
-    ):
-        target_day += timedelta(days=1)
-    return datetime.combine(target_day, end, local.tzinfo).astimezone(timezone.utc)
+    return quiet_end(
+        value,
+        settings.quiet_hours_start,
+        settings.quiet_hours_end,
+        settings.local_timezone,
+    )
 
 
-def quiet_hour_deferral(reminder: JsonObject, settings: Settings) -> str | None:
+def quiet_hour_deferral(
+    reminder: JsonObject, settings: Settings, now: datetime | None = None
+) -> str | None:
     metadata = reminder_metadata(reminder)
-    if metadata.get("notification_kind") == "instant_academic":
-        # A newly posted grade or assignment is a fact to deliver immediately;
-        # waiting until morning would make the "new" notice stale.
-        return None
-    mode = str(metadata.get("reminder_mode") or "normal")
-    if mode in {"duolingo", "war"}:
-        return None
-    now = datetime.now(timezone.utc)
-    if not is_quiet_time(now, settings):
+    if metadata.get("notification_kind") == "instant_academic" or metadata.get(
+        "reminder_mode"
+    ) in {"duolingo", "war"}:
         return None
     try:
         event_at = parse_datetime(
@@ -624,9 +420,14 @@ def quiet_hour_deferral(reminder: JsonObject, settings: Settings) -> str | None:
         )
     except ValueError:
         return None
-    if event_at - now <= timedelta(hours=1):
-        return None
-    return next_quiet_end(now, settings).isoformat().replace("+00:00", "Z")
+    target = quiet_hour_deferral_at(
+        now or datetime.now(timezone.utc),
+        event_at,
+        settings.quiet_hours_start,
+        settings.quiet_hours_end,
+        settings.local_timezone,
+    )
+    return target.isoformat().replace("+00:00", "Z") if target else None
 
 
 def format_telegram_message(
@@ -635,7 +436,10 @@ def format_telegram_message(
     timezone_name: str = LOCAL_TIMEZONE,
 ) -> str:
     metadata = reminder_metadata(reminder)
-    message = str(metadata.get("title") or reminder.get("message") or "").strip() or "Reminder"
+    message = (
+        str(metadata.get("title") or reminder.get("message") or "").strip()
+        or "Reminder"
+    )
     remind_at = str(reminder.get("remind_at") or "").strip()
     event_at = str(metadata.get("event_at") or remind_at).strip()
     source_label = str(metadata.get("source_label") or "Manual")
@@ -702,107 +506,142 @@ def process_due_reminders(
     settings: Settings,
     supabase: SupabaseClientProtocol,
     telegram: TelegramClientProtocol,
+    *,
+    now: datetime | None = None,
 ) -> ProcessSummary:
-    claim_due_reminders = getattr(supabase, "claim_due_reminders", None)
+    started = time.monotonic()
+    current = now or datetime.now(timezone.utc)
+    recovered = supabase.recover_deliveries("reminder")
+    summary = ProcessSummary(stale=int(recovered.get("stale", 0)))
+    logging.info(
+        "reminder_worker stale=%s recovered_unknown=%s",
+        summary.stale,
+        recovered.get("unknown", 0),
+    )
 
-    if callable(claim_due_reminders):
-        reminders = claim_due_reminders(utc_now(), settings.batch_size)
-        reminders_are_claimed = True
-    else:
-        reminders = supabase.list_due_reminders(utc_now(), settings.batch_size)
-        reminders_are_claimed = False
-
-    summary = ProcessSummary(processed=len(reminders))
-
-    if not reminders:
-        logging.info("reminder_worker status=idle due_count=0")
-        return summary
-
-    logging.info("reminder_worker status=processing due_count=%s", len(reminders))
-
-    for reminder in reminders:
-        reminder_id = str(reminder.get("id") or "unknown")
-
-        try:
-            if reminders_are_claimed:
-                claimed = reminder
-            else:
-                claimed = supabase.claim_reminder(reminder_id)
-            if not claimed:
-                logging.info("reminder id=%s status=claim_skipped", reminder_id)
-                continue
-            reminder = claimed
-            defer_until = quiet_hour_deferral(reminder, settings)
-            if defer_until:
-                supabase.defer_reminder(reminder_id, defer_until)
-                logging.info(
-                    "reminder id=%s status=quiet_hours_deferred until=%s",
-                    reminder_id,
-                    defer_until,
-                )
-                continue
-            recipient = supabase.resolve_reminder_recipient(reminder)
-            if recipient is None:
-                raise WorkerError("Reminder owner has no active Telegram profile")
-            context = supabase.fetch_reminder_context(reminder)
-            logging.info("reminder id=%s status=sending", reminder_id)
-            telegram.send_message(
-                recipient,
-                format_telegram_message(reminder, context, settings.local_timezone),
+    def claimed_rows():
+        # Reserve just-in-time; slow preparation of an earlier job must not
+        # exhaust leases on an entire already-reserved batch.
+        for _ in range(settings.batch_size):
+            rows = supabase.claim_due_reminders(
+                (now or datetime.now(timezone.utc)).isoformat(), 1
             )
-        except Exception as exc:  # noqa: BLE001 - isolate one reminder from the batch.
-            error = truncate_error(exc)
-            summary.send_failed += 1
+            if not rows:
+                return
+            yield rows[0]
 
-            try:
-                updated = supabase.record_send_failure(reminder, error)
-                status = str(updated.get("status") if updated else "pending")
-                attempts = updated.get("_reminder_worker_attempts") if updated else "unknown"
-                logging.warning(
-                    "reminder id=%s status=%s attempts=%s error=%s",
-                    reminder_id,
-                    status,
-                    attempts,
-                    error,
-                )
-            except Exception as mark_exc:  # noqa: BLE001 - continue with the batch.
-                logging.error(
-                    "reminder id=%s status=failure_record_failed error=%s",
-                    reminder_id,
-                    truncate_error(mark_exc),
-                )
-
-            continue
-
+    def finish(claim, outcome, reason="none", message_id=None, wait=None):
         try:
-            updated = supabase.mark_reminder_sent(reminder_id)
-        except Exception as exc:  # noqa: BLE001 - the message was sent; keep the loop alive.
+            changed = supabase.finish_delivery(
+                "reminder", claim, outcome, reason, message_id, wait
+            )
+            if not changed:
+                summary.mark_failed += 1
+                logging.warning("reminder id=%s status=claim_lost", claim.get("id"))
+            return changed
+        except Exception:
             summary.mark_failed += 1
             logging.error(
-                "reminder id=%s status=sent_mark_failed error=%s",
-                reminder_id,
-                truncate_error(exc),
+                "reminder id=%s status=state_unavailable outcome=%s",
+                claim.get("id"),
+                outcome,
             )
+            return False
+
+    for reminder in claimed_rows():
+        current = now or datetime.now(timezone.utc)
+        summary.processed += 1
+        reminder_id = str(reminder.get("id") or "unknown")
+        try:
+            profile = supabase.resolve_reminder_recipient(reminder)
+            if not profile:
+                finish(reminder, "cancelled", "recipient_inactive")
+                continue
+            recipient_settings = replace(
+                settings, local_timezone=str(profile.get("timezone") or "UTC")
+            )
+            defer_until = quiet_hour_deferral(reminder, recipient_settings, current)
+            if defer_until:
+                if supabase.defer_reminder_delivery(reminder, defer_until):
+                    summary.deferred += 1
+                else:
+                    summary.mark_failed += 1
+                continue
+            context = supabase.fetch_reminder_context(reminder)
+            # Slow DB preparation can cross into quiet hours; recheck before begin.
+            defer_until = quiet_hour_deferral(
+                reminder, recipient_settings, now or datetime.now(timezone.utc)
+            )
+            if defer_until:
+                if supabase.defer_reminder_delivery(reminder, defer_until):
+                    summary.deferred += 1
+                else:
+                    summary.mark_failed += 1
+                continue
+            text = format_telegram_message(
+                reminder, context, recipient_settings.local_timezone
+            )
+        except Exception:
+            summary.send_failed += 1
+            finish(reminder, "retry", "preparation_failed")
             continue
 
-        if updated:
-            summary.sent += 1
-            logging.info("reminder id=%s status=sent", reminder_id)
-        else:
+        try:
+            recipient = supabase.begin_delivery("reminder", reminder)
+        except Exception:
+            # The DB may have committed sending. Never reset or send on a lost response.
             summary.mark_failed += 1
-            logging.warning("reminder id=%s status=sent_mark_skipped", reminder_id)
-
+            logging.error("reminder id=%s status=begin_unavailable", reminder_id)
+            continue
+        if recipient is None:
+            logging.info("reminder id=%s status=claim_lost", reminder_id)
+            continue
+        logging.info(
+            "reminder id=%s status=sending attempt=%s failures=%s",
+            reminder_id,
+            int(reminder.get("delivery_attempts") or 0) + 1,
+            reminder.get("failure_count", 0),
+        )
+        try:
+            message_id = telegram.send_message(recipient, text)
+        except TelegramDeliveryError as exc:
+            summary.send_failed += 1
+            summary.unknown += int(exc.outcome == "unknown")
+            finish(reminder, exc.outcome, exc.reason, wait=exc.retry_after_seconds)
+            logging.warning(
+                "reminder id=%s status=%s reason=%s",
+                reminder_id,
+                exc.outcome,
+                exc.reason,
+            )
+            continue
+        except Exception:
+            summary.send_failed += 1
+            summary.unknown += 1
+            finish(reminder, "unknown", "unexpected_send_error")
+            logging.warning("reminder id=%s status=unknown", reminder_id)
+            continue
+        summary.sent += 1
+        finish(reminder, "sent", message_id=message_id)
+        logging.info("reminder id=%s status=acknowledged", reminder_id)
+    logging.info(
+        "reminder_worker duration_ms=%d claimed=%d sent=%d failed=%d unknown=%d deferred=%d state_failed=%d",
+        int((time.monotonic() - started) * 1000),
+        summary.processed,
+        summary.sent,
+        summary.send_failed,
+        summary.unknown,
+        summary.deferred,
+        summary.mark_failed,
+    )
     return summary
 
 
 def run_once(settings: Settings) -> ProcessSummary:
     supabase = SupabaseRestClient(settings.supabase_url, settings.service_role_key)
-    stale_before = (
-        datetime.now(timezone.utc) - timedelta(minutes=settings.claim_timeout_minutes)
-    ).isoformat().replace("+00:00", "Z")
-    supabase.release_stale_claims(stale_before)
-    telegram = TelegramApiClient(settings.telegram_bot_token)
-    return process_due_reminders(settings, supabase, telegram)
+    return process_due_reminders(
+        settings, supabase, TelegramApiClient(settings.telegram_bot_token)
+    )
 
 
 def run_loop(settings: Settings) -> None:
@@ -811,13 +650,13 @@ def run_loop(settings: Settings) -> None:
         settings.poll_seconds,
         settings.batch_size,
     )
-
     while True:
         try:
             run_once(settings)
-        except WorkerError as exc:
-            logging.error("reminder_worker status=iteration_failed error=%s", truncate_error(exc))
-
+        except Exception:
+            logging.error(
+                "reminder_worker status=iteration_failed reason=notification_state_unavailable"
+            )
         time.sleep(settings.poll_seconds)
 
 
@@ -838,23 +677,10 @@ def test_send(settings: Settings) -> None:
 
 
 def status(settings: Settings) -> None:
-    supabase = SupabaseRestClient(settings.supabase_url, settings.service_role_key)
-    due = supabase.list_due_reminders(utc_now(), settings.batch_size)
-    upcoming = supabase.list_next_pending_reminders(1)
-    print("Reminder worker status")
-    print(f"Poll seconds: {settings.poll_seconds}")
-    print(f"Batch size: {settings.batch_size}")
-    print(f"Due pending telegram reminders (first batch): {len(due)}")
-
-    if upcoming:
-        item = upcoming[0]
-        print(
-            "Next pending: "
-            f"id={item.get('id')} "
-            f"time={local_time_label(str(item.get('remind_at') or ''), settings.local_timezone)}"
-        )
-    else:
-        print("Next pending: none")
+    db = SupabaseRestClient(settings.supabase_url, settings.service_role_key)
+    print(
+        json.dumps({"worker": "reminder", "queue": db.queue_health()}, sort_keys=True)
+    )
 
 
 def configure_logging() -> None:
@@ -914,7 +740,9 @@ def main(argv: list[str] | None = None) -> int:
         logging.info("reminder_worker status=stopped")
         return 0
     except WorkerError as exc:
-        logging.error("reminder_worker status=failed error=%s", truncate_error(exc))
+        logging.error(
+            "reminder_worker status=failed reason=notification_state_unavailable"
+        )
         return 1
 
 

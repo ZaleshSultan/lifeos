@@ -20,9 +20,15 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm --filter @lifeos/tma build
+      - run: pnpm --filter @lifeos/web build
+      - run: node scripts/test-web-session-smoke.mjs
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - run: pip install -r workers/university-sync/requirements.txt -r workers/ics-sync/requirements.txt
       - run: pnpm test:workers
       - run: bash scripts/test-lms-migration.sh
+      - run: bash scripts/test-web-session-migration.sh
+      - run: bash scripts/test-security-migrations.sh
+      - run: bash scripts/test-notification-deliveries.sh
+      - run: bash scripts/test-obsidian-sync.sh

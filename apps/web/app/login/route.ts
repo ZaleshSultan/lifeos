@@ -1,50 +1,46 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyWebTokenAgainstApi } from "@/lib/lifeos-api";
-
-function publicWebUrl(path: string): URL {
-  const base =
-    process.env.NEXT_PUBLIC_WEB_APP_URL?.trim() ||
-    "https://lifeos.zalewko.me/web";
-
-  return new URL(
-    `${base.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`,
-  );
-}
+import {
+  privateAuthResponse,
+  publicWebUrl,
+  webAuthRequest,
+  webCookieOptions,
+  WEB_SESSION_COOKIE,
+} from "../../lib/web-auth";
 
 export async function GET(request: NextRequest) {
   const token = request.nextUrl.searchParams.get("token")?.trim();
-
-  if (!token) {
-    return NextResponse.redirect(
-      publicWebUrl("access?error=invalid"),
+  const invalid = () =>
+    privateAuthResponse(
+      NextResponse.redirect(publicWebUrl("access?error=invalid"), 303),
     );
-  }
-
+  if (!token || token.length > 1024) return invalid();
   try {
-    const verification = await verifyWebTokenAgainstApi(token);
-
-    if (!verification.ok) {
-      return NextResponse.redirect(
-        publicWebUrl("access?error=invalid"),
-      );
-    }
-  } catch {
-    return NextResponse.redirect(
-      publicWebUrl("access?error=invalid"),
+    const exchange = await webAuthRequest("exchange", token);
+    if (!exchange.ok) return invalid();
+    const body = (await exchange.json()) as {
+      data?: { token?: string; expiresAt?: string };
+    };
+    const session = body.data;
+    const expiresAt = Date.parse(session?.expiresAt ?? "");
+    const maxAge = Math.floor((expiresAt - Date.now()) / 1000);
+    if (
+      !session?.token ||
+      !/^ws1_[A-Za-z0-9_-]{43}$/.test(session.token) ||
+      !Number.isFinite(maxAge) ||
+      maxAge <= 0 ||
+      maxAge > 30 * 24 * 60 * 60
+    )
+      return invalid();
+    const response = privateAuthResponse(
+      NextResponse.redirect(publicWebUrl("today"), 303),
     );
+    response.cookies.set(WEB_SESSION_COOKIE, session.token, {
+      ...webCookieOptions(),
+      maxAge,
+      expires: new Date(expiresAt),
+    });
+    return response;
+  } catch {
+    return invalid();
   }
-
-  const response = NextResponse.redirect(
-    publicWebUrl("today"),
-  );
-
-  response.cookies.set("lifeos_web_session", token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-    maxAge: 30 * 24 * 60 * 60,
-  });
-
-  return response;
 }

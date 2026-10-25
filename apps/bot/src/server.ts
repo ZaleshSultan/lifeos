@@ -1,3 +1,9 @@
+import {
+  issueHealthCredential,
+  resolveHealthCredential,
+} from "./health-credentials.js";
+import { corsOrigins, handleApiCors } from "./cors.js";
+import { isProduction, validateBotSecurity, webhookSecretHeader } from "./security-config.js";
 import { LmsSessionService } from "./lms-sessions.js";
 import { handleLmsRoute } from "./lms-routes.js";
 import {
@@ -50,7 +56,8 @@ import {
 } from "./lifeos-ai.js";
 import { handlePlanningRoute } from "./planning-routes.js";
 import { fetchWeatherSnapshot } from "./weather.js";
-import { verifyWebSessionToken } from "./web-session.js";
+import { resolveWebSessionUser } from "./web-session.js";
+import { handleWebAuthRoute } from "./web-auth-routes.js";
 import {
   cancelReminderGoogleCalendarEvent,
   syncReminderToGoogleCalendar,
@@ -106,6 +113,8 @@ export interface BotServerOptions {
   config?: Partial<
     Pick<
       BotConfig,
+      | "nodeEnv"
+      | "corsAllowedOrigins"
       | "telegramWebhookPath"
       | "telegramWebhookSecret"
       | "telegramBotToken"
@@ -155,6 +164,8 @@ interface HealthResponse {
 }
 
 interface ResolvedBotServerOptions {
+  nodeEnv?: string;
+  corsAllowedOrigins: ReadonlySet<string>;
   lmsSessions: LmsSessionService;
   ai: LifeosAiService;
   startedAt: Date;
@@ -218,7 +229,6 @@ const TMA_MIME_TYPES: Record<string, string> = {
 const TMA_INIT_DATA_MAX_AGE_SECONDS = 86_400;
 const TMA_INIT_DATA_MAX_FUTURE_SKEW_SECONDS = 300;
 const GOOGLE_OAUTH_STATE_MAX_AGE_SECONDS = 10 * 60;
-const HEALTH_INGEST_TOKEN_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 const GOOGLE_OAUTH_SCOPES = [
   "https://www.googleapis.com/auth/calendar.events",
   "https://www.googleapis.com/auth/tasks.readonly",
@@ -242,15 +252,6 @@ interface GoogleOAuthStatePayload {
   issuedAt: number;
 }
 
-interface HealthIngestTokenPayload {
-  userId: string;
-  telegramUserId: number | null;
-  scope: "health_ingest";
-  nonce: string;
-  issuedAt: number;
-  expiresAt: number;
-}
-
 interface GoogleTokenExchangeResult {
   accessToken: string;
   refreshToken?: string;
@@ -265,22 +266,8 @@ function writeJson(
 ): void {
   response.writeHead(statusCode, {
     "content-type": "application/json; charset=utf-8",
-    "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-    "access-control-allow-headers":
-      "authorization,content-type,x-telegram-init-data,x-telegram-bot-api-secret-token",
   });
   response.end(JSON.stringify(body));
-}
-
-function writeNoContent(response: ServerResponse): void {
-  response.writeHead(204, {
-    "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-    "access-control-allow-headers":
-      "authorization,content-type,x-telegram-init-data,x-telegram-bot-api-secret-token",
-  });
-  response.end();
 }
 
 function writeHtml(
@@ -690,98 +677,6 @@ function verifyGoogleOAuthState(
   }
 }
 
-function signHealthIngestToken(
-  user: TelegramUserRecord,
-  secret: string,
-  nowSeconds = Math.floor(Date.now() / 1000),
-): string {
-  const payload: HealthIngestTokenPayload = {
-    userId: user.userId,
-    telegramUserId: user.telegramUserId,
-    scope: "health_ingest",
-    nonce: randomBytes(16).toString("hex"),
-    issuedAt: nowSeconds,
-    expiresAt: nowSeconds + HEALTH_INGEST_TOKEN_MAX_AGE_SECONDS,
-  };
-  const header = Buffer.from(
-    JSON.stringify({ alg: "HS256", typ: "JWT" }),
-    "utf8",
-  ).toString("base64url");
-  const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString(
-    "base64url",
-  );
-  const signingInput = `${header}.${encoded}`;
-  const signature = createHmac("sha256", secret)
-    .update(signingInput)
-    .digest("base64url");
-
-  return `${signingInput}.${signature}`;
-}
-
-function verifyHealthIngestToken(
-  token: string | undefined,
-  secret: string | undefined,
-): HealthIngestTokenPayload | null {
-  if (!token || !secret) {
-    return null;
-  }
-
-  const parts = token.split(".");
-  if (parts.length !== 3 || !parts[0] || !parts[1] || !parts[2]) {
-    return null;
-  }
-
-  const signingInput = `${parts[0]}.${parts[1]}`;
-  const expectedSignature = createHmac("sha256", secret)
-    .update(signingInput)
-    .digest("base64url");
-
-  if (!secureCompare(parts[2], expectedSignature)) {
-    return null;
-  }
-
-  try {
-    const header = JSON.parse(
-      Buffer.from(parts[0], "base64url").toString("utf8"),
-    ) as { alg?: unknown; typ?: unknown };
-    const payload = JSON.parse(
-      Buffer.from(parts[1], "base64url").toString("utf8"),
-    ) as Partial<HealthIngestTokenPayload>;
-    if (header.alg !== "HS256" || header.typ !== "JWT") {
-      return null;
-    }
-    const now = Math.floor(Date.now() / 1000);
-
-    if (
-      typeof payload.userId !== "string" ||
-      !payload.userId ||
-      (typeof payload.telegramUserId !== "number" &&
-        payload.telegramUserId !== null) ||
-      payload.scope !== "health_ingest" ||
-      typeof payload.nonce !== "string" ||
-      !payload.nonce ||
-      typeof payload.issuedAt !== "number" ||
-      typeof payload.expiresAt !== "number" ||
-      payload.expiresAt < now ||
-      payload.issuedAt - now > TMA_INIT_DATA_MAX_FUTURE_SKEW_SECONDS ||
-      payload.expiresAt - payload.issuedAt > HEALTH_INGEST_TOKEN_MAX_AGE_SECONDS
-    ) {
-      return null;
-    }
-
-    return {
-      userId: payload.userId,
-      telegramUserId: payload.telegramUserId,
-      scope: "health_ingest",
-      nonce: payload.nonce,
-      issuedAt: payload.issuedAt,
-      expiresAt: payload.expiresAt,
-    };
-  } catch {
-    return null;
-  }
-}
-
 function bearerToken(request: IncomingMessage): string | undefined {
   const value = headerValue(request.headers.authorization);
   const match = value?.match(/^Bearer\s+(.+)$/i);
@@ -944,7 +839,7 @@ function unsafeTmaDevAuthAllowed(
   return Boolean(
     options.allowUnsafeTmaDevAuth &&
     options.defaultUserId !== undefined &&
-    process.env.NODE_ENV !== "production",
+    !isProduction(options.nodeEnv),
   );
 }
 
@@ -961,16 +856,14 @@ async function resolveTmaSessionIdentity(
     }
   | { ok: false; statusCode: number; error: string }
 > {
-  const webSession = verifyWebSessionToken(
-    bearerToken(request),
-    options.webSessionSecret,
-  );
-
-  if (webSession) {
+  if (request.headers.authorization !== undefined) {
     if (!options.store) {
       return { ok: false, statusCode: 503, error: "database_not_configured" };
     }
-    const webUser = await options.store.resolveUserById(webSession.userId);
+    const webUser = await resolveWebSessionUser(
+      options.store,
+      bearerToken(request),
+    );
     if (!webUser) {
       return { ok: false, statusCode: 401, error: "invalid_web_session" };
     }
@@ -1204,28 +1097,17 @@ async function resolveTmaUser(
   | { ok: true; user: TelegramUserRecord }
   | { ok: false; statusCode: number; error: string }
 > {
-  const webSession = verifyWebSessionToken(
-    bearerToken(request),
-    options.webSessionSecret,
-  );
-
-  if (webSession && !telegramOnly) {
+  // Explicit invalid credentials must not fall through to Telegram/dev identity.
+  if (!telegramOnly && request.headers.authorization !== undefined) {
     if (!options.store) {
       return { ok: false, statusCode: 503, error: "database_not_configured" };
     }
-    const webUser = await options.store.resolveUserById(webSession.userId);
+    const webUser = await resolveWebSessionUser(
+      options.store,
+      bearerToken(request),
+    );
     if (!webUser) {
       return { ok: false, statusCode: 401, error: "invalid_web_session" };
-    }
-    if (webUser.status !== "active") {
-      return {
-        ok: false,
-        statusCode: 403,
-        error:
-          webUser.status === "pending"
-            ? "telegram_user_pending"
-            : "telegram_user_blocked",
-      };
     }
     return { ok: true, user: webUser };
   }
@@ -1468,7 +1350,7 @@ function telegramCommand(update: unknown): string | undefined {
   }
 
   const command = head.slice(1).split("@")[0]?.toLowerCase();
-  return command ? `/${command}` : undefined;
+  return command && /^[a-z0-9_]{1,32}$/.test(command) ? `/${command}` : undefined;
 }
 
 function sensitiveLogValues(options: ResolvedBotServerOptions): string[] {
@@ -1515,14 +1397,15 @@ function sanitizeErrorMessage(
 
 function logTelegramWebhookError(
   error: unknown,
-  options: ResolvedBotServerOptions,
   context: TelegramWebhookLogContext,
 ): void {
   console.error("telegram_webhook_error", {
     update_id: context.updateId ?? null,
     update_type: context.updateType,
-    command: context.command ?? null,
-    error: sanitizeErrorMessage(error, options),
+    // Only the /log category affects error handling; never log arbitrary command text.
+    command: context.command === "/log" ? "/log" : context.command ? "other" : null,
+    // Upstream exception messages can contain user payloads or credentials.
+    error: error instanceof RequestBodyError ? error.errorCode : "update_processing_failed",
   });
 }
 
@@ -1613,7 +1496,11 @@ async function handleTelegramWebhook(
 
     telegramOk(response);
   } catch (error) {
-    logTelegramWebhookError(error, options, context);
+    if (error instanceof RequestBodyError && error.statusCode === 413) {
+      writeJson(response, 413, { error: "request_body_too_large" });
+      return;
+    }
+    logTelegramWebhookError(error, context);
 
     try {
       await sendTelegramCommandError(
@@ -1624,7 +1511,7 @@ async function handleTelegramWebhook(
           : "❌ Ошибка обработки команды.",
       );
     } catch (sendError) {
-      logTelegramWebhookError(sendError, options, context);
+      logTelegramWebhookError(sendError, context);
     }
 
     telegramOk(response);
@@ -2309,10 +2196,7 @@ async function handleRequest(
     return;
   }
 
-  if (request.method === "OPTIONS" && requestUrl.pathname.startsWith("/api/")) {
-    writeNoContent(response);
-    return;
-  }
+  if (handleApiCors(request, response, requestUrl.pathname, options.corsAllowedOrigins)) return;
 
   if (await handleTmaStaticRequest(request, response, requestUrl, options)) {
     return;
@@ -2419,6 +2303,21 @@ async function handleRequest(
       return;
     }
   }
+
+  if (
+    requestUrl.pathname.startsWith("/api/tma/") ||
+    requestUrl.pathname.startsWith("/api/web/auth/")
+  ) {
+    response.setHeader("Cache-Control", "no-store");
+  }
+  if (await handleWebAuthRoute({
+    request, response,
+    pathname: requestUrl.pathname,
+    token: bearerToken(request),
+    store: options.store,
+    secret: options.webSessionSecret,
+    writeJson,
+  })) return;
 
   if (requestUrl.pathname === "/api/tma/session") {
     if (request.method !== "GET") {
@@ -2557,18 +2456,55 @@ async function handleRequest(
         return;
       }
 
-      writeJson(
-        response,
-        200,
-        tmaData({
-          token: signHealthIngestToken(
-            auth.user,
-            options.healthIngestJwtSecret,
-          ),
-          tokenType: "Bearer",
-          expiresInSeconds: HEALTH_INGEST_TOKEN_MAX_AGE_SECONDS,
-        }),
-      );
+      try {
+        const issued = await issueHealthCredential(
+          store,
+          auth.user,
+          options.healthIngestJwtSecret,
+        );
+        if (!issued)
+          writeJson(response, 403, { error: "health_ingest_access_denied" });
+        else writeJson(response, 200, tmaData(issued));
+      } catch {
+        writeJson(response, 503, { error: "health_authorization_unavailable" });
+      }
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      requestUrl.pathname === "/api/tma/health/devices"
+    ) {
+      try {
+        writeJson(
+          response,
+          200,
+          tmaData(await store.listHealthIngestCredentials(auth.user.userId)),
+        );
+      } catch {
+        writeJson(response, 503, { error: "health_authorization_unavailable" });
+      }
+      return;
+    }
+    const healthDeviceRoute = requestUrl.pathname.match(
+      /^\/api\/tma\/health\/devices\/([0-9a-f-]{36})$/i,
+    );
+    if (request.method === "DELETE" && healthDeviceRoute) {
+      const deviceId = healthDeviceRoute[1];
+      if (
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          deviceId,
+        )
+      ) {
+        writeJson(response, 400, { error: "invalid_health_device" });
+        return;
+      }
+      try {
+        await store.revokeHealthIngestCredential(auth.user.userId, deviceId);
+        writeJson(response, 200, tmaData({ revoked: true }));
+      } catch {
+        writeJson(response, 503, { error: "health_authorization_unavailable" });
+      }
       return;
     }
 
@@ -3136,10 +3072,6 @@ async function handleRequest(
           "content-disposition": `inline; filename=\"receipt${mimeExtension(contentType)}\"`,
           "content-security-policy": "default-src 'none'; sandbox",
           "x-content-type-options": "nosniff",
-          "access-control-allow-origin": "*",
-          "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-          "access-control-allow-headers":
-            "authorization,content-type,x-telegram-init-data,x-telegram-bot-api-secret-token",
         });
         response.end(bytes);
       } catch (error) {
@@ -3462,13 +3394,22 @@ async function handleRequest(
     }
 
     let authenticatedUserId: string | undefined;
-    const tokenPayload = verifyHealthIngestToken(
-      bearerToken(request),
-      options.healthIngestJwtSecret,
-    );
-
-    if (tokenPayload) {
-      authenticatedUserId = tokenPayload.userId;
+    if (request.headers.authorization !== undefined) {
+      try {
+        authenticatedUserId =
+          (await resolveHealthCredential(
+            options.store,
+            bearerToken(request),
+            options.healthIngestJwtSecret,
+          )) ?? undefined;
+      } catch {
+        writeJson(response, 503, { error: "health_authorization_unavailable" });
+        return;
+      }
+      if (!authenticatedUserId) {
+        writeJson(response, 401, { error: "invalid_health_ingest_token" });
+        return;
+      }
     } else if (headerValue(request.headers["x-telegram-init-data"])) {
       const auth = await resolveTmaUser(request, options);
 
@@ -3492,6 +3433,7 @@ async function handleRequest(
     try {
       body = await readJsonBody(request);
     } catch (error) {
+      if (error instanceof RequestBodyError && error.statusCode === 413) throw error;
       writeJson(response, 400, {
         error: "invalid_health_ingest_payload",
         message: publicErrorMessage("request_failed"),
@@ -3568,21 +3510,21 @@ async function handleRequest(
     return;
   }
 
-  if (
-    request.method === "POST" &&
-    requestUrl.pathname === options.webhookPath
-  ) {
-    if (options.webhookSecret) {
-      const providedSecret = request.headers["x-telegram-bot-api-secret-token"];
-
-      if (
-        !secureCompare(headerValue(providedSecret) ?? "", options.webhookSecret)
-      ) {
-        writeJson(response, 401, {
-          error: "invalid_webhook_secret",
-        });
-        return;
-      }
+  if (requestUrl.pathname === options.webhookPath) {
+    response.setHeader("Cache-Control", "no-store");
+    if (request.method !== "POST") {
+      response.setHeader("Allow", "POST");
+      writeJson(response, 405, { error: "method_not_allowed" });
+      return;
+    }
+    if (!options.webhookSecret) {
+      writeJson(response, 503, { error: "webhook_auth_not_configured" });
+      return;
+    }
+    const providedSecret = webhookSecretHeader(request);
+    if (!providedSecret || !secureCompare(providedSecret, options.webhookSecret)) {
+      writeJson(response, 401, { error: "invalid_webhook_secret" });
+      return;
     }
 
     if (!options.telegram) {
@@ -3602,7 +3544,11 @@ async function handleRequest(
 }
 
 export function createBotServer(options: BotServerOptions = {}): Server {
+  // Also protect callers constructing the server without loadBotConfig().
+  validateBotSecurity(options.config ?? {});
   const resolvedOptions: ResolvedBotServerOptions = {
+    nodeEnv: options.config?.nodeEnv,
+    corsAllowedOrigins: corsOrigins(options.config?.corsAllowedOrigins ?? [], options.config?.nodeEnv),
     ai: options.ai ?? createConfiguredLifeosAiService(),
     lmsSessions: options.lmsSessions ?? new LmsSessionService(),
     startedAt: options.startedAt ?? new Date(),

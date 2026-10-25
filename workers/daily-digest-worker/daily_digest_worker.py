@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
+import argparse
 import html
 import json
 import logging
 import os
 import re
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -17,6 +19,12 @@ from datetime import date, datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from common.notification_delivery import (
+    DeliveryStore, TelegramApiClient, TelegramDeliveryError, WorkerError,
+)
+from common.notification_time import resolve_local_datetime
 
 REQUEST_TIMEOUT_SECONDS = 30
 DEFAULT_TIMEZONE = "Asia/Almaty"
@@ -29,10 +37,6 @@ SESSION_LABELS = {"lecture": "лекция", "practical": "практика", "l
 AITU_MAP_URL = "https://yuujiso.github.io/aitumap/"
 
 JsonObject = dict[str, Any]
-
-
-class WorkerError(RuntimeError):
-    pass
 
 
 @dataclass(frozen=True)
@@ -126,16 +130,18 @@ def load_settings(env_file: Path | None = None) -> Settings:
 def resolve_timezone(name: str):
     try:
         return ZoneInfo(name)
-    except ZoneInfoNotFoundError:
+    except (ZoneInfoNotFoundError, ValueError, TypeError):
         if name in {"Asia/Almaty", "Asia/Qyzylorda"}:
             return timezone(timedelta(hours=5))
         return timezone.utc
 
 
 def digest_window(local_now: datetime, digest_time: str, window_minutes: int) -> bool:
-    hour, minute = (int(part) for part in digest_time.split(":", 1))
-    start = local_now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    return start <= local_now < start + timedelta(minutes=window_minutes)
+    """Use elapsed UTC time through DST; never reopen yesterday's digest date."""
+    start = resolve_local_datetime(local_now.date(), digest_time, local_now.tzinfo)
+    start_utc = start.astimezone(timezone.utc)
+    now_utc = local_now.astimezone(timezone.utc)
+    return start_utc <= now_utc < start_utc + timedelta(minutes=window_minutes)
 
 
 def build_tma_url(base_url: str, *, screen: str = "study", study_tab: str | None = None) -> str:
@@ -156,7 +162,7 @@ def utc_bounds(local_day: date, timezone_name: str) -> tuple[str, str]:
     return start.isoformat().replace("+00:00", "Z"), end.isoformat().replace("+00:00", "Z")
 
 
-class SupabaseRestClient:
+class SupabaseRestClient(DeliveryStore):
     def __init__(self, url: str, key: str) -> None:
         self.base_url = f"{url.rstrip('/')}/rest/v1"
         self.headers = {
@@ -178,12 +184,14 @@ class SupabaseRestClient:
         try:
             with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT_SECONDS) as response:
                 raw = response.read().decode("utf-8")
-        except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")[:500]
-            raise WorkerError(f"Supabase {method} {table} failed: {exc.code} {detail}") from exc
-        except urllib.error.URLError as exc:
-            raise WorkerError(f"Supabase {method} {table} failed: {exc.reason}") from exc
-        return json.loads(raw) if raw else None
+        except urllib.error.HTTPError:
+            raise WorkerError("database_http_error") from None
+        except (urllib.error.URLError, TimeoutError, OSError):
+            raise WorkerError("database_unavailable") from None
+        try:
+            return json.loads(raw) if raw else None
+        except ValueError:
+            raise WorkerError("database_invalid_response") from None
 
     def active_profiles(self) -> list[JsonObject]:
         return self.request("GET", "profiles", {
@@ -202,30 +210,6 @@ class SupabaseRestClient:
         if not rows or not isinstance(rows[0].get("settings"), dict):
             return {}
         return rows[0]["settings"]
-
-    def claim_delivery(self, user_id: str, local_date: str, chat_id: str) -> bool:
-        try:
-            self.request("POST", "daily_digest_deliveries", body={
-                "user_id": user_id,
-                "local_date": local_date,
-                "telegram_chat_id": int(chat_id),
-                "status": "sending",
-            }, prefer="return=minimal")
-            return True
-        except WorkerError as exc:
-            if "409" in str(exc):
-                return False
-            raise
-
-    def complete_delivery(self, user_id: str, local_date: str) -> None:
-        self.request("PATCH", "daily_digest_deliveries", {
-            "user_id": f"eq.{user_id}", "local_date": f"eq.{local_date}"
-        }, {"status": "sent", "sent_at": datetime.now(timezone.utc).isoformat()}, prefer="return=minimal")
-
-    def release_delivery(self, user_id: str, local_date: str) -> None:
-        self.request("DELETE", "daily_digest_deliveries", {
-            "user_id": f"eq.{user_id}", "local_date": f"eq.{local_date}", "status": "eq.sending"
-        }, prefer="return=minimal")
 
     def list_today_tasks(self, user_id: str, day_start: str, day_end: str) -> list[JsonObject]:
         planned = self.request("GET", "tasks", {
@@ -295,29 +279,8 @@ class SupabaseRestClient:
         return sorted(dedup.values(), key=lambda row: str(row.get("due_at") or ""))[:20]
 
 
-class TelegramClient:
-    def __init__(self, token: str) -> None:
-        self.url = f"https://api.telegram.org/bot{token}/sendMessage"
-
-    def send_message(self, chat_id: str, text: str, reply_markup: JsonObject | None = None) -> None:
-        payload: JsonObject = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
-        if reply_markup:
-            payload["reply_markup"] = reply_markup
-        request = urllib.request.Request(
-            self.url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"content-type": "application/json"},
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
-                if response.status >= 300:
-                    raise WorkerError(f"Telegram send failed: {response.status}")
-        except urllib.error.HTTPError as exc:
-            raise WorkerError(f"Telegram send failed: {exc.code}") from exc
-        except urllib.error.URLError as exc:
-            raise WorkerError(f"Telegram send failed: {exc.reason}") from exc
-
+# Keep the existing import name used by operational scripts.
+TelegramClient = TelegramApiClient
 
 WEATHER_LABELS = {
     0: "ясно", 1: "почти ясно", 2: "переменная облачность", 3: "пасмурно",
@@ -370,7 +333,7 @@ def fetch_weather(location: JsonObject, timezone_name: str) -> JsonObject | None
         with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
             body = json.loads(response.read().decode("utf-8"))
     except (urllib.error.HTTPError, urllib.error.URLError, ValueError):
-        logging.warning("weather forecast unavailable for %s", location.get("name"))
+        logging.warning("digest event=weather_unavailable")
         return None
     current = body.get("current") if isinstance(body.get("current"), dict) else {}
     daily = body.get("daily") if isinstance(body.get("daily"), dict) else {}
@@ -491,27 +454,47 @@ def build_digest(
     return "\n".join(lines)[:3900]
 
 
+def _finish(db: SupabaseRestClient, claim: JsonObject, outcome: str,
+            reason: str = "none", *, message_id: int | None = None,
+            retry_after_seconds: int | None = None) -> bool:
+    try:
+        completed = db.finish_delivery(
+            "digest", claim, outcome, reason=reason, message_id=message_id,
+            retry_after_seconds=retry_after_seconds,
+        )
+    except Exception:
+        # A commit may have succeeded even if its response was lost. Retain the
+        # lease; never delete or blindly retry a potentially delivered message.
+        logging.error("digest event=delivery_state_unavailable outcome=%s", outcome)
+        return False
+    if not completed:
+        logging.warning("digest event=claim_lost outcome=%s", outcome)
+    return completed
+
+
 def process_profile(db: SupabaseRestClient, telegram: TelegramClient, settings: Settings,
                     profile: JsonObject, now_utc: datetime) -> bool:
     user_id = str(profile.get("user_id") or "").strip()
     chat_id = str(profile.get("telegram_user_id") or "").strip()
-    if not user_id or not chat_id:
+    if not user_id or not chat_id or profile.get("status", "active") != "active":
         return False
     if settings.test_telegram_user_id and chat_id != settings.test_telegram_user_id:
         return False
-    timezone_name = str(profile.get("timezone") or settings.default_timezone)
-    tz = resolve_timezone(timezone_name)
-    local_now = now_utc.astimezone(tz)
+    timezone_name = str(profile.get("timezone", settings.default_timezone) or "UTC")
+    local_now = now_utc.astimezone(resolve_timezone(timezone_name))
     if not digest_window(local_now, settings.digest_time, settings.send_window_minutes):
         return False
-    local_date = local_now.date().isoformat()
-    if not db.claim_delivery(user_id, local_date, chat_id):
+    claim = db.claim_digest(user_id, local_now.date().isoformat())
+    if not claim:
         return False
+    logging.info("digest event=claimed id=%s attempts=%s failures=%s",claim.get("id"),claim.get("delivery_attempts",0),claim.get("failure_count",0))
 
     try:
         day_start, day_end = utc_bounds(local_now.date(), timezone_name)
         tasks = db.list_today_tasks(user_id, day_start, day_end)
         courses = db.list_courses(user_id)
+        # Schedules are owned through study_course_id, not a direct user_id
+        # column. Only IDs returned by the current user's scoped query enter it.
         schedule = db.list_schedule([str(row["id"]) for row in courses if row.get("id")], WEEKDAYS[local_now.weekday()])
         deadlines = db.list_deadlines(
             user_id,
@@ -535,33 +518,80 @@ def process_profile(db: SupabaseRestClient, telegram: TelegramClient, settings: 
             ])
         else:
             buttons.append([{"text": "Карта корпуса", "url": AITU_MAP_URL}])
-        telegram.send_message(chat_id, text, {"inline_keyboard": buttons})
-        db.complete_delivery(user_id, local_date)
-        return True
     except Exception:
-        try:
-            db.release_delivery(user_id, local_date)
-        except Exception:
-            logging.exception("failed to release daily digest claim")
-        raise
+        _finish(db, claim, "retry", "preparation_failed")
+        logging.warning("digest event=preparation_failed")
+        return False
+
+    try:
+        # Begin is the last authorization boundary: the database checks the
+        # current active profile, Telegram link, claim owner and lease expiry.
+        chat_id = db.begin_delivery("digest", claim)
+    except Exception:
+        # A response lost after begin committed must not trigger an HTTP send.
+        logging.error("digest event=begin_unavailable")
+        return False
+    if not chat_id:
+        logging.info("digest event=delivery_not_authorized")
+        return False
+    if settings.test_telegram_user_id and str(chat_id) != settings.test_telegram_user_id:
+        _finish(db, claim, "cancelled", "test_recipient_changed")
+        return False
+    try:
+        message_id = telegram.send_message(str(chat_id), text, reply_markup={"inline_keyboard": buttons}, parse_mode="HTML")
+    except TelegramDeliveryError as exc:
+        _finish(db, claim, exc.outcome, exc.reason, retry_after_seconds=exc.retry_after_seconds)
+        logging.warning("digest event=delivery_failed outcome=%s reason=%s", exc.outcome, exc.reason)
+        return False
+    except Exception:
+        # The client might have sent before an unexpected local failure.
+        _finish(db, claim, "unknown", "unexpected_send_error")
+        logging.warning("digest event=delivery_failed outcome=unknown reason=unexpected_send_error")
+        return False
+    _finish(db, claim, "sent", message_id=message_id)
+    logging.info("digest event=delivery_acknowledged")
+    return True
 
 
-def run_once(settings: Settings, now: datetime | None = None) -> int:
-    db = SupabaseRestClient(settings.supabase_url, settings.service_role_key)
-    telegram = TelegramClient(settings.telegram_bot_token)
+def run_once(settings: Settings, now: datetime | None = None, *,
+             db: SupabaseRestClient | None = None,
+             telegram: TelegramClient | None = None) -> int:
+    started = time.monotonic()
+    db = db or SupabaseRestClient(settings.supabase_url, settings.service_role_key)
+    telegram = telegram or TelegramClient(settings.telegram_bot_token)
     now_utc = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     sent = 0
-    for profile in db.active_profiles():
+    try:
+        recovery = db.recover_deliveries("digest")
+        profiles = db.active_profiles()
+    except Exception:
+        logging.error("digest event=poll_database_unavailable")
+        return 0
+    logging.info("digest event=recovery counts=%s", json.dumps(recovery, sort_keys=True))
+    for profile in profiles:
         try:
             sent += int(process_profile(db, telegram, settings, profile, now_utc))
         except Exception:
-            logging.exception("daily digest failed for one profile")
+            logging.error("digest event=profile_failed")
+    logging.info("digest event=poll_complete acknowledged=%d duration_ms=%d", sent,
+                 int((time.monotonic() - started) * 1000))
     return sent
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--status", action="store_true", help="Print safe aggregate queue health and exit")
+    args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     settings = load_settings()
+    if args.status:
+        db = SupabaseRestClient(settings.supabase_url, settings.service_role_key)
+        try:
+            print(json.dumps(db.queue_health(), sort_keys=True))
+        except Exception:
+            logging.error("digest event=health_unavailable")
+            return 1
+        return 0
     logging.info("daily digest worker started; target time=%s", settings.digest_time)
     while True:
         run_once(settings)

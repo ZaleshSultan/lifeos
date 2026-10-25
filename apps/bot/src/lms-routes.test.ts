@@ -109,6 +109,7 @@ async function fixture(
     status: "active" as const,
     role: "user" as const,
   }));
+  const resolveWebSession = vi.fn(async (_hash: string): Promise<string | null> => null);
   const getLmsConnection = vi.fn(
     async (userId: string) => connections.get(userId) ?? disconnected(),
   );
@@ -159,6 +160,7 @@ async function fixture(
   const store = {
     resolveTelegramUser,
     resolveUserById,
+    resolveWebSession,
     getLmsConnection,
     getLmsWork,
     saveLmsSession,
@@ -198,6 +200,7 @@ async function fixture(
     ciphertexts,
     resolveTelegramUser,
     resolveUserById,
+    resolveWebSession,
     getLmsConnection,
     getLmsWork,
     saveLmsSession,
@@ -305,7 +308,8 @@ describe("LMS HTTP authentication boundary", () => {
 
   it("rejects the development fallback and a valid web session even when configured", async () => {
     const f = await fixture({ allowDevAuth: true });
-    const token = createWebSessionToken("owner-20", WEB_SECRET);
+    const token = createWebSessionToken();
+    f.resolveWebSession.mockResolvedValue("owner-20");
     const authHeaders: Record<string, string>[] = [
       {},
       { authorization: `Bearer ${token}` },
@@ -322,6 +326,7 @@ describe("LMS HTTP authentication boundary", () => {
       }
     }
     expect(f.resolveUserById).not.toHaveBeenCalled();
+    expect(f.resolveWebSession).not.toHaveBeenCalled();
     expectNoPrivateDataAccess(f);
   });
 

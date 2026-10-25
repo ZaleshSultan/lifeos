@@ -43,7 +43,10 @@ tokens.
 
 The Android health bridge reads previous-day data from Health Connect and posts to `POST /health/ingest`. The backend validates `Authorization: Bearer <health-session-token>`, computes recovery and completeness with `packages/core`, upserts health tables, creates a `health_daily` life entity, and enqueues Obsidian sync.
 
-The web dashboard reads through backend APIs. It does not carry service-role keys, per-user health session tokens, or bot tokens.
+The web dashboard reads through backend APIs. Telegram `/web` links exchange once
+for revocable, opaque sessions; Next.js and the backend check live session and
+profile status. See [Web sessions](WEB_SESSIONS.md). It does not carry service-role
+keys, per-user health session tokens, or bot tokens.
 
 The Obsidian mirror worker runs on an Arch Linux server, claims queue rows from Supabase, loads `public.user_obsidian_settings` for the row owner, renders safe Markdown paths inside that user's configured vault, and writes atomically.
 
@@ -82,4 +85,4 @@ Do not present the Google sync worker, ICS, or standalone monthly-review integra
 
 ## Current Acceptance Boundary
 
-This phase stabilizes the first vertical slice: Telegram capture/tasks/workouts, TMA workout control, health ingest, Supabase persistence, and Obsidian queue rendering. It does not add production web dashboard auth or Android production build hardening.
+This phase stabilizes the first vertical slice: Telegram capture/tasks/workouts, TMA workout control, health ingest, Supabase persistence, and Obsidian queue rendering. The secure web-session work extends this boundary with Telegram-to-web authentication; Android production build hardening remains outside this slice.

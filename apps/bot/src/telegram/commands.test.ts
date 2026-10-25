@@ -59,6 +59,15 @@ type ObsidianSettingsRecord = NonNullable<
 >;
 
 class FakeStore implements LifeOSStore {
+  async issueHealthIngestCredential() { return null; }
+  async resolveHealthIngestCredential() { return false; }
+  async revokeHealthIngestCredential() {}
+  async listHealthIngestCredentials() { return []; }
+  async issueWebLoginToken() { return true; }
+  async exchangeWebLoginToken() { return null; }
+  async resolveWebSession() { return null; }
+  async revokeWebSession() {}
+
   async getLmsConnection() { return {configured:false,state:"not_configured" as const,lastSyncSuccessAt:null,lastSyncAttemptAt:null,lastErrorCategory:null,sessionExpiresAt:null,syncRequestedAt:null,unsupportedFeatures:[]}; }
   async saveLmsSession() { return {configured:false,state:"not_configured" as const,lastSyncSuccessAt:null,lastSyncAttemptAt:null,lastErrorCategory:null,sessionExpiresAt:null,syncRequestedAt:null,unsupportedFeatures:[]}; }
   async deleteLmsSession() { return {configured:false,state:"not_configured" as const,lastSyncSuccessAt:null,lastSyncAttemptAt:null,lastErrorCategory:null,sessionExpiresAt:null,syncRequestedAt:null,unsupportedFeatures:[]}; }
@@ -3521,4 +3530,47 @@ describe("Telegram commands", () => {
     expect(context.store.entities).toHaveLength(0);
     expect(context.sent.at(-1)?.text).toContain("Send /start");
   });
+});
+
+describe("Telegram /web authentication", () => {
+  it("persists a login hash before sending a two-minute link in a private chat", async () => {
+    const context = runtime();
+    context.webDashboardUrl = "https://lifeos.example/web";
+    context.webSessionSecret = "test-web-secret";
+    const issued = vi.spyOn(context.store, "issueWebLoginToken");
+    await handleTelegramUpdate(update("/web"), context);
+    expect(issued).toHaveBeenCalledWith(expect.objectContaining({ userId: "user-1", tokenHash: expect.stringMatching(/^[a-f0-9]{64}$/) }));
+    const markup = context.sent.at(-1)?.replyMarkup;
+    const button = markup && "inline_keyboard" in markup ? markup.inline_keyboard[0]?.[0] : undefined;
+    expect(button?.url).toContain("https://lifeos.example/web/login?token=");
+    expect(context.sent.at(-1)?.text).toContain("2 минуты");
+  });
+  it("does not post personal login links in group chats", async () => {
+    const context = runtime();
+    context.webDashboardUrl = "https://lifeos.example/web";
+    context.webSessionSecret = "test-web-secret";
+    const issued = vi.spyOn(context.store, "issueWebLoginToken");
+    const message = update("/web");
+    message.message!.chat.type = "group";
+    await handleTelegramUpdate(message, context);
+    expect(issued).not.toHaveBeenCalled();
+    expect(context.sent.at(-1)?.replyMarkup).toBeUndefined();
+  });
+});
+
+
+it("redacts login-link delivery errors before they reach webhook logging", async () => {
+  const context = runtime();
+  context.webDashboardUrl = "https://lifeos.example/web";
+  context.webSessionSecret = "test-web-secret";
+  context.telegram.sendMessage = async (input) => {
+    throw new Error(JSON.stringify(input));
+  };
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    await expect(handleTelegramUpdate(update("/web"), context)).rejects.toThrow("Web login delivery failed");
+    expect(JSON.stringify(log.mock.calls)).not.toContain("token=");
+  } finally {
+    log.mockRestore();
+  }
 });
