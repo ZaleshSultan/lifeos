@@ -4,12 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
 import sys
-import tempfile
 import time
+import uuid
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -17,6 +18,9 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from common.obsidian_files import FilesystemError, SecureVault
 
 
 JsonObject = dict[str, Any]
@@ -26,6 +30,7 @@ DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 CARD_OR_ACCOUNT_PATTERN = re.compile(r"(?<!\d)(?:\d[\s-]?){12,19}(?!\d)")
 SAFE_SEGMENT_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 LEGACY_SINGLE_USER_ENV = "LIFEOS_ENABLE_LEGACY_SINGLE_USER_MONTHLY_REVIEW"
+MULTITENANT_VAULT_ROOT = Path("/var/lifeos/vaults")
 
 
 class WorkerError(RuntimeError):
@@ -124,6 +129,8 @@ def load_settings(env_file: Path | None = None) -> Settings:
     require_legacy_single_user_mode()
 
     vault = os.environ.get("OBSIDIAN_VAULT_PATH", "").strip()
+    user_id = getenv_required("LIFEOS_DEFAULT_USER_ID")
+    vault_path = validated_vault_path(vault, user_id) if vault else None
     telegram_chat_id = (
         os.environ.get("MONTHLY_REVIEW_TELEGRAM_CHAT_ID", "").strip()
         or os.environ.get("LIFEOS_DEFAULT_TELEGRAM_USER_ID", "").strip()
@@ -133,10 +140,10 @@ def load_settings(env_file: Path | None = None) -> Settings:
     return Settings(
         supabase_url=getenv_required("SUPABASE_URL").rstrip("/"),
         service_role_key=getenv_required("SUPABASE_SERVICE_ROLE_KEY"),
-        user_id=getenv_required("LIFEOS_DEFAULT_USER_ID"),
+        user_id=user_id,
         timezone_name=os.environ.get("APP_TIMEZONE", "Asia/Qyzylorda").strip()
         or "Asia/Qyzylorda",
-        obsidian_vault_path=Path(vault).expanduser().resolve() if vault else None,
+        obsidian_vault_path=vault_path,
         telegram_bot_token=os.environ.get("TELEGRAM_BOT_TOKEN", "").strip() or None,
         telegram_chat_id=telegram_chat_id,
         ai_enabled=getenv_bool("MONTHLY_REVIEW_AI_ENABLED", False),
@@ -690,37 +697,51 @@ def sanitize_segment(value: str) -> str:
 
 
 def safe_vault_path(vault: Path, relative: str) -> Path:
-    parts = [sanitize_segment(part) for part in re.split(r"[\\/]+", relative) if part]
-    target = vault.joinpath(*parts).resolve()
+    # Do not resolve symlinks or sanitize traversal into a different destination.
+    return vault.joinpath(*SecureVault._segments(relative))
 
-    if os.path.commonpath([str(vault), str(target)]) != str(vault):
-        raise WorkerError("Resolved Obsidian path is outside vault")
 
-    return target
+def validated_vault_path(value: str | Path, user_id: str) -> Path:
+    raw = str(value)
+    try:
+        owner = str(uuid.UUID(user_id))
+    except (ValueError, TypeError, AttributeError):
+        raise WorkerError("invalid_vault_owner") from None
+    if owner != user_id:
+        raise WorkerError("invalid_vault_owner")
+    if not raw.startswith("/") or "\\" in raw or "\x00" in raw or any(
+        part in {".", ".."} for part in raw.split("/")
+    ):
+        raise WorkerError("invalid_vault_path")
+    path = Path(raw)
+    if path == Path("/"):
+        raise WorkerError("invalid_vault_path")
+    if (path == MULTITENANT_VAULT_ROOT or MULTITENANT_VAULT_ROOT in path.parents) and path != MULTITENANT_VAULT_ROOT / owner:
+        raise WorkerError("vault_owner_mismatch")
+    return path
 
 
 def atomic_write(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_name = tempfile.mkstemp(
-        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent, text=True
-    )
-
-    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-        handle.write(content)
-        handle.flush()
-        os.fsync(handle.fileno())
-
-    os.replace(temp_name, path)
+    # Without a managed DB ledger, regenerating different bytes is a conflict.
+    with SecureVault(path.parent) as opened, opened.note_lock("monthly-review"):
+        opened.publish(path.name, content)
 
 
-def update_reviews_dashboard(vault: Path, period_month: str, relative_path: str) -> None:
-    dashboard = safe_vault_path(vault, "Dashboards/Reviews.md")
+def update_reviews_dashboard(
+    vault: Path, period_month: str, relative_path: str, *, opened_vault: SecureVault | None = None,
+) -> None:
+    if opened_vault is None:
+        with SecureVault(vault) as opened, opened.note_lock("monthly-review"):
+            update_reviews_dashboard(vault, period_month, relative_path, opened_vault=opened)
+        return
+    dashboard = "Dashboards/Reviews.md"
     link = f"[[{relative_path.removesuffix('.md')}|{period_month} LifeOS Review]]"
-
-    if dashboard.exists():
-        current = dashboard.read_text(encoding="utf-8")
-    else:
+    try:
+        current = opened_vault.read_text(dashboard)
+        expected_hash = hashlib.sha256(current.encode("utf-8")).hexdigest()
+    except FileNotFoundError:
         current = "# Reviews\n\n```dataview\nTABLE created_at, source\nFROM \"Reviews\"\nSORT created_at DESC\n```\n"
+        expected_hash = None
 
     if link in current:
         return
@@ -729,17 +750,21 @@ def update_reviews_dashboard(vault: Path, period_month: str, relative_path: str)
         current = current.rstrip() + "\n\n## Monthly Reviews\n"
 
     current = current.rstrip() + f"\n- {link}\n"
-    atomic_write(dashboard, current)
+    opened_vault.publish(dashboard, current, expected_hash)
 
 
 def write_obsidian(settings: Settings, period_month: str, markdown: str) -> str | None:
     if not settings.obsidian_vault_path:
         return None
-
+    month_bounds(period_month)
+    vault = validated_vault_path(settings.obsidian_vault_path, settings.user_id)
     relative = f"Reviews/Monthly/{period_month}-LifeOS-Review.md"
-    target = safe_vault_path(settings.obsidian_vault_path, relative)
-    atomic_write(target, markdown)
-    update_reviews_dashboard(settings.obsidian_vault_path, period_month, relative)
+    try:
+        with SecureVault(vault) as opened, opened.note_lock("monthly-review"):
+            opened.publish(relative, markdown)
+            update_reviews_dashboard(vault, period_month, relative, opened_vault=opened)
+    except OSError:
+        raise WorkerError("obsidian_filesystem_unavailable") from None
     return relative
 
 
@@ -869,7 +894,7 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "run-loop":
             return run_loop(settings)
-    except WorkerError as exc:
+    except (WorkerError, FilesystemError) as exc:
         print(f"monthly_review_worker error: {exc}", file=sys.stderr)
         return 1
 
