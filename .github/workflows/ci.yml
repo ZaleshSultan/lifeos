@@ -26,6 +26,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r workers/university-sync/requirements.txt -r workers/ics-sync/requirements.txt
+      - run: python3 -m unittest discover -s scripts -p 'test_lifeos_rescue.py' -v
       - run: pnpm test:workers
       - run: bash scripts/test-lms-migration.sh
       - run: bash scripts/test-web-session-migration.sh
