@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import copy
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,6 +32,8 @@ class InMemoryReminderClient(SupabaseRestClient):
         )
         self.reminders: list[dict[str, object]] = []
         self.next_id = 1
+        self.profile_timezone: str | None = "Asia/Qyzylorda"
+        self.requests: list[tuple[str, str, dict[str, str]]] = []
 
     @staticmethod
     def _eq(value: str | None) -> str | None:
@@ -44,15 +47,20 @@ class InMemoryReminderClient(SupabaseRestClient):
         body: object | None = None,
         prefer: str | None = None,
     ) -> object:
-        self.assert_reminders_table(table)
         query = query or {}
+        self.requests.append((method, table, query))
+        if table == "profiles" and method == "GET":
+            if query.get("user_id") != "eq.user-1":
+                raise AssertionError("Profile lookup must use the recipient owner")
+            return [{"timezone": self.profile_timezone}]
+        self.assert_reminders_table(table)
         rows = self.reminders
-        for key in ("id", "user_id", "source_event_id", "status", "dedup_key"):
+        for key in ("id", "user_id", "source_event_id", "status", "dedup_key", "updated_at"):
             expected = self._eq(query.get(key))
             if expected is not None:
                 rows = [row for row in rows if row.get(key) == expected]
         if method == "GET":
-            return [dict(row) for row in rows]
+            return copy.deepcopy(rows)
         if method == "POST":
             assert isinstance(body, dict)
             row = {"id": f"reminder-{self.next_id}", "status": "pending", **body}
@@ -312,6 +320,119 @@ class ReminderPolicyTest(unittest.TestCase):
         self.assertEqual(client.cancel_future_reminders("event-a"), 1)
         self.assertEqual(client.reminders[0]["status"], "cancelled")
         self.assertEqual(client.reminders[1]["status"], "pending")
+
+    @staticmethod
+    def task_event() -> dict[str, object]:
+        return {
+            "id": "source-event-task-1",
+            "user_id": "user-1",
+            "source_key": "google_tasks",
+            "external_id": "@default:task-1",
+            "event_type": "task",
+            "title": "Read chapter",
+            "due_at": "2099-06-08T20:00:00Z",
+            "status": "active",
+        }
+
+    def test_schedule_uses_profile_timezone_instead_of_app_timezone(self) -> None:
+        client = InMemoryReminderClient()
+        client.profile_timezone = "America/New_York"
+        client._sync_reminders(self.task_event(), "normal")
+        morning = next(row for row in client.reminders if row["reminder_policy_key"] == "at_0900")
+        self.assertEqual(morning["remind_at"], "2099-06-08T13:00:00Z")
+        self.assertEqual(morning["metadata_json"]["event_at"], "2099-06-08T20:00:00Z")
+
+    def test_invalid_or_missing_profile_timezone_uses_utc(self) -> None:
+        for profile_timezone in (None, "invalid-zone"):
+            with self.subTest(profile_timezone=profile_timezone):
+                client = InMemoryReminderClient()
+                client.profile_timezone = profile_timezone
+                client._sync_reminders(self.task_event(), "normal")
+                morning = next(row for row in client.reminders if row["reminder_policy_key"] == "at_0900")
+                self.assertEqual(morning["remind_at"], "2099-06-08T09:00:00Z")
+
+    def test_source_event_from_other_user_cannot_schedule_reminders(self) -> None:
+        client = InMemoryReminderClient()
+        with self.assertRaises(SyncError):
+            client._sync_reminders({**self.task_event(), "user_id": "user-2"}, "normal")
+        self.assertEqual(client.requests, [])
+
+    def test_schedule_updates_keep_worker_attempts_and_require_pending_owner(self) -> None:
+        client = InMemoryReminderClient()
+        event = self.task_event()
+        client._sync_reminders(event, "normal")
+        for row in client.reminders:
+            row["metadata_json"]["reminder_worker"] = {"send_attempts": 2, "last_error": "temporary"}
+            row["updated_at"] = "2026-10-25T08:00:00Z"
+        client.requests.clear()
+        changed = client._sync_reminders({**event, "title": "Read revised chapter"}, "normal")
+        self.assertGreater(changed.updated, 0)
+        for row in client.reminders:
+            self.assertEqual(row["metadata_json"]["reminder_worker"]["send_attempts"], 2)
+            self.assertEqual(row["metadata_json"]["event_at"], event["due_at"])
+        for method, table, query in client.requests:
+            if method == "PATCH" and table == "reminders":
+                self.assertEqual(query["user_id"], "eq.user-1")
+                self.assertEqual(query["status"], "eq.pending")
+                self.assertEqual(query["updated_at"], "eq.2026-10-25T08:00:00Z")
+
+    def test_schedule_update_cannot_overwrite_newer_worker_state(self) -> None:
+        client = InMemoryReminderClient()
+        event = self.task_event()
+        client._sync_reminders(event, "normal")
+        for row in client.reminders:
+            row["updated_at"] = "2026-10-25T08:00:00Z"
+        original_request = client.request
+
+        def concurrent_retry(method, table, query=None, body=None, prefer=None):
+            if method == "PATCH" and table == "reminders":
+                for row in client.reminders:
+                    if query.get("id") == f"eq.{row['id']}":
+                        row["updated_at"] = "2026-10-25T08:00:01Z"
+                        row["metadata_json"]["reminder_worker"] = {"send_attempts": 3}
+            return original_request(method, table, query, body, prefer)
+
+        with patch.object(client, "request", side_effect=concurrent_retry):
+            result = client._sync_reminders({**event, "title": "Updated chapter"}, "normal")
+        self.assertEqual(result.updated, 0)
+        self.assertTrue(all(row["metadata_json"]["reminder_worker"]["send_attempts"] == 3 for row in client.reminders))
+
+    def test_cancelled_reminder_is_not_restored_by_schedule_reconciliation(self) -> None:
+        client = InMemoryReminderClient()
+        event = self.task_event()
+        client._sync_reminders(event, "normal")
+        for row in client.reminders:
+            row["status"] = "cancelled"
+        result = client._sync_reminders({**event, "title": "Updated chapter"}, "normal")
+        self.assertEqual((result.created, result.updated), (0, 0))
+        self.assertTrue(all(row["status"] == "cancelled" for row in client.reminders))
+
+    def test_quiet_shift_does_not_change_original_event_metadata(self) -> None:
+        event = {
+            "id": "event-a", "source_key": "manual", "event_type": "event",
+            "title": "Exam", "starts_at": "2026-03-08T12:00:00Z",
+        }
+        schedule = build_reminder_schedule(
+            event, "normal", "America/New_York",
+            datetime(2026, 3, 6, tzinfo=timezone.utc),
+            quiet_start="23:00", quiet_end="02:30",
+        )
+        self.assertTrue(schedule)
+        self.assertTrue(all(row["metadata_json"]["event_at"] == "2026-03-08T12:00:00Z" for row in schedule))
+        self.assertEqual(len({row["dedup_key"] for row in schedule}), len(schedule))
+
+    def test_collapsed_quiet_offsets_create_one_reminder_at_the_boundary(self) -> None:
+        event = {
+            "id": "event-a", "source_key": "manual", "event_type": "event",
+            "title": "Final exam", "starts_at": "2026-06-08T04:00:00Z",  # 09:00 local.
+        }
+        schedule = build_reminder_schedule(
+            event, "war", "Asia/Almaty", datetime(2026, 6, 6, tzinfo=timezone.utc),
+        )
+        boundary = [row for row in schedule if row["remind_at"] == "2026-06-08T03:00:00Z"]
+        self.assertEqual(len(boundary), 1)
+        self.assertEqual(boundary[0]["reminder_policy_key"], "before_360m")
+        self.assertEqual(len({row["remind_at"] for row in schedule}), len(schedule))
 
 
 if __name__ == "__main__":

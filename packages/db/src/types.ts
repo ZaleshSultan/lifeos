@@ -38,6 +38,8 @@ export type LifeEntityType =
 
 export type ObsidianSyncStatus =
   | "pending"
+  | "retry"
+  | "conflict"
   | "processing"
   | "completed"
   | "failed"
@@ -64,6 +66,8 @@ export type SyncRunStatus = "running" | "success" | "partial" | "failed";
 export type ReminderStatus =
   | "pending"
   | "processing"
+  | "sending"
+  | "unknown"
   | "sent"
   | "cancelled"
   | "failed";
@@ -1645,6 +1649,8 @@ export interface Database {
           source_event_id: string | null;
           channel: string;
           remind_at: string;
+          next_attempt_at: string | null;
+          notification_at: string;
           status: ReminderStatus;
           message: string;
           metadata_json: Json;
@@ -1662,6 +1668,7 @@ export interface Database {
           source_event_id?: string | null;
           channel?: string;
           remind_at: string;
+          next_attempt_at?: string | null;
           status?: ReminderStatus;
           message: string;
           metadata_json?: Json;
@@ -1794,6 +1801,9 @@ export interface Database {
           attempts: number;
           available_at: string;
           locked_at: string | null;
+          claim_token: string | null;
+          lease_expires_at: string | null;
+          last_error_code: string | null;
           completed_at: string | null;
           last_error: string | null;
           payload: Json;
@@ -1813,6 +1823,9 @@ export interface Database {
           attempts?: number;
           available_at?: string;
           locked_at?: string | null;
+          claim_token?: string | null;
+          lease_expires_at?: string | null;
+          last_error_code?: string | null;
           completed_at?: string | null;
           last_error?: string | null;
           payload?: Json;
@@ -2024,6 +2037,36 @@ export interface Database {
       };
     };
     Functions: {
+      issue_health_ingest_credential: {
+        Args: {p_user_id: string; p_token_hash: string; p_expires_at: string};
+        Returns: string | null;
+      };
+      resolve_health_ingest_credential: {
+        Args: {p_user_id: string; p_token_hash: string}; Returns: boolean;
+      };
+      revoke_health_ingest_credential: {
+        Args: {p_user_id: string; p_device_id: string}; Returns: undefined;
+      };
+      list_health_ingest_credentials: {
+        Args: {p_user_id: string};
+        Returns: {device_id: string; created_at: string; expires_at: string; revoked_at: string | null}[];
+      };
+      issue_web_login_token: {
+        Args: { p_user_id: string; p_token_hash: string; p_expires_at: string };
+        Returns: boolean;
+      };
+      exchange_web_login_token: {
+        Args: { p_user_id: string; p_token_hash: string; p_session_hash: string };
+        Returns: string | null;
+      };
+      resolve_web_session: {
+        Args: { p_session_hash: string };
+        Returns: string | null;
+      };
+      revoke_web_session: {
+        Args: { p_user_id: string; p_session_hash: string };
+        Returns: undefined;
+      };
       save_lms_session: {Args:{p_user_id:string;p_owner:string;p_encrypted_cookie:string;p_expires_at:string};Returns:boolean};
       delete_lms_session: {Args:{p_user_id:string;p_owner:string};Returns:boolean};
 

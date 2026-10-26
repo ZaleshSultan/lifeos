@@ -4,13 +4,11 @@
 from __future__ import annotations
 
 import argparse
-import errno
 import json
 import os
 import re
 import sys
-import shutil
-import tempfile
+import threading
 import time
 import uuid
 import unicodedata
@@ -18,16 +16,19 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from common.obsidian_files import FilesystemError, FileConflict, SecureVault, UnsafePath, hash_content
 
 
 JsonObject = dict[str, Any]
 LEGACY_SINGLE_USER_ENV = "LIFEOS_ENABLE_LEGACY_SINGLE_USER_OBSIDIAN"
 FAIL_ON_SYNC_CONFLICTS_ENV = "OBSIDIAN_MIRROR_FAIL_ON_SYNC_CONFLICTS"
-MULTITENANT_VAULT_ROOT = Path("/var/lifeos/vaults").resolve()
+MULTITENANT_VAULT_ROOT = Path("/var/lifeos/vaults")
 
 SUPPORTED_RENDER_TYPES = {
     "task",
@@ -52,6 +53,8 @@ STIGNORE_LIFEOS_END = "# END LifeOS managed ignores"
 STIGNORE_LIFEOS_BLOCK = "\n".join(
     [
         STIGNORE_LIFEOS_BEGIN,
+        "(?d).lifeos-state/",
+        "(?d).lifeos-recovery/",
         "(?d).lifeos-tmp/",
         "(?d)*.tmp-lifeos",
         "(?d).*tmp-lifeos",
@@ -59,8 +62,6 @@ STIGNORE_LIFEOS_BLOCK = "\n".join(
         "",
     ]
 )
-INITIALIZED_USERS: set[str] = set()
-INITIALIZED_DASHBOARD_KEYS: set[tuple[str, str]] = set()
 RESERVED_WINDOWS_NAMES = {
     "con",
     "prn",
@@ -96,6 +97,7 @@ class Settings:
     dashboard_dir: str
     fail_on_sync_conflicts: bool = True
     legacy_vault_path: Path | None = None
+    legacy_user_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -165,7 +167,21 @@ def resolve_vault_path(value: str | Path | None) -> Path:
     raw = str(value or "").strip()
     if not raw:
         raise WorkerError("Obsidian vault path is empty")
-    return Path(raw).expanduser().resolve()
+    path = Path(raw).expanduser()
+    if not path.is_absolute() or any(part in {".", ".."} for part in path.parts):
+        raise WorkerError("invalid_vault_path")
+    return path
+
+
+def canonical_user_id(value: Any) -> str:
+    raw = str(value or "")
+    try:
+        canonical = str(uuid.UUID(raw))
+    except (ValueError, TypeError, AttributeError):
+        raise WorkerError("invalid_user_ownership") from None
+    if raw != canonical:
+        raise WorkerError("invalid_user_ownership")
+    return canonical
 
 
 def load_settings(env_file: Path | None = None) -> Settings:
@@ -180,16 +196,30 @@ def load_settings(env_file: Path | None = None) -> Settings:
         if getenv_bool(LEGACY_SINGLE_USER_ENV)
         else None
     )
+    legacy_user_id = (
+        canonical_user_id(getenv_required("LIFEOS_DEFAULT_USER_ID"))
+        if legacy_vault_path is not None
+        else None
+    )
+    if legacy_vault_path is not None and legacy_vault_path.is_relative_to(MULTITENANT_VAULT_ROOT):
+        if legacy_vault_path != server_owned_user_vault_path(legacy_user_id or ""):
+            raise WorkerError("invalid_vault_ownership")
+
+    batch_size = getenv_int("OBSIDIAN_MIRROR_BATCH_SIZE", 10)
+    interval_seconds = getenv_int("OBSIDIAN_MIRROR_INTERVAL_SECONDS", 30)
+    if not 1 <= batch_size <= 1000 or not 1 <= interval_seconds <= 86400:
+        raise WorkerError("invalid_worker_configuration")
 
     return Settings(
         supabase_url=getenv_required("SUPABASE_URL").rstrip("/"),
         service_role_key=getenv_required("SUPABASE_SERVICE_ROLE_KEY"),
-        batch_size=getenv_int("OBSIDIAN_MIRROR_BATCH_SIZE", 10),
-        interval_seconds=getenv_int("OBSIDIAN_MIRROR_INTERVAL_SECONDS", 30),
+        batch_size=batch_size,
+        interval_seconds=interval_seconds,
         dashboard_dir=os.environ.get("OBSIDIAN_MIRROR_DASHBOARD_DIR", "Dashboards").strip()
         or "Dashboards",
         fail_on_sync_conflicts=getenv_bool(FAIL_ON_SYNC_CONFLICTS_ENV, True),
         legacy_vault_path=legacy_vault_path,
+        legacy_user_id=legacy_user_id,
     )
 
 
@@ -228,94 +258,61 @@ class SupabaseRestClient:
         try:
             with urllib.request.urlopen(request, timeout=30) as response:
                 raw = response.read().decode("utf-8")
-        except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
-            raise WorkerError(f"Supabase {method} {table} failed: {exc.code} {detail}") from exc
-        except urllib.error.URLError as exc:
-            raise WorkerError(f"Supabase {method} {table} failed: {exc.reason}") from exc
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError):
+            raise WorkerError("obsidian_state_unavailable") from None
+        except UnicodeError:
+            raise WorkerError("obsidian_state_invalid") from None
 
         if not raw:
             return None
 
-        return json.loads(raw)
+        try:
+            return json.loads(raw)
+        except (ValueError, UnicodeError):
+            raise WorkerError("obsidian_state_invalid") from None
 
-    def list_pending_jobs(self, limit: int) -> list[JsonObject]:
-        rows = self.request(
-            "GET",
-            "obsidian_sync_queue",
-            {
-                "select": "*",
-                "status": "eq.pending",
-                "available_at": f"lte.{utc_now()}",
-                "order": "created_at.asc",
-                "limit": str(limit),
-            },
-        )
-        return rows or []
+    def rpc(self, name: str, body: JsonObject | None = None) -> Any:
+        return self.request("POST", f"rpc/{name}", body=body or {})
 
-    def claim_job(self, job: JsonObject) -> JsonObject | None:
-        rows = self.request(
-            "PATCH",
-            "obsidian_sync_queue",
-            {
-                "id": f"eq.{job['id']}",
-                "status": "eq.pending",
-                "select": "*",
-            },
-            {
-                "status": "processing",
-                "attempts": int(job.get("attempts") or 0) + 1,
-                "locked_at": utc_now(),
-                "last_error": None,
-            },
-            prefer="return=representation",
-        )
+    @staticmethod
+    def claim_args(job: JsonObject) -> JsonObject:
+        return {
+            "p_job_id": canonical_user_id(job.get("id")),
+            "p_user_id": canonical_user_id(job.get("user_id")),
+            "p_claim_token": canonical_user_id(job.get("claim_token")),
+        }
 
-        if not rows:
-            return None
+    def claim_jobs(self, limit: int = 1) -> list[JsonObject]:
+        return self.rpc("claim_obsidian_sync_jobs", {"p_limit": limit}) or []
 
-        return rows[0]
+    def recover_jobs(self) -> JsonObject:
+        return self.rpc("recover_obsidian_sync_jobs") or {}
 
-    def complete_job(self, job_id: str) -> None:
-        self.request(
-            "PATCH",
-            "obsidian_sync_queue",
-            {"id": f"eq.{job_id}"},
-            {
-                "status": "completed",
-                "completed_at": utc_now(),
-                "locked_at": None,
-                "last_error": None,
-            },
-        )
+    def renew_job(self, job: JsonObject) -> bool:
+        return self.rpc("renew_obsidian_sync_claim", self.claim_args(job)) is True
 
-    def fail_job(self, job_id: str, error: str) -> None:
-        self.request(
-            "PATCH",
-            "obsidian_sync_queue",
-            {"id": f"eq.{job_id}"},
-            {
-                "status": "failed",
-                "locked_at": None,
-                "last_error": error[:2000],
-            },
-        )
+    def note_state(self, job: JsonObject) -> JsonObject | None:
+        return self.rpc("get_obsidian_note_state", self.claim_args(job))
 
-    def defer_job(self, job_id: str, error: str, delay_seconds: int = 3600) -> None:
-        available_at = (
-            datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
-        ).isoformat().replace("+00:00", "Z")
-        self.request(
-            "PATCH",
-            "obsidian_sync_queue",
-            {"id": f"eq.{job_id}"},
-            {
-                "status": "pending",
-                "available_at": available_at,
-                "locked_at": None,
-                "last_error": error[:2000],
-            },
-        )
+    def prepare_job(self, job: JsonObject, relative_path: str, content_hash: str, observed_hash: str | None) -> JsonObject:
+        return self.rpc("prepare_obsidian_sync_job", {
+            **self.claim_args(job), "p_relative_path": relative_path,
+            "p_content_hash": content_hash, "p_observed_hash": observed_hash,
+        }) or {}
+
+    def complete_job(self, job: JsonObject, content_hash: str, revision: int) -> bool:
+        return self.rpc("complete_obsidian_sync_job", {
+            **self.claim_args(job), "p_content_hash": content_hash, "p_revision": revision,
+        }) is True
+
+    def finish_job(self, job: JsonObject, error_code: str, *, retryable: bool = False, conflict: bool = False) -> bool:
+        return self.rpc("finish_obsidian_sync_job", {
+            **self.claim_args(job), "p_error_code": error_code,
+            "p_retryable": retryable, "p_conflict": conflict,
+        }) is True
+
+    def queue_status(self) -> JsonObject:
+        return self.rpc("obsidian_sync_status") or {}
 
     def fetch_one(
         self,
@@ -365,6 +362,13 @@ class SupabaseRestClient:
         )
         return rows or []
 
+    def user_is_active(self, user_id: str) -> bool:
+        rows = self.request(
+            "GET", "profiles",
+            {"select": "user_id,status", "user_id": f"eq.{user_id}", "limit": "1"},
+        )
+        return bool(rows and rows[0].get("user_id") == user_id and rows[0].get("status") == "active")
+
 
 def is_syncthing_or_local_settings(row: JsonObject) -> bool:
     mode = str(row.get("mode") or "").strip()
@@ -379,10 +383,7 @@ def is_syncthing_or_local_settings(row: JsonObject) -> bool:
 
 
 def server_owned_user_vault_path(user_id: str) -> Path:
-    normalized_user_id = str(user_id or "").strip()
-    if not normalized_user_id:
-        raise WorkerError("Cannot resolve vault path without user_id")
-    return (MULTITENANT_VAULT_ROOT / normalized_user_id).resolve()
+    return MULTITENANT_VAULT_ROOT / canonical_user_id(user_id)
 
 
 def vault_path_from_settings_row(row: JsonObject) -> Path | None:
@@ -395,9 +396,7 @@ def vault_path_from_settings_row(row: JsonObject) -> Path | None:
     configured = resolve_vault_path(row.get("vault_path"))
 
     if configured != expected:
-        raise WorkerError(
-            f"Unsafe vault_path for user {user_id}: expected {expected}, got {configured}"
-        )
+        raise WorkerError("invalid_vault_ownership")
 
     return configured
 
@@ -458,8 +457,8 @@ def normalize_timezone_name(value: Any) -> str:
     try:
         ZoneInfo(name)
         return name
-    except ZoneInfoNotFoundError:
-        print(f"invalid user timezone {name!r}; falling back to UTC", file=sys.stderr)
+    except (ZoneInfoNotFoundError, ValueError):
+        print("obsidian invalid_timezone; falling back to UTC", file=sys.stderr)
         return "UTC"
 
 
@@ -491,43 +490,18 @@ def date_part(value: Any) -> str:
 
 
 def assert_real_path_inside_vault(vault: Path, target: Path) -> Path:
-    vault_real = Path(os.path.realpath(vault))
-    target_abs = Path(target)
-
-    # Refuse to write through a final symlink even when it points back inside.
-    # Syncthing may propagate symlinks from untrusted client devices.
-    if target_abs.is_symlink():
-        raise WorkerError(f"Refusing to write through symlink: {target_abs}")
-
-    target_abs.parent.mkdir(parents=True, exist_ok=True)
-    parent_real = Path(os.path.realpath(target_abs.parent))
-
     try:
-        parent_common = os.path.commonpath([str(vault_real), str(parent_real)])
-    except ValueError as exc:
-        raise WorkerError("Resolved note parent is outside the vault") from exc
-
-    if parent_common != str(vault_real):
-        raise WorkerError("Resolved note parent is outside the vault")
-
-    if target_abs.exists():
-        target_real = Path(os.path.realpath(target_abs))
-        try:
-            target_common = os.path.commonpath([str(vault_real), str(target_real)])
-        except ValueError as exc:
-            raise WorkerError("Resolved note path is outside the vault") from exc
-
-        if target_common != str(vault_real):
-            raise WorkerError("Resolved note path is outside the vault")
-
-        return target_real
-
-    return parent_real / target_abs.name
+        relative = str(target.relative_to(vault))
+    except ValueError:
+        raise WorkerError("unsafe_path") from None
+    with SecureVault(vault) as opened:
+        opened.current_hash(relative)
+    return target
 
 
 def safe_read_text(path: Path, vault: Path) -> str:
-    real_path = assert_real_path_inside_vault(vault, path)
-    return real_path.read_text(encoding="utf-8")
+    with SecureVault(vault) as opened:
+        return opened.read_text(str(path.relative_to(vault)))
 
 
 def note_path(vault: Path, relative_segments: list[str]) -> Path:
@@ -537,7 +511,7 @@ def note_path(vault: Path, relative_segments: list[str]) -> Path:
     vault = resolve_vault_path(vault)
     safe_segments = [sanitize_segment(segment) for segment in relative_segments]
     safe_segments[-1] = sanitize_segment(safe_segments[-1].removesuffix(".md")) + ".md"
-    target = vault.joinpath(*safe_segments).resolve()
+    target = vault.joinpath(*safe_segments)
 
     try:
         common = os.path.commonpath([str(vault), str(target)])
@@ -954,72 +928,17 @@ def render_entity(entity: JsonObject, detail: JsonObject | None = None) -> Rende
 
 
 def atomic_write(path: Path, content: str, vault: Path | None = None) -> None:
-    write_path = assert_real_path_inside_vault(vault, path) if vault is not None else path
-    write_path.parent.mkdir(parents=True, exist_ok=True)
-
-    fd, temp_name = tempfile.mkstemp(
-        prefix=f"lifeos-{write_path.name}.",
-        suffix=".tmp-lifeos",
-        dir=tempfile.gettempdir(),
-        text=True,
-    )
-    temp_path = Path(temp_name)
-
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(content)
-            if content and not content.endswith("\n"):
-                handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-
-        if vault is not None:
-            write_path = assert_real_path_inside_vault(vault, write_path)
-
-        try:
-            os.replace(temp_path, write_path)
-        except OSError as exc:
-            # /tmp can live on another filesystem than /var/lifeos/vaults.
-            # In that case we still avoid exposing noisy temporary files to Syncthing
-            # by falling back to an ignored *.tmp-lifeos file inside the target folder.
-            if getattr(exc, "errno", None) != errno.EXDEV:
-                raise
-            replace_via_ignored_same_fs_temp(temp_path, write_path, vault)
-    except Exception:
-        try:
-            temp_path.unlink(missing_ok=True)
-        finally:
-            raise
-
-
-def replace_via_ignored_same_fs_temp(source: Path, destination: Path, vault: Path | None) -> None:
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    same_fs_temp = destination.parent / f".{destination.name}.{uuid.uuid4().hex}.tmp-lifeos"
-
-    try:
-        if vault is not None:
-            assert_real_path_inside_vault(vault, same_fs_temp)
-
-        shutil.copyfile(source, same_fs_temp)
-        with same_fs_temp.open("r+b") as handle:
-            handle.flush()
-            os.fsync(handle.fileno())
-
-        if vault is not None:
-            destination = assert_real_path_inside_vault(vault, destination)
-
-        os.replace(same_fs_temp, destination)
-    finally:
-        source.unlink(missing_ok=True)
-        same_fs_temp.unlink(missing_ok=True)
+    """Compatibility create-only writer; managed updates use the durable ledger."""
+    root = vault or path.parent
+    relative = str(path.relative_to(root))
+    with SecureVault(root) as opened, opened.note_lock("bootstrap"):
+        opened.publish(relative, content)
 
 
 def write_if_missing(path: Path, content: str, vault: Path | None = None) -> bool:
-    checked_path = assert_real_path_inside_vault(vault, path) if vault is not None else path
-    if checked_path.exists():
-        return False
-    atomic_write(checked_path, content, vault)
-    return True
+    root = vault or path.parent
+    with SecureVault(root) as opened, opened.note_lock("bootstrap"):
+        return opened.write_if_missing(str(path.relative_to(root)), content)
 
 
 DASHBOARDS = {
@@ -1210,10 +1129,10 @@ def render_lms_grades_dashboard(
     Fetch ``public.academic_records`` for *user_id* and write a static
     Markdown grade dashboard to ``<vault>/Academic/LMS_Grades_Dashboard.md``.
 
-    This is a *server-side* render that:
-    - Works without Obsidian being open (no Dataview dependency).
-    - Is always up-to-date the moment the Obsidian mirror processes a job.
-    - Complements the Dataview ``LMS_Grades.md`` file in the Dashboards folder.
+    This compatibility helper is not invoked by queue processing. It works
+    without Obsidian/Dataview, but creates only a missing file or reconciles
+    identical bytes. Existing different content requires explicit review;
+    untracked static dashboards are never silently overwritten.
 
     Returns the written path, or ``None`` if no academic records exist yet.
     """
@@ -1288,64 +1207,61 @@ def render_lms_grades_dashboard(
     return target
 
 
-def ensure_syncthing_ignores(vault_path: Path) -> bool:
-    vault_path = resolve_vault_path(vault_path)
-    vault_path.mkdir(parents=True, exist_ok=True)
-    target = vault_path / ".stignore"
-    checked = assert_real_path_inside_vault(vault_path, target)
-
-    existing = checked.read_text(encoding="utf-8") if checked.exists() else ""
+def ensure_syncthing_ignores(vault_path: Path, opened: SecureVault | None = None, validate_claim=None) -> bool:
+    if opened is None:
+        with SecureVault(vault_path) as selected, selected.note_lock("bootstrap"):
+            return ensure_syncthing_ignores(vault_path, selected, validate_claim)
+    expected_hash = opened.current_hash(".stignore")
+    existing = opened.read_text(".stignore") if expected_hash is not None else ""
     if STIGNORE_LIFEOS_BEGIN in existing and STIGNORE_LIFEOS_END in existing:
-        return False
-
+        # The private worker-state ignore is an additive rule. Existing user
+        # patterns and old managed blocks remain byte-for-byte intact.
+        missing = [pattern for pattern in ("(?d).lifeos-state/", "(?d).lifeos-recovery/") if pattern not in existing.splitlines()]
+        if not missing:
+            return False
+        addition = "\n".join(missing) + "\n"
+    else:
+        addition = STIGNORE_LIFEOS_BLOCK
     separator = "" if not existing or existing.endswith("\n") else "\n"
-    atomic_write(checked, f"{existing}{separator}{STIGNORE_LIFEOS_BLOCK}", vault_path)
+    opened.publish(".stignore", f"{existing}{separator}{addition}", expected_hash=expected_hash, validate_claim=validate_claim)
     return True
 
 
-def init_dashboards(vault_path: Path, dashboard_dir: str) -> int:
+def init_dashboards(vault_path: Path, dashboard_dir: str, opened: SecureVault | None = None, validate_claim=None) -> int:
     vault_path = resolve_vault_path(vault_path)
-    vault_path.mkdir(parents=True, exist_ok=True)
+    if opened is None:
+        with SecureVault(vault_path) as selected, selected.note_lock("bootstrap"):
+            return init_dashboards(vault_path, dashboard_dir, selected, validate_claim)
     created = 0
 
-    if ensure_syncthing_ignores(vault_path):
+    if ensure_syncthing_ignores(vault_path, opened, validate_claim):
         created += 1
-        print(f"updated {vault_path / '.stignore'}")
 
     for filename, content in DASHBOARDS.items():
         target = note_path(vault_path, [dashboard_dir, filename])
 
-        if write_if_missing(target, content, vault_path):
+        if opened.write_if_missing(str(target.relative_to(vault_path)), content, validate_claim=validate_claim):
             created += 1
-            print(f"created {target}")
-        elif filename == "Finance.md" and safe_read_text(target, vault_path) == LEGACY_FINANCE_DASHBOARD:
-            atomic_write(target, content, vault_path)
-            print(f"updated {target}")
 
     return created
 
 
 class DashboardInitializer:
     def __init__(self) -> None:
-        self._initialized_users = INITIALIZED_USERS
-        self._initialized_keys = INITIALIZED_DASHBOARD_KEYS
+        self._initialized_keys: set[tuple[str, str]] = set()
 
-    def ensure_for_user(self, user_id: str, vault_path: Path, dashboard_dir: str) -> None:
-        normalized_user_id = str(user_id or "").strip()
-        if normalized_user_id in self._initialized_users:
-            return
+    def ensure_for_user(self, user_id: str, vault_path: Path, dashboard_dir: str, opened: SecureVault | None = None, validate_claim=None) -> None:
+        canonical_user_id(user_id)
+        self.ensure(vault_path, dashboard_dir, opened, validate_claim)
 
-        self.ensure(vault_path, dashboard_dir)
-        self._initialized_users.add(normalized_user_id)
-
-    def ensure(self, vault_path: Path, dashboard_dir: str) -> None:
+    def ensure(self, vault_path: Path, dashboard_dir: str, opened: SecureVault | None = None, validate_claim=None) -> None:
         resolved = resolve_vault_path(vault_path)
         key = (str(resolved), dashboard_dir)
 
         if key in self._initialized_keys:
             return
 
-        init_dashboards(resolved, dashboard_dir)
+        init_dashboards(resolved, dashboard_dir, opened, validate_claim)
         self._initialized_keys.add(key)
 
 
@@ -1376,10 +1292,7 @@ def write_entity_note(
 
 
 def job_user_id(job: JsonObject) -> str:
-    user_id = str(job.get("user_id") or "").strip()
-    if not user_id:
-        raise WorkerError("Queue job has no user_id")
-    return user_id
+    return canonical_user_id(job.get("user_id"))
 
 
 def settings_vault_context(
@@ -1390,7 +1303,12 @@ def settings_vault_context(
     obsidian_settings = client.get_user_obsidian_settings(user_id)
 
     if obsidian_settings is None:
-        return settings.legacy_vault_path, "UTC"
+        # Queue claims require connected per-user DB settings. The explicit
+        # legacy path is reserved for the bound-owner bootstrap CLI.
+        return None, "UTC"
+
+    if obsidian_settings.get("user_id") != user_id:
+        raise WorkerError("invalid_user_ownership")
 
     return (
         vault_path_from_settings_row(obsidian_settings),
@@ -1403,26 +1321,75 @@ def settings_vault_path(settings: Settings, client: SupabaseRestClient, user_id:
     return vault_path
 
 
-def initialize_dashboards_for_active_vaults(
-    settings: Settings,
-    client: SupabaseRestClient,
-    dashboard_initializer: DashboardInitializer,
-) -> None:
-    initialized = 0
+class ClaimLease:
+    """Renew during long preparation; any uncertain renewal fences publication."""
+    def __init__(self, client: SupabaseRestClient, job: JsonObject, interval_seconds: float = 60):
+        self.client = client
+        self.job = job
+        self.interval_seconds = interval_seconds
+        self._stop = threading.Event()
+        self._lost = threading.Event()
+        self._renew_lock = threading.Lock()
+        self._deadline = 0.0
+        self._thread: threading.Thread | None = None
 
-    if settings.legacy_vault_path is not None:
-        dashboard_initializer.ensure(settings.legacy_vault_path, settings.dashboard_dir)
-        initialized += 1
+    def renew(self) -> bool:
+        with self._renew_lock:
+            started = time.monotonic()
+            if self._lost.is_set() or self._stop.is_set() or (self._deadline and started >= self._deadline):
+                self._lost.set()
+                return False
+            try:
+                owned = self.client.renew_job(self.job)
+            except Exception:
+                owned = False
+            if not owned:
+                self._lost.set()
+                return False
+            # DB leases last 300 seconds. Bound the local deadline from the
+            # request start, so network latency cannot extend a stale lease.
+            self._deadline = started + 299
+            if time.monotonic() >= self._deadline:
+                self._lost.set()
+                return False
+            return True
 
-    for row in client.list_active_obsidian_settings():
-        vault_path = vault_path_from_settings_row(row)
-        if vault_path is None:
-            continue
-        dashboard_initializer.ensure(vault_path, settings.dashboard_dir)
-        initialized += 1
+    def start(self) -> None:
+        if not self.renew():
+            raise FilesystemError("claim_lost")
+        self._thread = threading.Thread(target=self._heartbeat, name="obsidian-claim-lease", daemon=True)
+        self._thread.start()
 
-    if initialized:
-        print(f"initialized dashboards for {initialized} vault(s)")
+    def _heartbeat(self) -> None:
+        while not self._stop.wait(self.interval_seconds):
+            if not self.renew():
+                return
+
+    def close(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            # REST requests have a 30-second timeout. An in-flight renewal
+            # must finish before returning, preventing unobserved late work.
+            self._thread.join(timeout=31)
+
+
+def _job_error(exc: Exception) -> tuple[str, bool, bool]:
+    if isinstance(exc, FileConflict):
+        code = str(exc)
+        return code if code in {"path_collision", "unsafe_path", "syncthing_conflict", "note_missing"} else "external_modification", False, True
+    if isinstance(exc, UnsafePath):
+        return "unsafe_path", False, True
+    if isinstance(exc, FilesystemError):
+        code = str(exc)
+        return code, code in {"note_busy", "corrupt_temporary_file"}, False
+    if isinstance(exc, OSError):
+        return "storage_unavailable", True, False
+    if isinstance(exc, WorkerError):
+        code = str(exc)
+        if code in {"obsidian_state_unavailable", "obsidian_state_invalid"}:
+            return code, True, False
+        return code if re.fullmatch(r"[a-z_]{1,64}", code) else "invalid_job", False, False
+    return "preparation_failed", True, False
 
 
 def process_job(
@@ -1431,93 +1398,140 @@ def process_job(
     job: JsonObject,
     dashboard_initializer: DashboardInitializer | None = None,
 ) -> bool:
-    claimed = client.claim_job(job)
+    """Process an already-owned claim; file publication and DB ACK are distinct.
 
-    if claimed is None:
-        return False
-
-    job_id = str(claimed["id"])
-
+    A durable intent precedes publication. Losing the acknowledgement leaves the
+    intent untouched so a recovered claim can recognize the exact written bytes.
+    """
+    started = time.monotonic()
+    published = False
+    lease: ClaimLease | None = None
     try:
-        user_id = job_user_id(claimed)
+        client.claim_args(job)
+        user_id = job_user_id(job)
+        if not client.user_is_active(user_id):
+            raise WorkerError("recipient_inactive")
         vault_path, user_timezone = settings_vault_context(settings, client, user_id)
         if vault_path is None:
-            client.defer_job(job_id, "Obsidian sync is not connected for this user")
-            print(f"deferred {job_id}: Obsidian sync is not connected for user", file=sys.stderr)
-            return False
+            raise WorkerError("sync_unavailable")
+        lease = ClaimLease(client, job)
+        lease.start()
 
-        (dashboard_initializer or DashboardInitializer()).ensure_for_user(user_id, vault_path, settings.dashboard_dir)
-
-        if settings.fail_on_sync_conflicts:
-            conflicts = find_syncthing_conflicts(vault_path)
-            if conflicts:
-                message = (
-                    "Obsidian vault has unresolved Syncthing conflict files; "
-                    f"manual merge required before mirror writes continue: {conflict_summary(vault_path, conflicts)}"
-                )
-                client.defer_job(job_id, message, delay_seconds=1800)
-                print(f"deferred {job_id}: {message}", file=sys.stderr)
-                return False
-
-        life_entity_id = claimed.get("life_entity_id")
-
-        if not life_entity_id:
-            raise WorkerError("Queue job has no life_entity_id")
-
-        target_segments = queued_target_segments(claimed)
-        entity = client.fetch_one("life_entities", str(life_entity_id), user_id=user_id)
-
+        life_entity_id = canonical_user_id(job.get("life_entity_id"))
+        if job.get("operation") not in {"upsert", "upsert_note"} or job.get("action") != "upsert":
+            raise WorkerError("unsupported_operation")
+        target_segments = queued_target_segments(job)
+        entity = client.fetch_one("life_entities", life_entity_id, user_id=user_id)
         if entity is None:
-            raise WorkerError(f"Life entity not found: {life_entity_id}")
-
+            raise WorkerError("entity_missing")
+        if entity.get("id") != life_entity_id or entity.get("user_id") != user_id:
+            raise WorkerError("invalid_user_ownership")
         detail = fetch_linked_detail(client, entity, user_id)
+        if detail is not None and detail.get("user_id") != user_id:
+            raise WorkerError("invalid_user_ownership")
         previous_timezone = set_render_timezone(user_timezone)
         try:
-            target = write_entity_note(vault_path, entity, detail, target_segments)
+            rendered = render_entity(entity, detail)
         finally:
             set_render_timezone(previous_timezone)
-        client.complete_job(job_id)
-        print(f"mirrored {life_entity_id} -> {target}")
+        desired_hash = hash_content(rendered.markdown)
+
+        with SecureVault(vault_path) as opened, opened.note_lock(life_entity_id):
+            if not lease.renew():
+                raise FilesystemError("claim_lost")
+            if settings.fail_on_sync_conflicts and find_syncthing_conflicts(vault_path):
+                raise FileConflict("syncthing_conflict")
+
+            validate_claim = lease.renew
+            (dashboard_initializer or DashboardInitializer()).ensure_for_user(
+                user_id, vault_path, settings.dashboard_dir, opened, validate_claim,
+            )
+            state = client.note_state(job)
+            if state is not None:
+                relative_path = str(state.get("relative_path") or "")
+            else:
+                target = note_path(vault_path, target_segments or rendered.relative_segments)
+                relative_path = str(target.relative_to(vault_path))
+            observed_hash = opened.current_hash(relative_path)
+            prepared = client.prepare_job(job, relative_path, desired_hash, observed_hash)
+            if prepared.get("conflict") is True:
+                code = prepared.get("error_code")
+                raise FileConflict(code if code in {"path_collision", "unsafe_path", "external_modification"} else "external_modification")
+            if not prepared or prepared.get("relative_path") != relative_path:
+                raise FilesystemError("claim_lost")
+            revision = prepared.get("revision")
+            if type(revision) is not int or revision < 1 or prepared.get("pending_content_hash") != desired_hash:
+                raise WorkerError("invalid_note_state")
+
+            result = opened.publish(
+                relative_path, rendered.markdown,
+                expected_hash=prepared.get("expected_content_hash"),
+                validate_claim=validate_claim,
+            )
+            published = True
+            if not client.complete_job(job, result.content_hash, revision):
+                print("obsidian outcome=acknowledgement_lost", file=sys.stderr)
+                return False
+        elapsed = round((time.monotonic() - started) * 1000)
+        print(f"obsidian outcome=completed unchanged={str(result.unchanged).lower()} duration_ms={elapsed}")
         return True
     except Exception as exc:
-        message = str(exc)
-        client.fail_job(job_id, message)
-        print(f"failed {job_id}: {message}", file=sys.stderr)
+        if published:
+            # The ACK may have committed despite a lost response. Never replace
+            # that state with an unconditional failure or erase its write intent.
+            print("obsidian outcome=acknowledgement_unknown", file=sys.stderr)
+            return False
+        code, retryable, conflict = _job_error(exc)
+        if code != "claim_lost":
+            try:
+                client.finish_job(job, code, retryable=retryable, conflict=conflict)
+            except Exception:
+                print("obsidian outcome=state_unavailable", file=sys.stderr)
+        elapsed = round((time.monotonic() - started) * 1000)
+        print(f"obsidian outcome={code} duration_ms={elapsed}", file=sys.stderr)
         return False
+    finally:
+        if lease is not None:
+            lease.close()
+
+
+def run_batch(settings: Settings, client: SupabaseRestClient, dashboards: DashboardInitializer) -> int:
+    client.recover_jobs()
+    processed = 0
+    attempted = 0
+    # Claim only what can be processed immediately; idle batch reservations must
+    # not expire while an earlier note is being rendered or written.
+    for _ in range(settings.batch_size):
+        jobs = client.claim_jobs(1)
+        if not jobs:
+            break
+        attempted += 1
+        if process_job(settings, client, jobs[0], dashboards):
+            processed += 1
+    print(f"obsidian completed={processed} attempted={attempted}")
+    return processed
 
 
 def run_once(settings: Settings, dashboards: DashboardInitializer | None = None) -> int:
     client = SupabaseRestClient(settings.supabase_url, settings.service_role_key)
-    dashboards = dashboards or DashboardInitializer()
-    jobs = client.list_pending_jobs(settings.batch_size)
-    processed = 0
-
-    for job in jobs:
-        if process_job(settings, client, job, dashboards):
-            processed += 1
-
-    print(f"processed {processed}/{len(jobs)} jobs")
-    return processed
+    return run_batch(settings, client, dashboards or DashboardInitializer())
 
 
 def run_loop(settings: Settings) -> None:
     client = SupabaseRestClient(settings.supabase_url, settings.service_role_key)
     dashboards = DashboardInitializer()
-
     while True:
         try:
-            jobs = client.list_pending_jobs(settings.batch_size)
-            processed = 0
-
-            for job in jobs:
-                if process_job(settings, client, job, dashboards):
-                    processed += 1
-
-            print(f"processed {processed}/{len(jobs)} jobs")
-        except Exception as exc:
-            print(f"loop error: {exc}", file=sys.stderr)
-
+            run_batch(settings, client, dashboards)
+        except Exception:
+            print("obsidian outcome=loop_unavailable", file=sys.stderr)
         time.sleep(settings.interval_seconds)
+
+
+def print_status(settings: Settings) -> None:
+    # This RPC is STABLE/read-only. No lease recovery or vault access occurs.
+    client = SupabaseRestClient(settings.supabase_url, settings.service_role_key)
+    print(json.dumps(client.queue_status(), sort_keys=True))
 
 
 def sample_entity(entity_type: str) -> JsonObject:
@@ -1610,6 +1624,7 @@ def build_parser() -> argparse.ArgumentParser:
     subcommands.add_parser("run-once", help="Process one batch of pending sync jobs")
     subcommands.add_parser("run-loop", help="Continuously process pending sync jobs")
     subcommands.add_parser("init-dashboards", help="Create missing dashboard notes")
+    subcommands.add_parser("status", help="Read queue diagnostics without recovery or filesystem writes")
 
     render_parser = subcommands.add_parser("render-test", help="Render sample Markdown to stdout")
     render_parser.add_argument(
@@ -1630,6 +1645,10 @@ def main(argv: list[str] | None = None) -> int:
 
     settings = load_settings(args.env_file)
 
+    if args.command == "status":
+        print_status(settings)
+        return 0
+
     if args.command == "init-dashboards":
         if settings.legacy_vault_path is None:
             raise WorkerError(
@@ -1637,7 +1656,13 @@ def main(argv: list[str] | None = None) -> int:
                 f"{LEGACY_SINGLE_USER_ENV}=true and OBSIDIAN_VAULT_PATH; "
                 "multi-user dashboards are initialized per user vault while processing jobs"
             )
-        init_dashboards(settings.legacy_vault_path, settings.dashboard_dir)
+        client = SupabaseRestClient(settings.supabase_url, settings.service_role_key)
+        if not client.user_is_active(settings.legacy_user_id or ""):
+            raise WorkerError("recipient_inactive")
+        with SecureVault(settings.legacy_vault_path) as opened, opened.note_lock("bootstrap"):
+            if settings.fail_on_sync_conflicts and find_syncthing_conflicts(settings.legacy_vault_path):
+                raise WorkerError("syncthing_conflict")
+            init_dashboards(settings.legacy_vault_path, settings.dashboard_dir, opened, lambda: client.user_is_active(settings.legacy_user_id or ""))
         return 0
 
     if args.command == "run-once":
@@ -1656,4 +1681,8 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except WorkerError as exc:
         print(str(exc), file=sys.stderr)
+        raise SystemExit(1)
+    except Exception as exc:
+        code, _retryable, _conflict = _job_error(exc)
+        print(f"obsidian outcome={code}", file=sys.stderr)
         raise SystemExit(1)

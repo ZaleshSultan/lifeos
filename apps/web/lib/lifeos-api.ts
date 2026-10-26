@@ -1,4 +1,6 @@
 import { cookies } from "next/headers";
+import { lifeosApiBaseUrl, WEB_SESSION_COOKIE } from "./web-auth";
+export { lifeosApiBaseUrl, verifyWebTokenAgainstApi } from "./web-auth";
 
 export interface WebSessionStatus {
   state: "unregistered" | "pending" | "active" | "blocked";
@@ -44,32 +46,19 @@ export interface WebHomeSummary {
   weather?: WebWeatherSummary | null;
 }
 
-function apiBaseUrl(): string {
-  const value =
-    process.env.LIFEOS_API_BASE_URL ??
-    process.env.NEXT_PUBLIC_LIFEOS_API_BASE_URL;
-  if (!value) {
-    throw new Error("LIFEOS_API_BASE_URL is not configured");
-  }
-  return value.replace(/\/$/, "");
-}
-
-export function lifeosApiBaseUrl(): string {
-  return apiBaseUrl();
-}
-
 export async function webSessionToken(): Promise<string | null> {
   const store = await cookies();
-  return store.get("lifeos_web_session")?.value ?? null;
+  return store.get(WEB_SESSION_COOKIE)?.value ?? null;
 }
 
 export async function lifeosApi<T>(path: string): Promise<T | null> {
   const token = await webSessionToken();
   if (!token) return null;
 
-  const response = await fetch(`${apiBaseUrl()}${path}`, {
+  const response = await fetch(`${lifeosApiBaseUrl()}${path}`, {
     headers: { authorization: `Bearer ${token}` },
     cache: "no-store",
+    redirect: "error",
   });
   if (response.status === 401 || response.status === 403) return null;
   if (!response.ok) {
@@ -78,14 +67,6 @@ export async function lifeosApi<T>(path: string): Promise<T | null> {
   const body = (await response.json()) as { data?: T };
   return body.data ?? null;
 }
-
-export function verifyWebTokenAgainstApi(token: string): Promise<Response> {
-  return fetch(`${apiBaseUrl()}/api/tma/session`, {
-    headers: { authorization: `Bearer ${token}` },
-    cache: "no-store",
-  });
-}
-
 
 export interface WebStudySchedule {
   id: string;

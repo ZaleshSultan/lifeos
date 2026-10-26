@@ -1,4 +1,6 @@
 import type { ScholarshipConfig } from "../../core/src/scholarship.js";
+import { healthCredentialStore, type HealthCredentialStore } from "./health-credential-store.js";
+import { webSessionStore, type WebSessionStore } from "./web-session-store.js";
 import { createHash } from "node:crypto";
 import { SupabaseAssistantStore, type AssistantStore } from "./assistant-store.js";
 import {
@@ -1385,7 +1387,7 @@ export interface TmaStudySummary {
   records: AcademicRecord[];
 }
 
-export interface LifeOSStore extends LmsSessionStore {
+export interface LifeOSStore extends LmsSessionStore, WebSessionStore, HealthCredentialStore {
   assistant?: AssistantStore;
   getPlanningSnapshot(
     userId: string,
@@ -2241,7 +2243,7 @@ function toReminderRecord(row: ReminderRow): ReminderRecord {
     lifeEntityId: row.life_entity_id,
     sourceEventId: row.source_event_id,
     channel: row.channel,
-    remindAt: row.remind_at,
+    remindAt: row.notification_at ?? row.remind_at,
     status: row.status,
     message: row.message,
     metadataJson: row.metadata_json,
@@ -3459,6 +3461,32 @@ export interface SupabaseLifeOSStoreOptions {
 
 export class SupabaseLifeOSStore implements LifeOSStore {
   readonly assistant: AssistantStore;
+  issueHealthIngestCredential(input: Parameters<HealthCredentialStore["issueHealthIngestCredential"]>[0]) {
+    return healthCredentialStore(this.client).issueHealthIngestCredential(input);
+  }
+  resolveHealthIngestCredential(userId: string, tokenHash: string) {
+    return healthCredentialStore(this.client).resolveHealthIngestCredential(userId, tokenHash);
+  }
+  revokeHealthIngestCredential(userId: string, deviceId: string) {
+    return healthCredentialStore(this.client).revokeHealthIngestCredential(userId, deviceId);
+  }
+  listHealthIngestCredentials(userId: string) {
+    return healthCredentialStore(this.client).listHealthIngestCredentials(userId);
+  }
+
+  issueWebLoginToken(input: Parameters<WebSessionStore["issueWebLoginToken"]>[0]) {
+    return webSessionStore(this.client).issueWebLoginToken(input);
+  }
+  exchangeWebLoginToken(input: Parameters<WebSessionStore["exchangeWebLoginToken"]>[0]) {
+    return webSessionStore(this.client).exchangeWebLoginToken(input);
+  }
+  resolveWebSession(sessionHash: string) {
+    return webSessionStore(this.client).resolveWebSession(sessionHash);
+  }
+  revokeWebSession(userId: string, sessionHash: string) {
+    return webSessionStore(this.client).revokeWebSession(userId, sessionHash);
+  }
+
   getLmsConnection(userId:string) { return getLmsConnection(this.client,userId); }
   saveLmsSession(input:{userId:string;encryptedCookie:string;expiresAt:string}) { return saveLmsSession(this.client,input); }
   deleteLmsSession(userId:string) { return deleteLmsSession(this.client,userId); }
@@ -5775,8 +5803,8 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       .select("*")
       .eq("user_id", userId)
       .eq("status", "pending")
-      .lte("remind_at", before)
-      .order("remind_at", { ascending: true });
+      .lte("notification_at", before)
+      .order("notification_at", { ascending: true });
 
     if (error) {
       throwSupabaseError(error, "Failed to list pending reminders");
@@ -5794,8 +5822,8 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       .select("*")
       .eq("user_id", userId)
       .eq("status", "pending")
-      .gte("remind_at", new Date().toISOString())
-      .order("remind_at", { ascending: true })
+      .gte("notification_at", new Date().toISOString())
+      .order("notification_at", { ascending: true })
       .limit(limit);
 
     if (error) {
@@ -5866,6 +5894,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
         status: "pending",
         remind_at: parsed.toISOString(),
         claimed_at: null,
+        next_attempt_at: null,
       })
       .eq("user_id", userId)
       .eq("id", reminderId)
