@@ -75,6 +75,12 @@ await new Promise((r) => reservation.listen(0, "127.0.0.1", r));
 const port = reservation.address().port;
 await new Promise((r) => reservation.close(r));
 const origin = `http://127.0.0.1:${port}`;
+// Public env values can be compiled into a production artifact. Keep all
+// requests on loopback while checking redirects/CSRF against its real base URL.
+const publicWebBase = (
+  process.env.LIFEOS_SMOKE_PUBLIC_WEB_URL || `${origin}/web`
+).replace(/\/+$/, "");
+const publicOrigin = new URL(publicWebBase).origin;
 let logs = "";
 const app = spawn(
   process.execPath,
@@ -92,7 +98,7 @@ const app = spawn(
       PATH: process.env.PATH,
       NODE_ENV: "production",
       NEXT_TELEMETRY_DISABLED: "1",
-      NEXT_PUBLIC_WEB_APP_URL: `${origin}/web`,
+      NEXT_PUBLIC_WEB_APP_URL: publicWebBase,
       LIFEOS_API_BASE_URL: `http://127.0.0.1:${backend.address().port}`,
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -130,11 +136,11 @@ try {
   ]) {
     const denied = await request(path);
     assert.equal(denied.status, 303);
-    assert.equal(location(denied), origin + "/web/access");
+    assert.equal(location(denied), publicWebBase + "/access");
   }
   const initial = await request("/web/login?token=" + login);
   assert.equal(initial.status, 303);
-  assert.equal(location(initial), origin + "/web/today");
+  assert.equal(location(initial), publicWebBase + "/today");
   assert.equal(initial.headers.get("referrer-policy"), "no-referrer");
   assert.equal(initial.headers.get("cache-control"), "no-store");
   const cookie = initial.headers.get("set-cookie");
@@ -146,7 +152,7 @@ try {
   assert.equal(dashboard.status, 200);
   assert.ok((await dashboard.text()).includes("Smoke user"));
   const replay = await request("/web/login?token=" + login);
-  assert.equal(location(replay), origin + "/web/access?error=invalid");
+  assert.equal(location(replay), publicWebBase + "/access?error=invalid");
   assert.equal(replay.headers.get("set-cookie"), null);
   const csrf = await request("/web/logout", {
     method: "POST",
@@ -162,7 +168,7 @@ try {
   blocked = false;
   const logout = await request("/web/logout", {
     method: "POST",
-    headers: { ...headers, origin },
+    headers: { ...headers, origin: publicOrigin },
   });
   assert.equal(logout.status, 303);
   assert.ok(logout.headers.get("set-cookie").includes("Max-Age=0"));
