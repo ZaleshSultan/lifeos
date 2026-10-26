@@ -129,3 +129,23 @@ supabase db push
 ## LMS session migration
 
 `20261010141237_secure_lms_sessions.sql` adds optional encrypted AITU SSO-only sessions, credential-free metadata, queue/state fields and service-only per-user sync leases with atomic session mutation RPCs. Existing password/WS/iCal configurations and academic records remain intact. Browser roles cannot read/write credentials. Test with `bash scripts/test-lms-migration.sh` against disposable PostgreSQL; see [LMS_SESSIONS.md](LMS_SESSIONS.md) for the approved-deployment procedure.
+
+## Web session migration
+
+`20261022142222_secure_web_sessions.sql` adds service-only login-token/session
+hash tables, atomic single-use exchange RPCs and profile-status invalidation.
+It changes no existing user data. See [WEB_SESSIONS.md](WEB_SESSIONS.md). Run
+`bash scripts/test-web-session-migration.sh` against its disposable container.
+
+## Notification delivery leases
+
+See [notification deliveries](NOTIFICATION_DELIVERIES.md) for additive migration
+`20261024192839_notification_delivery_leases.sql`, service-only lifecycle RPCs,
+legacy-state handling and required stop-old-workers rollout.
+
+## Obsidian mirror recovery
+
+See [Obsidian recovery](OBSIDIAN_SYNC_RECOVERY.md) for the ordered additive
+`20261025042616_obsidian_sync_recovery.sql` and
+`20261025043139_obsidian_sync_leases.sql` migrations, service-only publication
+ledger, legacy quarantine and required stop-all-old-writers rollout.

@@ -1,137 +1,399 @@
 from __future__ import annotations
-
 import importlib.util
 import sys
 import unittest
+from copy import deepcopy
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from unittest.mock import patch
+
+SPEC = importlib.util.spec_from_file_location(
+    "reminder_worker", Path(__file__).with_name("reminder_worker.py")
+)
+rw = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = rw
+SPEC.loader.exec_module(rw)
+NOW = datetime(2026, 5, 18, 12, tzinfo=timezone.utc)
+SETTINGS = rw.Settings(
+    "https://example.invalid", "synthetic-service", "synthetic-bot", 30, 20
+)
 
 
-MODULE_PATH = Path(__file__).with_name("reminder_worker.py")
-SPEC = importlib.util.spec_from_file_location("reminder_worker", MODULE_PATH)
-assert SPEC and SPEC.loader
-reminder_worker = importlib.util.module_from_spec(SPEC)
-sys.modules[SPEC.name] = reminder_worker
-SPEC.loader.exec_module(reminder_worker)
-
-
-class CapturingSupabaseClient:
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, str, dict[str, str] | None, Any, str | None]] = []
-
-    def request(
-        self,
-        method: str,
-        table: str,
-        query: dict[str, str] | None = None,
-        body: Any | None = None,
-        prefer: str | None = None,
-    ) -> Any:
-        self.calls.append((method, table, query, body, prefer))
-        return []
-
-
-class FakeSupabase:
-    def __init__(self) -> None:
-        self.reminders = [
-            {
-                "id": "reminder-1",
-                "user_id": "user-1",
-                "message": "Review graph theory",
-                "remind_at": "2026-05-18T12:00:00Z",
-                "status": "pending",
-                "channel": "telegram",
-                "metadata_json": {},
-            }
+class FakeDB:
+    def __init__(self, count=1):
+        self.rows = [
+            dict(
+                id=f"reminder-{i}",
+                user_id=f"user-{i}",
+                claim_token=f"token-{i}",
+                message="private synthetic note",
+                remind_at="2026-05-18T10:00:00Z",
+                status="processing",
+                metadata_json={},
+                delivery_attempts=0,
+            )
+            for i in range(count)
         ]
-        self.failures: list[str] = []
-        self.recipients = {"user-1": "456"}
+        self.profiles = {
+            r["user_id"]: dict(
+                user_id=r["user_id"],
+                telegram_user_id=str(i + 100),
+                timezone="UTC",
+                status="active",
+            )
+            for i, r in enumerate(self.rows)
+        }
+        self.claimed_ids = set()
+        self.fail_prepare = False
+        self.fail_begin = False
+        self.fail_finish = False
+        self.deferrals = []
+        self.transitions = []
 
-    def list_due_reminders(self, _before: str, _limit: int) -> list[dict[str, Any]]:
-        return self.reminders
+    def recover_deliveries(self, kind):
+        return {"stale": 0}
 
-    def claim_reminder(self, reminder_id: str) -> dict[str, Any] | None:
-        reminder = self.reminders[0]
-        if reminder["id"] != reminder_id or reminder["status"] != "pending":
-            return None
-        reminder["status"] = "processing"
-        return reminder
+    def claim_due_reminders(self, before, limit):
+        rows = [
+            deepcopy(r)
+            for r in self.rows
+            if r["status"] == "processing" and r["id"] not in self.claimed_ids
+        ][:limit]
+        self.claimed_ids.update(r["id"] for r in rows)
+        return rows
 
-    def resolve_reminder_recipient(self, reminder: dict[str, Any]) -> str | None:
-        return self.recipients.get(str(reminder.get("user_id") or ""))
+    def resolve_reminder_recipient(self, row):
+        return self.profiles.get(row["user_id"])
 
-    def mark_reminder_sent(self, reminder_id: str) -> dict[str, Any] | None:
-        reminder = self.reminders[0]
-        reminder["id"] = reminder_id
-        reminder["status"] = "sent"
-        reminder["sent_at"] = "2026-05-18T12:01:00Z"
-        return reminder
-
-    def defer_reminder(self, reminder_id: str, remind_at: str) -> dict[str, Any] | None:
-        reminder = self.reminders[0]
-        reminder["id"] = reminder_id
-        reminder["status"] = "pending"
-        reminder["remind_at"] = remind_at
-        return reminder
-
-    def release_stale_claims(self, _before: str) -> None:
-        return None
-
-    def record_send_failure(
-        self,
-        reminder: dict[str, Any],
-        error: str,
-    ) -> dict[str, Any] | None:
-        self.failures.append(error)
-        metadata, attempts, status = reminder_worker.metadata_with_send_failure(
-            reminder,
-            error,
-            "2026-05-18T12:01:00Z",
-        )
-        reminder["metadata_json"] = metadata
-        reminder["status"] = status
-        reminder["_reminder_worker_attempts"] = attempts
-        return reminder
-
-    def fetch_reminder_context(self, _reminder: dict[str, Any]) -> dict[str, Any]:
+    def fetch_reminder_context(self, row):
+        if self.fail_prepare:
+            raise RuntimeError("private content Bearer credential")
         return {}
 
+    def begin_delivery(self, kind, row):
+        if self.fail_begin:
+            raise OSError("sensitive DB error")
+        actual = next(r for r in self.rows if r["id"] == row["id"])
+        if (
+            actual["status"] != "processing"
+            or actual["claim_token"] != row["claim_token"]
+        ):
+            return None
+        profile = self.profiles.get(row["user_id"])
+        if not profile:
+            return None
+        actual["status"] = "sending"
+        actual["delivery_attempts"] += 1
+        return profile["telegram_user_id"]
 
-class FailingTelegram:
-    def send_message(self, _chat_id: str, _text: str) -> None:
-        raise reminder_worker.WorkerError("Telegram send failed: test failure")
+    def finish_delivery(
+        self,
+        kind,
+        row,
+        outcome,
+        reason="none",
+        message_id=None,
+        retry_after_seconds=None,
+    ):
+        self.transitions.append(
+            (row["id"], outcome, reason, message_id, retry_after_seconds)
+        )
+        if self.fail_finish:
+            raise OSError("private message in raw DB error")
+        actual = next(r for r in self.rows if r["id"] == row["id"])
+        if actual["claim_token"] != row["claim_token"] or actual["status"] not in (
+            "processing",
+            "sending",
+        ):
+            return False
+        actual["status"] = {"retry": "pending", "permanent": "failed"}.get(
+            outcome, outcome
+        )
+        return True
+
+    def defer_reminder_delivery(self, row, not_before):
+        self.deferrals.append((row["id"], not_before))
+        self.rows[0]["status"] = "pending"
+        return True
 
 
-class CapturingTelegram:
-    def __init__(self) -> None:
-        self.messages: list[tuple[str, str]] = []
+class Telegram:
+    def __init__(self, error=None):
+        self.calls = []
+        self.error = error
 
-    def send_message(self, chat_id: str, text: str) -> None:
-        self.messages.append((chat_id, text))
+    def send_message(self, chat, text):
+        self.calls.append((chat, text))
+        if self.error:
+            raise self.error
+        return 42
 
 
 class ReminderWorkerTest(unittest.TestCase):
-    def test_moodle_assignment_deadline_message_is_in_russian_and_local_time(self) -> None:
-        reminder = {
-            "message": "OS work",
-            "remind_at": "2029-12-31T22:00:00Z",
-            "metadata_json": {
-                "notification_kind": "academic_assignment_deadline",
-                "course_title": "Operating Systems",
-                "event_at": "2030-01-01T00:00:00Z",
-            },
-        }
+    def test_success_uses_owner_ack_and_idempotent_poll(self):
+        db = FakeDB(2)
+        telegram = Telegram()
+        summary = rw.process_due_reminders(SETTINGS, db, telegram, now=NOW)
+        self.assertEqual(summary.sent, 2)
+        self.assertEqual([c[0] for c in telegram.calls], ["100", "101"])
+        self.assertTrue(all(t[1] == "sent" and t[3] == 42 for t in db.transitions))
+        rw.process_due_reminders(SETTINGS, db, telegram, now=NOW)
+        self.assertEqual(len(telegram.calls), 2)
 
-        message = reminder_worker.format_telegram_message(reminder, {}, "Asia/Qyzylorda")
+    def test_inactive_owner_is_cancelled_without_request(self):
+        db = FakeDB()
+        db.profiles = {}
+        telegram = Telegram()
+        rw.process_due_reminders(SETTINGS, db, telegram, now=NOW)
+        self.assertEqual(telegram.calls, [])
+        self.assertEqual(db.rows[0]["status"], "cancelled")
 
+    def test_preparation_failure_is_retry_without_sending(self):
+        db = FakeDB()
+        db.fail_prepare = True
+        telegram = Telegram()
+        rw.process_due_reminders(SETTINGS, db, telegram, now=NOW)
+        self.assertEqual(telegram.calls, [])
+        self.assertEqual(db.rows[0]["status"], "pending")
+        self.assertEqual(db.rows[0]["delivery_attempts"], 0)
+
+    def test_begin_database_response_loss_never_sends_or_resets_claim(self):
+        db = FakeDB()
+        db.fail_begin = True
+        telegram = Telegram()
+        summary = rw.process_due_reminders(SETTINGS, db, telegram, now=NOW)
+        self.assertEqual(telegram.calls, [])
+        self.assertEqual(db.transitions, [])
+        self.assertEqual(summary.mark_failed, 1)
+
+    def test_cancelled_claim_cannot_send(self):
+        db = FakeDB()
+        telegram = Telegram()
+        original = db.fetch_reminder_context
+
+        def cancel(row):
+            db.rows[0]["status"] = "cancelled"
+            return original(row)
+
+        db.fetch_reminder_context = cancel
+        rw.process_due_reminders(SETTINGS, db, telegram, now=NOW)
+        self.assertEqual(telegram.calls, [])
+
+    def test_profile_revoked_during_preparation_cannot_send(self):
+        db = FakeDB()
+        telegram = Telegram()
+
+        def block(row):
+            db.profiles = {}
+            return {}
+
+        db.fetch_reminder_context = block
+        rw.process_due_reminders(SETTINGS, db, telegram, now=NOW)
+        self.assertEqual(telegram.calls, [])
+
+    def test_old_claim_token_is_fenced_before_send(self):
+        db = FakeDB()
+        telegram = Telegram()
+
+        def supersede(row):
+            db.rows[0]["claim_token"] = "new-token"
+            return {}
+
+        db.fetch_reminder_context = supersede
+        rw.process_due_reminders(SETTINGS, db, telegram, now=NOW)
+        self.assertEqual(telegram.calls, [])
+
+    def test_explicit_transient_and_permanent_rejections(self):
+        for outcome, expected in [("retry", "pending"), ("permanent", "failed")]:
+            with self.subTest(outcome=outcome):
+                db = FakeDB()
+                telegram = Telegram(
+                    rw.TelegramDeliveryError(outcome, "telegram_rejected", 120)
+                )
+                rw.process_due_reminders(SETTINGS, db, telegram, now=NOW)
+                self.assertEqual(db.rows[0]["status"], expected)
+                self.assertEqual(db.transitions[0][4], 120)
+
+    def test_timeout_unknown_never_blindly_resends(self):
+        db = FakeDB()
+        telegram = Telegram(
+            rw.TelegramDeliveryError("unknown", "telegram_transport_unknown")
+        )
+        summary = rw.process_due_reminders(SETTINGS, db, telegram, now=NOW)
+        self.assertEqual(summary.unknown, 1)
+        self.assertEqual(db.rows[0]["status"], "unknown")
+        rw.process_due_reminders(SETTINGS, db, telegram, now=NOW)
+        self.assertEqual(len(telegram.calls), 1)
+
+    def test_ack_then_database_failure_never_releases_or_retries(self):
+        db = FakeDB()
+        db.fail_finish = True
+        telegram = Telegram()
+        summary = rw.process_due_reminders(SETTINGS, db, telegram, now=NOW)
+        self.assertEqual(summary.sent, 1)
+        self.assertEqual(summary.mark_failed, 1)
+        self.assertEqual(db.rows[0]["status"], "sending")
+        self.assertEqual([t[1] for t in db.transitions], ["sent"])
+        rw.process_due_reminders(SETTINGS, db, telegram, now=NOW)
+        self.assertEqual(len(telegram.calls), 1)
+
+    def test_one_failure_does_not_block_other_recipient(self):
+        db = FakeDB(2)
+        telegram = Telegram()
+        original = telegram.send_message
+
+        def send(chat, text):
+            if chat == "100":
+                raise TimeoutError("sensitive payload")
+            return original(chat, text)
+
+        telegram.send_message = send
+        result = rw.process_due_reminders(SETTINGS, db, telegram, now=NOW)
+        self.assertEqual(result.sent, 1)
+        self.assertEqual(db.rows[0]["status"], "unknown")
+        self.assertEqual(db.rows[1]["status"], "sent")
+
+    def test_claim_database_outage_does_not_send(self):
+        db = FakeDB()
+        telegram = Telegram()
+        db.claim_due_reminders = lambda *args: (_ for _ in ()).throw(OSError("lost"))
+        with self.assertRaises(OSError):
+            rw.process_due_reminders(SETTINGS, db, telegram, now=NOW)
+        self.assertEqual(telegram.calls, [])
+
+    def test_logs_contain_no_content_credentials_or_raw_exception(self):
+        db = FakeDB()
+        db.fail_finish = True
+        telegram = Telegram(TimeoutError("Bearer secret medical-content"))
+        with self.assertLogs(level="INFO") as logs:
+            rw.process_due_reminders(SETTINGS, db, telegram, now=NOW)
+        text = "\n".join(logs.output)
+        for sensitive in [
+            "private synthetic note",
+            "Bearer",
+            "secret",
+            "medical-content",
+            "raw DB error",
+        ]:
+            self.assertNotIn(sensitive, text)
+        self.assertIn("unknown", text)
+        self.assertIn("duration_ms", text)
+
+    def test_context_queries_scope_owner_and_do_not_leak_foreign_records(self):
+        client = rw.SupabaseRestClient("https://invalid", "synthetic")
+        calls = []
+        client.request = (
+            lambda method, table, query=None, body=None, prefer=None: calls.append(
+                query
+            )
+            or []
+        )
+        client.fetch_reminder_context(
+            dict(
+                id="x", user_id="a", life_entity_id="foreign", source_event_id="foreign"
+            )
+        )
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(all(c["user_id"] == "eq.a" for c in calls))
+
+    def test_recipient_profile_query_is_active_and_owner_scoped(self):
+        client = rw.SupabaseRestClient("https://invalid", "synthetic")
+        calls = []
+        client.request = (
+            lambda method, table, query=None, body=None, prefer=None: calls.append(
+                query
+            )
+            or []
+        )
+        client.resolve_reminder_recipient({"user_id": "a"})
+        self.assertEqual(calls[0]["status"], "eq.active")
+        self.assertEqual(calls[0]["user_id"], "eq.a")
+        self.assertIn("timezone", calls[0]["select"])
+
+    def test_distinct_recipient_timezones_and_event_time_in_message(self):
+        for zone, expected in [
+            ("Asia/Almaty", "15:00"),
+            ("Asia/Qyzylorda", "15:00"),
+            ("Europe/London", "11:00"),
+            ("America/New_York", "06:00"),
+        ]:
+            db = FakeDB()
+            db.profiles["user-0"]["timezone"] = zone
+            telegram = Telegram()
+            rw.process_due_reminders(SETTINGS, db, telegram, now=NOW)
+            self.assertIn(expected, telegram.calls[0][1])
+            self.assertIn(zone, telegram.calls[0][1])
+
+    def test_quiet_hours_use_recipient_not_global_timezone(self):
+        db = FakeDB()
+        db.rows[0]["remind_at"] = "2026-05-19T12:00:00Z"
+        db.profiles["user-0"]["timezone"] = "Asia/Almaty"
+        telegram = Telegram()
+        instant = datetime(2026, 5, 18, 19, tzinfo=timezone.utc)
+        result = rw.process_due_reminders(SETTINGS, db, telegram, now=instant)
+        self.assertEqual(result.deferred, 1)
+        self.assertEqual(telegram.calls, [])
+        self.assertEqual(db.deferrals[0][1], "2026-05-19T03:00:00Z")
+        self.assertEqual(db.rows[0]["remind_at"], "2026-05-19T12:00:00Z")
+
+    def test_priority_exceptions_are_preserved(self):
+        instant = datetime(2026, 5, 18, 23, tzinfo=timezone.utc)
+        for metadata in [
+            {"notification_kind": "instant_academic"},
+            {"reminder_mode": "war"},
+            {"reminder_mode": "duolingo"},
+        ]:
+            db = FakeDB()
+            db.rows[0]["metadata_json"] = {
+                **metadata,
+                "event_at": "2026-05-20T12:00:00Z",
+            }
+            telegram = Telegram()
+            rw.process_due_reminders(SETTINGS, db, telegram, now=instant)
+            self.assertEqual(len(telegram.calls), 1)
+
+    def test_near_event_never_postponed_and_morning_deadline_capped(self):
+        setting = rw.replace(SETTINGS, local_timezone="Europe/London")
+        now = datetime(2026, 5, 18, 23, tzinfo=timezone.utc)
+        self.assertIsNone(
+            rw.quiet_hour_deferral({"remind_at": "2026-05-18T23:30:00Z"}, setting, now)
+        )
         self.assertEqual(
-            message,
-            "⏰ Дедлайн задания по «Operating Systems»: OS work\n"
-            "Предмет: Operating Systems\n"
-            "Сдать до 2030-01-01 05:00 (Asia/Qyzylorda).",
+            rw.quiet_hour_deferral({"remind_at": "2026-05-19T06:30:00Z"}, setting, now),
+            "2026-05-19T05:30:00Z",
         )
 
-    def test_moodle_assignment_deadline_message_includes_grade_percentage(self) -> None:
+    def test_preparation_crossing_quiet_boundary_defers_before_send(self):
+        db = FakeDB()
+        db.rows[0]["metadata_json"] = {"event_at": "2026-05-20T12:00:00Z"}
+
+        class Clock(datetime):
+            value = datetime(2026, 5, 18, 22, 59, tzinfo=timezone.utc)
+
+            @classmethod
+            def now(cls, tz=None):
+                return cls.value
+
+        def prepare(row):
+            Clock.value = datetime(2026, 5, 18, 23, 1, tzinfo=timezone.utc)
+            return {}
+
+        db.fetch_reminder_context = prepare
+        telegram = Telegram()
+        with patch.object(rw, "datetime", Clock):
+            summary = rw.process_due_reminders(SETTINGS, db, telegram)
+        self.assertEqual(telegram.calls, [])
+        self.assertEqual(summary.deferred, 1)
+
+    def test_invalid_profile_timezone_path_falls_back_to_utc(self):
+        for zone in ["/etc/passwd", "../invalid", "Not/AZone"]:
+            db = FakeDB()
+            db.profiles["user-0"]["timezone"] = zone
+            telegram = Telegram()
+            rw.process_due_reminders(SETTINGS, db, telegram, now=NOW)
+            self.assertIn("10:00 (UTC)", telegram.calls[0][1])
+
+    def test_assignment_format_keeps_original_event_and_grade(self):
         reminder = {
             "message": "Lab 1",
             "remind_at": "2029-12-31T22:00:00Z",
@@ -142,242 +404,22 @@ class ReminderWorkerTest(unittest.TestCase):
                 "grade_info": {"score": 8.0, "max_score": 10.0},
             },
         }
+        text = rw.format_telegram_message(reminder, {}, "Asia/Qyzylorda")
+        self.assertIn("Сдать до 2030-01-01 05:00 (Asia/Qyzylorda)", text)
+        self.assertIn("8/10 (80%)", text)
 
-        message = reminder_worker.format_telegram_message(reminder, {}, "Asia/Qyzylorda")
-
-        self.assertIn("Выполнено: 8/10 (80%)", message)
-        self.assertIn("Сдать до 2030-01-01 05:00 (Asia/Qyzylorda).", message)
-        self.assertIn("Предмет: Algorithms", message)
-
-    def test_due_reminder_query_filters_pending_telegram_rows(self) -> None:
-        client = CapturingSupabaseClient()
-
-        reminder_worker.SupabaseRestClient.list_due_reminders(
-            client,
-            "2026-05-18T12:00:00Z",
-            20,
-        )
-
-        method, table, query, _body, _prefer = client.calls[0]
-        self.assertEqual(method, "GET")
-        self.assertEqual(table, "reminders")
-        self.assertEqual(query["status"], "eq.pending")
-        self.assertEqual(query["channel"], "eq.telegram")
-        self.assertEqual(query["remind_at"], "lte.2026-05-18T12:00:00Z")
-        self.assertEqual(query["limit"], "20")
-
-    def test_mark_sent_sets_status_sent_and_timestamps(self) -> None:
-        client = CapturingSupabaseClient()
-
-        reminder_worker.SupabaseRestClient.mark_reminder_sent(
-            client,
-            "reminder-1",
-        )
-
-        method, table, query, body, prefer = client.calls[0]
-        self.assertEqual(method, "PATCH")
-        self.assertEqual(table, "reminders")
-        self.assertEqual(query["id"], "eq.reminder-1")
-        self.assertEqual(query["status"], "eq.processing")
-        self.assertEqual(body["status"], "sent")
-        self.assertIn("sent_at", body)
-        self.assertIn("updated_at", body)
-        self.assertEqual(prefer, "return=representation")
-
-    def test_recipient_query_filters_active_owner_profile(self) -> None:
-        client = CapturingSupabaseClient()
-
-        reminder_worker.SupabaseRestClient.resolve_reminder_recipient(
-            client,
-            {"id": "reminder-1", "user_id": "user-1"},
-        )
-
-        method, table, query, _body, _prefer = client.calls[0]
-        self.assertEqual(method, "GET")
-        self.assertEqual(table, "profiles")
-        self.assertEqual(query["user_id"], "eq.user-1")
-        self.assertEqual(query["status"], "eq.active")
-
-    def test_worker_sends_to_owner_telegram_id(self) -> None:
-        settings = reminder_worker.Settings(
-            supabase_url="https://example.supabase.co",
-            service_role_key="service-role",
-            telegram_bot_token="bot-token",
-            poll_seconds=30,
-            batch_size=20,
-        )
-        supabase = FakeSupabase()
-        telegram = CapturingTelegram()
-
-        summary = reminder_worker.process_due_reminders(
-            settings,
-            supabase,
-            telegram,
-        )
-
-        self.assertEqual(summary.sent, 1)
-        self.assertEqual(telegram.messages[0][0], "456")
-
-    def test_worker_does_not_send_without_active_recipient(self) -> None:
-        settings = reminder_worker.Settings(
-            supabase_url="https://example.supabase.co",
-            service_role_key="service-role",
-            telegram_bot_token="bot-token",
-            poll_seconds=30,
-            batch_size=20,
-        )
-        supabase = FakeSupabase()
-        supabase.recipients = {}
-        telegram = CapturingTelegram()
-
-        with self.assertLogs(level="WARNING") as logs:
-            summary = reminder_worker.process_due_reminders(
-                settings,
-                supabase,
-                telegram,
-            )
-
-        self.assertEqual(summary.sent, 0)
-        self.assertEqual(summary.send_failed, 1)
-        self.assertEqual(telegram.messages, [])
-        self.assertIn("no active Telegram profile", supabase.failures[0])
-        self.assertIn("no active Telegram profile", "\n".join(logs.output))
-
-    def test_worker_does_not_crash_when_telegram_send_fails(self) -> None:
-        settings = reminder_worker.Settings(
-            supabase_url="https://example.supabase.co",
-            service_role_key="service-role",
-            telegram_bot_token="bot-token",
-            poll_seconds=30,
-            batch_size=20,
-        )
-        supabase = FakeSupabase()
-
-        with self.assertLogs(level="WARNING") as logs:
-            summary = reminder_worker.process_due_reminders(
-                settings,
-                supabase,
-                FailingTelegram(),
-            )
-
-        self.assertEqual(summary.processed, 1)
-        self.assertEqual(summary.send_failed, 1)
-        self.assertEqual(supabase.reminders[0]["status"], "pending")
-        self.assertIn("Telegram send failed", "\n".join(logs.output))
-        self.assertEqual(
-            supabase.reminders[0]["metadata_json"]["reminder_worker"]["attempts"],
-            1,
-        )
-
-    def test_quiet_hours_defer_normal_reminder(self) -> None:
-        reminder = {
-            "remind_at": "2026-05-18T18:30:00Z",
-            "metadata_json": {
-                "reminder_mode": "normal",
-                "event_at": "2026-05-19T12:00:00Z",
-            },
-        }
-        settings = reminder_worker.Settings(
-            supabase_url="https://example.supabase.co",
-            service_role_key="service-role",
-            telegram_bot_token="bot-token",
-            poll_seconds=30,
-            batch_size=20,
-            local_timezone="Asia/Qyzylorda",
-        )
-
-        original_datetime = reminder_worker.datetime
-        self.addCleanup(setattr, reminder_worker, "datetime", original_datetime)
-
-        class FixedDateTime(original_datetime):
-            @classmethod
-            def now(cls, tz=None):
-                value = cls(2026, 5, 18, 18, 30, tzinfo=reminder_worker.timezone.utc)
-                return value if tz else value.replace(tzinfo=None)
-
-        reminder_worker.datetime = FixedDateTime
-        self.assertEqual(
-            reminder_worker.quiet_hour_deferral(reminder, settings),
-            "2026-05-19T03:00:00Z",
-        )
-
-    def test_instant_academic_notice_uses_russian_text_even_in_quiet_hours(self) -> None:
+    def test_instant_academic_body_unchanged(self):
         message = "Оценка по «Алгоритмы»: Задание 1 — 0/10"
-        reminder = {
-            "message": message,
-            "remind_at": "2026-05-18T18:30:00Z",
-            "metadata_json": {
-                "notification_kind": "instant_academic",
-                "reminder_mode": "normal",
-            },
-        }
-        settings = reminder_worker.Settings(
-            supabase_url="https://example.supabase.co",
-            service_role_key="service-role",
-            telegram_bot_token="bot-token",
-            poll_seconds=30,
-            batch_size=20,
-            local_timezone="Asia/Qyzylorda",
+        self.assertEqual(
+            rw.format_telegram_message(
+                {
+                    "message": message,
+                    "metadata_json": {"notification_kind": "instant_academic"},
+                },
+                {},
+            ),
+            message,
         )
-        original_datetime = reminder_worker.datetime
-        self.addCleanup(setattr, reminder_worker, "datetime", original_datetime)
-
-        class FixedDateTime(original_datetime):
-            @classmethod
-            def now(cls, tz=None):
-                value = cls(2026, 5, 18, 18, 30, tzinfo=reminder_worker.timezone.utc)
-                return value if tz else value.replace(tzinfo=None)
-
-        reminder_worker.datetime = FixedDateTime
-        self.assertTrue(reminder_worker.is_quiet_time(FixedDateTime.now(reminder_worker.timezone.utc), settings))
-        self.assertIsNone(reminder_worker.quiet_hour_deferral(reminder, settings))
-        self.assertEqual(reminder_worker.format_telegram_message(reminder, {}), message)
-
-    def test_truncate_error_redacts_sensitive_tokens(self) -> None:
-        error = Exception(
-            "Authorization: Bearer abc.secret.token access_token=verysecret "
-            "https://example.test/hook?token=supersecret&ok=1 "
-            "bot123456:AAABBBCCCDDDEEEFFF"
-        )
-
-        redacted = reminder_worker.truncate_error(error)
-
-        self.assertIn("Authorization: Bearer [REDACTED]", redacted)
-        self.assertIn("access_token=[REDACTED]", redacted)
-        self.assertIn("token=[REDACTED]", redacted)
-        self.assertIn("bot[REDACTED]", redacted)
-        self.assertNotIn("abc.secret.token", redacted)
-        self.assertNotIn("verysecret", redacted)
-        self.assertNotIn("supersecret", redacted)
-
-    def test_quiet_hours_do_not_defer_war_reminder(self) -> None:
-        reminder = {
-            "remind_at": "2026-05-18T18:30:00Z",
-            "metadata_json": {
-                "reminder_mode": "war",
-                "event_at": "2026-05-19T12:00:00Z",
-            },
-        }
-        settings = reminder_worker.Settings(
-            supabase_url="https://example.supabase.co",
-            service_role_key="service-role",
-            telegram_bot_token="bot-token",
-            poll_seconds=30,
-            batch_size=20,
-            local_timezone="Asia/Qyzylorda",
-        )
-
-        original_datetime = reminder_worker.datetime
-        self.addCleanup(setattr, reminder_worker, "datetime", original_datetime)
-
-        class FixedDateTime(original_datetime):
-            @classmethod
-            def now(cls, tz=None):
-                value = cls(2026, 5, 18, 18, 30, tzinfo=reminder_worker.timezone.utc)
-                return value if tz else value.replace(tzinfo=None)
-
-        reminder_worker.datetime = FixedDateTime
-        self.assertIsNone(reminder_worker.quiet_hour_deferral(reminder, settings))
 
 
 if __name__ == "__main__":

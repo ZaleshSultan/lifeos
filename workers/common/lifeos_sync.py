@@ -11,10 +11,24 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta, timezone, tzinfo
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+try:
+    from .notification_time import (
+        in_quiet_hours,
+        quiet_hour_deferral_at,
+        resolve_local_datetime,
+        timezone_for,
+    )
+except ImportError:  # Direct execution from workers/common in local tooling.
+    from notification_time import (
+        in_quiet_hours,
+        quiet_hour_deferral_at,
+        resolve_local_datetime,
+        timezone_for,
+    )
 
 
 JsonObject = dict[str, Any]
@@ -179,15 +193,6 @@ def parse_datetime(value: str | None) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
-def timezone_for(name: str) -> tzinfo:
-    try:
-        return ZoneInfo(name)
-    except ZoneInfoNotFoundError:
-        if name == "Asia/Qyzylorda":
-            return timezone(timedelta(hours=5))
-        return timezone.utc
-
-
 def iso_utc(value: datetime | None) -> str | None:
     if value is None:
         return None
@@ -197,8 +202,7 @@ def iso_utc(value: datetime | None) -> str | None:
 
 
 def local_date_time(day: date, hhmm: str, timezone_name: str) -> datetime:
-    hour, minute = (int(part) for part in hhmm.split(":", 1))
-    return datetime.combine(day, time(hour, minute), timezone_for(timezone_name))
+    return resolve_local_datetime(day, hhmm, timezone_name)
 
 
 def stable_checksum(value: Any) -> str:
@@ -230,16 +234,6 @@ def effective_reminder_mode(mode: str, high_priority: bool) -> str:
     }[mode]
 
 
-def in_quiet_hours(value: datetime, start: str, end: str, timezone_name: str) -> bool:
-    local = value.astimezone(timezone_for(timezone_name))
-    current = local.time().replace(tzinfo=None)
-    start_time = time.fromisoformat(start)
-    end_time = time.fromisoformat(end)
-    if start_time < end_time:
-        return start_time <= current < end_time
-    return current >= start_time or current < end_time
-
-
 def shift_out_of_quiet_hours(
     reminder_at: datetime,
     event_at: datetime,
@@ -247,17 +241,7 @@ def shift_out_of_quiet_hours(
     start: str = "23:00",
     end: str = "08:00",
 ) -> datetime:
-    if event_at - reminder_at <= timedelta(hours=1):
-        return reminder_at
-    if not in_quiet_hours(reminder_at, start, end, timezone_name):
-        return reminder_at
-    local = reminder_at.astimezone(timezone_for(timezone_name))
-    end_time = time.fromisoformat(end)
-    target_day = local.date()
-    if local.time().replace(tzinfo=None) >= time.fromisoformat(start):
-        target_day += timedelta(days=1)
-    shifted = datetime.combine(target_day, end_time, local.tzinfo)
-    return shifted.astimezone(timezone.utc)
+    return quiet_hour_deferral_at(reminder_at, event_at, start, end, timezone_name) or reminder_at
 
 
 def reminder_policy_keys(
@@ -320,7 +304,12 @@ def build_reminder_schedule(
                 schedule.append(
                     _reminder_row(event, source_key, title, mode, policy_key, remind_at, target, high_priority)
                 )
-    return schedule
+    # Several offsets can land on one quiet-hours boundary. Keep one stable
+    # policy row per instant instead of sending the same event several times.
+    unique: dict[str, JsonObject] = {}
+    for item in schedule:
+        unique.setdefault(str(item["remind_at"]), item)
+    return list(unique.values())
 
 
 def _reminder_row(
@@ -566,7 +555,17 @@ class SupabaseRestClient:
 
     def _sync_reminders(self, event: JsonObject, mode: str) -> ReminderSyncStats:
         event_id = str(event["id"])
-        desired = build_reminder_schedule(event, mode, self.settings.timezone_name)
+        if event.get("user_id") not in (None, self.settings.user_id):
+            raise SyncError("Cannot schedule reminders for another owner")
+        profiles = self.request(
+            "GET",
+            "profiles",
+            {"select": "timezone", "user_id": f"eq.{self.settings.user_id}", "limit": "1"},
+        ) or []
+        # Source workers may run with a global APP_TIMEZONE, but notification
+        # schedules must follow the recipient. Missing/invalid zones use UTC.
+        timezone_name = str(profiles[0].get("timezone") or "UTC") if profiles else "UTC"
+        desired = build_reminder_schedule(event, mode, timezone_name)
         desired_keys = {str(item["dedup_key"]) for item in desired}
         stats = ReminderSyncStats()
         existing = self.request(
@@ -581,13 +580,19 @@ class SupabaseRestClient:
         ) or []
         for reminder in existing:
             if reminder.get("dedup_key") not in desired_keys:
-                self.request(
+                changed = self.request(
                     "PATCH",
                     "reminders",
-                    {"id": f"eq.{reminder['id']}", "status": "eq.pending"},
+                    {
+                        "id": f"eq.{reminder['id']}",
+                        "user_id": f"eq.{self.settings.user_id}",
+                        "status": "eq.pending",
+                        **({"updated_at": f"eq.{reminder['updated_at']}"} if reminder.get("updated_at") else {}),
+                    },
                     {"status": "cancelled"},
+                    prefer="return=representation",
                 )
-                stats.cancelled += 1
+                stats.cancelled += len(changed or [])
         for item in desired:
             rows = self.request(
                 "GET",
@@ -607,11 +612,24 @@ class SupabaseRestClient:
                 "channel": "telegram",
             }
             if rows:
+                previous_metadata = rows[0].get("metadata_json")
+                if isinstance(previous_metadata, dict) and "reminder_worker" in previous_metadata:
+                    payload["metadata_json"]["reminder_worker"] = previous_metadata["reminder_worker"]
                 if rows[0].get("status") == "pending" and self._reminder_changed(
                     rows[0], payload
                 ):
-                    self.request("PATCH", "reminders", {"id": f"eq.{rows[0]['id']}"}, payload)
-                    stats.updated += 1
+                    changed = self.request(
+                        "PATCH", "reminders",
+                        {
+                            "id": f"eq.{rows[0]['id']}",
+                            "user_id": f"eq.{self.settings.user_id}",
+                            "status": "eq.pending",
+                            **({"updated_at": f"eq.{rows[0]['updated_at']}"} if rows[0].get("updated_at") else {}),
+                        },
+                        payload,
+                        prefer="return=representation",
+                    )
+                    stats.updated += len(changed or [])
             else:
                 self.request("POST", "reminders", body=payload)
                 stats.created += 1
