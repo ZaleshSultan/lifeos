@@ -4,7 +4,7 @@ import {
   studyEvidenceBelongsToCourse,
   studyEvidenceIsAggregate,
   studyEvidenceIsMocked,
-  studyEvidencePeriodTotal,
+  studyEvidenceOfficialPeriod,
 } from "../../../../../packages/core/src/study-evidence.js";
 import {
   validateScholarshipConfig,
@@ -38,8 +38,7 @@ export function GradeBindings({
     (row) =>
       studyEvidenceBelongsToCourse(row, course) &&
       !studyEvidenceIsMocked(row) &&
-      !studyEvidencePeriodTotal(row) &&
-      !/calculated grade register/i.test(row.title),
+      !studyEvidenceOfficialPeriod(row, course),
   );
   const apply = () => {
     const entries = Object.entries(selected)

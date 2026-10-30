@@ -339,7 +339,12 @@ function buildEvidence(
     rows.push({
       id: field.id,
       originalFieldId: original.id,
-      label: field.label,
+      label:
+        record &&
+        /^(?:lecture async [12])$/.test(normalizeStudyTitle(record.title)) &&
+        studyEvidenceMatchesField(original, record, course)
+          ? `${record.title.trim().slice(0, 260)} · итог внешней платформы`
+          : field.label,
       period: field.period,
       kind: scholarshipWorkKind(original),
       weightInFinal: stable(
@@ -403,7 +408,8 @@ function buildEvidence(
           binding.entries.some((entry) =>
             own.some(
               (row) =>
-                row.id === entry.recordId && studyEvidencePeriodTotal(row),
+                row.id === entry.recordId &&
+                studyEvidenceOfficialPeriod(row, course),
             ),
           )
         ) {
@@ -424,7 +430,7 @@ function buildEvidence(
             ({ record }) =>
               record &&
               (studyEvidenceIsAggregate(record) ||
-                studyEvidencePeriodTotal(record)),
+                studyEvidenceOfficialPeriod(record, course)),
           )
         ) {
           warnings.push(

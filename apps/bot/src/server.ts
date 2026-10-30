@@ -459,6 +459,16 @@ async function handleTmaStaticRequest(
     options.tmaStaticDir,
     requestedPath,
   );
+  // A stale lazy chunk must fail as an asset, rather than cache the SPA HTML
+  // under a JavaScript/CSS URL and keep clients broken after a new release.
+  if (
+    !requestedFile &&
+    (relativePath.startsWith("assets/") || extname(relativePath) !== "")
+  ) {
+    response.setHeader("cache-control", "no-store");
+    writeJson(response, 404, { error: "tma_asset_not_found" });
+    return true;
+  }
   const filePath =
     requestedFile ??
     (await resolveTmaStaticFile(options.tmaStaticDir, "index.html"));

@@ -1,4 +1,8 @@
-import type { StudyCalculatorState } from "../../../../../packages/core/src/study.js";
+import {
+  studyCalculatorStatesMatch,
+  validateStudyCalculatorDefinition,
+  type StudyCalculatorState,
+} from "../../../../../packages/core/src/study.js";
 import type { StudyWeekday, StudyWorkspaceCourse } from "../../api/study";
 
 export const studyDays: { id: StudyWeekday; short: string; label: string }[] = [
@@ -40,6 +44,44 @@ export interface StudyDraft {
   saved: string;
 }
 
+export function isStudyDrafts(
+  value: unknown,
+): value is Record<string, StudyDraft> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const entries = Object.entries(value);
+  return (
+    entries.length <= 100 &&
+    entries.every(([id, entry]) => {
+      if (
+        !id ||
+        ["__proto__", "constructor", "prototype"].includes(id) ||
+        !entry ||
+        typeof entry !== "object"
+      )
+        return false;
+      const draft = entry as Record<string, unknown>;
+      return (
+        validateStudyCalculatorDefinition(draft.definition) &&
+        typeof draft.target === "string" &&
+        draft.target.length <= 12 &&
+        typeof draft.saved === "string" &&
+        draft.saved.length <= 20_000 &&
+        draft.inputs !== null &&
+        typeof draft.inputs === "object" &&
+        !Array.isArray(draft.inputs) &&
+        Object.entries(draft.inputs).length <= 100 &&
+        Object.entries(draft.inputs).every(
+          ([fieldId, score]) =>
+            /^[a-z0-9][a-z0-9_-]{0,79}$/.test(fieldId) &&
+            !["constructor", "prototype"].includes(fieldId) &&
+            typeof score === "string" &&
+            score.length <= 12,
+        )
+      );
+    })
+  );
+}
+
 function draftSignature(draft: Pick<StudyDraft, "inputs" | "target">): string {
   return JSON.stringify([
     Object.entries(draft.inputs).sort(([a], [b]) => a.localeCompare(b)),
@@ -69,7 +111,22 @@ export function reconcileStudyDraft(
   draft: StudyDraft | undefined,
   remote: StudyCalculatorState,
 ): StudyDraft {
-  return draft && studyDraftIsDirty(draft) ? draft : createStudyDraft(remote);
+  const stored = createStudyDraft(remote);
+  if (draft && studyDraftIsDirty(draft)) {
+    if (
+      [draft.target, ...Object.values(draft.inputs)].some((text) =>
+        /[.,]$/.test(text.trim()),
+      )
+    )
+      return draft;
+    // A save can finish after this screen unmounts, leaving its recovery buffer
+    // behind. Compare parsed values and the full formula before marking clean.
+    const parsed = parseStudyDraft(draft).state;
+    const parsedRemote = parseStudyDraft(stored).state;
+    if (!parsed || !studyCalculatorStatesMatch(parsed, parsedRemote))
+      return draft;
+  }
+  return stored;
 }
 
 export function parseStudyScore(input: string): number | null | "invalid" {
@@ -111,10 +168,9 @@ export function studyDateLabel(date: string): string {
   return `${day}.${month}.${year}`;
 }
 
+const scoreFormatter = new Intl.NumberFormat("ru-RU", {
+  maximumFractionDigits: 2,
+});
 export function studyScoreLabel(score: number | null): string {
-  return score === null
-    ? "—"
-    : new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(
-        score,
-      );
+  return score === null ? "—" : scoreFormatter.format(score);
 }

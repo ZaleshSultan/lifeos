@@ -383,6 +383,59 @@ describe("scholarship survival planner", () => {
 });
 
 describe("user-confirmed DBMS Moodle rubric", () => {
+  it.each([
+    "Calculated Register Midterm",
+    "Register Midterm",
+    "Calculated grade Register Midterm",
+  ])("rejects an explicit component binding to official %s", (title) => {
+    const c = course();
+    c.scholarship!.bindings.assignment_1 = {
+      mode: "aggregate",
+      ruleConfirmed: true,
+      entries: [{ recordId: "official", weight: 100 }],
+    };
+    const p = calculateScholarshipCourse(c, [
+      grade(c, "Assignment 2", 50),
+      grade(c, "Assignment 3", 70),
+      grade(c, "Lecture Async 1", 88),
+      grade(c, "Quiz Midterm", 81),
+      grade(c, title, 72.1, "official"),
+    ]);
+    expect(
+      p.evidence.find((r) => r.id === "assignment_1")!.confirmed,
+    ).toBeNull();
+    expect(p.confirmedCount).toBe(4);
+    expect(p.minimum).toBe(17.13);
+    expect(p.attestationChecks).toEqual([
+      { period: "att1", official: 72.1, calculated: null, matches: null },
+    ]);
+    expect(p.warnings.join(" ")).toContain(
+      "итог аттестации нельзя записывать в отдельный компонент",
+    );
+  });
+
+  it.each([
+    "Calculated Register Midterm",
+    "Register Midterm",
+    "Calculated grade Register Midterm",
+  ])("reconciles the official %s without using it as a component", (title) => {
+    const c = course();
+    const p = calculateScholarshipCourse(c, [
+      grade(c, "Assignment 1", 75),
+      grade(c, "Assignment 2", 50),
+      grade(c, "Assignment 3", 70),
+      grade(c, "Lecture Async 1", 88),
+      grade(c, "Quiz Midterm", 80),
+      grade(c, title, 72.1),
+    ]);
+    expect(p.confirmedCount).toBe(5);
+    expect(p.scenarios!.realistic.att1).toBeCloseTo(71.8, 10);
+    expect(p.attestationChecks).toEqual([
+      { period: "att1", official: 72.1, calculated: 71.8, matches: false },
+    ]);
+    expect(p.warnings.join(" ")).toContain("расходится");
+  });
+
   it("matches the official ATT1 72.1 exactly without adding Register twice", () => {
     const c = course();
     const records = [
@@ -401,6 +454,12 @@ describe("user-confirmed DBMS Moodle rubric", () => {
       { period: "att1", official: 72.1, calculated: 72.1, matches: true },
     ]);
     expect(p.evidence.find((r) => r.id === "quiz_1")!.confirmed).toBe(88);
+    expect(p.evidence.find((r) => r.id === "quiz_1")!.label).toBe(
+      "Lecture Async 1 · итог внешней платформы",
+    );
+    expect(p.evidence.find((r) => r.id === "quiz_1")!.label).not.toMatch(
+      /quiz|квиз/i,
+    );
     expect(p.evidence.find((r) => r.id === "midterm")!.confirmed).toBe(81);
     expect(c.calculator!.values).toEqual({});
   });
@@ -425,8 +484,11 @@ describe("user-confirmed DBMS Moodle rubric", () => {
     const p = calculateScholarshipCourse(c, [
       grade(c, "Lecture Async 1", 88),
       grade(c, "Quiz Midterm", 81),
+      grade(c, "Calculated Register Midterm", 72.1),
+      grade(c, "Register Midterm", 72.1),
     ]);
     expect(p.confirmedCount).toBe(0);
+    expect(p.attestationChecks).toEqual([]);
   });
 });
 

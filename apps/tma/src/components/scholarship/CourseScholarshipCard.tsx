@@ -15,10 +15,16 @@ import {
 } from "../../api/study";
 import type { AcademicRecord } from "../../api/types";
 import { cx } from "../../lib/styles";
+import {
+  readSessionDraft,
+  useDraftStorageKey,
+  writeSessionDraft,
+} from "../../lib/session-draft";
 import { GradeBindings } from "./GradeBindings";
 import { ScoreInput } from "./ScoreInput";
 import {
   kindLabels,
+  isScholarshipDraft,
   reconcileScholarshipDraft,
   riskLabels,
   scholarshipDraftDirty,
@@ -44,8 +50,13 @@ export function CourseScholarshipCard({
   onDraftChange?: (courseId: string, config: ScholarshipConfig) => void;
 }) {
   const remote = course.scholarship ?? null;
+  const storageKey = useDraftStorageKey("scholarship", course.id);
   const [draft, setDraft] = useState(() =>
-    reconcileScholarshipDraft(undefined, remote, course.calculator?.target),
+    reconcileScholarshipDraft(
+      readSessionDraft(storageKey, isScholarshipDraft),
+      remote,
+      course.calculator?.target,
+    ),
   );
   const [saved, setSaved] = useState(false);
   const save = useSaveScholarshipPlanMutation();
@@ -63,6 +74,9 @@ export function CourseScholarshipCard({
     setSaved(false);
   };
   const dirty = scholarshipDraftDirty(draft);
+  useEffect(() => {
+    writeSessionDraft(storageKey, dirty ? draft : undefined);
+  }, [storageKey, dirty, draft]);
   const conflict = !scholarshipConfigsMatch(draft.base, remote);
   const plan = calculateScholarshipCourse(
     { ...course, scholarship: config },
@@ -122,22 +136,24 @@ export function CourseScholarshipCard({
       </p>
       {plan.configured ? (
         <>
-          <dl className="grid grid-cols-3 gap-2 rounded-xl bg-white/[0.035] p-3 text-xs">
-            <div>
-              <dt className="text-zinc-400">Гарантированный минимум*</dt>
+          <dl className="grid grid-cols-2 gap-3 rounded-xl bg-white/[0.035] p-3 text-xs">
+            <div className="min-w-0">
+              <dt className="break-words text-zinc-400">
+                Гарантированный минимум*
+              </dt>
               <dd className="mt-1 text-base tabular-nums text-white">
                 {score(plan.minimum)}
               </dd>
             </div>
-            <div>
-              <dt className="text-zinc-400">Возможный максимум</dt>
+            <div className="min-w-0">
+              <dt className="break-words text-zinc-400">Возможный максимум</dt>
               <dd className="mt-1 text-base tabular-nums text-white">
                 {score(plan.maximum)}
               </dd>
             </div>
-            <div>
+            <div className="col-span-2 flex min-w-0 items-center justify-between gap-3 border-t border-white/10 pt-2">
               <dt className="text-zinc-400">Среднее на остаток</dt>
-              <dd className="mt-1 text-base tabular-nums text-white">
+              <dd className="shrink-0 text-base tabular-nums text-white">
                 {score(plan.requiredAverage)}
               </dd>
             </div>
@@ -510,7 +526,9 @@ export function CourseScholarshipCard({
           </fieldset>
           {dirty ? (
             <p className="text-xs text-amber-200">
-              Есть несохранённые изменения. Обновление Moodle их не сбрасывает.
+              Есть несохранённые изменения. Черновик восстанавливается после
+              обновления страницы в этой вкладке. Для постоянного хранения
+              сохраните настройки.
             </p>
           ) : null}
           {saved ? (

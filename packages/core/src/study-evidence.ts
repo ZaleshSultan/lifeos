@@ -150,7 +150,9 @@ export function studyEvidenceOfficialPeriod(
 ): "att1" | "att2" | null {
   if (
     matchSyllabusProfile(course.title, course.code)?.id === "dbms" &&
-    normalizeStudyTitle(record.title) === "calculated grade register midterm"
+    /^(?:calculated(?: grade)? )?register midterm$/.test(
+      normalizeStudyTitle(record.title),
+    )
   )
     return "att1";
   return studyEvidencePeriodTotal(record);

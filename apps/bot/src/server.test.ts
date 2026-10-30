@@ -1655,6 +1655,35 @@ describe("bot server", () => {
     );
   });
 
+  it("does not serve or cache SPA HTML for missing TMA assets", async () => {
+    const tmaStaticDir = await createTmaStaticDirectory();
+    const server = createBotServer({ config: { tmaStaticDir } });
+    servers.push(server);
+    const port = await listen(server);
+
+    for (const path of [
+      "assets/stale-chunk.js",
+      "assets/missing",
+      "missing.css",
+    ]) {
+      for (const method of ["GET", "HEAD"]) {
+        const response = await fetch(`http://127.0.0.1:${port}/tma/${path}`, {
+          method,
+        });
+        expect(response.status).toBe(404);
+        expect(response.headers.get("cache-control")).toBe("no-store");
+        expect(response.headers.get("content-type")).toContain(
+          "application/json",
+        );
+        if (method === "GET") {
+          await expect(response.json()).resolves.toEqual({
+            error: "tma_asset_not_found",
+          });
+        }
+      }
+    }
+  });
+
   it("blocks TMA path traversal", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "lifeos-tma-parent-"));
     tempDirectories.push(parentDirectory);

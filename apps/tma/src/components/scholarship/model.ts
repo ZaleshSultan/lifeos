@@ -1,15 +1,15 @@
 import {
   defaultScholarshipConfig,
   scholarshipConfigsMatch,
+  validateScholarshipConfig,
   type ScholarshipConfig,
 } from "../../../../../packages/core/src/scholarship.js";
+const scoreFormatter = new Intl.NumberFormat("ru-RU", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
 export const scholarshipScore = (score: number | null) =>
-  score === null
-    ? "Неизвестно"
-    : new Intl.NumberFormat("ru-RU", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }).format(score);
+  score === null ? "Неизвестно" : scoreFormatter.format(score);
 export const scenarioLabels = {
   pessimistic: "Пессимистичный",
   realistic: "Реалистичный",
@@ -35,6 +35,15 @@ export interface ScholarshipDraft {
   base: ScholarshipConfig | null;
   initial: ScholarshipConfig;
 }
+export function isScholarshipDraft(value: unknown): value is ScholarshipDraft {
+  if (!value || typeof value !== "object") return false;
+  const draft = value as Record<string, unknown>;
+  return (
+    validateScholarshipConfig(draft.config) &&
+    (draft.base === null || validateScholarshipConfig(draft.base)) &&
+    validateScholarshipConfig(draft.initial)
+  );
+}
 export function scholarshipDraftDirty(draft: ScholarshipDraft) {
   return !scholarshipConfigsMatch(draft.config, draft.initial);
 }
@@ -43,7 +52,9 @@ export function reconcileScholarshipDraft(
   remote: ScholarshipConfig | null,
   target = 70,
 ): ScholarshipDraft {
-  return draft && scholarshipDraftDirty(draft)
+  return draft &&
+    scholarshipDraftDirty(draft) &&
+    !scholarshipConfigsMatch(draft.config, remote)
     ? draft
     : {
         config: remote ?? defaultScholarshipConfig(target),

@@ -240,7 +240,7 @@ export function routeAssistantIntent(
   )
     return call("classes.next");
   const classes = query.match(
-    /^(?:(?:what\s+are\s+)?(?:my\s+)?(?:classes|schedule)(?:\s+(?:for|on))?\s+(today|tomorrow)|(?:today|tomorrow)(?:'s)?\s+(?:classes|schedule)|(?:какие\s+)?(?:у\s+меня\s+)?(?:пары|занятия|расписание)(?:\s+на)?\s+(сегодня|завтра))$/iu,
+    /^(?:(?:what\s+are\s+)?(?:my\s+)?(?:classes|schedule)(?:\s+(?:for|on))?\s+(today|tomorrow)|(?:today|tomorrow)(?:'s)?\s+(?:classes|schedule)|(?:какие\s+)?(?:у\s+меня\s+)?(?:пары|занятия|расписание)(?:\s+на)?\s+(сегодня|завтра)|(?:какие\s+)?(?:у\s+меня\s+)?(?:сегодня|завтра)\s+(?:пары|занятия|расписание))$/iu,
   );
   if (classes)
     return call(

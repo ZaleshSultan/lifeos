@@ -32,12 +32,16 @@ describe("assistant deterministic routing", () => {
   );
   it.each([
     ["Какие пары завтра?", "classes.tomorrow"],
+    ["Какие у меня завтра пары?", "classes.tomorrow"],
+    ["Какие у меня сегодня пары?", "classes.today"],
+    ["У меня завтра занятия", "classes.tomorrow"],
     ["пары сегодня", "classes.today"],
     ["Show me tomorrow's classes", "classes.tomorrow"],
     ["What is my next class?", "classes.next"],
     ["my deadlines", "study.deadlines"],
     ["мои дедлайны", "study.deadlines"],
     ["Какие дедлайны скоро?", "study.deadlines"],
+    ["Какие у меня дедлайны?", "study.deadlines"],
     ["Which deadlines are urgent?", "study.deadlines"],
     ["recent grade changes", "study.changes"],
     ["новые оценки", "study.changes"],

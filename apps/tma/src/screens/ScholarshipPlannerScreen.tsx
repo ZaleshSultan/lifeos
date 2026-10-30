@@ -8,6 +8,7 @@ import {
   scholarshipConfigsMatch,
 } from "../../../../packages/core/src/scholarship.js";
 import { useStudyQuery } from "../api/study";
+import { apiErrorMessage } from "../api/errors";
 import { useLmsWorkQuery } from "../api/lms";
 import { ErrorPanel, LoadingPanel } from "../components/AsyncState";
 import { CourseScholarshipCard } from "../components/scholarship/CourseScholarshipCard";
@@ -55,7 +56,7 @@ export function ScholarshipPlannerScreen({
     return (
       <ErrorPanel
         title="Не удалось загрузить стипендиальный план"
-        detail={query.error.message}
+        detail={apiErrorMessage(query.error)}
         onRetry={() => void query.refetch()}
       />
     );

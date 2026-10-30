@@ -19,6 +19,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
+      - run: bash scripts/test-selfhost-deployment.sh
       - run: pnpm --filter @lifeos/tma build
       - run: pnpm --filter @lifeos/web build
       - run: node scripts/test-web-session-smoke.mjs

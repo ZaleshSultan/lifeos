@@ -1,20 +1,73 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useSessionQuery } from "./api/hooks";
+import { apiErrorMessage } from "./api/errors";
 import { AppShell } from "./components/AppShell";
 import { ErrorPanel, LoadingPanel } from "./components/AsyncState";
-import { FocusScreen } from "./screens/FocusScreen";
-import { FinanceScreen } from "./screens/FinanceScreen";
-import { HealthScreen } from "./screens/HealthScreen";
 import { HomeScreen } from "./screens/HomeScreen";
-import { ModeScreen } from "./screens/ModeScreen";
 import { OnboardingStatusScreen } from "./screens/OnboardingStatusScreen";
-import { RemindersScreen } from "./screens/RemindersScreen";
-import { SourcesScreen } from "./screens/SourcesScreen";
-import { WorkoutScreen } from "./screens/WorkoutScreen";
-import { StudyScreen } from "./screens/StudyScreen";
-import { StudyDashboardScreen } from "./screens/StudyDashboardScreen";
-import { AiScreen } from "./screens/AiScreen";
 import type { ScreenId } from "./types";
+import { DraftOwnerContext } from "./lib/session-draft";
+import { ScreenLoadBoundary } from "./components/ScreenLoadBoundary";
+
+const FocusScreen = lazy(() =>
+  import("./screens/FocusScreen").then((module) => ({
+    default: module.FocusScreen,
+  })),
+);
+
+const FinanceScreen = lazy(() =>
+  import("./screens/FinanceScreen").then((module) => ({
+    default: module.FinanceScreen,
+  })),
+);
+
+const HealthScreen = lazy(() =>
+  import("./screens/HealthScreen").then((module) => ({
+    default: module.HealthScreen,
+  })),
+);
+
+const ModeScreen = lazy(() =>
+  import("./screens/ModeScreen").then((module) => ({
+    default: module.ModeScreen,
+  })),
+);
+
+const RemindersScreen = lazy(() =>
+  import("./screens/RemindersScreen").then((module) => ({
+    default: module.RemindersScreen,
+  })),
+);
+
+const SourcesScreen = lazy(() =>
+  import("./screens/SourcesScreen").then((module) => ({
+    default: module.SourcesScreen,
+  })),
+);
+
+const WorkoutScreen = lazy(() =>
+  import("./screens/WorkoutScreen").then((module) => ({
+    default: module.WorkoutScreen,
+  })),
+);
+
+const StudyScreen = lazy(() =>
+  import("./screens/StudyScreen").then((module) => ({
+    default: module.StudyScreen,
+  })),
+);
+
+const StudyDashboardScreen = lazy(() =>
+  import("./screens/StudyDashboardScreen").then((module) => ({
+    default: module.StudyDashboardScreen,
+  })),
+);
+
+const AiScreen = lazy(() =>
+  import("./screens/AiScreen").then((module) => ({
+    default: module.AiScreen,
+  })),
+);
 
 const LmsConnectionScreen = lazy(() =>
   import("./screens/LmsConnectionScreen").then((module) => ({
@@ -53,6 +106,12 @@ export default function App() {
   const [aiDate, setAiDate] = useState<string>();
   const sessionQuery = useSessionQuery();
 
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("screen", screen);
+    window.history.replaceState(null, "", url);
+  }, [screen]);
+
   if (sessionQuery.isLoading) {
     return (
       <AppShell
@@ -75,7 +134,7 @@ export default function App() {
         statusLabel="Offline"
       >
         <ErrorPanel
-          detail={sessionQuery.error.message}
+          detail={apiErrorMessage(sessionQuery.error)}
           onRetry={() => void sessionQuery.refetch()}
           title="Session unavailable"
         />
@@ -116,52 +175,61 @@ export default function App() {
   }
 
   return (
-    <AppShell onScreenChange={setScreen} screen={screen}>
-      {screen === "home" ? (
-        <HomeScreen
-          onOpenScholarship={() => setScreen("dashboard")}
-          onOpenWorkout={() => setScreen("workout")}
-          onOpenStudy={() => setScreen("study")}
-          onOpenAi={(date) => {
-            setAiDate(date);
-            setScreen("ai");
-          }}
-          session={sessionQuery.data}
-        />
-      ) : null}
-      {screen === "ai" ? (
-        <AiScreen date={aiDate} onBack={() => setScreen("home")} />
-      ) : null}
-      {screen === "workout" ? <WorkoutScreen /> : null}
-      {screen === "dashboard" ? (
-        <StudyDashboardScreen
-          onOpenStudy={() => setScreen("study")}
-          onOpenLms={() => setScreen("lms")}
-          onOpenCalculator={(courseId) => {
-            const url = new URL(window.location.href);
-            url.searchParams.set("studyTab", "calculator");
-            url.searchParams.set("courseId", courseId);
-            window.history.replaceState(null, "", url);
-            setScreen("study");
-          }}
-        />
-      ) : null}
-      {screen === "study" ? (
-        <StudyScreen onOpenLms={() => setScreen("lms")} />
-      ) : null}
-      {screen === "lms" ? (
-        <Suspense
-          fallback={<LoadingPanel title="Загружаем подключение LMS…" />}
-        >
-          <LmsConnectionScreen onBack={() => setScreen("study")} />
-        </Suspense>
-      ) : null}
-      {screen === "health" ? <HealthScreen /> : null}
-      {screen === "focus" ? <FocusScreen /> : null}
-      {screen === "finance" ? <FinanceScreen /> : null}
-      {screen === "sources" ? <SourcesScreen /> : null}
-      {screen === "reminders" ? <RemindersScreen /> : null}
-      {screen === "mode" ? <ModeScreen /> : null}
-    </AppShell>
+    <DraftOwnerContext.Provider
+      key={sessionQuery.data.telegramUserId}
+      value={sessionQuery.data.telegramUserId}
+    >
+      <AppShell onScreenChange={setScreen} screen={screen}>
+        <ScreenLoadBoundary key={screen}>
+          <Suspense fallback={<LoadingPanel title="Загружаем раздел…" />}>
+            {screen === "home" ? (
+              <HomeScreen
+                onOpenScholarship={() => setScreen("dashboard")}
+                onOpenWorkout={() => setScreen("workout")}
+                onOpenStudy={() => setScreen("study")}
+                onOpenAi={(date) => {
+                  setAiDate(date);
+                  setScreen("ai");
+                }}
+                session={sessionQuery.data}
+              />
+            ) : null}
+            {screen === "ai" ? (
+              <AiScreen date={aiDate} onBack={() => setScreen("home")} />
+            ) : null}
+            {screen === "workout" ? <WorkoutScreen /> : null}
+            {screen === "dashboard" ? (
+              <StudyDashboardScreen
+                onOpenStudy={() => setScreen("study")}
+                onOpenLms={() => setScreen("lms")}
+                onOpenCalculator={(courseId) => {
+                  const url = new URL(window.location.href);
+                  url.searchParams.set("studyTab", "calculator");
+                  url.searchParams.set("courseId", courseId);
+                  window.history.replaceState(null, "", url);
+                  setScreen("study");
+                }}
+              />
+            ) : null}
+            {screen === "study" ? (
+              <StudyScreen onOpenLms={() => setScreen("lms")} />
+            ) : null}
+            {screen === "lms" ? (
+              <Suspense
+                fallback={<LoadingPanel title="Загружаем подключение LMS…" />}
+              >
+                <LmsConnectionScreen onBack={() => setScreen("study")} />
+              </Suspense>
+            ) : null}
+            {screen === "health" ? <HealthScreen /> : null}
+            {screen === "focus" ? <FocusScreen /> : null}
+            {screen === "finance" ? <FinanceScreen /> : null}
+            {screen === "sources" ? <SourcesScreen /> : null}
+            {screen === "reminders" ? <RemindersScreen /> : null}
+            {screen === "mode" ? <ModeScreen /> : null}
+          </Suspense>
+        </ScreenLoadBoundary>
+      </AppShell>
+    </DraftOwnerContext.Provider>
   );
 }

@@ -18,12 +18,20 @@ pnpm selfhost:build-tma
 pnpm selfhost:deploy
 ```
 
-The build script removes the old TMA build, sets the production API origin,
-disables mock data, builds with `/tma/` as the base path, and rejects broken
-root `/assets/` references.
+The build script sets the production API origin, disables mock data, and builds
+with `/tma/` into a disposable staging directory. It validates generated asset
+references before publishing any files, keeps previous hashed assets for open
+Telegram WebViews, and atomically replaces `index.html` after the assets are ready.
+A failed build or validation leaves the live release intact.
 
 `pnpm selfhost:deploy` builds the TMA, restarts `lifeos-bot.service`, then
 checks local health, public health, and the public TMA.
+Only the bot is restarted; workers are restarted separately when their code changes.
+Deployment uses noninteractive `sudo -n` and the existing same-user systemd restart
+fallback, so it cannot wait for a sudo password.
+Public probes use a Telegram-style browser user agent because the current
+Cloudflare edge rejects generic CLI user agents. Health probes require JSON
+`status: "ok"`; the TMA probe requires generated `/tma/assets/` JavaScript.
 
 ## Daily Study Digest (one-time setup)
 

@@ -5,11 +5,16 @@ task_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 task_container="lifeos-assistant-test-${RANDOM}-$$"
 cleanup() { docker rm -f "$task_container" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
-docker run --rm -d --name "$task_container" -e POSTGRES_HOST_AUTH_METHOD=trust postgres:15-alpine >/dev/null
-for attempt in {1..30}; do
-  if docker exec "$task_container" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; then break; fi
+docker run --rm -d --name "$task_container" --tmpfs /var/lib/postgresql/data:rw,size=256m -e POSTGRES_HOST_AUTH_METHOD=trust postgres:15-alpine >/dev/null
+task_ready=false
+for attempt in {1..120}; do
+  if docker exec "$task_container" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; then task_ready=true; break; fi
   sleep 1
 done
+if [[ "$task_ready" != true ]]; then
+  printf '%s\n' 'Disposable PostgreSQL did not become ready' >&2
+  exit 1
+fi
 for task_sql in \
   supabase/tests/assistant-setup.sql \
   supabase/migrations/20260518020100_lifeos_kernel.sql \

@@ -3,29 +3,16 @@ set -euo pipefail
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$REPO_ROOT/apps/tma/dist"
-INDEX_FILE="$DIST_DIR/index.html"
+STAGING_DIR="$(mktemp -d "$REPO_ROOT/apps/tma/.selfhost-build.XXXXXX")"
+trap 'rm -rf -- "$STAGING_DIR"' EXIT
 
 cd "$REPO_ROOT"
-rm -rf "$DIST_DIR"
 
 VITE_API_BASE_URL="https://lifeos.zalewko.me" \
 VITE_ALLOW_MOCK_DATA="false" \
 VITE_BASE_PATH="/tma/" \
-pnpm --filter @lifeos/tma build
+pnpm --filter @lifeos/tma build --outDir "$STAGING_DIR" --base /tma/
 
-if [[ ! -f "$INDEX_FILE" ]]; then
-  printf 'ERROR: TMA build did not create %s\n' "$INDEX_FILE" >&2
-  exit 1
-fi
+node "$REPO_ROOT/scripts/publish-tma-build.mjs" "$STAGING_DIR" "$DIST_DIR"
 
-if ! grep -q '/tma/assets/' "$INDEX_FILE"; then
-  printf 'ERROR: %s does not contain /tma/assets/ paths\n' "$INDEX_FILE" >&2
-  exit 1
-fi
-
-if grep -Eq '(src|href)="/assets/' "$INDEX_FILE"; then
-  printf 'ERROR: %s contains broken root /assets/ paths\n' "$INDEX_FILE" >&2
-  exit 1
-fi
-
-printf 'OK: self-host TMA built with /tma/assets/ paths\n'
+printf 'OK: self-host TMA published with /tma/assets/ paths; previous assets retained\n'

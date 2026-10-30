@@ -22,11 +22,17 @@ import { StudySyllabi } from "../components/study/StudySyllabi";
 import { StudyLmsOverview } from "../components/study/StudyLmsOverview";
 import {
   createStudyDraft,
+  isStudyDrafts,
   reconcileStudyDraft,
   studyDraftIsDirty,
   type StudyDraft,
 } from "../components/study/model";
 import { cx } from "../lib/styles";
+import {
+  readSessionDraft,
+  useDraftStorageKey,
+  writeSessionDraft,
+} from "../lib/session-draft";
 import { matchSyllabusProfile } from "../components/study/syllabus-profiles";
 import { useStudySyllabusProfiles } from "../components/study/useStudySyllabusProfiles";
 import {
@@ -61,16 +67,30 @@ export function StudyScreen({ onOpenLms }: { onOpenLms: () => void }) {
   const [courseId, setCourseId] = useState<string | null>(() =>
     new URLSearchParams(window.location.search).get("courseId"),
   );
-  const [drafts, setDrafts] = useState<Record<string, StudyDraft>>({});
+  const storageKey = useDraftStorageKey("study");
+  const [drafts, setDrafts] = useState<Record<string, StudyDraft>>(
+    () => readSessionDraft(storageKey, isStudyDrafts) ?? {},
+  );
   const [errors, setErrors] = useState<Record<string, string | null>>({});
   const [savedCourse, setSavedCourse] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unsaved = Object.fromEntries(
+      Object.entries(drafts).filter(([, draft]) => studyDraftIsDirty(draft)),
+    );
+    writeSessionDraft(
+      storageKey,
+      Object.keys(unsaved).length ? unsaved : undefined,
+    );
+  }, [storageKey, drafts]);
 
   useEffect(() => {
     const url = new URL(window.location.href);
     url.searchParams.set("screen", "study");
     url.searchParams.set("studyTab", tab);
+    if (courseId) url.searchParams.set("courseId", courseId);
     window.history.replaceState(null, "", url);
-  }, [tab]);
+  }, [tab, courseId]);
 
   useEffect(() => {
     setDrafts((current) => {
@@ -191,8 +211,9 @@ export function StudyScreen({ onOpenLms }: { onOpenLms: () => void }) {
       ) : null}
       {dirtyCount ? (
         <p className="text-xs text-amber-200" role="status">
-          Есть несохранённые сценарии: {dirtyCount}. Сохрани их перед выходом из
-          раздела.
+          Есть несохранённые сценарии: {dirtyCount}. Черновики восстанавливаются
+          после обновления страницы в этой вкладке. Сохрани их для постоянного
+          хранения.
         </p>
       ) : null}
       <div
