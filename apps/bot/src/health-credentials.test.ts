@@ -69,7 +69,17 @@ async function fixture() {
       revokedAt: string | null;
     }
   >();
-  const upsertHealthMetrics = vi.fn(async () => ({ created: 1, updated: 0 }));
+  const upsertHealthMetrics = vi.fn(
+    async (
+      input: Parameters<LifeOSStore["upsertHealthMetrics"]>[0],
+    ): ReturnType<LifeOSStore["upsertHealthMetrics"]> => ({
+      date: input.date,
+      source: input.source,
+      created: 1,
+      updated: 0,
+      metrics: [],
+    }),
+  );
   const store = {
     resolveTelegramUser: vi.fn(
       async (id: number) =>
