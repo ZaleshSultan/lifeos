@@ -1,0 +1,73 @@
+name: Android Health Bridge
+
+on:
+  push:
+    branches:
+      - 'ci/android-health-bridge-*'
+    paths:
+      - 'apps/health-bridge/**'
+      - '.github/workflows/android-health-bridge.yml'
+  pull_request:
+    paths:
+      - 'apps/health-bridge/**'
+      - '.github/workflows/android-health-bridge.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-health-bridge-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-debug:
+    # Standard GitHub-hosted runners are free for this public repository.
+    # No production host, provider key, account grant or signing secret is used.
+    if: github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+          cache-disabled: true
+      - name: Install the declared Android SDK
+        run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
+      - name: Compile, run JVM tests and lint
+        run: >-
+          gradle --no-daemon --console=plain --max-workers=2
+          -p apps/health-bridge
+          :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+      - name: Verify and describe the debug artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          task_apk=apps/health-bridge/app/build/outputs/apk/debug/app-debug.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$task_apk"
+          sha256sum "$task_apk" > apps/health-bridge/app/build/outputs/apk/debug/SHA256SUMS
+          {
+            printf 'LifeOS Health Bridge debug build\nSource commit: %s\n' "$GITHUB_SHA"
+            printf 'Checks: assembleDebug, testDebugUnitTest, lintDebug\n'
+            printf 'Physical Galaxy S23+/Health Connect/Keystore/background behavior: UNVERIFIED\n'
+            printf 'Contains no configured user token or backend credentials. Connect on the phone after installation.\n'
+            printf 'Debug signing is for testing; this is not a production-signed Play release.\n'
+          } > apps/health-bridge/app/build/outputs/apk/debug/BUILD-VERIFICATION.txt
+      - name: Upload the verified debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: lifeos-health-bridge-debug-${{ github.sha }}
+          path: |
+            apps/health-bridge/app/build/outputs/apk/debug/app-debug.apk
+            apps/health-bridge/app/build/outputs/apk/debug/SHA256SUMS
+            apps/health-bridge/app/build/outputs/apk/debug/BUILD-VERIFICATION.txt
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
