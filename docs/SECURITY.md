@@ -138,6 +138,30 @@ reconnection after deployment.
 - Keep production, preview, and local env values separate.
 - Review logs before sharing, since webhook payloads can contain personal data.
 
+### Diagnostics and incident evidence
+
+- Emit selected metadata such as the public Supabase project reference,
+  configuration-presence booleans and aggregate counts. Do not dump complete
+  environment files, process environments or token-bearing service commands.
+- Inspect `systemctl` properties selectively. `ExecStart` and `Environment`
+  can contain credentials; capture and sanitize internally rather than printing
+  them. URL-constructor and provider exceptions can echo their input, so print
+  a fixed safe diagnostic instead of raw configuration errors.
+- Keep actual credential files and private transcripts owner-readable only.
+  Check directory traversal permissions as well as leaf file modes when
+  assessing exposure. Permission changes do not rotate a disclosed credential.
+- Keep `docs/PRODUCTION_INCIDENT_REPORT.md` and raw recovery evidence out of Git.
+  Publish a separately reviewed summary without credentials, user identifiers,
+  private transcript locations or raw database records.
+- A confirmed tunnel-token disclosure needs provider-side rotation and secure
+  connector replacement. Use a protected token file when supported instead of
+  embedding the token in process arguments. Verify connector continuity and
+  invalidate old connections before marking containment complete. See
+  [Cloudflare's tunnel-token procedure](https://developers.cloudflare.com/tunnel/reference/tunnel-tokens/).
+- Do not rotate encryption keys needed to decrypt recoverable backup data
+  without a separate migration plan. Do not report provider rotation as complete
+  based only on a local file change.
+
 ## AITU LMS sessions
 
 AITU session management requires valid Telegram initData even when web/dev authentication exists elsewhere. Credentials use owner-bound AES-256-GCM envelopes, fail closed without a valid key, expire by default after 24 hours, and are never selected into AI context or returned to browsers. Session rotation/deletion and both LMS workers share a per-user lease; database mutations validate that lease atomically. See [LMS_SESSIONS.md](LMS_SESSIONS.md) for routes, retention, migration and deployment sequencing.

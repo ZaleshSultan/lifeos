@@ -16,6 +16,7 @@ import {
   studyEvidencePercent,
   studyEvidencePeriodTotal,
   studyEvidenceOfficialPeriod,
+  studyEvidenceExternalAsyncField,
   type StudyGradeEvidence,
 } from "./study-evidence.js";
 
@@ -341,8 +342,7 @@ function buildEvidence(
       originalFieldId: original.id,
       label:
         record &&
-        /^(?:lecture async [12])$/.test(normalizeStudyTitle(record.title)) &&
-        studyEvidenceMatchesField(original, record, course)
+        studyEvidenceExternalAsyncField(record, course) === original.id
           ? `${record.title.trim().slice(0, 260)} · итог внешней платформы`
           : field.label,
       period: field.period,

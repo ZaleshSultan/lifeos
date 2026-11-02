@@ -23,7 +23,12 @@ export function createBotDependencies(
     return {};
   }
 
-  const config = loadSupabaseConfig(source);
+  // An anon-only client can silently hide profiles behind RLS and make an
+  // existing account look unregistered. Production backend reads and writes
+  // require the service-role boundary; never fall back to browser credentials.
+  const config = loadSupabaseConfig(source, {
+    requireServiceRole: source.NODE_ENV === "production",
+  });
   const supabase = createLifeOSSupabaseClient(config, {
     useServiceRole: Boolean(config.serviceRoleKey),
   });
