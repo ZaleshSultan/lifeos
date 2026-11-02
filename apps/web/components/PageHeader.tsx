@@ -23,7 +23,7 @@ export function PageHeader({
           </div>
 
           {/* Title */}
-          <h1 className="mt-3 text-[28px] font-semibold leading-[1.15] tracking-tight text-white md:text-[32px]">
+          <h1 className="mt-3 break-words text-[28px] font-semibold leading-[1.15] tracking-tight text-white md:text-[32px]">
             {title}
           </h1>
 

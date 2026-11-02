@@ -23,6 +23,9 @@ const artifacts = resolve(
 await mkdir(artifacts, { recursive: true });
 const sessionA = "ws1_" + "A".repeat(43),
   sessionB = "ws1_" + "B".repeat(43);
+// User-supplied profile names can contain long unbroken words, handles or IDs.
+const fixtureDisplayName = (owner) =>
+  `Fixture owner ${owner} ${"0123456789abcdef".repeat(4)}`;
 const sessions = new Map([
   [sessionA, "A"],
   [sessionB, "B"],
@@ -190,7 +193,7 @@ const backend = createServer(async (req, res) => {
       return json(res, {
         state: "active",
         telegramUserId: owner === "A" ? 900001 : 900002,
-        displayName: `Fixture owner ${owner}`,
+        displayName: fixtureDisplayName(owner),
         profile: { status: "active", role: "user" },
         integrations: {
           telegram: { connected: true },
@@ -204,7 +207,7 @@ const backend = createServer(async (req, res) => {
       });
     if (path === "/api/tma/home")
       return json(res, {
-        displayName: `Fixture owner ${owner}`,
+        displayName: fixtureDisplayName(owner),
         localDate: date,
         modeLabel: "Normal",
         modeReason: "Fixture factual mode",
@@ -636,13 +639,38 @@ try {
     await page.waitForTimeout(1000);
 
     await page
-      .getByRole("heading", { name: "Сегодня · Fixture owner A" })
+      .getByRole("heading", { name: `Сегодня · ${fixtureDisplayName("A")}` })
       .waitFor();
     assert.ok(!page.url().includes("token="));
     const cookie = (await context.cookies()).find(
       (c) => c.name === "lifeos_web_session",
     );
     assert.ok(cookie?.httpOnly && cookie.secure);
+  });
+  await test("long profile names remain readable without clipping at 320px tablet and desktop", async () => {
+    for (const width of [320, 768, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto(`${origin}/web/today`);
+      const heading = page.getByRole("heading", {
+        name: `Сегодня · ${fixtureDisplayName("A")}`,
+        exact: true,
+      });
+      await heading.waitFor();
+      const geometry = await heading.evaluate((element) => ({
+        viewport: innerWidth,
+        documentWidth: document.documentElement.scrollWidth,
+        headingWidth: element.clientWidth,
+        headingContentWidth: element.scrollWidth,
+      }));
+      assert.ok(
+        geometry.documentWidth <= geometry.viewport &&
+          geometry.headingContentWidth <= geometry.headingWidth,
+        `Long profile name overflows or is clipped: ${JSON.stringify(geometry)}`,
+      );
+      await page.screenshot({
+        path: resolve(artifacts, `web-long-profile-name-${width}.png`),
+      });
+    }
   });
   await test("Ideal Human saves once and persists after reloading", async () => {
     await page.goto(`${origin}/web/ideal-human`);
