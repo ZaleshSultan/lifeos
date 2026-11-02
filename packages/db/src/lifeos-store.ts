@@ -4769,7 +4769,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     const { data, error } = await this.client.from("user_settings")
       .select("settings").eq("user_id", userId).maybeSingle();
     if (error) throwSupabaseError(error, "Failed to load Ideal Human days");
-    const saved = jsonObject(jsonObject(data?.settings).ideal_human_days);
+    const saved = jsonObject(jsonObject(data?.settings).ideal_human_days as Json | null | undefined);
     const days: IdealHumanDay[] = [];
     for (const entry of Object.values(saved)) {
       try { days.push(parseIdealHumanDay(entry)); }
@@ -4784,10 +4784,10 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       .select("settings").eq("user_id", userId).maybeSingle();
     if (readError) throwSupabaseError(readError, "Failed to load Ideal Human settings");
     const settings = jsonObject(data?.settings);
-    const existing = jsonObject(settings.ideal_human_days);
+    const existing = jsonObject(settings.ideal_human_days as Json | null | undefined);
     const { error } = await this.client.from("user_settings").upsert({
       user_id: userId,
-      settings: {...settings, ideal_human_days: {...existing, [day.date]: day} as unknown as Json },
+      settings: {...settings, ideal_human_days: {...existing, [day.date]: day}} as unknown as Json,
     }, {onConflict:"user_id"});
     if (error) throwSupabaseError(error, "Failed to save Ideal Human day");
     return day;
