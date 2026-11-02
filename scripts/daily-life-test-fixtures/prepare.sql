@@ -1,0 +1,5 @@
+alter table public.profiles add column status text not null default 'active';
+insert into auth.users values('00000000-0000-4000-8000-000000000001'),('00000000-0000-4000-8000-000000000002'),('00000000-0000-4000-8000-000000000003');
+insert into public.profiles(user_id,timezone) values('00000000-0000-4000-8000-000000000001','Asia/Almaty'),('00000000-0000-4000-8000-000000000002','Pacific/Kiritimati'),('00000000-0000-4000-8000-000000000003','Pacific/Pago_Pago');
+create function public.daily_test_assert(ok boolean,message text) returns void language plpgsql as $$begin if ok is distinct from true then raise exception 'Daily Life assertion failed: %',message;end if;end;$$;
+create function public.daily_test_prefs(morning text default '08:00') returns jsonb language sql as $$select jsonb_build_object('morningEnabled',false,'morningTime',morning,'eveningEnabled',false,'eveningTime','21:00','quietStart','22:00','quietEnd','07:00','hydrationRemindersEnabled',false,'includeHealth',false,'includeFilming',true);$$;

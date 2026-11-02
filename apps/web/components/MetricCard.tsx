@@ -52,7 +52,7 @@ export function MetricCard({
   return (
     <section
       className={cx(
-        "group relative rounded-xl border border-white/[0.08] bg-white/[0.03] p-5",
+        "min-w-0 group relative rounded-xl border border-white/[0.08] bg-white/[0.03] p-5",
         "border-t-2",
         config.topBorder,
         "transition-all duration-200 hover:border-white/[0.12] hover:bg-white/[0.05]",
@@ -60,10 +60,10 @@ export function MetricCard({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-semibold uppercase tracking-widest text-zinc-500">
+          <p className="text-[11px] font-semibold uppercase tracking-widest text-zinc-400">
             {label}
           </p>
-          <p className="mt-3 text-[26px] font-semibold leading-none tracking-tight text-white tabular-nums">
+          <p className="mt-3 break-words text-[26px] font-semibold leading-none tracking-tight text-white tabular-nums">
             {value}
           </p>
         </div>
@@ -76,7 +76,7 @@ export function MetricCard({
           <Icon className={cx("h-[18px] w-[18px]", config.iconText)} />
         </div>
       </div>
-      <p className="mt-4 text-[13px] leading-relaxed text-zinc-600">{detail}</p>
+      <p className="mt-4 text-[13px] leading-relaxed text-zinc-400">{detail}</p>
     </section>
   );
 }

@@ -157,6 +157,14 @@ export type FinanceReceiptStatus =
 export interface Database {
   public: {
     Tables: {
+      hydration_entries: TableDefinition<
+        { id:string;user_id:string;request_id:string;amount_ml:number;occurred_at:string;local_date:string;source:"telegram"|"tma"|"web";undone_at:string|null },
+        { id?:string;user_id:string;request_id:string;amount_ml:number;occurred_at?:string;local_date:string;source:"telegram"|"tma"|"web";undone_at?:string|null }
+      >;
+      daily_life_preferences: TableDefinition<
+        {user_id:string;preferences:Json;revision:number;updated_at:string},
+        {user_id:string;preferences:Json;revision?:number;updated_at?:string}
+      >;
       profiles: TableDefinition<
         {
           user_id: string;
@@ -2055,6 +2063,11 @@ export interface Database {
       };
     };
     Functions: {
+      get_hydration_summary: {Args:{p_user_id:string;p_date:string};Returns:Json};
+      log_hydration: {Args:{p_user_id:string;p_request_id:string;p_amount_ml:number;p_source:string};Returns:Json};
+      undo_hydration: {Args:{p_user_id:string;p_entry_id:string};Returns:Json};
+      save_daily_life_preferences: {Args:{p_user_id:string;p_preferences:Json;p_expected_revision:number};Returns:Json};
+      manage_lifeos_task: {Args:{p_user_id:string;p_task_id:string|null;p_request_id:string|null;p_patch:Json;p_expected_updated_at:string|null};Returns:Json};
       save_ideal_human_day: {
         Args: {
           p_user_id: string;

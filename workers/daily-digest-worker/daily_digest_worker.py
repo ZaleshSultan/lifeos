@@ -24,7 +24,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from common.notification_delivery import (
     DeliveryStore, TelegramApiClient, TelegramDeliveryError, WorkerError,
 )
-from common.notification_time import resolve_local_datetime
+from common.notification_time import resolve_local_datetime, in_quiet_hours
+from common.daily_life_notifications import notification_preferences, optional_notification_times, render_briefing, clip_message
 
 REQUEST_TIMEOUT_SECONDS = 30
 DEFAULT_TIMEZONE = "Asia/Almaty"
@@ -200,6 +201,19 @@ class SupabaseRestClient(DeliveryStore):
             "telegram_user_id": "not.is.null",
             "order": "created_at.asc",
         }) or []
+
+    def notification_preferences(self, user_id: str) -> JsonObject | None:
+        rows = self.request("GET", "daily_life_preferences", {"select": "preferences,revision", "user_id": f"eq.{user_id}", "limit": "1"}) or []
+        if not rows or not isinstance(rows[0].get("preferences"), dict):
+            return None
+        return notification_preferences({**rows[0]["preferences"], "revision": rows[0].get("revision")})
+
+    def claim_digest(self, user_id: str, local_date: str, preferences_revision: int) -> JsonObject | None:
+        rows = self._delivery_rpc("claim_daily_life_digest", {"p_user_id": user_id, "p_local_date": local_date, "p_preferences_revision": preferences_revision})
+        return rows[0] if rows else None
+
+    def enqueue_daily_life_notification(self, user_id: str, local_date: str, kind: str, revision: int, message: str, due_at: str) -> bool:
+        return self._delivery_rpc("enqueue_daily_life_notification", {"p_user_id": user_id, "p_local_date": local_date, "p_kind": kind, "p_preferences_revision": revision, "p_message": clip_message(message), "p_due_at": due_at}) is True
 
     def user_settings(self, user_id: str) -> JsonObject:
         rows = self.request("GET", "user_settings", {
@@ -439,7 +453,7 @@ def build_digest(
             suffix = f" · {html.escape(' · '.join(details))}" if details else ""
             lines.append(f"• <b>{html.escape(start)}–{html.escape(end)}</b> — {title}{suffix}")
     else:
-        lines.append("Сегодня пар нет.")
+        lines.append("Подтверждённые занятия не загружены. Проверь актуальное расписание AITU.")
 
     lines.extend(["", "<b>⏳ Ближайшие дедлайны · 7 дней</b>"])
     if deadlines:
@@ -449,7 +463,7 @@ def build_digest(
             due = local_due_label(str(row.get("due_at") or ""), timezone_name)
             lines.append(f"• {title} — {course} · <b>{html.escape(due)}</b>")
     else:
-        lines.append("На ближайшие 7 дней дедлайнов нет.")
+        lines.append("Предстоящие дедлайны не загружены. Это не означает отсутствие заданий в LMS.")
 
     return "\n".join(lines)[:3900]
 
@@ -472,6 +486,20 @@ def _finish(db: SupabaseRestClient, claim: JsonObject, outcome: str,
     return completed
 
 
+def queue_optional_notifications(db, settings: Settings, profile: JsonObject, local_now: datetime, preferences: JsonObject) -> int:
+    queued = 0
+    user_id = str(profile["user_id"])
+    for kind, due in optional_notification_times(local_now, preferences):
+        if kind == "evening":
+            message = render_briefing(settings, user_id, local_now.date().isoformat(), "evening", preferences)
+            if message is None:
+                message = "Вечерний обзор: свежие данные сейчас недоступны. Открой LifeOS и по желанию ответь: что получилось, что было трудно, что немного изменить завтра? Изменения не сохраняются автоматически."
+        else:
+            message = "Если сейчас удобно, можешь попить воды и отметить выпитое в LifeOS. Количество выбираешь ты; это мягкое напоминание, без обязательной нормы."
+        queued += int(db.enqueue_daily_life_notification(user_id, local_now.date().isoformat(), kind, preferences["revision"], message, due.astimezone(timezone.utc).isoformat()))
+    return queued
+
+
 def process_profile(db: SupabaseRestClient, telegram: TelegramClient, settings: Settings,
                     profile: JsonObject, now_utc: datetime) -> bool:
     user_id = str(profile.get("user_id") or "").strip()
@@ -480,33 +508,52 @@ def process_profile(db: SupabaseRestClient, telegram: TelegramClient, settings: 
         return False
     if settings.test_telegram_user_id and chat_id != settings.test_telegram_user_id:
         return False
-    timezone_name = str(profile.get("timezone", settings.default_timezone) or "UTC")
-    local_now = now_utc.astimezone(resolve_timezone(timezone_name))
-    if not digest_window(local_now, settings.digest_time, settings.send_window_minutes):
+    timezone_name = str(profile.get("timezone", settings.default_timezone) or "").strip()
+    if not timezone_name:
         return False
-    claim = db.claim_digest(user_id, local_now.date().isoformat())
+    try:
+        ZoneInfo(timezone_name)
+    except (ZoneInfoNotFoundError, ValueError):
+        if timezone_name not in {"Asia/Almaty", "Asia/Qyzylorda"}:
+            return False
+    local_now = now_utc.astimezone(resolve_timezone(timezone_name))
+    preferences = notification_preferences(db.notification_preferences(user_id))
+    if preferences is None:
+        return False
+    queued = queue_optional_notifications(db, settings, profile, local_now, preferences)
+    if queued:
+        logging.info("digest event=optional_jobs_queued count=%d", queued)
+    if not preferences["morningEnabled"] or in_quiet_hours(local_now, preferences["quietStart"], preferences["quietEnd"], local_now.tzinfo) or not digest_window(local_now, preferences["morningTime"], settings.send_window_minutes):
+        return False
+    claim = db.claim_digest(user_id, local_now.date().isoformat(), preferences["revision"])
     if not claim:
         return False
     logging.info("digest event=claimed id=%s attempts=%s failures=%s",claim.get("id"),claim.get("delivery_attempts",0),claim.get("failure_count",0))
 
     try:
-        day_start, day_end = utc_bounds(local_now.date(), timezone_name)
-        tasks = db.list_today_tasks(user_id, day_start, day_end)
-        courses = db.list_courses(user_id)
-        # Schedules are owned through study_course_id, not a direct user_id
-        # column. Only IDs returned by the current user's scoped query enter it.
-        schedule = db.list_schedule([str(row["id"]) for row in courses if row.get("id")], WEEKDAYS[local_now.weekday()])
-        deadlines = db.list_deadlines(
-            user_id,
-            now_utc.isoformat().replace("+00:00", "Z"),
-            (now_utc + timedelta(days=7)).isoformat().replace("+00:00", "Z"),
-        )
-        user_settings = db.user_settings(user_id)
-        weather_location = weather_location_from_settings(user_settings, settings)
-        weather = fetch_weather(weather_location, timezone_name) if weather_location else None
-        text = build_digest(
-            local_now, timezone_name, tasks, courses, schedule, deadlines, weather
-        )
+        text = render_briefing(settings, user_id, local_now.date().isoformat(), "morning", preferences)
+        if text is None:
+            day_start, day_end = utc_bounds(local_now.date(), timezone_name)
+            tasks = db.list_today_tasks(user_id, day_start, day_end)
+            courses = db.list_courses(user_id)
+            # Schedules are owned through study_course_id, not a direct user_id
+            # column. Only IDs returned by the current user's scoped query enter it.
+            schedule = db.list_schedule([str(row["id"]) for row in courses if row.get("id")], WEEKDAYS[local_now.weekday()])
+            deadlines = db.list_deadlines(
+                user_id,
+                now_utc.isoformat().replace("+00:00", "Z"),
+                (now_utc + timedelta(days=7)).isoformat().replace("+00:00", "Z"),
+            )
+            user_settings = db.user_settings(user_id)
+            weather_location = weather_location_from_settings(user_settings, settings)
+            weather = fetch_weather(weather_location, timezone_name) if weather_location else None
+            text = build_digest(
+                local_now, timezone_name, tasks, courses, schedule, deadlines, weather
+            )
+            # The old builder uses HTML. Send plain text so bounded truncation can
+            # never create broken tags/entities, and clearly flag uncertain freshness.
+            text = "Сохранённые данные AITU; актуальность не подтверждена. Проверь LMS.\n\n" + html.unescape(re.sub(r"<[^>]*>", "", text))
+        text = clip_message(text)
         buttons: list[list[JsonObject]] = []
         if settings.tma_url:
             buttons.append([
@@ -538,7 +585,7 @@ def process_profile(db: SupabaseRestClient, telegram: TelegramClient, settings: 
         _finish(db, claim, "cancelled", "test_recipient_changed")
         return False
     try:
-        message_id = telegram.send_message(str(chat_id), text, reply_markup={"inline_keyboard": buttons}, parse_mode="HTML")
+        message_id = telegram.send_message(str(chat_id), text, reply_markup={"inline_keyboard": buttons}, parse_mode=None)
     except TelegramDeliveryError as exc:
         _finish(db, claim, exc.outcome, exc.reason, retry_after_seconds=exc.retry_after_seconds)
         logging.warning("digest event=delivery_failed outcome=%s reason=%s", exc.outcome, exc.reason)

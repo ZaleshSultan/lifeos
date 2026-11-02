@@ -1,0 +1,13 @@
+# Meal photos and manual nutrition
+
+Manual food entries in Ideal Human support optional calories, protein, fat, carbohydrates, meal time and portion. Unknown quantities stay blank. All clients save the same owned daily journal with its expected revision; there is no second food database.
+
+Optional photo estimates use the existing Gemini account/model behind the shared durable AI budget governor. `LIFEOS_MEAL_VISION_ENABLED` defaults false. Configuration alone does not verify model availability, billing or food accuracy. No billable provider calls were made during this mission; manual logging remains available when the provider is disabled or fails. Verify the existing account/model and provider spending controls before enabling it.
+
+In Telegram, send a photo with the caption `/meal`. The bot requests explicit consent before downloading the Telegram attachment or sending it to the provider. Ordinary receipt photos retain their existing finance workflow. The consent button is bound to the active user in a private chat, expires after five minutes and shares one in-flight analysis across duplicate callbacks. Cancel removes the pending reference; an already transmitted image cannot be recalled from the provider. LifeOS does not claim to delete the original from Telegram.
+
+In the Mini App or web Nutrition screen, select a photo, review the local preview and explicitly consent to that image being sent to Gemini. The browser scales/re-encodes the image before transfer, stripping original metadata. The API accepts bounded JPEG/PNG/WebP images, validates dimensions and uses fixed provider instructions without tools. Images are not persisted by LifeOS. Provider-side retention follows the selected account terms; LifeOS cannot guarantee provider deletion.
+
+Results are labelled estimates with uncertainty, editable foods/portions/macros and a separate save action. Telegram opens the same authenticated correction screen through a short draft ID; no photo, credential or full journal is put in the URL. The draft keeps its original experiment date across midnight. Five-minute, owner-bound drafts live only in process memory and disappear after restart. Expiry and network/provider errors leave manual logging available. No analysis automatically writes a meal or journal. Save rereads the current day and uses revision conflict protection plus stable draft-item IDs to prevent accidental duplicate food entries.
+
+No AGATA vision endpoint is assumed. Optional external integrations remain separate and disabled until their actual contract and authorization are verified. Photo nutrition is approximate and does not prescribe medical or weight-gain targets.

@@ -6,6 +6,7 @@ export type ScreenId =
   | "lms"
   | "workout"
   | "ideal-human"
+  | "daily-life"
   | "health"
   | "focus"
   | "finance"

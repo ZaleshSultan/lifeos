@@ -1,7 +1,9 @@
 # Daily digest worker
 
-Sends one Telegram briefing per active user each day. The default send time is
-`08:00` in the profile timezone (fallback `Asia/Almaty`). The message contains:
+Sends a morning Telegram briefing only for active users who explicitly opt in
+through saved Daily Life preferences. Missing preferences and first-run defaults
+send nothing. The editable default clock is `08:00` in a valid profile timezone.
+The deterministic briefing uses current LifeOS facts; its saved study fallback contains:
 
 - LifeOS tasks/deadlines due today plus tasks captured today without a due date;
 - today's university timetable from `study_courses` + `course_schedules`;
@@ -46,14 +48,19 @@ Inspect safe aggregate queue state without sending messages:
 python3 daily_digest_worker.py --status
 ```
 
-Stop old worker instances, apply the additive notification lifecycle migration,
-then start the updated workers. Mixing old insert/delete workers with the new
+Stop old worker instances, apply the additive notification lifecycle, Daily Life
+logs/preferences and `20261103030000_daily_life_notifications.sql` migrations in
+order, then start the updated workers. Mixing old insert/delete workers with the new
 lease protocol is unsupported. Keep the send window at its default 12 hours
 unless a shorter catch-up period is intended.
 
 Copy `.env.example` to `.env`, apply migrations, then install the example systemd
-service. Change `DAILY_DIGEST_TIME` to any `HH:MM` value if 08:00 is not desired.
-
+service. Users choose morning/evening times and quiet hours in Daily Life.
+`DAILY_DIGEST_TIME` remains a legacy compatibility setting; saved user preferences
+govern live scheduling. The same existing worker queues opted-in evening reviews
+and at most two gentle hydration nudges into the existing reminders queue.
+See [consent and delivery](../../docs/DAILY_LIFE_NOTIFICATIONS.md) for final-send
+authorization, cancellation, bounded rendering and rollback details.
 
 ## Systemd install
 

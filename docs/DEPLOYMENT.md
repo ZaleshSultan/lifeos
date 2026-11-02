@@ -1,6 +1,15 @@
 # Deployment
 
-Deployment is intentionally split by runtime.
+The current production target is Debian/systemd behind the existing Cloudflare
+Tunnel at `https://lifeos.zalewko.me`: bot/TMA on local port 3000 and Next.js `/web`
+on port 3001, with Supabase and separate workers. Follow
+[production operations](OPERATIONS.md) and the [self-host runbook](SELF_HOST_RUNBOOK.md).
+Capture the actual deployed SHA, verified backup and rollback before release.
+
+The Railway, Vercel and Arch instructions below are retained as historical or
+alternative deployment examples, not instructions to move current production.
+Do not create a new paid environment or replace existing infrastructure from an
+old example. Backend variables and secret boundaries still apply.
 
 ## Supabase
 

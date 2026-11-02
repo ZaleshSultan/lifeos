@@ -17,7 +17,7 @@ export function PageHeader({
         <div className="min-w-0">
           {/* Kicker badge */}
           <div className="inline-flex items-center rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-1">
-            <span className="text-[11px] font-semibold uppercase tracking-widest text-zinc-500">
+            <span className="text-[11px] font-semibold uppercase tracking-widest text-zinc-400">
               {kicker}
             </span>
           </div>
@@ -28,7 +28,7 @@ export function PageHeader({
           </h1>
 
           {/* Summary */}
-          <p className="mt-2.5 max-w-xl text-sm leading-relaxed text-zinc-500">
+          <p className="mt-2.5 max-w-xl text-sm leading-relaxed text-zinc-400">
             {summary}
           </p>
         </div>

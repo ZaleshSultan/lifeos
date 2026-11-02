@@ -198,3 +198,11 @@ duplicate; ambiguous jobs need operator attention. Automated reconciliation of
 unknown Telegram sends, operator UI, proactive alert routing, retention scheduling
 and distributed rate limiting remain follow-up work. Existing API credentials,
 web-session protections, LMS restrictions and health revocation remain enforced.
+
+## Daily Life opt-in extension
+
+The additive November 3 release requires saved consent for morning digests and
+uses the same reminder leases for optional evening/hydration jobs. Missing
+preferences stay off; legacy unbound digest claims fail the final send boundary.
+See [Daily Life notifications](DAILY_LIFE_NOTIFICATIONS.md) for migration order,
+quiet hours, cancellation and the extended full-chain SQL tests.

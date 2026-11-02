@@ -1,3 +1,4 @@
+import { createAiGovernor } from "./ai-governor.js";
 import { createHmac } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -13,6 +14,12 @@ import { AssistantBrain } from "./assistant/brain.js";
 import { createLifeosAiService, readLifeosAiConfig } from "./lifeos-ai.js";
 import { handleTelegramUpdate } from "./telegram/commands.js";
 import type { SendMessageInput } from "./telegram/types.js";
+
+const testGovernor = () =>
+  createAiGovernor({
+    source: {},
+    store: { reserve: async () => "reserved", finish: async () => undefined },
+  });
 
 const user: TelegramUserRecord = {
   userId: "11111111-1111-4111-8111-111111111111",
@@ -122,6 +129,7 @@ async function fixture(enabled = true, gemini = false) {
       LIFEOS_AI_ENABLED: String(gemini),
       GEMINI_API_KEY: "test-only",
     }),
+    { governor: testGovernor() },
   );
   const ask = vi.fn(async () => ({
     answer: "Use your saved priorities.",

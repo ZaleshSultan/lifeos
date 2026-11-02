@@ -92,7 +92,8 @@ Wildcard CORS + stolen initData = cross-origin API abuse from malicious pages.
 | `/health/ingest`    | 10 req/hour per device                   |
 | `/healthz`          | Unlimited                                |
 
-Implement at reverse proxy (Railway) or in-memory token bucket in `server.ts`.
+Maintain the existing rate limits in `server.ts` and the current Cloudflare/Debian
+reverse-proxy boundary. Railway notes describe an alternative deployment.
 
 ## HTTP Method Discipline
 

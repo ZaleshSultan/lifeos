@@ -54,6 +54,34 @@ class MonthlyReviewLegacyGuardTest(unittest.TestCase):
         self.assertIsNone(settings.obsidian_vault_path)
 
 
+class MonthlyReviewAiSafetyTest(unittest.TestCase):
+    def settings(self, enabled: bool) -> object:
+        return monthly_review_worker.Settings(
+            supabase_url="https://example.supabase.co", service_role_key="test",
+            user_id="11111111-1111-4111-8111-111111111111", timezone_name="UTC",
+            obsidian_vault_path=None, telegram_bot_token=None, telegram_chat_id=None,
+            ai_enabled=enabled, openrouter_api_key="synthetic-private-key",
+            ai_model="test", ai_base_url="https://unapproved.invalid", poll_seconds=3600,
+        )
+
+    def test_enabled_legacy_ai_cannot_bypass_shared_budget_or_send_secrets(self) -> None:
+        with patch.object(monthly_review_worker, "fallback_markdown", return_value="deterministic report"), patch.object(monthly_review_worker.urllib.request, "urlopen") as network:
+            markdown, metadata, model = monthly_review_worker.ai_markdown(self.settings(True), {"periodMonth": "2026-10"})
+        self.assertEqual(markdown, "deterministic report")
+        self.assertEqual(metadata, {"fallback": True, "reason": "shared_ai_governor_required"})
+        self.assertIsNone(model)
+        network.assert_not_called()
+        self.assertNotIn("synthetic-private-key", str(metadata))
+
+    def test_disabled_ai_preserves_deterministic_fallback(self) -> None:
+        with patch.object(monthly_review_worker, "fallback_markdown", return_value="deterministic report"), patch.object(monthly_review_worker.urllib.request, "urlopen") as network:
+            markdown, metadata, model = monthly_review_worker.ai_markdown(self.settings(False), {})
+        self.assertEqual(markdown, "deterministic report")
+        self.assertEqual(metadata["reason"], "ai_disabled_or_missing_key")
+        self.assertIsNone(model)
+        network.assert_not_called()
+
+
 class MonthlyReviewFilesystemTest(unittest.TestCase):
     USER_A = "11111111-1111-4111-8111-111111111111"
     USER_B = "22222222-2222-4222-8222-222222222222"

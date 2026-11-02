@@ -18,6 +18,10 @@ begin
     foreach v_function in array array[
       'public.claim_due_reminders(timestamptz,integer)'::regprocedure,
       'public.claim_daily_digest(uuid,date)'::regprocedure,
+      'public.claim_daily_life_digest(uuid,date,integer)'::regprocedure,
+      'public.enqueue_daily_life_notification(uuid,date,text,integer,text,timestamptz)'::regprocedure,
+      'public.daily_life_notification_allowed(uuid,text,timestamptz,integer)'::regprocedure,
+      'public.begin_notification_delivery_legacy(text,uuid,uuid,uuid)'::regprocedure,
       'public.begin_notification_delivery(text,uuid,uuid,uuid)'::regprocedure,
       'public.finish_notification_delivery(text,uuid,uuid,uuid,text,text,bigint,integer)'::regprocedure,
       'public.defer_reminder_delivery(uuid,uuid,uuid,timestamptz)'::regprocedure,
@@ -217,21 +221,21 @@ begin
   update public.daily_digest_deliveries set lease_expires_at=clock_timestamp()-interval '1 second' where id=d.id;
   perform public.recover_notification_deliveries('digest',100);
   perform notification_test.assert((select status='pending' and failure_count=1 and delivery_attempts=0 from public.daily_digest_deliveries where id=d.id),'digest crash before send recovers to pending');
-  perform notification_test.assert((select count(*)=0 from public.claim_daily_digest(d.user_id,d.local_date)),'digest respects retry backoff');
+  perform notification_test.assert((select count(*)=0 from public.claim_daily_life_digest(d.user_id,d.local_date,1)),'digest respects retry backoff');
   update public.daily_digest_deliveries set next_attempt_at=clock_timestamp()-interval '1 second' where id=d.id;
-  select claim_token into v_new_token from public.claim_daily_digest(d.user_id,d.local_date);
+  select claim_token into v_new_token from public.claim_daily_life_digest(d.user_id,d.local_date,1);
   perform notification_test.assert(v_new_token is not null and v_new_token<>v_token,'digest restart acquires fresh claim token');
   perform notification_test.assert(not public.finish_notification_delivery('digest',d.user_id,d.id,v_token,'sent','none',999),'stale digest worker cannot overwrite new owner');
   perform notification_test.assert(public.begin_notification_delivery('digest',d.user_id,d.id,v_new_token)=101,'restarted digest begins with current recipient');
   update public.daily_digest_deliveries set lease_expires_at=clock_timestamp()-interval '1 second' where id=d.id;
   perform public.recover_notification_deliveries('digest',100);
   perform notification_test.assert((select status='unknown' and delivery_attempts=1 from public.daily_digest_deliveries where id=d.id),'stale sending digest becomes terminal unknown');
-  perform notification_test.assert((select count(*)=0 from public.claim_daily_digest(d.user_id,d.local_date)),'unknown digest preserves daily deduplication');
+  perform notification_test.assert((select count(*)=0 from public.claim_daily_life_digest(d.user_id,d.local_date,1)),'unknown digest preserves daily deduplication');
 
-  select * into d from public.claim_daily_digest('00000000-0000-4000-8000-000000000002',(clock_timestamp() at time zone 'Asia/Almaty')::date);
+  select * into d from public.claim_daily_life_digest('00000000-0000-4000-8000-000000000002',(clock_timestamp() at time zone 'Asia/Almaty')::date,1);
   perform notification_test.assert(public.begin_notification_delivery('digest',d.user_id,d.id,d.claim_token)=102,'second user digest targets second user');
   perform notification_test.assert(public.finish_notification_delivery('digest',d.user_id,d.id,d.claim_token,'sent','none',4321),'confirmed digest persisted');
-  perform notification_test.assert((select count(*)=0 from public.claim_daily_digest(d.user_id,d.local_date)),'confirmed digest never rescheduled for same local date');
+  perform notification_test.assert((select count(*)=0 from public.claim_daily_life_digest(d.user_id,d.local_date,1)),'confirmed digest never rescheduled for same local date');
 end;
 $$;
 

@@ -1,3 +1,4 @@
+import { AutoHealthPanel } from "../components/ideal-human/AutoHealthPanel";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CalendarDays,
@@ -399,6 +400,11 @@ export function IdealHumanScreen({
               onRetry={() => void query.refetch()}
             />
           ) : null}
+          <AutoHealthPanel
+            date={date}
+            manual={draft}
+            onOpenHealth={onOpenHealth}
+          />
           <section
             className="grid grid-cols-2 gap-2"
             aria-label="Статус выбранного дня"
@@ -458,7 +464,8 @@ export function IdealHumanScreen({
                 draft.footageCaptured === true ||
                 draft.aRoll === true ||
                 draft.bRoll === true ||
-                (draft.filmingMinutes ?? 0) > 0
+                (draft.filmingMinutes ?? 0) > 0 ||
+                (draft.footage?.length ?? 0) > 0
                   ? "Материал отмечен"
                   : "Нет подтверждения"
               }
@@ -466,7 +473,8 @@ export function IdealHumanScreen({
                 draft.footageCaptured === true ||
                 draft.aRoll === true ||
                 draft.bRoll === true ||
-                (draft.filmingMinutes ?? 0) > 0
+                (draft.filmingMinutes ?? 0) > 0 ||
+                (draft.footage?.length ?? 0) > 0
               }
             />
             <StatusTile

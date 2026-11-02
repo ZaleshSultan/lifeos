@@ -1,3 +1,4 @@
+import { createAiGovernor } from "./ai-governor.js";
 import { createHmac } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { DateTime } from "luxon";
@@ -16,6 +17,12 @@ import {
   type LifeosAiReply,
 } from "./lifeos-ai.js";
 import { loadPlanningData } from "./planning-context.js";
+
+const testGovernor = () =>
+  createAiGovernor({
+    source: {},
+    store: { reserve: async () => "reserved", finish: async () => undefined },
+  });
 
 const servers: ReturnType<typeof createBotServer>[] = [];
 afterEach(async () => {
@@ -112,6 +119,7 @@ async function fixture({
       LIFEOS_AI_ENABLED: String(enabled),
       GEMINI_API_KEY: "test-key",
     }),
+    { governor: testGovernor() },
   );
   const server = createBotServer({
     store,

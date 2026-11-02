@@ -1,146 +1,47 @@
 # LifeOS Health Bridge
 
-Android scaffold for syncing Xiaomi Watch 4 data into LifeOS through the
-Samsung Galaxy S23+ and Android Health Connect:
+Android source for the Samsung Galaxy S23+ to read permitted Health Connect records and send normalized measurements to the existing LifeOS backend. The current upstream route is Xiaomi Watch 4 → Mi Fitness → Health Connect → LifeOS. A metric must actually be published to Health Connect; no private Xiaomi API, sensor access or Samsung Health synchronization is assumed.
 
-```text
-Xiaomi Watch 4 -> Mi Fitness -> Health Connect -> LifeOS bridge
-```
+## Current implementation and verification
 
-This app does not use Samsung Health, scrape Mi Fitness/Mi account data, use
-Xiaomi private APIs, or require firmware changes. Mi Fitness must publish a
-metric to Health Connect before the bridge can read it.
+Source includes a Compose setup/status screen, partial read-permission handling, optional background-read permission, foreground manual sync, seven-day backfill, WorkManager scheduling, Android Keystore AES-GCM token storage and bounded HTTPS requests. These are implemented source capabilities, not a tested handset release.
 
-## Scope
+The November 3 engineering host has no Java, Gradle, Kotlin compiler, Android SDK or adb. The repository also has no checked-in Gradle wrapper. Android compilation, unit tests, lint, APK creation/install, Keystore execution and physical-device background behavior are **UNVERIFIED**. No APK was built or installed. Static inspection checked the used Health Connect symbols against the official `connect-client:1.1.0` source; that does not replace compilation.
 
-- Kotlin Android app scaffold
-- Health Connect client structure
-- WorkManager worker structure
-- Basic Compose `MainActivity`
-- `SecureConfigStore` placeholder implementation backed by private `SharedPreferences`
-- Previous-day Health Connect aggregation in the phone's local timezone
-- `LifeOsApiClient` for `POST /api/health/ingest`
-- Schedules:
-  - `00:01` nightly previous-day sync
-  - `00:15` retry
-  - `06:00` morning reconcile
-  - manual sync from UI
+## Build on an Android development machine
 
-## Required Permissions
-
-Declared Health Connect read permissions:
-
-- `android.permission.health.READ_ACTIVE_CALORIES_BURNED`
-- `android.permission.health.READ_DISTANCE`
-- `android.permission.health.READ_EXERCISE`
-- `android.permission.health.READ_HEART_RATE`
-- `android.permission.health.READ_RESTING_HEART_RATE`
-- `android.permission.health.READ_HEART_RATE_VARIABILITY`
-- `android.permission.health.READ_OXYGEN_SATURATION`
-- `android.permission.health.READ_SLEEP`
-- `android.permission.health.READ_STEPS`
-- `android.permission.health.READ_TOTAL_CALORIES_BURNED`
-- `android.permission.health.READ_WEIGHT`
-
-Network permission:
-
-- `android.permission.INTERNET`
-
-The app also declares a Health Connect permission rationale activity for `android.intent.action.VIEW_PERMISSION_USAGE`.
-
-## Local Build
-
-Install Android Studio or Android command-line tools with:
-
-- JDK 21
-- Android SDK Platform 36
-- Android Gradle Plugin 8.13.0 compatible Gradle
-
-Then from this folder:
-
-```bash
-./gradlew :app:assembleDebug
-./gradlew :app:testDebugUnitTest
-./gradlew :app:lintDebug
-```
-
-This scaffold does not include a checked-in Gradle wrapper binary. Generate one from a machine with Gradle installed:
+Use JDK 21, Android SDK Platform 36, Android Gradle Plugin 8.13.0 and its compatible Gradle distribution. On a machine with Gradle installed, from this directory:
 
 ```bash
 gradle wrapper
+./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
 ```
 
-## Runtime Setup
+Review and commit the generated wrapper through the normal release process. A debug APK, if those checks succeed, is produced at `app/build/outputs/apk/debug/app-debug.apk`. Do not publish a release APK before configuring signing and any applicable Play Console Health Connect declarations. [Android build compatibility](https://developer.android.com/build/releases/past-releases/agp-8-13-0-release-notes).
 
-Open the app and save:
+## Connect and verify on the phone
 
-- LifeOS API base URL, for example `https://your-lifeos-backend.example.com`
-- Health session token issued by the backend endpoint `POST /api/tma/health/ingest-token`
+1. Confirm that the actual sleep, steps, weight or workouts are visible in Health Connect from their upstream app.
+2. Build/install the verified bridge. Open LifeOS Mini App → Health → Connect watch and issue a personal health token.
+3. Enter `https://lifeos.zalewko.me` and that token in the bridge. URLs must use HTTPS, without user-info, query or fragment. Redirects are refused so tokens cannot be forwarded to another host.
+4. Save the connection. Only the personal token is encrypted on the phone with Android Keystore AES-GCM; the bridge never contains a shared backend or Supabase key. A successful first read migrates the old plaintext preference to encrypted storage. Keystore failure leaves the connection unusable and requires reconnecting.
+5. Grant only the read permissions you want. The bridge skips ungranted measurement types; it never writes Health Connect records.
+6. Use **Send today and yesterday**, then inspect the latest result and retained last successful transmission time. Confirm the matching source/date in LifeOS Health and Ideal Human.
+7. Optionally grant background reads when the device reports support. Without that grant, foreground manual sync remains available. Android decides background execution time; no precise alarm or delivery guarantee is made.
+8. Repeat a manual sync and check that backend workout/sample counts do not duplicate. Test permission revocation, expired token, offline/retry and app/device restart using an isolated LifeOS test identity before relying on automation.
 
-Then grant Health Connect permissions and tap **Sync now** for a manual
-previous-day sync. Start with manual sync; scheduled sync can be enabled after
-record availability is verified on the Samsung Galaxy S23+.
+The source schedules approximate daily work near 00:01 and 06:00 in Asia/Almaty. WorkManager persists periodic work, requires network access and uses exponential retry starting at 15 minutes for transient failures. There is no separate exact 00:15 job. Existing obsolete one-shot names are cancelled on upgrade. Manual sync runs while the app is open; backfill covers today and the preceding six days. Background reading requires both device feature support and explicit permission. [Health Connect background reads](https://developer.android.com/health-and-fitness/health-connect/read-data).
 
-The bridge stores only the per-user health session token on the Android phone and sends it as `Authorization: Bearer <token>`. The APK no longer accepts or sends a user id; the backend binds ingested metrics only to the user encoded in that signed token.
+## Measurement semantics
 
-## Xiaomi Watch 4 Verification
+- Reporting uses Asia/Almaty civil dates; today ends at the current instant. Completed prior days use their full day.
+- Completed sleep belongs to its local wake-up date. Asleep/light/deep/REM stages are clipped to their session and merged across overlapping records. Awake/unknown stages are excluded. A session without stages leaves asleep duration unknown; its time in bed is not substituted for sleep. Unavailable deep/REM/awake values stay null.
+- Steps use Health Connect aggregation to reduce duplicate upstream counting. Resting heart rate comes only from resting-heart-rate records, separately from ordinary heart rate. Weight, RMSSD HRV and SpO2 remain absent when no permitted records exist.
+- Record reads follow every page token. A failed/repeated page aborts that day's submission instead of publishing a partial record list.
+- Workouts retain stable Health Connect record IDs, source and original timestamps; daily workout duration merges overlap and clips to the reporting day. Heart-rate detail keeps one actual reading per minute to bound payload size; the daily average uses the complete Health Connect aggregate.
+- Empty days are skipped rather than replacing existing values with zero. The backend owns identity, validation and deduplication. Verified automatic data is projected into Ideal Human without overwriting manual journal entries.
+- Diagnostics retain the latest fixed status/message and last successful transmission time, without tokens or raw health records. These local diagnostics are separate from backend `health_sync_runs`.
 
-1. Confirm Mi Fitness shows the watch data.
-2. In Android Health Connect, confirm Mi Fitness has write access.
-3. Confirm records such as steps or sleep are visible from Mi Fitness.
-4. Grant this bridge read access.
-5. Tap **Sync now**.
-6. Check `/health` in Telegram and the TMA Health screen.
+Read permissions cover active/total energy, distance, workouts, heart/resting heart rate, RMSSD HRV, oxygen, sleep, steps and weight. The manifest contains rationale routes for both Android 13 and lower and Android 14+, plus a separately requested background-read permission. [Health Connect setup and manifest](https://developer.android.com/health-and-fitness/health-connect/get-started).
 
-If Mi Fitness does not publish a metric to Health Connect, use `/health_log` or
-the documented JSON/CSV import fallback.
-
-## Data semantics
-
-- Resting heart rate comes only from `RestingHeartRateRecord`; ordinary heart
-  rate is stored separately as `average_heart_rate`. No resting reading means
-  missing, never a substituted daily average.
-- HRV is the mean of actual RMSSD records; oxygen saturation is the mean of
-  actual SpO2 records. Both remain missing when Mi Fitness exports no readings.
-- Every record query follows all page tokens. A failed page aborts the sync;
-  a partial day is never silently submitted.
-- Sleep uses published asleep/light/deep/REM stage intervals, clipped to the
-  previous local day and merged to avoid duplicate overlap. Awake/unknown time
-  is excluded. Sessions with no stages do not become fabricated sleep totals;
-  `sleep_minutes` remains missing. Stage-specific totals stay missing if that
-  stage is absent from the available records.
-- Daily workout minutes merge overlapping sessions and clip to the day. The
-  original session timestamps, title, source, type code and stable Health
-  Connect record ID are retained in each workout.
-- Heart rate detail sends at most one real reading per minute, choosing the
-  earliest timestamp (then source) deterministically. Its original timestamp
-  and value are preserved. Daily average HR still uses Health Connect's
-  aggregate of all readings. This keeps a normal daily JSON request below the
-  backend's 1 MiB limit without sending fabricated samples.
-- The bridge sends one object payload with metrics, workouts, samples and
-  missing flags. The signed token determines the owner; no client user ID is
-  sent. Backend retries upsert workouts and samples instead of duplicating
-  them, and mirror daily scalar metrics for the mini-app and weekly trends.
-
-After installing an updated debug build, grant the new resting-heart-rate
-permission again. Validate manual sync while the bridge is open on the phone;
-scheduled background access remains a separate device/provider verification
-step, and requires Android Health Connect background-read support/permission.
-
-Reference: [Health Connect reads and pagination](https://developer.android.com/health-and-fitness/health-connect/read-data).
-
-## TODOs Before Production
-
-- Replace `SharedPreferencesSecureConfigStore` with AndroidX Security or platform-backed encrypted storage.
-- Add validation/error messages around backend config fields.
-- Add user-visible WorkManager status history.
-- Add instrumentation tests with fake Health Connect data.
-- Verify exact record availability on target devices and Health Connect provider apps.
-- Configure Play Console Health Connect data access declarations before release.
-
-## Auth model
-
-`x-lifeos-ingest-secret` is intentionally unsupported. Health ingest uses only a
-per-user signed Bearer token issued by the authenticated TMA session. The Android
-APK does not contain a shared backend secret and does not send a configurable
-LifeOS user id.
+See [the HTTP contract](../../docs/HEALTH_BRIDGE_CONTRACT.md) and [device operations](../../docs/ANDROID_HEALTH_BRIDGE.md). Remaining release work is Android build/lint/JVM tests, fake-provider instrumentation, signed artifact delivery and real Galaxy S23+/Mi Fitness permission, accuracy and background verification. None is represented as completed by backend/browser checks.

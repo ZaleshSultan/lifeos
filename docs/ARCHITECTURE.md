@@ -5,7 +5,9 @@
 Daily planning is deterministic in `packages/core`; optional Gemini text
 assistance runs through the authenticated `apps/bot` boundary. Supabase remains
 authoritative. TMA Today and AI screens use bounded read-only context; model
-suggestions cannot write user data. Existing OpenRouter flows remain separate.
+suggestions cannot write user data. Existing Gemini/OpenRouter calls now share
+the backend AI governor and durable budget reservations; the ungoverned legacy
+monthly AI path fails closed. See [AI execution safety](AI_EXECUTION_SAFETY.md).
 See [LifeOS AI](LIFEOS_AI.md) for configuration, contracts and limitations.
 
 An optional, disabled-by-default assistant Brain adds deterministic authorized
@@ -15,8 +17,10 @@ provider. TMA changes require signed confirmation and atomic per-user receipts.
 See [assistant architecture](ASSISTANT_ARCHITECTURE.md) and
 [rollout](ASSISTANT_ROLLOUT.md).
 
-Agata remains an independent external authenticated read-only API consumer. It
-is not embedded into LifeOS, its clients, workers or internal AI architecture.
+AGATA is a proposed optional external consumer. No deployed compatible service
+or `/api/agata/*` personal-data API was found. Its authenticated capability
+projection and proposed v1 draft contract remain disabled; see
+[AGATA boundary](AGATA_INTEGRATION.md).
 
 LifeOS is a personal operating system monorepo. The center of the system is a Supabase-backed kernel of life entities, with specialized layers for health, fitness, finance, Telegram capture, a Telegram Mini App, a web dashboard, Android Health Connect ingestion, and an Obsidian mirror.
 
@@ -25,13 +29,12 @@ LifeOS is a personal operating system monorepo. The center of the system is a Su
 - `apps/bot` - Node HTTP server for Telegram webhooks, health ingest, and backend API boundaries.
 - `apps/tma` - Vite React Telegram Mini App for workout and focus workflows.
 - `apps/web` - Next.js dashboard for desktop and mobile browser use.
-- `apps/android-health-bridge` - installable manual Android Health Connect bridge with preview-before-send.
-- `apps/health-bridge` - legacy Android Kotlin scaffold.
+- `apps/health-bridge` - Kotlin Health Connect project/scaffold; no installable APK is verified.
 - `packages/core` - Pure domain logic, parsers, health mode, ingest scoring, and shared types.
 - `packages/db` - Supabase client/config/store boundary.
 - `packages/obsidian` - Obsidian path safety utilities.
 - `supabase/migrations` - Kernel, health, fitness, finance, bot, and ingest schema.
-- `workers/obsidian-mirror` - Arch Linux worker that renders queued entities into Markdown.
+- `workers/obsidian-mirror` - systemd worker on the current Debian host that renders queued entities into Markdown.
 - `deploy` - Deployment assets and platform notes.
 - `docs` - Architecture, contracts, security, and operations documentation.
 
@@ -55,7 +58,7 @@ for revocable, opaque sessions; Next.js and the backend check live session and
 profile status. See [Web sessions](WEB_SESSIONS.md). It does not carry service-role
 keys, per-user health session tokens, or bot tokens.
 
-The Obsidian mirror worker runs on an Arch Linux server, claims queue rows from Supabase, loads `public.user_obsidian_settings` for the row owner, renders safe Markdown paths inside that user's configured vault, and writes atomically.
+The Obsidian mirror worker runs on the current Debian server, claims queue rows from Supabase, loads `public.user_obsidian_settings` for the row owner, renders safe Markdown paths inside that user's configured vault, and writes atomically. Arch Linux was a historical target.
 
 ## Source Of Truth
 
@@ -82,14 +85,32 @@ Current multi-user MVP caveat: Telegram bot/TMA access, health ingest, reminder 
 
 Do not present the Google sync worker, ICS, or standalone monthly-review integrations as fully multi-user-safe until per-user source configuration is consumed by those workers. Google OAuth status is connected only for users with `user_oauth_connections.provider = 'google'` and `status = 'connected'`. Obsidian mirror is connected only for users with `user_obsidian_settings.enabled = true`, `status = 'connected'`, and a local vault path.
 
-## Deployment Targets
+## Current Deployment Topology
 
-- Railway: `apps/bot` backend HTTP service.
-- Vercel: `apps/web` Next.js dashboard.
-- Telegram hosting surface: `apps/tma` built as static assets, commonly Vercel or another HTTPS static host.
-- Arch Linux: `workers/obsidian-mirror` and a local Obsidian vault.
-- Android phone: `apps/health-bridge` Health Connect bridge.
+The active installation uses Debian/systemd and the existing Cloudflare Tunnel
+at `https://lifeos.zalewko.me`. The bot serves `/tma/`, the webhook and protected
+APIs on local port 3000; Next.js serves `/web` on port 3001. Workers are separate
+systemd services. Supabase remains the database, and its service credentials stay
+in trusted backend/worker environments. See [production operations](OPERATIONS.md).
+
+Railway, Vercel and Arch/Tailscale deployment assets remain as historical or
+alternative targets. They are not evidence of the currently deployed version.
+Capture the real source/build SHA, active service configuration, backup and
+rollback artifacts before a release. New application behavior is not considered
+live until its release report records runtime verification.
 
 ## Current Acceptance Boundary
 
-This phase stabilizes the first vertical slice: Telegram capture/tasks/workouts, TMA workout control, health ingest, Supabase persistence, and Obsidian queue rendering. The secure web-session work extends this boundary with Telegram-to-web authentication; Android production build hardening remains outside this slice.
+The original vertical slice covered Telegram capture/tasks/workouts, TMA workout
+control, health ingest, Supabase persistence and Obsidian rendering. The explicitly
+authorized November 3 overnight mission extends that scope to secure web sessions,
+shared daily workspaces and the Android Health Connect application. Old exclusions
+of production web authentication and Android builds are historical. The web UI
+uses authenticated backend projections and an allowlisted CSRF-protected bridge;
+credential-changing LMS flows still require Telegram authorization. Building an
+Android artifact does not prove physical-device permissions or background sync.
+The audited host has no JDK, Android SDK or Gradle wrapper available; an APK build
+and actual device ingestion remain blocked/unverified rather than claimed complete.
+External institutional/creator grants require genuine authorization and must be
+reported as unavailable when missing. See the [phase 2 report](OVERNIGHT_PHASE2_REPORT.md)
+for actual implementation, deployment evidence and unresolved limitations.

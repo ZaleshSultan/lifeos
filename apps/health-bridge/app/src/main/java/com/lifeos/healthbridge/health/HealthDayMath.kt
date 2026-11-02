@@ -58,9 +58,9 @@ internal fun sleepTotals(stages: List<SleepStageInterval>, range: PreviousDayRan
 }
 
 // A completed night belongs to its wake-up date, not to the calendar day
-// containing each individual minute. SleepSessionRecord without stages still
-// provides a measured session interval (time in bed); use it as a fallback,
-// but do not fabricate deep/REM/awake stage durations.
+// containing each individual minute. A session interval without stages does
+// not distinguish asleep time from time awake in bed, so asleep duration stays
+// unknown rather than silently treating the whole interval as measured sleep.
 internal data class SleepSessionIntervals(
     val interval: HealthInterval,
     val stages: List<SleepStageInterval>,
@@ -72,7 +72,7 @@ internal fun sleepTotalsForWakeDay(
 ): SleepTotals {
     val completed = sessions.filter { session ->
         session.interval.start < session.interval.end &&
-            session.interval.end > wakeDay.start &&
+            session.interval.end.atZone(wakeDay.zoneId).toLocalDate() == wakeDay.date &&
             session.interval.end <= wakeDay.end
     }
     if (completed.isEmpty()) return SleepTotals(null, null, null, null)
@@ -91,9 +91,6 @@ internal fun sleepTotalsForWakeDay(
             val end = minOf(stage.interval.end, session.interval.end)
             if (start < end) stage.copy(interval = HealthInterval(start, end)) else null
         }
-        // Some Mi Fitness versions publish a session without stages.
-        // A stage-less session can supply total duration but not stage totals.
-        if (stages.isEmpty()) asleep.add(session.interval)
         for (stage in stages) {
             when (stage.kind) {
                 SleepStageKind.ASLEEP -> asleep.add(stage.interval)

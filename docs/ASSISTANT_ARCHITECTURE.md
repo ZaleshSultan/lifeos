@@ -51,6 +51,19 @@ paths or arbitrary HTTP destinations. Conversation history and source text are
 never authority to execute a write. Confirmation is issued by the backend and
 bound to user, source, request and exact action, with an expiry.
 
+Existing optional Gemini/OpenRouter operations run through the backend governor
+and durable owner/feature accounting before a provider call. Token/time/task
+limits, cancellation, bounded concurrency, circuit breaking and shutdown protect
+those operations; deterministic tools continue without a model. Estimated cost
+is not a provider billing cap. See [AI execution safety](AI_EXECUTION_SAFETY.md).
+
+AGATA remains a separate, disabled integration proposal. The historical Phase A
+prompt is not an implemented `/api/agata/*` personal-data API. The authenticated
+v1 capability projection honestly reports no connected service or enabled
+analysis operation; the proposed typed draft contract grants no tools, database
+access or write authority. No verified AGATA vision/voice transport is claimed.
+See [AGATA capability and activation requirements](AGATA_INTEGRATION.md).
+
 ## Persistence and scheduling
 
 Memory is opt-in per write, owner-scoped, searchable, updateable, archivable and
@@ -62,6 +75,13 @@ A unique per-user idempotency key and atomic Postgres mutation/receipt prevent
 duplicates even if the process stops after commit and before response delivery.
 Reminder rows use the existing queue and worker. No daily scheduler is added:
 LifeOS's existing digest and claim/retry delivery remain authoritative.
+
+Morning/evening Daily Life overviews also reuse that deterministic summary and
+existing worker; they do not create an autonomous model loop or save tomorrow's
+suggested changes. Automatic delivery requires explicit owner preferences and
+quiet-hour checks; missing preferences enable no notifications. Health inclusion
+defaults off. Reflection history is saved only through explicit journal edits,
+not inferred from assistant output. See [notification consent](DAILY_LIFE_NOTIFICATIONS.md).
 
 See [assistant operations](ASSISTANT_ROLLOUT.md) for rollout, flags, verification,
 limitations and rollback instructions. Hosted migration and deployment require

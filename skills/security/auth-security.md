@@ -95,7 +95,8 @@ Use signed HS256 Bearer tokens from TMA health sessions.
 | reminder-worker       | Service role + Telegram bot token |
 | google-sync, ics-sync | Service role                      |
 
-Workers run in trusted environments only (Arch server, not Vercel).
+Workers run in trusted environments only (currently Debian/systemd; older Arch
+examples are historical). Frontends do not receive service credentials.
 
 ## Authorization Patterns
 
@@ -123,7 +124,7 @@ ALLOW_UNSAFE_TMA_DEV_AUTH=true   # LOCAL ONLY
 LIFEOS_DEFAULT_USER_ID=<uuid>
 ```
 
-Returns fake user without valid initData. **Never enable in Railway/production.**
+Returns fake user without valid initData. **Never enable in any production deployment, including current Debian/systemd.**
 
 ## Bootstrap / Single-User Setup
 

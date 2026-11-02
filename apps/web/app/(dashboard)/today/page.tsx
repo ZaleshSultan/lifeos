@@ -1,3 +1,7 @@
+import Link from "next/link";
+import { BriefingPanel, DocumentaryPanel } from "@/components/DailyLifePanels";
+import { dashboardData } from "@/lib/dashboard-data";
+import type { DailyLifeSummary } from "../../../../../packages/core/src/daily-life.js";
 import {
   Activity,
   CalendarClock,
@@ -16,6 +20,9 @@ export default async function TodayPage() {
   const home = await lifeosApi<WebHomeSummary>("/api/tma/home");
   if (!home) redirect("/access");
 
+  const daily = await dashboardData<DailyLifeSummary>(
+    `/api/tma/daily-life/summary?date=${home.localDate}`,
+  );
   const weather = home.weather;
   const temp =
     weather?.temperatureC === null || weather?.temperatureC === undefined
@@ -30,6 +37,71 @@ export default async function TodayPage() {
         title={home.displayName ? `Сегодня · ${home.displayName}` : "Сегодня"}
       />
 
+      <Link
+        href="/ideal-human"
+        className="mb-6 block rounded-xl border border-cyan-300/25 bg-cyan-300/[0.05] p-5"
+      >
+        <p className="text-lg font-semibold text-white">
+          Ideal Human
+          {daily?.dayNumber
+            ? ` — Day ${daily.dayNumber}/30`
+            : " — дневник эксперимента"}
+        </p>
+        <p className="mt-2 text-sm text-zinc-300">
+          Гибкий день, вес и сон, питание, учёба и документальный фильм.
+        </p>
+      </Link>
+      {daily ? (
+        <div className="mb-6 grid gap-5 lg:grid-cols-2">
+          <BriefingPanel view={daily.morning} />
+          <BriefingPanel view={daily.evening} />
+          <DocumentaryPanel summary={daily} />
+          <SectionPanel title="Сегодня в записях">
+            <div className="space-y-3 text-sm text-zinc-300">
+              <p>
+                Вода:{" "}
+                {daily.hydration === null
+                  ? "нет данных"
+                  : `${daily.hydration.totalMl} мл`}
+              </p>
+              <p>
+                Питание: {daily.nutrition.mealCount} записанных приёмов пищи
+                {daily.nutrition.incomplete ? " · неполные данные" : ""}
+              </p>
+              <p>
+                Сон:{" "}
+                {daily.health.sleepMinutes === null
+                  ? "нет измерения"
+                  : `${(daily.health.sleepMinutes.value / 60).toFixed(1)} ч · ${daily.health.sleepMinutes.source}`}
+              </p>
+              {daily.sourceWarnings.map((warning, index) => (
+                <p key={index} className="text-xs text-amber-100">
+                  {warning}
+                </p>
+              ))}
+              <div className="flex flex-wrap gap-3">
+                <Link
+                  href="/planner"
+                  className="inline-flex min-h-11 items-center rounded-lg border border-white/15 px-3"
+                >
+                  Мои задачи
+                </Link>
+                <Link
+                  href="/nutrition"
+                  className="inline-flex min-h-11 items-center rounded-lg border border-white/15 px-3"
+                >
+                  Записать еду и воду
+                </Link>
+              </div>
+            </div>
+          </SectionPanel>
+        </div>
+      ) : (
+        <div className="mb-6 rounded-lg border border-white/[0.08] p-4 text-sm text-zinc-400">
+          Обзор дня пока недоступен. Остальные модули работают через свои
+          сохранённые данные.
+        </div>
+      )}
       <div className="dashboard-grid">
         <MetricCard
           detail="Персональный focus score из твоего LifeOS профиля."
@@ -60,7 +132,11 @@ export default async function TodayPage() {
           detail="Очередь синхронизации именно этого пользователя."
           icon={RefreshCw}
           label="Sync"
-          value={String(home.pendingSyncCount ?? 0)}
+          value={
+            home.pendingSyncCount === undefined
+              ? "—"
+              : String(home.pendingSyncCount)
+          }
         />
       </div>
 
@@ -78,7 +154,10 @@ export default async function TodayPage() {
           </div>
         </SectionPanel>
 
-        <SectionPanel eyebrow="Weather" title={weather?.locationName ?? "Город не выбран"}>
+        <SectionPanel
+          eyebrow="Weather"
+          title={weather?.locationName ?? "Город не выбран"}
+        >
           {weather ? (
             <div>
               <div className="text-4xl font-semibold text-white">{temp}</div>
@@ -90,8 +169,9 @@ export default async function TodayPage() {
               </p>
             </div>
           ) : (
-            <p className="text-sm leading-relaxed text-zinc-500">
-              Напиши боту <code>/weather город</code>. Настройка хранится отдельно для каждого пользователя.
+            <p className="text-sm leading-relaxed text-zinc-400">
+              Напиши боту <code>/weather город</code>. Настройка хранится
+              отдельно для каждого пользователя.
             </p>
           )}
         </SectionPanel>

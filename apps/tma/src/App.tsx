@@ -45,6 +45,12 @@ const SourcesScreen = lazy(() =>
   })),
 );
 
+const DailyLifeScreen = lazy(() =>
+  import("./screens/DailyLifeScreen").then((module) => ({
+    default: module.DailyLifeScreen,
+  })),
+);
+
 const IdealHumanScreen = lazy(() =>
   import("./screens/IdealHumanScreen").then((module) => ({
     default: module.IdealHumanScreen,
@@ -89,6 +95,7 @@ const SCREENS: ScreenId[] = [
   "lms",
   "workout",
   "ideal-human",
+  "daily-life",
   "health",
   "focus",
   "finance",
@@ -114,7 +121,7 @@ export default function App() {
   const setScreen = (next: ScreenId) => {
     if (
       next !== screen &&
-      screen === "ideal-human" &&
+      (screen === "ideal-human" || screen === "daily-life") &&
       idealHumanDirty &&
       !window.confirm(
         "Есть несохранённые изменения дневника. Открыть другой раздел и отменить их?",
@@ -208,6 +215,7 @@ export default function App() {
                 onOpenScholarship={() => setScreen("dashboard")}
                 onOpenWorkout={() => setScreen("workout")}
                 onOpenIdealHuman={() => setScreen("ideal-human")}
+                onOpenDailyLife={() => setScreen("daily-life")}
                 onOpenStudy={() => setScreen("study")}
                 onOpenAi={(date) => {
                   setAiDate(date);
@@ -220,6 +228,13 @@ export default function App() {
               <AiScreen date={aiDate} onBack={() => setScreen("home")} />
             ) : null}
             {screen === "workout" ? <WorkoutScreen /> : null}
+            {screen === "daily-life" ? (
+              <DailyLifeScreen
+                onOpenIdealHuman={() => setScreen("ideal-human")}
+                onOpenReminders={() => setScreen("reminders")}
+                onDirtyChange={setIdealHumanDirty}
+              />
+            ) : null}
             {screen === "ideal-human" ? (
               <IdealHumanScreen
                 onOpenWorkout={() => setScreen("workout")}

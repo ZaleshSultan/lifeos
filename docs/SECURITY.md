@@ -1,5 +1,16 @@
 # Security
 
+The active deployment uses Debian/systemd and Cloudflare Tunnel. See
+[operations](OPERATIONS.md) for encrypted backups, isolated recovery and
+monitoring, [web sessions](WEB_SESSIONS.md) and [dashboard](WEB_DASHBOARD.md)
+for browser authorization and CSRF, and [AI execution safety](AI_EXECUTION_SAFETY.md)
+for durable budgets and emergency shutdown. Optional [meal photo analysis](FOOD_PHOTO_LOGGING.md)
+requires explicit per-photo consent and review before persistence.
+[AGATA](AGATA_INTEGRATION.md) and external [creator account integrations](CREATOR_INTEGRATIONS.md)
+remain disabled without verified services and appropriate account authorization.
+Actual release and production verification evidence belongs in the
+[phase 2 report](OVERNIGHT_PHASE2_REPORT.md).
+
 ## Secrets
 
 Never commit real values for:

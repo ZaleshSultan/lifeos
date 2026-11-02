@@ -32,21 +32,34 @@ export default async function AccessPage({
           </div>
         ) : null}
 
+        <a
+          href="https://t.me/MYlifeeOS_bot"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-5 inline-flex min-h-11 items-center rounded-lg border border-cyan-300/30 px-4 text-sm text-cyan-100"
+        >
+          Открыть бота LifeOS
+        </a>
         <div className="mt-6 space-y-3">
           <div className="flex gap-3 rounded-xl border border-white/[0.07] bg-black/20 p-3">
             <Send className="mt-0.5 h-4 w-4 shrink-0 text-cyan-300" />
             <div>
-              <div className="text-sm font-medium text-zinc-100">1. Открой бота</div>
-              <div className="mt-1 text-xs text-zinc-500">
-                Отправь команду <code className="text-zinc-300">/web</code> или нажми кнопку Web.
+              <div className="text-sm font-medium text-zinc-100">
+                1. Открой бота
+              </div>
+              <div className="mt-1 text-xs text-zinc-400">
+                Отправь команду <code className="text-zinc-300">/web</code> или
+                нажми кнопку Web.
               </div>
             </div>
           </div>
           <div className="flex gap-3 rounded-xl border border-white/[0.07] bg-black/20 p-3">
             <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
             <div>
-              <div className="text-sm font-medium text-zinc-100">2. Открой личную ссылку</div>
-              <div className="mt-1 text-xs text-zinc-500">
+              <div className="text-sm font-medium text-zinc-100">
+                2. Открой личную ссылку
+              </div>
+              <div className="mt-1 text-xs text-zinc-400">
                 Она создаст защищённую HttpOnly-сессию этого браузера.
               </div>
             </div>

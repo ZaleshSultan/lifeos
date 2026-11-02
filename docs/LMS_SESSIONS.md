@@ -1,6 +1,8 @@
 # AITU LMS sessions
 
-LifeOS now supports a manually supplied Microsoft `ESTSAUTHPERSISTENT` cookie through **Study → AITU LMS Connection**. A Moodle Web Services token is optional. Today, Gemini and the external Agata consumer keep their existing boundaries.
+The current institution-approved automatic authorization blocker and genuine sign-in action are documented in [AITU authorization discovery](AITU_AUTH_DISCOVERY.md). Opening the university login does not transfer access to LifeOS. The manual method below remains an advanced compatibility fallback, not an automatic sign-in solution.
+
+LifeOS supports a manually supplied Microsoft `ESTSAUTHPERSISTENT` cookie through **Study → AITU LMS Connection**. A Moodle Web Services token is optional. Today, Gemini and the external Agata consumer keep their existing boundaries.
 
 ## Connection flow
 
@@ -15,7 +17,7 @@ Keep this value out of chat, AI prompts, shell history, screenshots and support 
 
 ## Storage and authentication
 
-Every `/api/tma/lms/*` endpoint requires signed, unexpired Telegram initData and an active linked profile. Personal web sessions and the development authentication shortcut are deliberately unavailable for these endpoints. Requests cannot supply `user_id`, a Moodle origin, or credentials in query parameters. Responses, including authentication failures, use `Cache-Control: no-store`.
+Credential validation/save/delete, manual-work writes and sync mutations require signed, unexpired Telegram initData and an active linked profile. Only the exact read-only `GET /api/tma/lms/connection` and `GET /api/tma/lms/work` routes also accept the existing authenticated personal web session; they expose safe owner-scoped projections. The development authentication shortcut remains unavailable for LMS operations. Requests cannot supply `user_id`, a Moodle origin, or credentials in query parameters. Responses, including authentication failures, use `Cache-Control: no-store`.
 
 The backend enforces strict JSON schemas, a 20,000-byte validation body limit, smaller limits for other mutations, per-user rate limits, two concurrent validations globally, and a 60-second bridge timeout. It invokes a static Python helper without a shell. The cookie travels on stdin; the subprocess receives neither service-role keys nor AI credentials. Its stderr and raw network errors are not forwarded or logged.
 
@@ -141,3 +143,15 @@ Security/regression coverage includes Telegram-only active-profile authenticatio
 Local verification passed: 556 JS/TS tests, 205 Python worker tests, all TypeScript checks, the TMA production build, disposable PostgreSQL ownership/lease assertions, and a packaged Node/Python bridge smoke test with networking disabled. Docker build exclusions were checked for the actual environment-file and virtualenv paths.
 
 `scripts/test-lms-migration.sh` executes the original/new migrations and ownership/grant/lease assertions against disposable PostgreSQL 15. TypeScript/TMA tests and the Python worker suite are also in CI. No production database verification has been performed. Browser WebView interaction remains a manual smoke check after deployment.
+
+## Debian parser dependency compatibility
+
+The inspected production interpreter is Python 3.11.2. Its installed Soup Sieve
+3.0 cannot parse ordinary selectors such as `table.user-grade`; this broke 36
+worker fixture cases before any authenticated university request. The official
+[Soup Sieve changelog](https://facelessuser.github.io/soupsieve/about/changelog/#302)
+confirms broken possessive quantifiers in Python versions before 3.11.5.
+The parser requirements now select maintained Soup Sieve 2.x on those runtimes.
+Install the reviewed requirements in the existing worker environment and restart
+only affected workers after release validation. This repairs local HTML parsing;
+it does not renew an expired institutional grant or prove a fresh LMS sync.

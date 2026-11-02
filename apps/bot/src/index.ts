@@ -1,3 +1,5 @@
+import { createAiBudgetStore } from "@lifeos/db";
+import { createAiGovernor } from "./ai-governor.js";
 import { loadBotConfig } from "./config.js";
 import { createBotDependencies } from "./dependencies.js";
 import { createBotServer } from "./server.js";
@@ -5,10 +7,16 @@ import { TelegramHttpClient } from "./telegram/client.js";
 
 const config = loadBotConfig();
 const dependencies = createBotDependencies();
+const aiGovernor = createAiGovernor({
+  store: dependencies.supabase
+    ? createAiBudgetStore(dependencies.supabase)
+    : undefined,
+});
 const telegram = config.telegramBotToken
   ? new TelegramHttpClient(config.telegramBotToken)
   : undefined;
 const server = createBotServer({
+  aiGovernor,
   config,
   store: dependencies.store,
   telegram,
@@ -49,3 +57,13 @@ server.listen(config.port, config.host, () => {
     setInterval(syncRates, 24 * 60 * 60 * 1000);
   }
 });
+
+// Cancellation must precede shutdown so optional provider calls cannot outlive the service.
+server.on("close", () => aiGovernor.shutdown());
+for (const signal of ["SIGTERM", "SIGINT"] as const)
+  process.once(signal, () => {
+    aiGovernor.shutdown();
+    server.close(() => process.exit(0));
+    const shutdownTimer = setTimeout(() => process.exit(0), 5000);
+    shutdownTimer.unref();
+  });

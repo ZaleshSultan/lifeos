@@ -37,6 +37,7 @@ const primaryTabs: NavigationItem[] = [
 ];
 
 const secondaryTabs: NavigationItem[] = [
+  { id: "daily-life", label: "День и вода", icon: Activity },
   { id: "ideal-human", label: "Ideal Human", icon: Target },
   { id: "health", label: "Здоровье", icon: HeartPulse },
   { id: "workout", label: "Тренировки", icon: Dumbbell },
@@ -55,6 +56,7 @@ const screenNames: Partial<Record<ScreenId, string>> = {
   ai: "AI-помощник",
   workout: "Тренировки",
   "ideal-human": "Ideal Human · 30 дней",
+  "daily-life": "Обзор · вода · питание",
   health: "Здоровье",
   focus: "Фокус",
   finance: "Финансы",
@@ -88,8 +90,12 @@ export function AppShell({
               <Zap className="h-[19px] w-[19px]" strokeWidth={2.5} />
             </div>
             <div className="min-w-0">
-              <div className="lo-brand-wordmark">lifeos<span className="lo-brand-dot">.</span></div>
-              <div className="lo-header-subtitle">{screenNames[screen] ?? "Личная система"}</div>
+              <div className="lo-brand-wordmark">
+                lifeos<span className="lo-brand-dot">.</span>
+              </div>
+              <div className="lo-header-subtitle">
+                {screenNames[screen] ?? "Личная система"}
+              </div>
             </div>
           </div>
           <div className="lo-header-status" aria-label={statusLabel}>
@@ -112,7 +118,11 @@ export function AppShell({
           className="lo-bottom-nav fixed inset-x-0 bottom-0 z-30"
         >
           {moreOpen ? (
-            <div id="more-sections" className="lo-more-panel" aria-label="Другие разделы">
+            <div
+              id="more-sections"
+              className="lo-more-panel"
+              aria-label="Другие разделы"
+            >
               <div className="lo-more-heading">Другие разделы</div>
               <div className="lo-more-grid">
                 {secondaryTabs.map(({ id, label, icon: Icon }) => (
@@ -120,10 +130,16 @@ export function AppShell({
                     key={id}
                     type="button"
                     aria-current={screen === id ? "page" : undefined}
-                    className={cx("lo-more-link", screen === id && "lo-more-link--active")}
+                    className={cx(
+                      "lo-more-link",
+                      screen === id && "lo-more-link--active",
+                    )}
                     onClick={() => selectScreen(id)}
                   >
-                    <Icon className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+                    <Icon
+                      className="h-[18px] w-[18px] shrink-0"
+                      aria-hidden="true"
+                    />
                     <span>{label}</span>
                   </button>
                 ))}
@@ -148,7 +164,11 @@ export function AppShell({
                   onClick={() => selectScreen(id)}
                 >
                   <span className="lo-nav-icon">
-                    <Icon className="h-[21px] w-[21px]" strokeWidth={active ? 2.35 : 1.9} aria-hidden="true" />
+                    <Icon
+                      className="h-[21px] w-[21px]"
+                      strokeWidth={active ? 2.35 : 1.9}
+                      aria-hidden="true"
+                    />
                   </span>
                   <span className="lo-nav-label">{label}</span>
                 </button>
@@ -159,10 +179,18 @@ export function AppShell({
               aria-label="Другие разделы"
               aria-controls="more-sections"
               aria-expanded={moreOpen}
-              className={cx("lo-nav-item", (moreOpen || moreSelected) && "lo-nav-item--active")}
+              className={cx(
+                "lo-nav-item",
+                (moreOpen || moreSelected) && "lo-nav-item--active",
+              )}
               onClick={() => setMoreOpen((open) => !open)}
             >
-              <span className="lo-nav-icon"><MoreHorizontal className="h-[22px] w-[22px]" aria-hidden="true" /></span>
+              <span className="lo-nav-icon">
+                <MoreHorizontal
+                  className="h-[22px] w-[22px]"
+                  aria-hidden="true"
+                />
+              </span>
               <span className="lo-nav-label">Ещё</span>
             </button>
           </div>

@@ -100,12 +100,12 @@ Verify `.env.example` updated for new vars — placeholders only.
 
 ## Layer 8: Deployment
 
-| Environment    | Checks                                              |
-| -------------- | --------------------------------------------------- |
-| Railway (bot)  | All secrets set; dev auth false; webhook secret set |
-| Vercel (web)   | No service role; auth before public launch          |
-| Arch (workers) | Vault path explicit; systemd user not root          |
-| Local dev      | `.env` in `.gitignore`; no real secrets committed   |
+| Environment    | Checks                                                           |
+| -------------- | ---------------------------------------------------------------- |
+| Debian (bot)   | Service secrets private; dev auth false; webhook secret set      |
+| Debian (web)   | No service role; live session validation, CSRF and cookie checks |
+| Debian workers | Vault path explicit; reviewed least-privilege systemd units      |
+| Local dev      | `.env` in `.gitignore`; no real secrets committed                |
 
 ## Layer 9: Testing
 

@@ -35,6 +35,7 @@ interface HomeScreenProps {
   onOpenScholarship?: () => void;
   onOpenWorkout: () => void;
   onOpenIdealHuman: () => void;
+  onOpenDailyLife?: () => void;
   onOpenStudy: () => void;
   onOpenAi: (date: string) => void;
   session: TmaSessionStatus;
@@ -44,6 +45,7 @@ export function HomeScreen({
   onOpenScholarship,
   onOpenWorkout,
   onOpenIdealHuman,
+  onOpenDailyLife,
   onOpenStudy,
   onOpenAi,
   session,
@@ -116,6 +118,22 @@ export function HomeScreen({
       </section>
 
       <TodayPanel date={home.localDate} onOpenAi={onOpenAi} />
+      {onOpenDailyLife ? (
+        <button
+          type="button"
+          className="w-full rounded-xl border border-cyan-400/20 bg-cyan-400/[0.04] p-4 text-left active:scale-[0.99]"
+          onClick={onOpenDailyLife}
+        >
+          <span className="block text-lg font-semibold text-white">
+            Обзор дня · вода · питание
+          </span>
+          <span className="mt-1 block text-xs text-zinc-400">
+            Факты и источники, утренний / вечерний обзор, быстрые записи и
+            уведомления по твоему выбору.
+          </span>
+        </button>
+      ) : null}
+
       <button
         type="button"
         onClick={onOpenIdealHuman}

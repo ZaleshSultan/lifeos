@@ -1,3 +1,4 @@
+import { createDailyLifeStore, type DailyLifeStore } from "./daily-life-store.js";
 import { idealHumanStore } from "./ideal-human-store.js";
 import type { ScholarshipConfig } from "../../core/src/scholarship.js";
 import { healthCredentialStore, type HealthCredentialStore } from "./health-credential-store.js";
@@ -1390,6 +1391,7 @@ export interface TmaStudySummary {
 }
 
 export interface LifeOSStore extends LmsSessionStore, WebSessionStore, HealthCredentialStore {
+  dailyLife?: DailyLifeStore;
   assistant?: AssistantStore;
   getPlanningSnapshot(
     userId: string,
@@ -3465,6 +3467,7 @@ export interface SupabaseLifeOSStoreOptions {
 
 export class SupabaseLifeOSStore implements LifeOSStore {
   readonly assistant: AssistantStore;
+  readonly dailyLife: DailyLifeStore;
   issueHealthIngestCredential(input: Parameters<HealthCredentialStore["issueHealthIngestCredential"]>[0]) {
     return healthCredentialStore(this.client).issueHealthIngestCredential(input);
   }
@@ -3513,6 +3516,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     options: SupabaseLifeOSStoreOptions = {},
   ) {
     this.assistant = new SupabaseAssistantStore(client);
+    this.dailyLife = createDailyLifeStore(client);
     this.adminTelegramUserIds = new Set(options.adminTelegramUserIds ?? []);
     const configuredKey =
       options.encryptionKey ?? options.oauthTokenEncryptionKey;

@@ -1,3 +1,6 @@
+import { isDailyLifeCallback, handleDailyLifeCallback, handleWaterCommand, handleBriefingCommand } from "./daily-life.js";
+import { isMealPhotoMessage, isMealPhotoCallback, handleMealPhoto, handleMealPhotoCallback } from "./meal-photo.js";
+import { governedOpenRouterFetch } from "../ai-governor.js";
 import { DateTime } from "luxon";
 import {
   explainModeReason,
@@ -133,6 +136,9 @@ const HELP_TEXT = [
   "/health_import",
   "/health_sources",
   "/healthsync_status",
+  "/water [300] — вода, быстрые кнопки и отмена записи",
+  "/briefing · /evening · /documentary — факты дня и предложения",
+  "Фото еды с подписью /meal — оценка после согласия и проверка перед сохранением",
   "/sources",
   "/sync [health|obsidian]",
   "/reminders",
@@ -2404,6 +2410,7 @@ function makeFinanceEntryHandler(
         aiEnabled: sourceCommand === "finance_ai" && runtime.financeAi?.enabled,
         openRouterApiKey: runtime.financeAi?.openRouterApiKey,
         model: runtime.financeAi?.model,
+        fetchImpl: runtime.financeAi?.fetchForUser?.(user!.userId) ?? governedOpenRouterFetch(undefined,user!.userId),
       }),
       text,
       sourceCommand,
@@ -4026,7 +4033,7 @@ async function handleFinanceAskCommand(
     userId: user!.userId,
     question,
     today,
-    ai: runtime.financeAi,
+    ai: {...runtime.financeAi,aiEnabled: runtime.financeAi?.enabled,fetchImpl: runtime.financeAi?.fetchForUser?.(user!.userId) ?? governedOpenRouterFetch(undefined,user!.userId)},
   });
   const lines = [
     result.answer,
@@ -4160,6 +4167,11 @@ async function handleFinanceFixCommand(
 // ---------------------------------------------------------------------------
 
 const COMMAND_REGISTRY: Record<string, CommandConfig> = {
+  water: {requiresUser:true,handler:async(args,message,runtime,user)=>handleWaterCommand(args,message,runtime,user!)},
+  briefing: {requiresUser:true,handler:async(_args,message,runtime,user)=>handleBriefingCommand("morning",message,runtime,user!)},
+  evening: {requiresUser:true,handler:async(_args,message,runtime,user)=>handleBriefingCommand("evening",message,runtime,user!)},
+  documentary: {requiresUser:true,handler:async(_args,message,runtime,user)=>handleBriefingCommand("documentary",message,runtime,user!)},
+
   start: {
     handler: async (_args, message, runtime, _user) => {
       await handleStartCommand(message, runtime);
@@ -4759,7 +4771,9 @@ async function handleTelegramCallbackQuery(
     data === "study_add_deadline" ||
     data === "study_add_topic";
 
-  if (data !== "workout_start" && !bankMatch && !studyAction) {
+  const dailyLifeAction = isDailyLifeCallback(data);
+  const mealPhotoAction = isMealPhotoCallback(data);
+  if (data !== "workout_start" && !bankMatch && !studyAction && !dailyLifeAction && !mealPhotoAction) {
     await answer("Эта кнопка недоступна. Откройте раздел заново.");
     return;
   }
@@ -4798,6 +4812,8 @@ async function handleTelegramCallbackQuery(
   }
 
   try {
+    if (mealPhotoAction) {await handleMealPhotoCallback(data!,message,runtime,user);return;}
+    if (dailyLifeAction) {await handleDailyLifeCallback(data!,message,runtime,user);return;}
     if (data === "study_today") {
       await handleStudyTodaySchedule(message, runtime, user);
       return;
@@ -4962,7 +4978,10 @@ export async function handleTelegramUpdate(
     }
 
     try {
-      await handlePhotoUpload(message, runtime, user);
+      if (isMealPhotoMessage(message)) {
+        if (message.chat.type !== "private" || message.chat.id !== user.telegramUserId) return;
+        await handleMealPhoto(message, runtime, user);
+      } else await handlePhotoUpload(message, runtime, user);
     } catch (error) {
       console.error("[ERROR] Photo upload handler failed", {
         errorType: error instanceof Error ? error.name : typeof error,

@@ -12,12 +12,12 @@ export function SectionPanel({
   action,
 }: SectionPanelProps) {
   return (
-    <section className="rounded-xl border border-white/[0.08] bg-white/[0.02]">
+    <section className="min-w-0 rounded-xl border border-white/[0.08] bg-white/[0.02]">
       {/* Panel header */}
-      <div className="flex items-center justify-between border-b border-white/[0.06] px-5 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] px-5 py-4">
         <div>
           {eyebrow ? (
-            <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-widest text-zinc-600">
+            <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-widest text-zinc-400">
               {eyebrow}
             </p>
           ) : null}

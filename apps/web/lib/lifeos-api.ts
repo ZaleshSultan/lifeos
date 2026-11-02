@@ -59,6 +59,7 @@ export async function lifeosApi<T>(path: string): Promise<T | null> {
     headers: { authorization: `Bearer ${token}` },
     cache: "no-store",
     redirect: "error",
+    signal: AbortSignal.timeout(10_000),
   });
   if (response.status === 401 || response.status === 403) return null;
   if (!response.ok) {

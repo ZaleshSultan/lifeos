@@ -2,75 +2,136 @@ import { Activity, HeartPulse, Moon, RotateCw } from "lucide-react";
 import { MetricCard } from "@/components/MetricCard";
 import { PageHeader } from "@/components/PageHeader";
 import { SectionPanel } from "@/components/SectionPanel";
-
-const ingestReasons = [
-  { id: "nightly_00_01", label: "nightly_00_01", desc: "Primary nightly run" },
-  { id: "retry_00_15", label: "retry_00_15", desc: "15-min retry window" },
-  {
-    id: "morning_reconcile_06_00",
-    label: "morning_reconcile_06_00",
-    desc: "AM reconcile pass",
-  },
-  { id: "manual", label: "manual", desc: "On-demand trigger" },
-  { id: "backfill", label: "backfill", desc: "Historical backfill" },
-];
-
-export default function HealthPage() {
+import { TrendChart } from "@/components/TrendChart";
+import { dashboardData, dateTime } from "@/lib/dashboard-data";
+import type { HealthSummary } from "../../../../tma/src/api/types";
+export default async function HealthPage() {
+  const data = await dashboardData<HealthSummary>("/api/tma/health");
   return (
     <>
       <PageHeader
-        kicker="Recovery Layer"
-        summary="Health is read from backend API projections fed by Health Connect ingest, never from frontend-held Supabase service credentials."
-        title="Health"
+        kicker={data?.date ?? "Health Connect"}
+        title="Здоровье и восстановление"
+        summary="Реальные измерения из существующего Health Connect потока. Неизвестные значения остаются пустыми."
       />
-
-      <div className="dashboard-grid">
-        <MetricCard
-          detail="Calculated during /health/ingest from sleep, HRV, RHR, stress, and activity signals."
-          icon={HeartPulse}
-          label="Recovery Mode"
-          tone="rose"
-          value="Mode"
-        />
-        <MetricCard
-          detail="Previous-day sleep rolls into daily health rows and focus decisions."
-          icon={Moon}
-          label="Sleep"
-          value="Daily"
-        />
-        <MetricCard
-          detail="Steps, active energy, and workouts are aggregated by the Android bridge."
-          icon={Activity}
-          label="Movement"
-          tone="mint"
-          value="Range"
-        />
-        <MetricCard
-          detail="Sync runs preserve reason, status, source, and completeness score."
-          icon={RotateCw}
-          label="Sync"
-          tone="amber"
-          value="Runs"
-        />
-      </div>
-
-      <div className="mt-6">
-        <SectionPanel eyebrow="Ingest" title="Previous-Day Health Contract">
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {ingestReasons.map((reason) => (
-              <div
-                key={reason.id}
-                className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-4 py-3 transition-colors hover:bg-white/[0.04]"
-              >
-                <p className="font-mono text-[12px] font-medium text-cyan-400/80">
-                  {reason.label}
-                </p>
-                <p className="mt-1 text-[12px] text-zinc-600">{reason.desc}</p>
-              </div>
-            ))}
+      {data ? (
+        <>
+          <div className="dashboard-grid">
+            <MetricCard
+              label="Сон"
+              icon={Moon}
+              value={
+                data.sleepMinutes == null
+                  ? "—"
+                  : `${(data.sleepMinutes / 60).toFixed(1)} ч`
+              }
+              detail={data.sourceLabel ?? "Источник не указан"}
+            />
+            <MetricCard
+              label="Шаги"
+              icon={Activity}
+              value={
+                data.steps == null ? "—" : data.steps.toLocaleString("ru-RU")
+              }
+              detail={`Измеренный день: ${data.date}`}
+              tone="mint"
+            />
+            <MetricCard
+              label="Пульс в покое"
+              icon={HeartPulse}
+              value={
+                data.restingHeartRate == null
+                  ? "—"
+                  : `${data.restingHeartRate} уд/мин`
+              }
+              detail="Показывается только при наличии измерения."
+              tone="rose"
+            />
+            <MetricCard
+              label="Полнота данных"
+              icon={RotateCw}
+              value={
+                data.hasMetrics
+                  ? `${data.dataCompletenessScore}%`
+                  : "Нет измерений"
+              }
+              detail={
+                data.recommendation ||
+                "Проверь подключение телефона и разрешения Health Connect."
+              }
+              tone="amber"
+            />
           </div>
+          <div className="mt-6 grid gap-5 lg:grid-cols-2">
+            <SectionPanel title="Тренд сна">
+              <TrendChart
+                title="Продолжительность сна"
+                unit="ч"
+                points={(data.trends ?? []).map((point) => ({
+                  date: point.date,
+                  value:
+                    point.sleepMinutes === null
+                      ? null
+                      : Math.round((point.sleepMinutes / 60) * 10) / 10,
+                }))}
+              />
+            </SectionPanel>
+            <SectionPanel title="Активность">
+              <TrendChart
+                title="Шаги"
+                unit="шагов"
+                points={(data.trends ?? []).map((point) => ({
+                  date: point.date,
+                  value: point.steps,
+                }))}
+              />
+            </SectionPanel>
+            <SectionPanel title="Источники и свежесть">
+              <div className="space-y-3">
+                {data.sources?.length ? (
+                  data.sources.map((source) => (
+                    <div
+                      key={source.source}
+                      className="rounded-lg border border-white/[0.08] p-3"
+                    >
+                      <p className="text-sm text-zinc-100">{source.label}</p>
+                      <p className="mt-1 text-xs text-zinc-400">
+                        Последнее измерение: {dateTime(source.latestMetricAt)}
+                      </p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-zinc-400">
+                    Источник и свежесть пока не подтверждены.
+                  </p>
+                )}
+              </div>
+            </SectionPanel>
+            <SectionPanel title="Недостающие данные">
+              <p className="text-sm text-zinc-300">
+                {Object.entries(data.missingMetrics ?? {})
+                  .filter(([, missing]) => missing)
+                  .map(([name]) => name)
+                  .join(", ") ||
+                  "Подробный список отсутствующих разрешений не получен."}
+              </p>
+              <p className="mt-3 text-xs leading-relaxed text-zinc-400">
+                Для автоматической доставки нужен установленный и разрешённый
+                Android-компонент. Данные телефона не возникают из web-сессии;
+                manual записи Ideal Human сохраняются отдельно и не
+                перезаписываются.
+              </p>
+            </SectionPanel>
+          </div>
+        </>
+      ) : (
+        <SectionPanel title="Измерения пока недоступны">
+          <p className="text-sm text-zinc-300">
+            Проверь подключение и обнови страницу. Ранее сохранённые данные
+            остаются в LifeOS.
+          </p>
         </SectionPanel>
-      </div>
+      )}
     </>
   );
 }

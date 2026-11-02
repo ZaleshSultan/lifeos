@@ -33,8 +33,7 @@ MONTHLY_REVIEW_BASE_URL=https://openrouter.ai/api/v1
 MONTHLY_REVIEW_POLL_SECONDS=3600
 ```
 
-AI is optional. If disabled or missing a key, the worker writes deterministic
-local markdown and still succeeds.
+The worker produces deterministic local markdown. Its legacy direct provider path is disabled until an authenticated shared backend-governor gateway is implemented. Even an enabled flag and existing key produce `shared_ai_governor_required` rather than an unaccounted external request. `MONTHLY_REVIEW_BASE_URL` is retained as a compatibility setting and is not called. No provider key or complete provider response is stored in fallback metadata. See [AI execution safety](../../docs/AI_EXECUTION_SAFETY.md).
 
 ## Multi-user Status
 
