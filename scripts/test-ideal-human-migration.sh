@@ -27,7 +27,7 @@ for attempt in {1..8}; do
     if docker exec "$task_container" psql -h 127.0.0.1 -X -qAt -U postgres -v ON_ERROR_STOP=1 -c "set role service_role; select public.save_ideal_human_day('00000000-0000-4000-8000-000000000001','2026-11-06',jsonb_build_object('date','2026-11-06','notes','concurrent-$attempt'),0)->>'revision';" > "$task_results/$attempt" 2> "$task_results/$attempt.err"; then
       printf '%s\n' success > "$task_results/$attempt.result"
     else
-      if ! rg -q 'ideal_human_conflict' "$task_results/$attempt.err"; then cat "$task_results/$attempt.err" >&2; exit 1; fi
+      if ! grep -q 'ideal_human_conflict' "$task_results/$attempt.err"; then cat "$task_results/$attempt.err" >&2; exit 1; fi
       printf '%s\n' conflict > "$task_results/$attempt.result"
     fi
   ) &
