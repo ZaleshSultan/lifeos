@@ -1,0 +1,15 @@
+# Managed by LifeOS operations v1.
+[Unit]
+Description=LifeOS read-only health checks and deduplicated operational alerts
+
+[Service]
+Type=oneshot
+WorkingDirectory=@REPO_ROOT@
+ExecStart=@PYTHON@ @REPO_ROOT@/scripts/ops/lifeos_monitor.py --config @CONFIG@
+Environment=PYTHONDONTWRITEBYTECODE=1
+UMask=0077
+NoNewPrivileges=true
+Nice=10
+MemoryMax=256M
+CPUQuota=25%
+TimeoutStartSec=3min

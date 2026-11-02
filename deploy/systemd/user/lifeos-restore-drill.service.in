@@ -1,0 +1,17 @@
+# Managed by LifeOS operations v1.
+[Unit]
+Description=LifeOS network-isolated temporary database restore verification
+
+[Service]
+Type=oneshot
+WorkingDirectory=@REPO_ROOT@
+ExecStart=@PYTHON@ @REPO_ROOT@/scripts/ops/lifeos_backup.py restore-drill --config @CONFIG@
+Environment=PYTHONDONTWRITEBYTECODE=1
+UMask=0077
+NoNewPrivileges=true
+Nice=15
+IOSchedulingClass=idle
+MemoryMax=384M
+CPUQuota=50%
+TimeoutStartSec=10min
+TimeoutStopSec=30

@@ -43,10 +43,10 @@ Historical transactions are backfilled based on daily exchange rates. If an API 
 
 If `finance_transactions` or `finance_receipts` are accidentally purged:
 
-1. Log into the Supabase Dashboard.
-2. Navigate to Database -> Backups.
-3. Select a Point-In-Time recovery point prior to the incident.
-4. Note that restoring the database will NOT restore deleted files from the `receipts` storage bucket. Ensure you do not purge the S3 bucket if you intend to recover receipts. S3 bucket items must be manually backed up if desired.
+1. Preserve the current state and follow the [operations recovery runbook](OPERATIONS.md).
+2. Check actual provider backup/PITR availability. The inspected production account has no available managed recovery backup and PITR is disabled; do not assume a dashboard recovery point exists.
+3. Verify and restore a current encrypted local backup into an isolated temporary database first. Any selective production recovery needs a separate reviewed transaction that preserves newer records.
+4. PostgreSQL backups contain Storage metadata, not receipt object bytes. Database recovery does not prove that deleted receipt files were recovered; protect those files separately.
 
 > [!WARNING]
-> Because the Finance module is a Single Source of Truth, never run bulk deletions manually on the `finance_transactions` table without disabling the cascading triggers first.
+> Do not bulk-delete production financial history or disable its triggers, RLS or authorization. Application rollback never restores an old database over current records. Use verified backups and an isolated recovery rehearsal before a separately reviewed data repair.
