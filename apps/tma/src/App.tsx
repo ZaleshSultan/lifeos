@@ -45,6 +45,10 @@ const SourcesScreen = lazy(() =>
   })),
 );
 
+const IdealHumanScreen = lazy(() =>
+  import("./screens/IdealHumanScreen").then(module => ({default:module.IdealHumanScreen})),
+);
+
 const WorkoutScreen = lazy(() =>
   import("./screens/WorkoutScreen").then((module) => ({
     default: module.WorkoutScreen,
@@ -82,6 +86,7 @@ const SCREENS: ScreenId[] = [
   "dashboard",
   "lms",
   "workout",
+  "ideal-human",
   "health",
   "focus",
   "finance",
@@ -186,6 +191,7 @@ export default function App() {
               <HomeScreen
                 onOpenScholarship={() => setScreen("dashboard")}
                 onOpenWorkout={() => setScreen("workout")}
+                onOpenIdealHuman={() => setScreen("ideal-human")}
                 onOpenStudy={() => setScreen("study")}
                 onOpenAi={(date) => {
                   setAiDate(date);
@@ -198,6 +204,7 @@ export default function App() {
               <AiScreen date={aiDate} onBack={() => setScreen("home")} />
             ) : null}
             {screen === "workout" ? <WorkoutScreen /> : null}
+            {screen === "ideal-human" ? <IdealHumanScreen onOpenWorkout={() => setScreen("workout")} onOpenHealth={() => setScreen("health")} onOpenStudy={() => setScreen("study")} /> : null}
             {screen === "dashboard" ? (
               <StudyDashboardScreen
                 onOpenStudy={() => setScreen("study")}

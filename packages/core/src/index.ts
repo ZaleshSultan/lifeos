@@ -16,6 +16,7 @@ export * from "./planner.js";
 export * from "./source-events.js";
 export * from "./types.js";
 export * from "./workout.js";
+export * from "./ideal-human.js";
 
 export * from "./lms-work.js";
 

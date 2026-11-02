@@ -30,6 +30,7 @@ import { integrationCardsForSession } from "../lib/session-status";
 interface HomeScreenProps {
   onOpenScholarship?: () => void;
   onOpenWorkout: () => void;
+  onOpenIdealHuman: () => void;
   onOpenStudy: () => void;
   onOpenAi: (date: string) => void;
   session: TmaSessionStatus;
@@ -38,6 +39,7 @@ interface HomeScreenProps {
 export function HomeScreen({
   onOpenScholarship,
   onOpenWorkout,
+  onOpenIdealHuman,
   onOpenStudy,
   onOpenAi,
   session,
@@ -105,6 +107,11 @@ export function HomeScreen({
       </section>
 
       <TodayPanel date={home.localDate} onOpenAi={onOpenAi} />
+      <button type="button" onClick={onOpenIdealHuman} className="w-full rounded-xl border border-cyan-400/30 bg-cyan-400/[0.08] p-4 text-left shadow-panel active:scale-[0.99]">
+        <span className="block text-xs font-semibold uppercase tracking-[0.15em] text-cyan-300">IDEAL HUMAN · 03.11 — 02.12</span>
+        <span className="mt-1 block text-lg font-semibold text-white">Открыть дневник 30 дней</span>
+        <span className="mt-1 block text-xs text-zinc-400">Тело · интеллект · съёмка · честные итоги</span>
+      </button>
       {onOpenScholarship ? <ScholarshipDailySummary onOpen={onOpenScholarship}/> : null}
 
       <section className="rounded-xl border border-cyan-400/15 bg-cyan-400/[0.05] p-4 shadow-panel">

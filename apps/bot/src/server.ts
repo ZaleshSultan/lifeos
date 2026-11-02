@@ -50,6 +50,7 @@ import {
 } from "./syncthing.js";
 import { pipeline } from "node:stream/promises";
 import { handleWorkoutRoute } from "./workout-routes.js";
+import { handleIdealHumanRoute } from "./ideal-human-routes.js";
 import {
   createConfiguredLifeosAiService,
   type LifeosAiService,
@@ -3382,6 +3383,11 @@ async function handleRequest(
       writeJson(response, 200, tmaData({ ...home, weather }));
       return;
     }
+
+    if (await handleIdealHumanRoute({
+      request, response, pathname: requestUrl.pathname,
+      userId: auth.user.userId, store, readJsonBody, writeJson,
+    })) return;
 
     if (await handleWorkoutRoute({
       request, response, pathname: requestUrl.pathname,
