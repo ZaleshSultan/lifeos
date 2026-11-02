@@ -90,7 +90,7 @@ export function parseIdealHumanDay(input: unknown): IdealHumanDay {
   if (v.footageBackedUp !== null && v.footageBackedUp !== undefined &&
       typeof v.footageBackedUp !== "boolean")
     throw new IdealHumanInputError("Invalid footageBackedUp");
-  return {
+  const day: IdealHumanDay = {
     date: v.date,
     weightKg: number("weightKg", 25, 300, false),
     sleepMinutes: number("sleepMinutes", 0, 1440),
@@ -108,6 +108,9 @@ export function parseIdealHumanDay(input: unknown): IdealHumanDay {
     highlights: str("highlights", 500),
     notes: str("notes", 2000),
   };
+  if (Object.entries(day).every(([key,value]) => key === "date" || value === null || value === ""))
+    throw new IdealHumanInputError("Record at least one actual observation or reflection");
+  return day;
 }
 
 export function idealHumanStats(days: readonly IdealHumanDay[]) {
