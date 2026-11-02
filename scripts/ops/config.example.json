@@ -1,0 +1,36 @@
+{
+  "project_ref": "abcdefghijklmnopqrst",
+  "management_token_file": "/home/operator/.supabase/access-token",
+  "bot_env_file": "/srv/lifeos/apps/bot/.env",
+  "key_file": "/home/operator/.config/lifeos/backup.key",
+  "database_ca_file": "/home/operator/.config/lifeos/supabase-db-ca.crt",
+  "canonical_user_id": "00000000-0000-4000-8000-000000000001",
+  "canonical_telegram_user_id": 123456789,
+  "backup_dir": "/home/operator/lifeos-backups/automated-v1",
+  "state_dir": "/home/operator/.local/state/lifeos-ops",
+  "runtime_dir": "/run/user/1000/lifeos-ops",
+  "client_image": "postgres:17",
+  "restore_image": "supabase/postgres:17.6.1.173",
+  "minimum_rows": {
+    "auth_users": 1,
+    "profiles": 1,
+    "study_courses": 1,
+    "academic_records": 1,
+    "workouts": 1,
+    "finance_transactions": 1
+  },
+  "canonical_minimum_rows": {
+    "public.academic_records": 1
+  },
+  "offsite_remote": "",
+  "require_offsite_for_deploy": false,
+  "retention_enabled": true,
+  "retention_days": 30,
+  "predeploy_max_age_hours": 24,
+  "backup_max_age_hours": 30,
+  "lms_max_age_hours": 24,
+  "public_origin": "https://YOUR_LIFEOS_HOST",
+  "alerts_enabled": false,
+  "suppress_initial_alerts": true,
+  "alert_failure_threshold": 2
+}

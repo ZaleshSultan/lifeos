@@ -1,0 +1,2 @@
+# Already supplied by the existing university worker virtualenv.
+cryptography>=42.0.0

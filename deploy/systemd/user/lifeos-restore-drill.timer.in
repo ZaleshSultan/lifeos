@@ -1,0 +1,12 @@
+# Managed by LifeOS operations v1.
+[Unit]
+Description=Weekly LifeOS isolated restore verification
+
+[Timer]
+OnCalendar=Sun *-*-* 03:40:00 Asia/Almaty
+Persistent=true
+RandomizedDelaySec=120
+AccuracySec=30
+
+[Install]
+WantedBy=timers.target

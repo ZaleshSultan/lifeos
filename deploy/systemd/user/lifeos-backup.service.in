@@ -1,0 +1,21 @@
+# Managed by LifeOS operations v1. Contains paths only, never credentials.
+[Unit]
+Description=LifeOS encrypted database backup and verification
+StartLimitIntervalSec=3h
+StartLimitBurst=2
+
+[Service]
+Type=oneshot
+WorkingDirectory=@REPO_ROOT@
+ExecStart=@PYTHON@ @REPO_ROOT@/scripts/ops/lifeos_backup.py backup --config @CONFIG@
+Environment=PYTHONDONTWRITEBYTECODE=1
+UMask=0077
+NoNewPrivileges=true
+Nice=10
+IOSchedulingClass=idle
+MemoryMax=384M
+CPUQuota=50%
+TimeoutStartSec=10min
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=15min

@@ -1,0 +1,12 @@
+# Managed by LifeOS operations v1.
+[Unit]
+Description=LifeOS operational monitoring every five minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+RandomizedDelaySec=15
+AccuracySec=20
+
+[Install]
+WantedBy=timers.target
