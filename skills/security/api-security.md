@@ -1,151 +1,53 @@
 # API Security Guidelines
 
-> Applies to `apps/bot/src/server.ts` HTTP API surface.
-> Informed by [Anthropic Cybersecurity Skills](https://github.com/mukul975/Anthropic-Cybersecurity-Skills).
+> Applies to the existing Node HTTP backend and Next.js web bridge. Read [authentication](auth-security.md) and the current [architecture](../../docs/ARCHITECTURE.md) before changing trust boundaries.
 
-## API Route Map
+## Route boundaries
 
-| Route family             | Auth                | Body limit       | CORS |
-| ------------------------ | ------------------- | ---------------- | ---- |
-| `GET /healthz`           | None                | —                | `*`  |
-| `POST /telegram/webhook` | Webhook secret      | Telegram payload | —    |
-| `/api/tma/*`             | Init data HMAC      | 1 MB JSON        | `*`  |
-| `POST /health/ingest`    | Ingest secret       | Health payload   | `*`  |
-| `GET /tma/*`             | None (static)       | —                | `*`  |
-| `/api/web/*`             | **Not implemented** | —                | —    |
+| Route family                                | Authentication / access                                                                                    | Input and transport                                                                       |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `GET /healthz`                              | Public safe health projection                                                                              | No user records or secrets                                                                |
+| `POST /telegram/webhook`                    | Exactly one valid webhook secret header, timing-safe match                                                 | Bounded JSON, production secret required                                                  |
+| `/api/tma/*`                                | Valid signed Telegram initData or live opaque web session where allowed; active profile for protected data | One-MiB JSON cap, exact configured CORS origins                                           |
+| LMS session mutations                       | Genuine Telegram initData only                                                                             | Owner-bound encrypted credentials and validated leases                                    |
+| `POST /health/ingest`, `/api/health/ingest` | Registered personal health Bearer credential or valid TMA initData                                         | Core validation; no shared APK ingest secret                                              |
+| `POST /api/web/auth/exchange`               | Signed issued one-use login token                                                                          | Creates a new opaque session; no general web summary API duplication                      |
+| `POST /api/web/auth/logout`                 | Caller web session                                                                                         | Durable revocation; no other user's session selected by client ID                         |
+| `/web/api/bridge/*`                         | Next server reads HttpOnly cookie and backend independently validates it                                   | Explicit method/resource allowlist, exact Origin on mutations, bounded JSON, no redirects |
+| `/tma/*`                                    | Public static shell/assets                                                                                 | Protected data remains behind backend auth                                                |
 
-## Request Handling Rules
+Session/registration status are explicit exceptions: valid Telegram callers can discover their pending/unregistered/blocked state without reading protected records. Safe LMS connection/work reads may use web auth; credentials cannot. Do not broaden these exceptions when adding routes.
 
-### 1. Authentication First
+## Authentication and ownership first
 
-Every `/api/tma/*` handler must:
+Call the existing auth resolver before accessing user data. Pass only its resolved `user.userId` into store methods. Body/query IDs are resource selectors, not authority. Explicit invalid Authorization must fail closed rather than fall back to Telegram/dev identity. Native Supabase identity remains canonical, but the current web design does not require browser Supabase JWTs or direct browser database reads.
 
-```typescript
-const auth = await resolveTmaUser(request, options);
-if (!auth.ok) {
-  writeJson(response, auth.statusCode, { error: auth.error });
-  return;
-}
-const { user } = auth;
-// All subsequent store calls use user.userId
-```
+Keep business validation in pure core and persistence/RPC access in the DB package. Extract route modules for substantive additions rather than expanding the server monolith. Sensitive writes retain their backend confirmation and atomic idempotency/revision checks.
 
-Never parse route params before auth resolution.
+## Requests and responses
 
-### 2. Response Envelope
+- Preserve `{ data: T }` and stable `{ error: code, message?: safeText }` envelopes. Never return stack traces, raw provider/database diagnostics, cookies or private configuration.
+- Bound JSON before parsing, reject unsupported enums/types/dates, and validate resource identifiers. Use the existing per-adapter image type/size/dimension checks; this is not a universal file-security guarantee.
+- Return health projections rather than `raw_payload`. Return private receipt content through its authorized existing boundary; never expose storage keys or vault paths.
+- Private API responses are no-store. Do not describe authenticated health/finance summaries as publicly cacheable. Static hashed assets may be immutable while HTML remains fresh.
+- Validate wrong methods explicitly. Existing route matching can return 404 where no handler exists; do not falsely claim every wrong-method path already returns 405.
 
-**Success:**
+## CORS and browser CSRF
 
-```json
-{ "data": { ... } }
-```
+`cors.ts` implements exact `LIFEOS_CORS_ALLOWED_ORIGINS`, direct same-origin handling and validated preflights for TMA/health API families. Production configuration accepts exact HTTPS origins; local loopback HTTP is permitted only outside production. There is no wildcard API origin policy. A TLS-terminating proxy must configure its actual public frontend origin; forwarded headers do not establish trust.
 
-**Error:**
+CORS is transport policy, not authentication. Backend ownership checks are required for non-browser clients too. The Next web bridge forwards only cookie-derived identity, refuses caller-supplied backend URLs/identity headers, checks exact Origin on mutations and rejects cross-site mutation fetches. Logout also checks Origin. Preserve these rules on new web routes; SameSite alone does not protect against all sibling-host requests.
 
-```json
-{ "error": "error_code", "message": "Optional human text" }
-```
+## Limits and external calls
 
-- Use stable `error` codes for client handling.
-- Use `sanitizeErrorMessage()` before including `message` — redact secrets.
-- Never return stack traces to clients.
+Existing Gemini/assistant/LMS controls apply to their own operations. The shared AI governor reserves durable token/cost/task budgets, bounds provider concurrency/time/output, propagates cancellation and fails closed without accounting. OpenRouter/Telegram adapters use fixed destinations and reject redirects. Consent is required before external meal-photo analysis, and its result stays a draft until reviewed save.
 
-### 3. Input Validation
+There is no repository-wide distributed rate limiter for every webhook/TMA/health endpoint. Do not claim Cloudflare ingress rate controls exist without inspecting actual configuration. Review general authenticated abuse/endpoint throttling separately from AI cost budgets. Legacy operator-configured ICS feeds need their own outbound URL/redirect review before being exposed to users.
 
-| Input                   | Validation                          |
-| ----------------------- | ----------------------------------- |
-| JSON body               | `readJsonBody` with 1 MB cap        |
-| UUIDs                   | Validate format before DB lookup    |
-| Enums                   | Match against `@lifeos/core` types  |
-| Dates                   | ISO 8601 parse with fallback reject |
-| Base64 images (finance) | Size check, magic bytes if possible |
-| Telegram text           | Length limits in command handlers   |
+## Verification and operations
 
-### 4. Output Filtering
+The current deployment is Debian/systemd with Cloudflare Tunnel, not a presumed Railway/Vercel deployment. Verify the actual service/build SHA, environment, backup/restore and rollback evidence before release.
 
-- Do not return `SUPABASE_SERVICE_ROLE_KEY`, internal queue IDs unless needed.
-- Strip `raw_payload` from health API responses unless debug mode.
-- Finance receipts: return signed URLs with TTL, not storage paths.
+For substantive changes run TypeScript/unit/API checks, relevant worker/migration tests and frontend builds/browser scenarios. Negative coverage includes expired/future initData, invalid/revoked/blocked identities, wrong owners, invalid-origin CSRF, oversized bodies, concurrent/retried writes, provider failures and sanitized errors. Existing coverage lives in bot security/route tests, web bridge/proxy/login/logout tests and isolated SQL/browser harnesses. Keep runtime verification claims separate from fixture results.
 
-## CORS Policy
-
-**Current:** `Access-Control-Allow-Origin: *`
-
-**Production recommendation:**
-
-```typescript
-const allowedOrigins = [
-  process.env.TMA_ORIGIN, // e.g. https://tma.example.com
-  process.env.WEB_ORIGIN, // e.g. https://dashboard.example.com
-];
-// Reflect origin only if in allowlist
-```
-
-Wildcard CORS + stolen initData = cross-origin API abuse from malicious pages.
-
-## Rate Limiting (Recommended)
-
-| Endpoint            | Suggested limit                          |
-| ------------------- | ---------------------------------------- |
-| `/telegram/webhook` | Telegram controls rate; add 429 on burst |
-| `/api/tma/*`        | 100 req/min per telegram_user_id         |
-| `/health/ingest`    | 10 req/hour per device                   |
-| `/healthz`          | Unlimited                                |
-
-Maintain the existing rate limits in `server.ts` and the current Cloudflare/Debian
-reverse-proxy boundary. Railway notes describe an alternative deployment.
-
-## HTTP Method Discipline
-
-- `GET` — read-only, idempotent, cacheable summaries.
-- `POST` — creates, actions (complete set, save expense).
-- `PUT/PATCH` — updates (when added).
-- `DELETE` — soft-delete preferred for life entities.
-
-Return `405` for wrong methods — already handled by route matching.
-
-## Static TMA Hosting
-
-When `TMA_STATIC_DIR` is set, bot serves built TMA assets at `/tma/*`.
-
-- No directory listing.
-- `Content-Type` set correctly.
-- Cache static assets with long `max-age`; `index.html` short cache.
-
-## Adding New API Routes
-
-Checklist for every new route in `server.ts`:
-
-1. [ ] Auth mechanism defined (initData / JWT / secret / none)
-2. [ ] `user_id` scoped if user data involved
-3. [ ] Input validated in handler or `@lifeos/core`
-4. [ ] Error responses use envelope format
-5. [ ] No secrets in response body
-6. [ ] Test added to `server.test.ts`
-7. [ ] Documented in relevant `docs/*.md`
-
-## Planned `/api/web/*` Routes
-
-When implementing web dashboard APIs:
-
-```
-GET  /api/web/home      → today summary
-GET  /api/web/health    → recovery mode + ingest
-GET  /api/web/finance   → monthly rollup
-GET  /api/web/study     → academic sources
-```
-
-Auth: Supabase JWT in `Authorization: Bearer <token>`, validated server-side.
-
-**Do not** duplicate TMA routes for web — share store methods, different auth resolver.
-
-## Security Testing
-
-Existing: `apps/bot/src/server.test.ts` covers webhook secret, initData, ingest.
-
-Add tests for:
-
-- Expired initData rejection
-- Oversized body rejection
-- Unlinked user 403
-- IDOR attempts (user A's ID in user B's session)
+See [web dashboard](../../docs/WEB_DASHBOARD.md), [health contract](../../docs/HEALTH_BRIDGE_CONTRACT.md), [AI safety](../../docs/AI_EXECUTION_SAFETY.md) and [operations](../../docs/OPERATIONS.md).

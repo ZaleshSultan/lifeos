@@ -792,13 +792,25 @@ try {
       "650",
     );
     journalFail = true;
+    const failedSave = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname ===
+          "/web/api/bridge/ideal-human/days" &&
+        response.request().method() === "PUT",
+    );
     await page
       .getByRole("button", {
         name: "Подтвердить и сохранить приём пищи",
         exact: true,
       })
       .click();
-    await page.getByRole("alert").waitFor();
+    assert.equal((await failedSave).status(), 503);
+    await page
+      .getByText(
+        "Сервис временно недоступен. Проверь соединение и повтори попытку.",
+        { exact: true },
+      )
+      .waitFor();
     assert.equal(days.get("A")[0].meals.length, 0);
     assert.equal(
       await page.getByLabel("Ккал", { exact: true }).inputValue(),

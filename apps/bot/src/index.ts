@@ -6,6 +6,8 @@ import { createBotServer } from "./server.js";
 import { TelegramHttpClient } from "./telegram/client.js";
 
 const config = loadBotConfig();
+// Set by the reviewed deployment; expose only a complete commit SHA in health.
+const releaseSha = process.env.LIFEOS_RELEASE_SHA?.trim();
 const dependencies = createBotDependencies();
 const aiGovernor = createAiGovernor({
   store: dependencies.supabase
@@ -16,6 +18,8 @@ const telegram = config.telegramBotToken
   ? new TelegramHttpClient(config.telegramBotToken)
   : undefined;
 const server = createBotServer({
+  version:
+    releaseSha && /^[a-f0-9]{40}$/i.test(releaseSha) ? releaseSha : undefined,
   aiGovernor,
   config,
   store: dependencies.store,
