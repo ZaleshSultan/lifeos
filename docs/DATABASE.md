@@ -48,7 +48,7 @@ Apply migrations in filename order:
 supabase db push
 ```
 
-Current migration set:
+The initial foundation migrations include:
 
 - `20260518020100_lifeos_kernel.sql`
 - `20260518020200_health_layer.sql`
@@ -64,6 +64,12 @@ Current migration set:
 - `20260524000100_dynamic_sources_mvp.sql`
 - `20260615000100_profile_status_roles.sql`
 
+This is not the complete migration inventory. The authoritative ordered set is
+`supabase/migrations/*.sql`; compare its versions with the target project's
+`supabase_migrations.schema_migrations` before selecting a release. Do not push
+unrelated pending migrations or rerun already applied SQL. A migration file's
+presence does not establish that it has been applied in production.
+
 ## Kernel Tables
 
 - `profiles`
@@ -78,10 +84,17 @@ Current migration set:
 - `health_sync_runs`
 - `health_workouts`
 - `health_samples`
+- `health_metrics`
+- `health_ingest_credentials` (server-only, revocable device credentials)
 
 ## Fitness And Finance Tables
 
-The fitness and finance migrations establish layer tables and indexes for future structured workflows. Telegram spend capture currently writes finance-flavored `life_entities` and stores parsed amount metadata.
+Workout sessions and sets use the existing `workouts` and `workout_sets` tables.
+Finance uses `finance_transactions`, accounts, categories, budgets and related
+receipt/tag/reimbursement tables; optional timeline entities are projections,
+not a second authoritative transaction ledger. Currency and exchange-rate
+lookups receive read-only browser policies in
+`20261103000100_finance_lookup_rls.sql`; browser mutations remain forbidden.
 
 ## Dynamic Sources MVP
 
@@ -93,7 +106,12 @@ Dynamic source state is stored in:
 - `reminders`
 - `academic_records`
 
-These tables prepare integrations without implementing Google OAuth, Google sync, university scraping, or mobile bridge changes. The Phase 1 seed can populate source catalog rows, finals, ExamFX, the Discrete Mathematics summer course, academic records/topics, and starter reminders as Supabase data.
+Integration workers and authenticated APIs reuse these tables alongside
+`study_courses`, `course_schedules` and `assessment_items`. Their presence does
+not establish a current university grant, a fresh sync or an authorized Google
+account. See [LMS connection limitations](AITU_AUTH_DISCOVERY.md) and
+[architecture](ARCHITECTURE.md) for the actual integration boundaries. Never
+replay a historical seed over restored academic records or outbound queues.
 
 ## RLS
 
@@ -176,3 +194,61 @@ See [Obsidian recovery](OBSIDIAN_SYNC_RECOVERY.md) for the ordered additive
 `20261025042616_obsidian_sync_recovery.sql` and
 `20261025043139_obsidian_sync_leases.sql` migrations, service-only publication
 ledger, legacy quarantine and required stop-all-old-writers rollout.
+
+## Daily Life release migrations
+
+These three candidate migrations extend the existing data model. Actual applied
+versions, restore evidence and deployed runtime verification are recorded in the
+[phase 2 release report](OVERNIGHT_PHASE2_REPORT.md), not inferred here.
+
+| Migration                                     | Tables and behavior                                                                                                                                                                                                                     |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `20261103010000_daily_life_logs.sql`          | Adds `hydration_entries` and revisioned `daily_life_preferences`; adds nullable request/hash columns and a unique per-user request index to existing tasks; adds a monotonic task update timestamp trigger.                             |
+| `20261103020000_ai_execution_budget.sql`      | Adds `ai_execution_reservations`, a conservative per-user/request accounting ledger with owner/feature/global UTC-day limits and durable task iteration limits.                                                                         |
+| `20261103030000_daily_life_notifications.sql` | Adds `daily_life_notification_jobs` linking unique user/day/kind jobs to existing reminders, and preference revision/timezone fields on existing digest deliveries. Extends the existing send fence with consent and local-time checks. |
+
+All four new tables have RLS enabled, with browser table access revoked. Their
+mutation/read RPCs are service-role-only and retain explicit owner arguments from
+the backend authentication boundary. Hydration add/undo and task mutations lock
+the active owner's profile; exact request retries do not create duplicate rows.
+`get_hydration_summary` computes the complete owned daily sum in one snapshot,
+independently of its bounded 200-entry history. `manage_lifeos_task` checks the
+saved timestamp before editing an existing task; completion evidence is set or
+cleared by explicit status changes. `save_daily_life_preferences` compares the
+expected revision, and missing preferences leave every notification disabled.
+
+`reserve_ai_execution` serializes cross-process accounting under a database
+advisory lock; `finish_ai_execution` records bounded usage/status without refunding
+potentially billed work. Reservations contain no prompts, images, credentials or
+model responses. They must survive application restarts and rollback. See
+[AI execution safety](AI_EXECUTION_SAFETY.md).
+
+`claim_daily_life_digest` and `enqueue_daily_life_notification` bind jobs to the
+owner's current preferences and timezone. `begin_notification_delivery` rechecks
+consent before using the established claim/lease/send transition. Confirmed or
+ambiguous deliveries are never reopened to compensate for a changed preference.
+The trigger-only `cancel_changed_daily_life_notifications` uses narrowly scoped
+definer privileges, an empty search path and fixed public tables so the existing
+authenticated owner timezone-update grant continues working without granting
+browser access to queue tables. Profile RLS still prevents foreign-user updates.
+See [notification consent and rollout](DAILY_LIFE_NOTIFICATIONS.md).
+
+Before applying these migrations, verify a fresh backup and restore it in an
+isolated database, then rehearse the ordered changes against that schema. Stop
+old notification workers during the coordinated migration/application rollout.
+Apply each reviewed version and its migration-ledger record atomically through
+the established release procedure. These SQL files are once-only migrations,
+not scripts to rerun blindly after a partially observed deployment.
+
+Relevant isolated verification harnesses are
+`bash scripts/test-daily-life-migration.sh`,
+`bash scripts/test-ai-budget-migration.sh` and
+`bash scripts/test-daily-life-notifications.sh`. They use synthetic identities;
+the notification harness exercises the full migration chain and overlapping
+claims. A successful fixture run does not verify current production data.
+
+Application rollback retains the additive tables, existing task/history rows,
+notification deduplication bindings and AI reservations. Stop incompatible
+workers rather than restoring older send behavior. Never drop these tables,
+reset the database, erase usage receipts or restore an old snapshot over current
+data to roll back application code.

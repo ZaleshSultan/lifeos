@@ -1,142 +1,70 @@
 # Threat Modeling for LifeOS
 
-> STRIDE-based threat model for the LifeOS personal OS.
-> Informed by [Anthropic Cybersecurity Skills](https://github.com/mukul975/Anthropic-Cybersecurity-Skills).
+> STRIDE-based review of implemented boundaries and remaining risks. Use with [architecture](../../docs/ARCHITECTURE.md), [security](../../docs/SECURITY.md) and current release evidence.
 
-## System Boundaries
+## System and assets
 
-```
-                    TRUST BOUNDARY
-    Untrusted                          Trusted
-┌─────────────────┐              ┌──────────────────────┐
-│ Telegram users  │──────────────│ apps/bot             │
-│ TMA WebView     │   HTTPS      │ packages/db (store)  │
-│ Android bridge  │──────────────│ packages/core        │
-│ Web browsers    │              │ Python workers       │
-└─────────────────┘              └──────────┬───────────┘
-                                            │
-                                   ┌────────▼───────────┐
-                                   │ Supabase Postgres  │
-                                   │ Supabase Storage   │
-                                   └────────┬───────────┘
-                                            │
-                                   ┌────────▼───────────┐
-                                   │ Obsidian vault     │
-                                   │ (local Arch server)│
-                                   └────────────────────┘
-```
+Untrusted Telegram messages, TMA/WebView input, web browsers, Android measurements and provider output reach the `apps/bot` trust boundary. Next.js holds the browser cookie server-side and forwards authorized requests through a narrow proxy. `packages/core` validates pure rules, `packages/db` owns scoped persistence, Supabase is authoritative and Obsidian is a mirror.
 
-## Assets
+The current host is Debian/systemd behind Cloudflare Tunnel. Bot/API/TMA and Next.js run separately, as do reminder/digest/LMS/mirror workers. Supabase is remote. Prior Railway/Vercel/Arch descriptions are historical alternatives, not the active topology.
 
-| Asset                              | Sensitivity         | Location                 |
-| ---------------------------------- | ------------------- | ------------------------ |
-| Health metrics (HRV, sleep, steps) | High (PHI-adjacent) | `health_*` tables        |
-| Finance data (spend, receipts)     | High                | `finance_*` tables       |
-| Telegram captures & tasks          | Medium              | `life_entities`, `tasks` |
-| Workout logs                       | Medium              | `workouts`               |
-| Obsidian mirror notes              | Medium              | Local vault              |
-| Service role key                   | Critical            | Bot/worker env only      |
-| Bot token                          | Critical            | Bot env only             |
-| Ingest secret                      | High                | Bot + Android env        |
+Sensitive assets include health/finance/academic history, private journals/photos, OAuth/LMS grants, session/device token hashes, privileged backend credentials, encrypted backups and backup decryption keys. Browser code must not receive service-role/bot/provider credentials. Android receives only its personal health credential; there is no shared APK ingest secret.
 
-## STRIDE Analysis
+## Telegram webhook
 
-### Telegram Webhook (`POST /telegram/webhook`)
+| Threat                                  | Existing controls                                                             | Residual risk/review                                                                               |
+| --------------------------------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Spoofed update/secret comparison attack | Production secret required; exactly one valid header; timing-safe comparison  | A stolen secret can forge delivery; rotate and inspect downstream owner/admin checks               |
+| Malicious command text                  | Core parsing, active profile, private-chat/owner checks for private workflows | Review every new command/callback; text is never SQL/shell authority                               |
+| Flooding                                | One-MiB body bound and selected feature limits                                | No general shared webhook rate limiter or Telegram IP allowlist is established by current app code |
 
-| Threat                        | Type      | Scenario                        | Mitigation                         |
-| ----------------------------- | --------- | ------------------------------- | ---------------------------------- |
-| Fake webhook calls            | Spoofing  | Attacker POSTs without secret   | `TELEGRAM_WEBHOOK_SECRET` header   |
-| Secret brute force            | Elevation | Timing attack on secret compare | Use `secureCompare()`              |
-| Command injection via message | Tampering | Malicious `/cap` text           | Parser validation in core          |
-| Webhook flooding              | DoS       | High-volume fake updates        | Rate limit + Telegram IP allowlist |
+## TMA API
 
-### TMA API (`/api/tma/*`)
+| Threat                 | Existing controls                                         | Residual risk/review                                                          |
+| ---------------------- | --------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Forged identity        | Telegram HMAC and linked active profile                   | Never trust body/query owner IDs                                              |
+| Stolen initData replay | Signed `auth_date`: age ≤24 hours, future skew ≤5 minutes | Replay within that window remains possible; no request-wide nonce protocol    |
+| Cross-user access      | Resolved `userId` required in user-owned store operations | Service-role mistakes bypass RLS; test negative ownership paths               |
+| Cross-origin API reads | Exact configured CORS origins and validated preflights    | CORS cannot authenticate a caller or protect a stolen bearer outside browsers |
+| Unsafe local bypass    | Production startup rejects `ALLOW_UNSAFE_TMA_DEV_AUTH`    | Keep local defaults and production environments separate                      |
 
-| Threat                 | Type            | Scenario                                      | Mitigation                     |
-| ---------------------- | --------------- | --------------------------------------------- | ------------------------------ |
-| Forged initData        | Spoofing        | Attacker crafts fake HMAC                     | HMAC validation with bot token |
-| Stolen initData replay | Replay          | Intercepted initData reused                   | Add `auth_date` TTL check      |
-| Cross-user data access | Elevation       | Guess UUID in URL                             | Scope all queries by `user_id` |
-| CORS abuse             | Info disclosure | Malicious site calls API with stolen initData | Origin allowlist               |
-| Dev auth bypass        | Elevation       | `ALLOW_UNSAFE_TMA_DEV_AUTH` in prod           | Env validation on startup      |
+## Health ingest
 
-### Health Ingest (`POST /health/ingest`)
+| Threat                       | Existing controls                                                              | Residual risk/review                                                                                    |
+| ---------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| Stolen/extracted phone token | Personal HS256 token, durable hash, expiry/revocation and active-profile check | Copied credentials work until revoked/expired; revoke the affected device, not historical data          |
+| Payload owner substitution   | Owner comes from auth; conflicting supplied identity rejected                  | Valid device credentials can still submit incorrect measurements; provenance is not sensor authenticity |
+| Replay/duplicates            | Stable daily/workout/sample upserts                                            | Authorized corrected snapshots may update their source; this is not a per-payload nonce system          |
+| Malformed/oversize data      | One-MiB JSON bound and core validation                                         | Review raw-payload retention; return projections rather than raw records                                |
 
-| Threat              | Type      | Scenario                      | Mitigation                        |
-| ------------------- | --------- | ----------------------------- | --------------------------------- |
-| Fake health data    | Tampering | Spoofed recovery scores       | Ingest secret + parser validation |
-| Payload injection   | Tampering | Malformed JSON crashes server | 1 MB limit + schema validation    |
-| Replay old payloads | Replay    | Resubmit yesterday's data     | Idempotent upsert by date+user    |
+The route also accepts valid Telegram initData. Invalid explicit bearer credentials fail closed. Credential issue/revoke is authenticated and owner-scoped; blocking revokes credentials. Android Keystore/HTTPS-only/no-redirect implementation exists in source, but build/device behavior must be verified separately.
 
-### Web Dashboard (`apps/web`)
+## Web dashboard
 
-| Threat                 | Type            | Scenario                        | Mitigation                      |
-| ---------------------- | --------------- | ------------------------------- | ------------------------------- |
-| Unauthenticated access | Info disclosure | Public Vercel URL exposes shell | Add Supabase auth before deploy |
-| XSS in dashboard       | Tampering       | Injected script steals session  | React escaping + CSP headers    |
-| Backend URL exposure   | Info disclosure | `LIFEOS_BACKEND_URL` in client  | Server-side fetch only          |
+| Threat                                           | Existing controls                                                                                           | Residual risk/review                                                                                          |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Public data scraping/stale authenticated layouts | Next proxy checks protected HTML/RSC requests; backend independently resolves live session and active owner | Availability dependency; data already rendered cannot be retracted                                            |
+| Login-link replay/session fixation               | Random signed link expires within 120 seconds; atomic one-use exchange for a new opaque session             | Forwarded links or link scanners can use/burn them; redact initial login URLs                                 |
+| Copied cookie                                    | Hash-only server storage, expiry, logout and profile-block revocation                                       | Copied active tokens remain usable until expiry/revocation                                                    |
+| CSRF                                             | HttpOnly/SameSite cookie; exact Origin on logout and bridge mutations; method/resource allowlist            | New browser mutation routes must adopt the same checks                                                        |
+| XSS/provider text                                | React escaping; no raw HTML rendering for model text; cookie HttpOnly                                       | Do not claim a dashboard-wide restrictive CSP is implemented; an XSS can still act through the user's session |
+| Frontend credential leakage                      | Server-only cookie forwarding; no service-role access from browser                                          | Public backend URLs are not secrets; actual credentials and response projections require bundle/log checks    |
 
-### Database (Supabase)
+There is no browser Supabase JWT login requirement in the current design. Web reuses owned `/api/tma/*` contracts through its server proxy; LMS credential mutations remain Telegram-only. [Web session model](../../docs/WEB_SESSIONS.md).
 
-| Threat                          | Type            | Scenario                             | Mitigation                    |
-| ------------------------------- | --------------- | ------------------------------------ | ----------------------------- |
-| RLS bypass via service role bug | Elevation       | Missing user_id filter               | Code review + store tests     |
-| SQL injection                   | Tampering       | Unsanitized query                    | Parameterized Supabase client |
-| Key leak from logs              | Info disclosure | Error logs contain connection string | `sanitizeErrorMessage`        |
+## Database, mirror and workers
 
-### Obsidian Worker
+- **Elevation/tampering:** service-role access bypasses RLS. Parameterized queries, owner filters, service-only RPC grants and concurrency tests are required. Review native Auth/ACL drift and new migrations against real roles.
+- **Disclosure:** token hashes, encrypted grant columns and private backups are still sensitive. Keep trusted service environments private and redact diagnostic exceptions.
+- **Mirror traversal/destruction:** server-owned per-user vault roots, symlink/path checks, atomic managed-note writes and fenced queue delivery protect the mirror. It is never the canonical database and the worker must not delete notes.
+- **Worker compromise:** Debian host/service compromise can expose privileged data. Verify systemd permissions and rotate compromised credentials. Legacy Google/ICS/monthly workers remain guarded single-user modes; do not relabel them multi-user-safe.
+- **Notification leaks/duplicates:** minimize private text, respect opt-in/quiet hours and existing delivery receipts. A provider timeout can leave delivery outcome unknown; do not blindly resend.
+- **Recovery failure:** encrypted backup integrity is insufficient without a matching isolated restore and recoverable key. App rollback must never restore an older database over populated history.
 
-| Threat          | Type        | Scenario                              | Mitigation                       |
-| --------------- | ----------- | ------------------------------------- | -------------------------------- |
-| Path traversal  | Tampering   | `../../../etc/passwd` in entity title | `@lifeos/obsidian` sanitizer     |
-| Vault wipe      | Destruction | Worker deletes notes                  | Worker never deletes — by design |
-| Queue poisoning | Tampering   | Malicious entity in sync queue        | Sanitize at write time in bot    |
+## Optional AI and external accounts
 
-### Python Workers (reminder, sync)
+Provider output, images, mail, notes and memories cannot grant authority. Keep bounded schema, fixed destinations, explicit writes/confirmations and transactional receipts. Shared durable budgets protect token/cost/task accounting; process-local concurrency/circuits multiply with replicas. Abort may not stop provider billing. Meal analysis needs per-photo consent and separate reviewed save, with manual fallback. AGATA/creator capabilities remain disabled until real contract/account authorization exists; never infer shell, database, email-send or account access from a model suggestion.
 
-| Threat                           | Type            | Scenario                         | Mitigation                        |
-| -------------------------------- | --------------- | -------------------------------- | --------------------------------- |
-| Service role on compromised host | Elevation       | Arch server breached             | Least privilege, key rotation     |
-| Telegram message leak            | Info disclosure | Reminder contains sensitive text | Minimize content in notifications |
+## Maintenance
 
-## Attack Scenarios (Prioritized)
-
-### Scenario 1: Public Dashboard Scraping
-
-**Likelihood:** High (if Vercel deployed)  
-**Impact:** Low today (placeholder data), High when APIs wired  
-**Mitigation:** Implement web auth before `/api/web/*`
-
-### Scenario 2: initData Interception in Telegram WebView
-
-**Likelihood:** Medium  
-**Impact:** High (full API access as victim)  
-**Mitigation:** `auth_date` TTL, HTTPS only, short session tokens (future)
-
-### Scenario 3: Store Method Missing user_id Filter
-
-**Likelihood:** Medium (on new code)  
-**Impact:** Critical (cross-tenant data leak)  
-**Mitigation:** Mandatory `userId` param on all store methods; PR review checklist
-
-### Scenario 4: Ingest Secret Leak from Android APK
-
-**Likelihood:** Low-Medium  
-**Impact:** High (fake health data)  
-**Mitigation:** Certificate pinning (future), rotate secret, per-device keys (future)
-
-## Threat Model Maintenance
-
-Re-run this analysis when:
-
-- Adding `/api/web/*` routes
-- Enabling multi-user support
-- Adding OAuth (Google calendar sync)
-- Shipping Android bridge to Play Store
-- Exposing any endpoint without authentication
-
-## References
-
-- `docs/SECURITY.md` — operational security
-- `skills/security/owasp.md` — OWASP mapping
-- `skills/security/auth-security.md` — auth controls
+Revisit this model when adding an auth surface, API/mutation, provider, outbound URL, account grant, worker, browser storage mechanism or deployment component. Distinguish code controls, synthetic tests, actual production verification and physical-device evidence. General endpoint rate limiting, dashboard CSP and expired-credential metadata cleanup remain separate follow-up items; avoid claiming protections based on a historical checklist.

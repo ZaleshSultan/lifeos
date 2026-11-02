@@ -8,6 +8,11 @@ insert into public.profiles(user_id,status,role,telegram_user_id,timezone) value
   ('00000000-0000-4000-8000-000000000002','active','user',102,'Asia/Almaty')
 on conflict(user_id) do nothing;
 
+-- These fixture users explicitly consent. A missing preferences row remains OFF.
+insert into public.daily_life_preferences(user_id,preferences)
+select user_id,'{"morningEnabled":true,"morningTime":"08:00","eveningEnabled":false,"eveningTime":"21:00","quietStart":"00:00","quietEnd":"00:00","hydrationRemindersEnabled":false,"includeHealth":false,"includeFilming":true}'::jsonb
+from public.profiles where user_id in ('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002');
+
 create schema notification_test;
 create table notification_test.assertions(name text primary key);
 create function notification_test.assert(ok boolean, message text) returns void language plpgsql as $$

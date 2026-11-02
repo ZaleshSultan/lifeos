@@ -8,3 +8,6 @@ export * from "./planning-snapshot.js";
 
 export * from "./lms-store.js";
 export * from "./assistant-store.js";
+
+export * from "./ai-budget-store.js";
+export * from "./daily-life-store.js";

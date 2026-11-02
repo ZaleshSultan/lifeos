@@ -1,155 +1,47 @@
 # Authentication & Authorization Security
 
-> LifeOS identity model and auth hardening.
-> Informed by [Anthropic Cybersecurity Skills](https://github.com/mukul975/Anthropic-Cybersecurity-Skills).
+## Identity and trust boundary
 
-## Identity Model
+`auth.users.id` is the canonical LifeOS owner, linked through `profiles.user_id` and unique `profiles.telegram_user_id`. Resolve identity and current profile status at the backend boundary before domain reads/writes. User-owned store methods accept the resolved `userId`; query/body resource IDs never establish identity. Supabase is authoritative and browsers never access it with service-role credentials.
 
-```
-auth.users.id          ← canonical LifeOS user_id
-       │
-       ▼
-public.profiles        ← telegram_user_id (unique)
-       │
-       ▼
-All user-owned tables  ← user_id FK → auth.users(id)
-```
+The active infrastructure is Debian/systemd behind the existing Cloudflare Tunnel. Trusted bot/workers hold service credentials; browser apps receive public configuration only. Native Supabase Auth remains the identity root, but current browser login uses LifeOS opaque sessions rather than a Supabase browser JWT.
 
-**Rule:** Every write path must resolve to a `user_id` before touching the database.
+## Telegram webhook
 
-## Auth Surfaces
+`POST /telegram/webhook` requires exactly one valid `X-Telegram-Bot-Api-Secret-Token` header and `secureCompare` timing-safe matching. Production configuration/direct server creation reject a missing/invalid secret and unsafe TMA dev authentication. Local servers without a secret return an unavailable webhook rather than accepting unauthenticated updates. Keep `TELEGRAM_WEBHOOK_SECRET` private and re-register the webhook when rotating it.
 
-### 1. Telegram Bot Webhook
+## Telegram Mini App
 
-**File:** `apps/bot/src/server.ts`
+`validateTelegramInitData()` verifies the Telegram HMAC with the bot token, requires signed `auth_date` no older than 86,400 seconds and no more than 300 seconds in the future, then resolves the linked profile. Protected operations require active status. Valid signed callers may read their unregistered/pending/blocked session status or register pending approval without receiving protected domain data.
 
-| Control         | Implementation                     |
-| --------------- | ---------------------------------- |
-| Endpoint        | `POST /telegram/webhook`           |
-| Secret header   | `X-Telegram-Bot-Api-Secret-Token`  |
-| Env var         | `TELEGRAM_WEBHOOK_SECRET`          |
-| User resolution | `profiles.telegram_user_id` lookup |
+Send `X-Telegram-Init-Data` on API requests; never embed the bot token in a frontend. Freshness bounds replay but does not make each request single-use. TMA initData can be replayed within its accepted lifetime if stolen. LMS credential validation/store/delete operations require genuine Telegram authentication; safe LMS status/work reads may use a valid web session. Do not broaden that exception to credentials.
 
-**Hardening:**
+`ALLOW_UNSAFE_TMA_DEV_AUTH=true` is local-only. Production startup rejects it; never deploy it as an authentication workaround. Invalid explicit web credentials cannot fall through to a Telegram/dev identity.
 
-```typescript
-// Current (weak):
-if (providedSecret !== options.webhookSecret)
+## Revocable Telegram-to-web login
 
-// Recommended:
-if (!secureCompare(providedSecret ?? "", options.webhookSecret))
-```
+The private Telegram `/web` command issues a random, signed, purpose-bound login link lasting at most 120 seconds. Its SHA-256 hash is stored before transmission. `POST /api/web/auth/exchange` atomically consumes that link and creates a new opaque random session, stored only by hash, with absolute 30-day expiry.
 
-Use signed HS256 Bearer tokens from TMA health sessions.
+Next.js stores the session in `lifeos_web_session` with HttpOnly, SameSite=Lax, host-only Path=/ and Secure in production. Login redirects remove credentials; auth/private responses use no-store/no-referrer. Next proxy validates every protected HTML/RSC request, and backend `/api/tma/*` authorization independently checks the persistent session, expiry/revocation and active owner.
 
-### 2. Telegram Mini App (TMA)
+Interactive web requests pass through an explicit resource/method allowlist. Cookie-derived identity is forwarded server-side; caller Authorization/identity headers cannot replace it. Mutations and logout require the exact configured public Origin. Logout revokes server-side before clearing the cookie; failure retains the cookie for retry. Profile blocking invalidates sessions and outstanding links; reapproval does not revive them.
 
-**File:** `apps/bot/src/server.ts` → `validateTelegramInitData()`
+A copied live session remains usable until expiry/revocation. Rotating `LIFEOS_WEB_SESSION_SECRET` invalidates login links, not exchanged sessions; revoke those separately. No distributed general rate limiter or automatic expired-row cleanup is implied. See [web sessions](../../docs/WEB_SESSIONS.md) and [dashboard boundary](../../docs/WEB_DASHBOARD.md).
 
-| Step | Check                                                   |
-| ---- | ------------------------------------------------------- |
-| 1    | Parse `X-Telegram-Init-Data` header                     |
-| 2    | Verify HMAC-SHA256 hash with bot token                  |
-| 3    | Extract `user.id` from JSON `user` param                |
-| 4    | Resolve via `store.resolveTelegramUser(telegramUserId)` |
-| 5    | Reject if not linked (`403`)                            |
+## Personal health credentials
 
-**Gaps to close:**
+`POST /health/ingest` and `/api/health/ingest` accept a personal HS256 Bearer token or valid TMA initData. Device tokens have at most 30-day validity, random nonce and scope; backend verification checks signature, expiry, persisted SHA-256 credential hash, revocation and the active owner. Explicit invalid Bearer tokens cannot fall through to another identity.
 
-| Gap                       | Fix                                             |
-| ------------------------- | ----------------------------------------------- |
-| No `auth_date` check      | Reject if `Date.now()/1000 - auth_date > 86400` |
-| Dev bypass in prod        | `ALLOW_UNSAFE_TMA_DEV_AUTH` must be `false`     |
-| Replay of stolen initData | Short TTL + optional server-side nonce cache    |
+Authenticated Mini App Health issues the token once; storage contains its hash, not the token. Device list/revoke APIs are owner-scoped. Blocking revokes all credentials, and reapproval does not restore them. Android sends no configurable user ID or shared ingest secret. Keystore encryption/HTTPS-only/no-redirect source exists, but APK/physical-device verification is separate. Payloads remain untrusted until parsed by core.
 
-**Client rule (`apps/tma/src/api/client.ts`):**
+## Authorization, RLS and workers
 
-- Send `X-Telegram-Init-Data` on every API call.
-- Never store or transmit bot token in frontend.
+The backend service role bypasses RLS, so every user-owned query/mutation must filter the resolved owner. RLS, restricted profile columns and service-only token/RPC privileges provide defense in depth; they never excuse omitted application ownership checks. Browser web sessions do not grant direct Supabase table access.
 
-### 3. Health Ingest (Android Bridge)
+Workers run only in trusted service environments. Per-user reminders/mirror routing and guarded legacy single-user integrations have different scopes. Never infer multi-user safety from service-role credentials alone. Keep shared secrets, OAuth/LMS grants, health tokens and vault paths out of frontend bundles/API projections/logs; issuing a personal health token once to its authenticated connection UI is the explicit exception.
 
-| Control       | Value                                          |
-| ------------- | ---------------------------------------------- |
-| Header        | `Authorization: Bearer <health-session-token>` |
-| Comparison    | `secureCompare()` ✓ (timing-safe)              |
-| Payload trust | Untrusted until `@lifeos/core` parsing         |
+## Bootstrap and review
 
-### 4. Web Dashboard (Future)
+`LIFEOS_DEFAULT_USER_ID` plus `LIFEOS_DEFAULT_TELEGRAM_USER_ID` support an intentional local/single-user `/start` link. Production registration remains pending-approval; admin operations require profile/admin-ID authorization. Never merge identities or move historical records as an auth workaround.
 
-**Current state:** No Supabase Auth session in `apps/web`.
-
-**Required before production:**
-
-1. Supabase Auth (email magic link or OAuth).
-2. Session middleware in Next.js (`@supabase/ssr`).
-3. New `/api/web/*` routes on bot validating Supabase JWT.
-4. Map `auth.users.id` → same `user_id` as TMA/bot.
-5. Never use service role in browser.
-
-### 5. Python Workers
-
-| Worker                | Auth                              |
-| --------------------- | --------------------------------- |
-| obsidian-mirror       | `SUPABASE_SERVICE_ROLE_KEY`       |
-| reminder-worker       | Service role + Telegram bot token |
-| google-sync, ics-sync | Service role                      |
-
-Workers run in trusted environments only (Arch server, not Vercel).
-
-## Authorization Patterns
-
-### Service Role + App-Layer Scoping
-
-The bot uses `SUPABASE_SERVICE_ROLE_KEY`, bypassing RLS. Security depends entirely on:
-
-```typescript
-// Every store call must include userId from auth resolution
-await store.getWorkout(user.userId, workoutId);
-// NOT: await store.getWorkout(workoutId);
-```
-
-### RLS as Defense in Depth
-
-RLS policies use `lifeos_is_owner(user_id)` for `authenticated` role. When web auth ships:
-
-- Browser uses anon key + user JWT → RLS applies.
-- Bot/workers keep service role → app-layer scoping.
-
-### Dev Auth Bypass
-
-```bash
-ALLOW_UNSAFE_TMA_DEV_AUTH=true   # LOCAL ONLY
-LIFEOS_DEFAULT_USER_ID=<uuid>
-```
-
-Returns fake user without valid initData. **Never enable in Railway/production.**
-
-## Bootstrap / Single-User Setup
-
-```bash
-LIFEOS_DEFAULT_USER_ID=your-auth-user-uuid
-LIFEOS_DEFAULT_TELEGRAM_USER_ID=your-telegram-user-id
-```
-
-`/start` links Telegram sender to profile when IDs match. This is intentional for single-user bootstrap — not multi-tenant auth.
-
-## Auth Security Checklist
-
-- [ ] `TELEGRAM_WEBHOOK_SECRET` set in production
-- [ ] `ALLOW_UNSAFE_TMA_DEV_AUTH=false` in production
-- [ ] `LIFEOS_HEALTH_INGEST_JWT_SECRET` is high-entropy random string
-- [ ] No JWT/service role in `apps/web` or `apps/tma` bundles
-- [ ] New API routes call auth resolver before store access
-- [ ] `auth_date` validated on initData (when implemented)
-- [ ] Webhook secret uses timing-safe compare (when implemented)
-- [ ] Unlinked Telegram users get `403`, not `500` or data leak
-
-## Secret Rotation
-
-If compromised, rotate in order:
-
-1. `SUPABASE_SERVICE_ROLE_KEY` (Supabase dashboard)
-2. `TELEGRAM_BOT_TOKEN` (BotFather)
-3. `TELEGRAM_WEBHOOK_SECRET` + re-register webhook
-4. `LIFEOS_HEALTH_INGEST_JWT_SECRET` + issue health session tokens from TMA
+For changes, test invalid/expired/future credentials, revoked sessions/devices, blocked/reapproved profiles, wrong owners, concurrent login exchange, CSRF and invalid-credential fallback. Keep auth tests and [security operations](../../docs/SECURITY.md) current. Rotate only implicated credentials with their dependent services; preserve encryption keys needed for existing encrypted data and backups.

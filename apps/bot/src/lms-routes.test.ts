@@ -109,7 +109,9 @@ async function fixture(
     status: "active" as const,
     role: "user" as const,
   }));
-  const resolveWebSession = vi.fn(async (_hash: string): Promise<string | null> => null);
+  const resolveWebSession = vi.fn(
+    async (_hash: string): Promise<string | null> => null,
+  );
   const getLmsConnection = vi.fn(
     async (userId: string) => connections.get(userId) ?? disconnected(),
   );
@@ -306,7 +308,7 @@ describe("LMS HTTP authentication boundary", () => {
     expectNoPrivateDataAccess(f);
   });
 
-  it("rejects the development fallback and a valid web session even when configured", async () => {
+  it("rejects development fallback on all LMS routes and browser credentials on mutations", async () => {
     const f = await fixture({ allowDevAuth: true });
     const token = createWebSessionToken();
     f.resolveWebSession.mockResolvedValue("owner-20");
@@ -316,6 +318,13 @@ describe("LMS HTTP authentication boundary", () => {
     ];
     for (const auth of authHeaders) {
       for (const [method, path] of routes) {
+        // Exact safe reads now support a real browser session, never the dev fallback.
+        if (
+          auth.authorization &&
+          method === "GET" &&
+          ["/api/tma/lms/connection", "/api/tma/lms/work"].includes(path)
+        )
+          continue;
         const response = await fetch(`${f.base}${path}`, {
           method,
           headers: { ...auth, "content-type": "application/json" },
@@ -328,6 +337,29 @@ describe("LMS HTTP authentication boundary", () => {
     expect(f.resolveUserById).not.toHaveBeenCalled();
     expect(f.resolveWebSession).not.toHaveBeenCalled();
     expectNoPrivateDataAccess(f);
+  });
+
+  it("describes the genuine sign-in without manufacturing an integration grant", async () => {
+    const f = await fixture();
+    const response = await fetch(`${f.base}/api/tma/lms/connection`, {
+      headers: headers(21),
+    });
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.data.configured).toBe(false);
+    expect(body.data.authorization).toMatchObject({
+      version: 1,
+      automaticConnection: "blocked",
+      browserSignInTransfersAccess: false,
+      reconnectRequired: true,
+      syncFreshness: "never_synced",
+    });
+    expect(body.data.authorization.browserSignInUrl).toBe(
+      "https://lms.astanait.edu.kz/auth/oidc/?source=loginpage",
+    );
+    expect(f.getLmsConnection).toHaveBeenCalledExactlyOnceWith("owner-21");
+    expect(f.validator).not.toHaveBeenCalled();
+    expect(f.saveLmsSession).not.toHaveBeenCalled();
   });
 
   it("scopes connection and work reads only to the authenticated active owner", async () => {
@@ -574,10 +606,17 @@ describe("LMS session HTTP validation and retention", () => {
       expect(response.headers.get("cache-control")).toBe("no-store");
   });
 
-  it.each(["session_expired", "interactive_login_required", "unsupported_auth_flow"] as const)(
+  it.each([
+    "session_expired",
+    "interactive_login_required",
+    "unsupported_auth_flow",
+  ] as const)(
     "returns fixed SSO diagnostics for %s without exposing provider content or saving a receipt",
     async (errorCategory) => {
-      const event = { stage: "oidc_form_post", reason: "callback_invalid" } as const;
+      const event = {
+        stage: "oidc_form_post",
+        reason: "callback_invalid",
+      } as const;
       const f = await fixture({
         validator: async () => ({
           ok: false,
@@ -586,11 +625,20 @@ describe("LMS session HTTP validation and retention", () => {
             ...event,
             cookie: "private-cookie",
             url: "https://login.microsoftonline.com/?code=private-code",
-            events: [{ ...event, html: "private-html", form: { code: "private-code" } }],
+            events: [
+              {
+                ...event,
+                html: "private-html",
+                form: { code: "private-code" },
+              },
+            ],
           },
         }),
       });
-      const response = await fetch(`${f.base}/api/tma/lms/session/validate`, post({ cookie: "private-cookie" }));
+      const response = await fetch(
+        `${f.base}/api/tma/lms/session/validate`,
+        post({ cookie: "private-cookie" }),
+      );
       expect(response.status).toBe(422);
       expect(response.headers.get("cache-control")).toBe("no-store");
       expect(await response.json()).toEqual({

@@ -9,7 +9,8 @@ LifeOS is a **personal operating system** monorepo:
 
 - **Backend:** `apps/bot` — Node HTTP server (Telegram, TMA API, health ingest)
 - **TMA:** `apps/tma` — Telegram Mini App (Vite + React)
-- **Web:** `apps/web` — Next.js dashboard
+- **Web:** `apps/web` — authenticated Next.js dashboard with a same-origin, allowlisted backend bridge
+- **Android:** `apps/health-bridge` — Kotlin Health Connect project; no APK or physical-device verification is claimed
 - **Core:** `packages/core` (pure domain), `packages/db` (Supabase store), `packages/obsidian`
 - **Workers:** Python services in `workers/` (Obsidian mirror, reminders, sync)
 - **Database:** Supabase Postgres with RLS
@@ -134,7 +135,15 @@ Copy `.env.example` → `.env` / `.env.local` per app before running.
 
 ## Acceptance Boundary
 
-This phase stabilizes Telegram + TMA + health ingest + Obsidian mirror.
-**Not in scope yet:** production web auth, `/api/web/*` endpoints, Android production build.
+The original stabilization slice covered Telegram + TMA + health ingest + Obsidian mirror.
+The explicitly authorized November 3 overnight mission extends that scope to secure
+web sessions/dashboard integration and the Android Health Connect deliverable.
+The old web-auth/Android exclusions are historical, not a veto on this mission.
 
-Do not ship partial workarounds for these — follow skills and docs for proper implementation.
+Production currently uses Debian/systemd, Cloudflare Tunnel and Supabase at
+`https://lifeos.zalewko.me`; see `docs/OPERATIONS.md`. Railway, Vercel and
+Arch/Tailscale examples are alternative or historical deployments. Verify the
+actual deployed SHA and service configuration before releases. Keep all existing
+authentication, RLS and secret boundaries; never substitute browser service keys
+or an auth bypass. The audited host lacks the Android/JDK/Gradle-wrapper toolchain;
+an installable APK and physical-phone sync remain unverified.

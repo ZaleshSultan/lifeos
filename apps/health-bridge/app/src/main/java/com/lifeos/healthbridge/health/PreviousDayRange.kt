@@ -28,3 +28,19 @@ fun localDayRange(
     end = date.plusDays(1).atStartOfDay(zoneId).toInstant(),
     zoneId = zoneId,
 )
+
+/** Current-day reads stop at now; completed previous days retain their full range. */
+fun dayRange(
+    date: LocalDate,
+    now: Instant = Instant.now(),
+    zoneId: ZoneId = ZoneId.systemDefault(),
+): PreviousDayRange {
+    val full = localDayRange(date, zoneId)
+    require(now > full.start) { "Health day has not started" }
+    return full.copy(end = minOf(full.end, now))
+}
+
+fun todayRange(
+    now: Instant = Instant.now(),
+    zoneId: ZoneId = ZoneId.systemDefault(),
+): PreviousDayRange = dayRange(now.atZone(zoneId).toLocalDate(), now, zoneId)

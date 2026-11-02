@@ -38,6 +38,7 @@ export function useSaveIdealHumanDay() {
           (a, b) => a.date.localeCompare(b.date),
         ),
       );
+      void cache.invalidateQueries({ queryKey: ["daily-life"] });
       telegram.hapticImpact("light");
     },
   });

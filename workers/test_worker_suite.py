@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parent
 TEST_FILES = (
     ROOT / "common" / "notification_delivery_test.py",
     ROOT / "common" / "notification_time_test.py",
+    ROOT / "common" / "daily_life_notifications_test.py",
     ROOT / "common" / "lifeos_sync_test.py",
     ROOT / "common" / "obsidian_files_test.py",
     ROOT / "common" / "lms_sessions_test.py",

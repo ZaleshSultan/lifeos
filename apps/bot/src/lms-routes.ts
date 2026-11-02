@@ -1,3 +1,4 @@
+import { aituAuthorizationGuidance } from "@lifeos/core";
 import { DateTime } from "luxon";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
@@ -106,12 +107,17 @@ export async function handleLmsRoute({
             : 10,
     );
     let data: unknown;
-    if (expected === "GET")
-      data =
-        action === "work"
-          ? await store.getLmsWork(user.userId, user.timezone)
-          : await store.getLmsConnection(user.userId);
-    else {
+    if (expected === "GET") {
+      if (action === "work")
+        data = await store.getLmsWork(user.userId, user.timezone);
+      else {
+        const connection = await store.getLmsConnection(user.userId);
+        data = {
+          ...connection,
+          authorization: aituAuthorizationGuidance(connection, Date.now()),
+        };
+      }
+    } else {
       if (
         expected === "POST" &&
         !/^application\/json(?:\s*;|$)/i.test(

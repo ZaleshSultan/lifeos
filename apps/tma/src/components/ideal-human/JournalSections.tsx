@@ -1,3 +1,4 @@
+import { VideoAssets } from "./VideoAssets";
 import type { IdealHumanDay } from "../../../../../packages/core/src/ideal-human.js";
 import {
   ChoiceField,
@@ -309,6 +310,32 @@ export function NutritionJournal({
               value={meal.proteinG}
               onChange={(proteinG) => update(index, { proteinG })}
             />
+            <NumberField
+              title={`Блюдо ${index + 1}, жиры, г`}
+              max={1000}
+              step={0.1}
+              value={meal.fatG ?? null}
+              onChange={(fatG) => update(index, { fatG })}
+            />
+            <NumberField
+              title={`Блюдо ${index + 1}, углеводы, г`}
+              max={2000}
+              step={0.1}
+              value={meal.carbsG ?? null}
+              onChange={(carbsG) => update(index, { carbsG })}
+            />
+            <TextField
+              title="Время приёма пищи (если известно)"
+              type="time"
+              value={meal.mealTime ?? ""}
+              onChange={(value) => update(index, { mealTime: value || null })}
+            />
+            <TextField
+              title="Порция (если известна)"
+              value={meal.portion ?? ""}
+              maxLength={240}
+              onChange={(portion) => update(index, { portion })}
+            />
           </div>
           <label className="flex min-h-11 items-center gap-3 text-sm text-zinc-300">
             <input
@@ -611,6 +638,7 @@ export function VideoJournal({
         ]}
         onChange={(value) => change("editingStatus", value)}
       />
+      <VideoAssets day={day} change={change} />
     </Fold>
   );
 }

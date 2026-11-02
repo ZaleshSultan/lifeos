@@ -17,22 +17,22 @@ Request a security architecture review when changing:
 
 ## Layer 1: Trust Boundaries
 
-| Question                                             | Pass criteria                              |
-| ---------------------------------------------------- | ------------------------------------------ |
-| Does browser code access service role?               | **No** — anon key + JWT only (web, future) |
-| Does TMA contain bot token or ingest secret?         | **No**                                     |
-| Are workers the only non-bot service-role consumers? | **Yes** (+ bot)                            |
-| Is user identity resolved before DB access?          | **Yes** — every write path                 |
+| Question                                              | Pass criteria                                                                               |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Does browser code access service role?                | **No** — browser calls authenticated backend; web forwards its HttpOnly session server-side |
+| Does TMA contain bot token or ingest secret?          | **No**                                                                                      |
+| Are privileged consumers confined to trusted servers? | **Yes** — bot, reviewed workers and authorized operations only                              |
+| Is user identity resolved before DB access?           | **Yes** — every write path                                                                  |
 
 ## Layer 2: Authentication
 
-| Surface      | Review item                                  |
-| ------------ | -------------------------------------------- |
-| Webhook      | Secret required in prod; timing-safe compare |
-| TMA          | HMAC valid; user linked; dev bypass off      |
-| Ingest       | Secret required; timing-safe compare         |
-| Web (future) | Supabase JWT validated server-side           |
-| Workers      | Service role in env only, not in code        |
+| Surface | Review item                                                                                      |
+| ------- | ------------------------------------------------------------------------------------------------ |
+| Webhook | Secret required in prod; timing-safe compare                                                     |
+| TMA     | HMAC/freshness valid; active owner; dev bypass off                                               |
+| Ingest  | Personal signature, credential hash, expiry/revocation and active owner; valid TMA alternative   |
+| Web     | One-use link exchange; opaque live session; secure cookie, revocation and mutation Origin checks |
+| Workers | Service role in env only, not in code                                                            |
 
 ## Layer 3: Authorization
 
@@ -48,11 +48,11 @@ async getResource(userId: string, resourceId: string) {
 }
 ```
 
-| Check                                         |     |
-| --------------------------------------------- | --- |
-| Every SELECT/UPDATE/DELETE filters `user_id`  |     |
-| No "admin" endpoints without separate auth    |     |
-| UUIDs in URLs cannot access other users' data |     |
+| Check                                                                                                                            |     |
+| -------------------------------------------------------------------------------------------------------------------------------- | --- |
+| Every user-owned SELECT/UPDATE/DELETE filters resolved `user_id`; identity/global-reference/admin exceptions explicitly reviewed |     |
+| No "admin" endpoints without separate auth                                                                                       |     |
+| UUIDs in URLs cannot access other users' data                                                                                    |     |
 
 ## Layer 4: Data Handling
 
@@ -87,34 +87,34 @@ async getResource(userId: string, resourceId: string) {
 
 ## Layer 7: Secrets & Configuration
 
-| Secret                            | Where allowed                    |
-| --------------------------------- | -------------------------------- |
-| `SUPABASE_SERVICE_ROLE_KEY`       | bot, workers                     |
-| `TELEGRAM_BOT_TOKEN`              | bot only                         |
-| `TELEGRAM_WEBHOOK_SECRET`         | bot only                         |
-| `LIFEOS_HEALTH_INGEST_JWT_SECRET` | bot only                         |
-| `SUPABASE_ANON_KEY`               | web (future), never service role |
-| `OPENROUTER_API_KEY`              | bot/core server-side only        |
+| Secret                                 | Where allowed                                        |
+| -------------------------------------- | ---------------------------------------------------- |
+| `SUPABASE_SERVICE_ROLE_KEY`            | bot, workers                                         |
+| `TELEGRAM_BOT_TOKEN`                   | bot only                                             |
+| `TELEGRAM_WEBHOOK_SECRET`              | bot only                                             |
+| `LIFEOS_HEALTH_INGEST_JWT_SECRET`      | bot only                                             |
+| `LIFEOS_WEB_SESSION_SECRET`            | bot only; never the web/browser bundle               |
+| `OPENROUTER_API_KEY`, `GEMINI_API_KEY` | trusted backend only; no provider calls from browser |
 
 Verify `.env.example` updated for new vars — placeholders only.
 
 ## Layer 8: Deployment
 
-| Environment    | Checks                                              |
-| -------------- | --------------------------------------------------- |
-| Railway (bot)  | All secrets set; dev auth false; webhook secret set |
-| Vercel (web)   | No service role; auth before public launch          |
-| Arch (workers) | Vault path explicit; systemd user not root          |
-| Local dev      | `.env` in `.gitignore`; no real secrets committed   |
+| Environment    | Checks                                                           |
+| -------------- | ---------------------------------------------------------------- |
+| Debian (bot)   | Service secrets private; dev auth false; webhook secret set      |
+| Debian (web)   | No service role; live session validation, CSRF and cookie checks |
+| Debian workers | Vault path explicit; reviewed least-privilege systemd units      |
+| Local dev      | `.env` in `.gitignore`; no real secrets committed                |
 
 ## Layer 9: Testing
 
-| Test type         | Location                             |
-| ----------------- | ------------------------------------ |
-| Auth rejection    | `apps/bot/src/server.test.ts`        |
-| Parser edge cases | `packages/core/src/*.test.ts`        |
-| Path traversal    | `packages/obsidian/src/path.test.ts` |
-| Store scoping     | Add when store grows                 |
+| Test type         | Location                                                                                      |
+| ----------------- | --------------------------------------------------------------------------------------------- |
+| Auth rejection    | `apps/bot/src/server.test.ts`                                                                 |
+| Parser edge cases | `packages/core/src/*.test.ts`                                                                 |
+| Path traversal    | `packages/obsidian/src/path.test.ts`                                                          |
+| Store scoping     | Existing DB/store tests and isolated SQL role/concurrency harnesses; extend for changed paths |
 
 New auth paths **must** have negative tests (invalid secret, wrong user, expired token).
 
@@ -142,8 +142,13 @@ New auth paths **must** have negative tests (invalid secret, wrong user, expired
 
 1. `server.ts` monolith — harder to audit all routes
 2. `lifeos-store.ts` size — scoping bugs hide in volume
-3. CORS wildcard — acceptable in dev only
-4. No web auth — blocks production dashboard
-5. initData replay window — needs TTL
+3. General webhook/TMA/ingest rate limiting is not a shared distributed app control; verify ingress separately from feature-specific limits.
+4. TMA signed freshness is implemented, but stolen initData can replay within its 24-hour lifetime; live web/device credentials remain reusable until expiry/revocation.
+5. Dashboard-wide restrictive CSP and automatic expired-credential metadata cleanup are not established controls; review them independently.
+
+Resolved baseline gaps: webhook timing-safe comparison, signed TMA freshness,
+exact API CORS origins and revocable Telegram-to-web authentication are already
+implemented. Preserve them and their negative tests; do not reintroduce a
+stateless/shared-secret shortcut or duplicate browser database access.
 
 See `docs/PROJECT_AUDIT.md` for full issue registry.

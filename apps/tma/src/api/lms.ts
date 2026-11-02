@@ -1,3 +1,7 @@
+import {
+  parseAituAuthorizationGuidance,
+  type AituAuthorizationGuidance,
+} from "../../../../packages/core/src/aitu-authorization.js";
 import { useQuery } from "@tanstack/react-query";
 import { ApiError, request } from "./client";
 
@@ -11,6 +15,7 @@ export type LmsConnectionState =
   | "error";
 
 export interface LmsConnection {
+  authorization?: AituAuthorizationGuidance;
   configured: boolean;
   state: LmsConnectionState;
   lastSyncSuccessAt: string | null;
@@ -124,12 +129,30 @@ const lmsAuthStageLabels = {
   authenticated_moodle_session: "проверка сессии Moodle",
 } as const;
 const lmsAuthReasons = new Set([
-  "started", "accepted", "rejected", "request", "followed", "target_rejected",
-  "redirect_limit", "transition_limit", "deadline_exceeded", "network_error",
-  "http_rejected", "response_too_large", "page_received", "interactive_required",
-  "callback_missing", "callback_invalid", "callback_ambiguous", "callback_error",
-  "session_expired", "identity_missing", "identity_verified", "continuation_missing",
-  "continuation_invalid", "continuation_loop",
+  "started",
+  "accepted",
+  "rejected",
+  "request",
+  "followed",
+  "target_rejected",
+  "redirect_limit",
+  "transition_limit",
+  "deadline_exceeded",
+  "network_error",
+  "http_rejected",
+  "response_too_large",
+  "page_received",
+  "interactive_required",
+  "callback_missing",
+  "callback_invalid",
+  "callback_ambiguous",
+  "callback_error",
+  "session_expired",
+  "identity_missing",
+  "identity_verified",
+  "continuation_missing",
+  "continuation_invalid",
+  "continuation_loop",
 ]);
 
 interface LmsAuthDiagnostic {
@@ -137,7 +160,9 @@ interface LmsAuthDiagnostic {
   reason: string;
 }
 
-function safeCurrentAuthDiagnostic(value: unknown): LmsAuthDiagnostic | undefined {
+function safeCurrentAuthDiagnostic(
+  value: unknown,
+): LmsAuthDiagnostic | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return;
   const data = value as Record<string, unknown>;
   if (
@@ -146,7 +171,10 @@ function safeCurrentAuthDiagnostic(value: unknown): LmsAuthDiagnostic | undefine
     typeof data.reason === "string" &&
     lmsAuthReasons.has(data.reason)
   )
-    return { stage: data.stage as LmsAuthDiagnostic["stage"], reason: data.reason };
+    return {
+      stage: data.stage as LmsAuthDiagnostic["stage"],
+      reason: data.reason,
+    };
 }
 
 export class LmsError extends Error {
@@ -174,11 +202,15 @@ function sanitizedLmsError(error: unknown): LmsError {
     } catch {
       // Never retain or display the original response to a credential request.
     }
-    if (typeof code === "string" && Object.prototype.hasOwnProperty.call(lmsErrorMessages, code))
+    if (
+      typeof code === "string" &&
+      Object.prototype.hasOwnProperty.call(lmsErrorMessages, code)
+    )
       return new LmsError(
-        lmsErrorMessages[code] + (diagnostics
-          ? ` Этап SSO: ${lmsAuthStageLabels[diagnostics.stage]} (${diagnostics.stage}); код: ${diagnostics.reason}.`
-          : ""),
+        lmsErrorMessages[code] +
+          (diagnostics
+            ? ` Этап SSO: ${lmsAuthStageLabels[diagnostics.stage]} (${diagnostics.stage}); код: ${diagnostics.reason}.`
+            : ""),
         error.status,
         diagnostics,
       );
@@ -222,7 +254,9 @@ async function lmsRequest<T>(
 }
 
 function connectionMetadata(value: LmsConnection): LmsConnection {
+  const authorization = parseAituAuthorizationGuidance(value.authorization);
   return {
+    ...(authorization ? { authorization } : {}),
     configured: value.configured,
     state: value.state,
     lastSyncSuccessAt: value.lastSyncSuccessAt,

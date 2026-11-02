@@ -1,194 +1,251 @@
 "use client";
-
 import {
-  Activity,
   BookOpenCheck,
+  CalendarDays,
+  CheckSquare,
   CircleDollarSign,
+  Clapperboard,
+  Video,
+  Dumbbell,
   HeartPulse,
   LayoutDashboard,
   LogOut,
-  UserRound,
+  Menu,
+  MessageSquare,
+  Bell,
   Settings,
+  Utensils,
+  X,
   Zap,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useRef, useState } from "react";
 import { cx } from "@/lib/styles";
 import type { SystemStatus } from "@/lib/system-status";
 
-interface AppShellProps {
+function SignOutButton({ mobile = false }: { mobile?: boolean }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(false);
+  const inFlight = useRef(false);
+  async function signOut() {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setBusy(true);
+    setError(false);
+    try {
+      const response = await fetch("/web/logout", {
+        method: "POST",
+        mode: "cors",
+        credentials: "same-origin",
+        cache: "no-store",
+        redirect: "follow",
+      });
+      const destination = new URL(response.url);
+      if (
+        !response.ok ||
+        !response.redirected ||
+        destination.origin !== window.location.origin ||
+        destination.pathname !== "/web/access"
+      )
+        throw new Error("logout_unavailable");
+      window.location.assign("/web/access");
+    } catch {
+      setError(true);
+      inFlight.current = false;
+      setBusy(false);
+    }
+  }
+  return (
+    <div className={mobile ? "mt-3" : "mt-3"}>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => void signOut()}
+        className="flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-white/15 px-3 text-sm text-zinc-200 disabled:opacity-50"
+      >
+        <LogOut className="h-4 w-4" />
+        {busy ? "Закрываем сессию…" : mobile ? "Выйти из LifeOS" : "Выйти"}
+      </button>
+      {error ? (
+        <p role="alert" className="mt-2 text-xs leading-relaxed text-rose-200">
+          Не удалось выйти. Повтори попытку; сессия не считается закрытой.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+const navItems: Array<{ href: string; label: string; icon: LucideIcon }> = [
+  { href: "/today", label: "Сегодня", icon: LayoutDashboard },
+  { href: "/planner", label: "Задачи и план", icon: CheckSquare },
+  { href: "/calendar", label: "Календарь", icon: CalendarDays },
+  { href: "/study", label: "Учёба", icon: BookOpenCheck },
+  { href: "/workouts", label: "Тренировки", icon: Dumbbell },
+  { href: "/health", label: "Здоровье", icon: HeartPulse },
+  { href: "/nutrition", label: "Еда и вода", icon: Utensils },
+  { href: "/finance", label: "Финансы", icon: CircleDollarSign },
+  { href: "/ai", label: "AI помощник", icon: MessageSquare },
+  { href: "/ideal-human", label: "Ideal Human", icon: Clapperboard },
+  { href: "/creator", label: "Creator", icon: Video },
+  { href: "/notifications", label: "Напоминания", icon: Bell },
+  { href: "/settings", label: "Настройки", icon: Settings },
+];
+const mobileItems = [navItems[0], navItems[1], navItems[3], navItems[9]];
+
+export function AppShell({
+  children,
+  systemStatus,
+  userName,
+}: {
   children: React.ReactNode;
   systemStatus: SystemStatus;
   userName?: string | null;
-}
-
-const navItems: Array<{
-  href: string;
-  label: string;
-  icon: LucideIcon;
-}> = [
-  { href: "/today", label: "Today", icon: LayoutDashboard },
-  { href: "/health", label: "Health", icon: HeartPulse },
-  { href: "/finance", label: "Finance", icon: CircleDollarSign },
-  { href: "/study", label: "Study", icon: BookOpenCheck },
-  { href: "/settings", label: "Settings", icon: Settings },
-];
-
-export function AppShell({ children, systemStatus, userName }: AppShellProps) {
-  const pathname = usePathname();
-
+}) {
+  const pathname = usePathname().replace(/^\/web(?=\/|$)/, "") || "/today";
+  const [moreOpen, setMoreOpen] = useState(false);
+  const navigation = (mobile = false) =>
+    navItems.map(({ href, label, icon: Icon }) => (
+      <Link
+        key={href}
+        href={href}
+        prefetch={false}
+        aria-current={pathname === href ? "page" : undefined}
+        onClick={() => setMoreOpen(false)}
+        className={cx(
+          "flex min-h-11 min-w-0 items-center gap-3 rounded-lg px-3 text-sm transition-colors",
+          pathname === href
+            ? "bg-cyan-400/10 text-cyan-200"
+            : "text-zinc-300 hover:bg-white/[0.05] hover:text-white",
+          mobile && "border border-white/[0.06]",
+        )}
+      >
+        <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+        <span className="min-w-0 break-words">{label}</span>
+      </Link>
+    ));
   return (
     <div className="min-h-screen">
-      {/* ── Desktop Sidebar ─────────────────────────────────── */}
-      <aside className="fixed inset-y-0 left-0 hidden w-56 flex-col border-r border-white/[0.06] bg-graphite-950 px-3 py-5 xl:flex">
-        {/* Brand */}
-        <div className="mb-6 flex items-center gap-2.5 px-2">
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-cyan-400/25 bg-cyan-400/10">
-            <Zap className="h-3.5 w-3.5 text-cyan-400" />
-          </div>
-          <span className="text-sm font-semibold tracking-tight text-white">
-            LifeOS
-          </span>
-        </div>
-
-        {/* Nav items */}
-        <nav className="flex-1 space-y-0.5">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const active = pathname === item.href;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cx(
-                  "group flex h-8 items-center gap-2.5 rounded-md px-2 text-sm font-medium transition-all duration-150",
-                  active
-                    ? "bg-white/[0.08] text-white"
-                    : "text-zinc-500 hover:bg-white/[0.05] hover:text-zinc-200",
-                )}
-              >
-                <Icon
-                  className={cx(
-                    "h-4 w-4 shrink-0 transition-colors",
-                    active
-                      ? "text-cyan-400"
-                      : "text-zinc-600 group-hover:text-zinc-400",
-                  )}
-                />
-                <span className="flex-1">{item.label}</span>
-                {active && (
-                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-400" />
-                )}
-              </Link>
-            );
-          })}
+      <a
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-cyan-300 focus:p-3 focus:text-zinc-950"
+        href="#lifeos-main"
+      >
+        К содержимому
+      </a>
+      <aside className="fixed inset-y-0 left-0 hidden w-60 flex-col border-r border-white/[0.08] bg-graphite-950 px-3 py-5 xl:flex">
+        <Link
+          href="/today"
+          className="mb-5 flex min-h-11 items-center gap-3 px-3 text-lg font-semibold text-white"
+        >
+          <Zap className="h-6 w-6 text-cyan-300" />
+          LifeOS
+        </Link>
+        <nav
+          aria-label="Разделы LifeOS"
+          className="min-h-0 flex-1 space-y-1 overflow-y-auto"
+        >
+          {navigation()}
         </nav>
-
-        <div className="mb-2 rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2.5">
-          <div className="flex items-center gap-2">
-            <UserRound className="h-3.5 w-3.5 text-cyan-400" />
-            <span className="min-w-0 flex-1 truncate text-xs font-medium text-zinc-300">
-              {userName || "LifeOS user"}
-            </span>
-            <form action="/web/logout" method="post">
-              <button
-                type="submit"
-                aria-label="Выйти"
-                className="text-zinc-600 transition hover:text-zinc-300"
-              >
-                <LogOut className="h-3.5 w-3.5" />
-              </button>
-            </form>
-          </div>
-        </div>
-
-        {/* Status footer */}
-        <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2.5">
-          <div className="flex items-center gap-2">
-            <span
-              className={cx(
-                "h-1.5 w-1.5 shrink-0 rounded-full",
-                systemStatus.online ? "bg-emerald-400" : "bg-amber-400",
-              )}
-            />
-            <span className="min-w-0 truncate text-xs font-medium text-zinc-400">
-              {systemStatus.label}
-            </span>
-          </div>
-          <p className="mt-1 text-[11px] tabular-nums text-zinc-600">
-            {systemStatus.checkedAt}
+        <div className="mt-4 border-t border-white/[0.08] px-3 pt-4">
+          <p className="truncate text-sm text-zinc-100">
+            {userName || "Мой LifeOS"}
           </p>
+          <p className="mt-1 text-xs text-zinc-400">{systemStatus.label}</p>
+          <SignOutButton />
         </div>
       </aside>
-
-      <div className="xl:pl-56">
-        {/* ── Mobile Header ────────────────────────────────── */}
-        <header className="sticky top-0 z-20 flex items-center justify-between border-b border-white/[0.06] bg-graphite-950/90 px-4 py-3 backdrop-blur-md xl:hidden">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-cyan-400/25 bg-cyan-400/10">
-              <Zap className="h-3 w-3 text-cyan-400" />
-            </div>
-            <span className="text-sm font-semibold tracking-tight text-white">
-              LifeOS
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="max-w-24 truncate text-xs text-zinc-500">{userName}</span>
-          <div
+      <div className="xl:pl-60">
+        <header className="sticky top-0 z-30 flex min-h-16 items-center justify-between gap-3 border-b border-white/[0.08] bg-graphite-950/95 px-4 backdrop-blur-md xl:hidden">
+          <Link
+            href="/today"
+            className="flex items-center gap-2 font-semibold text-white"
+          >
+            <Zap className="h-5 w-5 text-cyan-300" />
+            LifeOS
+          </Link>
+          <span className="min-w-0 truncate text-xs text-zinc-300">
+            {userName}
+          </span>
+          <span
             className={cx(
-              "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium",
+              "shrink-0 rounded-full border px-2 py-1 text-[11px]",
               systemStatus.online
-                ? "border-emerald-400/20 bg-emerald-400/[0.08] text-emerald-400"
-                : "border-amber-400/20 bg-amber-400/[0.08] text-amber-400",
+                ? "border-emerald-300/20 text-emerald-200"
+                : "border-amber-300/20 text-amber-200",
             )}
           >
-            <span
-              className={cx(
-                "h-1.5 w-1.5 shrink-0 rounded-full",
-                systemStatus.online ? "bg-emerald-400" : "bg-amber-400",
-              )}
-            />
             {systemStatus.shortLabel}
-          </div>
-          </div>
+          </span>
         </header>
-
-        {/* ── Main Content ─────────────────────────────────── */}
-        <main className="mx-auto min-h-screen max-w-6xl px-4 pb-28 pt-6 md:px-6 md:pt-8 xl:pb-12">
+        <main
+          id="lifeos-main"
+          className="mx-auto min-h-screen max-w-7xl px-4 pb-32 pt-6 md:px-6 md:pt-8 xl:pb-12"
+        >
           {children}
         </main>
-
-        {/* ── Mobile Bottom Nav ────────────────────────────── */}
-        <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-white/[0.06] bg-graphite-950/95 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-md xl:hidden">
-          <div className="mx-auto grid max-w-sm grid-cols-5">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const active = pathname === item.href;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  aria-label={item.label}
-                  className={cx(
-                    "flex flex-col items-center gap-1 py-1 text-[10px] font-medium transition-colors duration-150",
-                    active ? "text-white" : "text-zinc-600 hover:text-zinc-400",
-                  )}
+        <nav
+          aria-label="Быстрая навигация"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") setMoreOpen(false);
+          }}
+          className="fixed inset-x-0 bottom-0 z-40 border-t border-white/[0.08] bg-graphite-950/95 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md xl:hidden"
+        >
+          {moreOpen ? (
+            <section
+              id="web-more-nav"
+              className="max-h-[70vh] overflow-y-auto border-b border-white/[0.08] p-4"
+            >
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-zinc-100">
+                  Все разделы
+                </h2>
+                <button
+                  aria-label="Закрыть разделы"
+                  type="button"
+                  className="grid h-11 w-11 place-items-center text-zinc-200"
+                  onClick={() => setMoreOpen(false)}
                 >
-                  <div
-                    className={cx(
-                      "flex h-8 w-8 items-center justify-center rounded-lg transition-all",
-                      active ? "bg-white/[0.1]" : "",
-                    )}
-                  >
-                    <Icon
-                      className={cx("h-4 w-4", active ? "text-cyan-400" : "")}
-                    />
-                  </div>
-                  <span>{item.label}</span>
-                </Link>
-              );
-            })}
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-2">{navigation(true)}</div>
+              <SignOutButton mobile />
+            </section>
+          ) : null}
+          <div className="mx-auto grid max-w-xl grid-cols-5 px-2 pt-2">
+            {mobileItems.map(({ href, label, icon: Icon }) => (
+              <Link
+                key={href}
+                href={href}
+                prefetch={false}
+                aria-label={label}
+                aria-current={pathname === href ? "page" : undefined}
+                className={cx(
+                  "flex min-h-14 flex-col items-center justify-center gap-1 rounded-lg px-1 text-center text-[10px]",
+                  pathname === href
+                    ? "bg-cyan-300/10 text-cyan-200"
+                    : "text-zinc-400",
+                )}
+              >
+                <Icon className="h-5 w-5" aria-hidden="true" />
+                <span className="min-w-0 break-words">{label}</span>
+              </Link>
+            ))}
+            <button
+              type="button"
+              aria-label="Все разделы"
+              aria-controls="web-more-nav"
+              aria-expanded={moreOpen}
+              onClick={() => setMoreOpen(!moreOpen)}
+              className={cx(
+                "flex min-h-14 flex-col items-center justify-center gap-1 rounded-lg text-[10px]",
+                moreOpen ? "bg-white/10 text-white" : "text-zinc-400",
+              )}
+            >
+              <Menu className="h-5 w-5" />
+              <span>Ещё</span>
+            </button>
           </div>
         </nav>
       </div>

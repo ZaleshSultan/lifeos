@@ -70,14 +70,26 @@ class HealthDayMathTest {
         assertNull(sleepTotalsForWakeDay(sessions, localDayRange(LocalDate.parse("2026-10-09"), ZoneId.of("UTC"))).sleepMinutes)
     }
 
-    @Test fun `sleep without stages uses recorded session not fabricated stages`() {
+    @Test fun `sleep without stages leaves asleep duration and stage totals unknown`() {
         val wakeDay = localDayRange(LocalDate.parse("2026-10-10"), ZoneId.of("UTC"))
         val result = sleepTotalsForWakeDay(listOf(SleepSessionIntervals(
             interval("2026-10-09T23:14:00Z", "2026-10-10T06:47:00Z"), emptyList(),
         )), wakeDay)
-        assertEquals(453L, result.sleepMinutes)
+        assertNull(result.sleepMinutes)
         assertNull(result.deepMinutes)
         assertNull(result.remMinutes)
+        assertNull(result.awakeMinutes)
+    }
+
+    @Test fun `session ending exactly at local midnight belongs to its wake date`() {
+        val zone = ZoneId.of("Asia/Almaty")
+        val wakeDay = localDayRange(LocalDate.parse("2026-11-03"), zone)
+        val night = interval("2026-11-02T17:00:00Z", "2026-11-02T19:00:00Z")
+        val sessions = listOf(SleepSessionIntervals(
+            night, listOf(SleepStageInterval(night, SleepStageKind.ASLEEP)),
+        ))
+        assertEquals(120L, sleepTotalsForWakeDay(sessions, wakeDay).sleepMinutes)
+        assertNull(sleepTotalsForWakeDay(sessions, localDayRange(LocalDate.parse("2026-11-02"), zone)).sleepMinutes)
     }
 
     @Test fun `sleep stages exclude wake and merge duplicated providers`() {

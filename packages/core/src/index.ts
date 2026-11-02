@@ -22,3 +22,9 @@ export * from "./lms-work.js";
 
 export * from "./assistant.js";
 export * from "./assistant-router.js";
+
+export * from "./aitu-authorization.js";
+export * from "./daily-life.js";
+
+export * from "./ai-execution.js";
+export * from "./nutrition.js";

@@ -4,8 +4,23 @@ export const WEB_SESSION_COOKIE = "lifeos_web_session";
 
 export function publicWebUrl(path: string): URL {
   const base =
+    process.env.LIFEOS_WEB_APP_URL?.trim() ||
     process.env.NEXT_PUBLIC_WEB_APP_URL?.trim() ||
     "https://lifeos.zalewko.me/web";
+  let parsed: URL;
+  try {
+    parsed = new URL(base);
+  } catch {
+    throw new Error("Invalid public web base configuration");
+  }
+  if (
+    !["https:", "http:"].includes(parsed.protocol) ||
+    parsed.username ||
+    parsed.password ||
+    parsed.search ||
+    parsed.hash
+  )
+    throw new Error("Invalid public web base configuration");
   return new URL(`${base.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`);
 }
 

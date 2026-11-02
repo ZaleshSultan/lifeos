@@ -643,52 +643,15 @@ def fallback_markdown(stats: JsonObject) -> str:
 
 
 def ai_markdown(settings: Settings, stats: JsonObject) -> tuple[str, JsonObject, str | None]:
-    if not settings.ai_enabled or not settings.openrouter_api_key:
-        return fallback_markdown(stats), {"fallback": True, "reason": "ai_disabled_or_missing_key"}, None
-
-    prompt = {
-        "role": "system",
-        "content": (
-            "Ты LifeOS operator. Напиши краткий, прямой, практичный monthly review "
-            "на русском markdown. Без мотивационного мусора. Не добавляй факты, "
-            "которых нет в JSON. Сохрани секции 1-8 из задания."
-        ),
-    }
-    user = {
-        "role": "user",
-        "content": json.dumps(stats, ensure_ascii=False, sort_keys=True),
-    }
-    payload = {
-        "model": settings.ai_model,
-        "temperature": 0.2,
-        "messages": [prompt, user],
-    }
-    request = urllib.request.Request(
-        f"{settings.ai_base_url.rstrip('/')}/chat/completions",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "authorization": f"Bearer {settings.openrouter_api_key}",
-            "content-type": "application/json",
-            "accept": "application/json",
-        },
-        method="POST",
+    # This legacy process has no authenticated shared-governor gateway. Keep its
+    # deterministic report useful; an enabled flag/key must not bypass durable
+    # budget accounting or send data to an arbitrary configured destination.
+    reason = (
+        "shared_ai_governor_required"
+        if settings.ai_enabled and settings.openrouter_api_key
+        else "ai_disabled_or_missing_key"
     )
-
-    try:
-        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
-            body = json.loads(response.read().decode("utf-8"))
-    except Exception as exc:
-        return fallback_markdown(stats), {"fallback": True, "error": str(exc)[:500]}, None
-
-    try:
-        content = str(body["choices"][0]["message"]["content"]).strip()
-    except (KeyError, IndexError, TypeError):
-        return fallback_markdown(stats), {"fallback": True, "error": "invalid_ai_response"}, None
-
-    if not content.startswith("# LifeOS Monthly Review"):
-        content = f"# LifeOS Monthly Review — {stats['periodMonth']}\n\n{content}"
-
-    return content, {"fallback": False, "response": body}, settings.ai_model
+    return fallback_markdown(stats), {"fallback": True, "reason": reason}, None
 
 
 def sanitize_segment(value: str) -> str:

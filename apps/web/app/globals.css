@@ -84,3 +84,12 @@ select {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
   gap: 1rem;
 }
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

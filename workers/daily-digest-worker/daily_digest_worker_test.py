@@ -18,6 +18,57 @@ SPEC.loader.exec_module(worker)
 
 
 class DailyDigestTest(unittest.TestCase):
+    def setUp(self) -> None:
+        # Existing delivery-fence tests use the deterministic local fallback,
+        # never a production database or subprocess renderer.
+        renderer = patch.object(worker, "render_briefing", return_value=None)
+        renderer.start()
+        self.addCleanup(renderer.stop)
+
+    def test_absent_or_explicitly_disabled_preferences_never_claim_or_send(self) -> None:
+        for preferences in (None, {"revision":1}, {"revision":1,"morningEnabled":False,"morningTime":"08:00","eveningEnabled":False,"eveningTime":"21:00","quietStart":"22:00","quietEnd":"07:00","hydrationRemindersEnabled":False,"includeHealth":False,"includeFilming":True}):
+            db, telegram = FakeDb(), FakeTelegram()
+            db.preferences=preferences
+            self.assertFalse(process(db,telegram))
+            self.assertEqual(db.events,["preferences"])
+            self.assertEqual(telegram.sent,[])
+            self.assertEqual(db.queued,{})
+
+    def test_personal_time_and_quiet_hours_override_legacy_global_digest_time(self) -> None:
+        db,telegram=FakeDb(),FakeTelegram()
+        db.preferences={**db.preferences,"morningTime":"09:00"}
+        self.assertFalse(process(db,telegram))
+        self.assertTrue(process(db,telegram,now=NOW.replace(hour=4)))
+        other,recipient=FakeDb(),FakeTelegram()
+        other.preferences={**other.preferences,"quietStart":"07:30","quietEnd":"09:30"}
+        self.assertFalse(process(other,recipient))
+        self.assertEqual(other.claim_requests,[])
+
+    def test_shared_renderer_is_sent_as_plain_text_without_html_interpretation(self) -> None:
+        db,telegram=FakeDb(),FakeTelegram()
+        with patch.object(worker,"render_briefing",return_value="Facts <untrusted title> & honest notes"):
+            self.assertTrue(process(db,telegram))
+        self.assertEqual(telegram.parse_modes,[None])
+        self.assertIn("<untrusted title>",telegram.sent[0][1])
+        self.assertNotIn("tasks",db.events)
+
+    def test_evening_and_water_use_existing_queue_and_restart_deduplication(self) -> None:
+        db,telegram=FakeDb(),FakeTelegram()
+        db.preferences={**db.preferences,"morningEnabled":False,"eveningEnabled":True,"hydrationRemindersEnabled":True}
+        evening=NOW.replace(hour=16)  # 21:05 Asia/Almaty; earlier water slots are skipped.
+        self.assertFalse(process(db,telegram,now=evening))
+        self.assertEqual(len(db.queued),1)
+        self.assertIn(("user-1","2026-10-05","evening"),db.queued)
+        self.assertFalse(process(db,telegram,now=evening))
+        self.assertEqual(len(db.queued),1)
+        self.assertEqual(telegram.sent,[])
+        self.assertEqual(db.claim_requests,[])
+        morning,none=FakeDb(),FakeTelegram()
+        morning.preferences={**morning.preferences,"morningEnabled":False,"hydrationRemindersEnabled":True}
+        process(morning,none)
+        self.assertEqual(set(k[2] for k in morning.queued),{"hydration_1","hydration_2"})
+        self.assertEqual(none.sent,[])
+
     def test_digest_window_and_almaty_day_bounds(self) -> None:
         local = datetime(2026, 10, 5, 8, 7, tzinfo=worker.resolve_timezone("Asia/Almaty"))
         self.assertTrue(worker.digest_window(local, "08:00", 720))
@@ -99,16 +150,16 @@ class DailyDigestTest(unittest.TestCase):
         self.assertTrue(process(db, telegram))
         self.assertEqual(db.claim_requests, [("user-1", "2026-10-05")])
         self.assertEqual(db.finishes, [("sent", "none", 42, None)])
-        self.assertEqual(db.events, ["claim", "tasks", "courses", "schedule", "deadlines", "settings", "begin", "finish"])
+        self.assertEqual(db.events, ["preferences", "claim", "tasks", "courses", "schedule", "deadlines", "settings", "begin", "finish"])
         chat_id, text, markup = telegram.sent[0]
         self.assertEqual(chat_id, "123")
-        self.assertEqual(telegram.parse_modes, ["HTML"])
+        self.assertEqual(telegram.parse_modes, [None])
         self.assertIn("Разобрать конспект", text)
         self.assertIn("14:00–14:50", text)
         self.assertIn("Lab", text)
         self.assertEqual(markup["inline_keyboard"][0][1]["web_app"]["url"], "https://lifeos.example/tma/?screen=study&studyTab=map")
 
-    def test_real_sender_preserves_html_and_inline_buttons(self) -> None:
+    def test_real_sender_preserves_plaintext_and_inline_buttons(self) -> None:
         response = MagicMock()
         response.__enter__.return_value = response
         response.read.return_value = b'{"ok":true,"result":{"message_id":42}}'
@@ -117,15 +168,15 @@ class DailyDigestTest(unittest.TestCase):
         self.assertTrue(process(FakeDb(), telegram))
         request = opener.call_args.args[0]
         payload = json.loads(request.data)
-        self.assertEqual(payload["parse_mode"], "HTML")
+        self.assertNotIn("parse_mode", payload)
         self.assertIn("inline_keyboard", payload["reply_markup"])
-        self.assertIn("<b>", payload["text"])
+        self.assertNotIn("<b>", payload["text"])
 
     def test_rejected_claim_never_reads_data_or_sends(self) -> None:
         db, telegram = FakeDb(), FakeTelegram()
         db.claim = None
         self.assertFalse(process(db, telegram))
-        self.assertEqual(db.events, ["claim"])
+        self.assertEqual(db.events, ["preferences", "claim"])
         self.assertEqual(telegram.sent, [])
 
     def test_crash_immediately_after_claim_does_not_delete_delivery(self) -> None:
@@ -255,10 +306,10 @@ class DailyDigestTest(unittest.TestCase):
         db, telegram = FakeDb(), FakeTelegram()
         db.profiles = [{**PROFILE, "user_id": "broken"}, PROFILE]
         original_claim = db.claim_digest
-        def claim(user_id, local_date):
+        def claim(user_id, local_date, revision):
             if user_id == "broken":
                 raise RuntimeError("private database error")
-            return original_claim(user_id, local_date)
+            return original_claim(user_id, local_date, revision)
         db.claim_digest = claim
         with self.assertLogs(level="ERROR") as logs:
             self.assertEqual(worker.run_once(settings_for(), NOW, db=db, telegram=telegram), 1)
@@ -281,14 +332,13 @@ class DailyDigestTest(unittest.TestCase):
         self.assertFalse(process(db, telegram, profile={**PROFILE, "timezone": "America/New_York"}, now=NOW))
         self.assertEqual(db.claim_requests, [])
 
-    def test_invalid_or_empty_profile_timezone_matches_database_utc_fallback(self) -> None:
+    def test_invalid_or_empty_profile_timezone_never_claims_a_notification(self) -> None:
         for zone in ("", "invalid/timezone"):
             with self.subTest(zone=zone):
                 db, telegram = FakeDb(), FakeTelegram()
-                now = datetime(2026, 10, 5, 23, 5, tzinfo=timezone.utc)
-                self.assertTrue(process(db, telegram, profile={**PROFILE, "timezone": zone},
-                                        settings=settings_for(digest_time="20:00"), now=now))
-                self.assertEqual(db.claim_requests, [("user-1", "2026-10-05")])
+                self.assertFalse(process(db, telegram, profile={**PROFILE, "timezone": zone}))
+                self.assertEqual(db.claim_requests, [])
+                self.assertEqual(telegram.sent, [])
 
     def test_dst_spring_gap_runs_at_first_real_minute(self) -> None:
         tz = worker.resolve_timezone("America/New_York")
@@ -391,8 +441,22 @@ class FakeDb:
         self.preparation_error = self.begin_error = self.finish_error = self.recover_error = None
         self.recoveries = 0
         self.profiles = [PROFILE]
+        # Tests opting into delivery explicitly; production has no default opt-in.
+        self.preferences = {"revision":1,"morningEnabled":True,"morningTime":"08:00","eveningEnabled":False,"eveningTime":"21:00","quietStart":"22:00","quietEnd":"07:00","hydrationRemindersEnabled":False,"includeHealth":False,"includeFilming":True}
+        self.queued = {}
 
-    def claim_digest(self, user_id, local_date):
+    def notification_preferences(self, user_id):
+        self.events.append("preferences")
+        return self.preferences
+
+    def enqueue_daily_life_notification(self, user_id, local_date, kind, revision, message, due_at):
+        key=(user_id,local_date,kind)
+        if key in self.queued:
+            return False
+        self.queued[key]=(revision,message,due_at)
+        return True
+
+    def claim_digest(self, user_id, local_date, revision):
         self.events.append("claim")
         self.claim_requests.append((user_id, local_date))
         return self.claim

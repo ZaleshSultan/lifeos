@@ -1,3 +1,4 @@
+import type { MealVisionService } from "../nutrition-routes.js";
 import type { LifeOSStore } from "@lifeos/db";
 import type { AssistantBrain } from "../assistant/brain.js";
 
@@ -88,6 +89,7 @@ export interface TelegramClient {
 }
 
 export interface TelegramBotRuntime {
+  mealVision?: MealVisionService;
   assistant?: AssistantBrain;
   telegram: TelegramClient;
   store?: LifeOSStore;
@@ -103,6 +105,7 @@ export interface TelegramBotRuntime {
   adminTelegramUserIds?: number[];
   signupMode?: "pending_approval";
   financeAi?: {
+    fetchForUser?: (userId: string) => typeof fetch;
     enabled: boolean;
     openRouterApiKey?: string;
     model?: string;

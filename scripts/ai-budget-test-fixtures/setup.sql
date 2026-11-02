@@ -1,0 +1,14 @@
+create role anon;
+create role authenticated;
+create role service_role bypassrls;
+create schema auth;
+create table auth.users(id uuid primary key);
+create table public.profiles(user_id uuid primary key references auth.users(id),status text not null default 'active');
+grant usage on schema public,auth to anon,authenticated,service_role;
+grant select,update on public.profiles to service_role;
+alter default privileges in schema public grant all on tables to anon,authenticated,service_role;
+alter default privileges in schema public grant execute on functions to anon,authenticated,service_role;
+insert into auth.users select ('00000000-0000-4000-8000-'||lpad(i::text,12,'0'))::uuid from generate_series(1,8) i;
+insert into public.profiles select id,'active' from auth.users;
+create function public.ai_test_assert(ok boolean,message text) returns void language plpgsql as $$ begin if ok is distinct from true then raise exception 'AI budget assertion failed: %',message;end if;end;$$;
+create function public.ai_test_limits(u bigint default 1000,f bigint default 1000,g bigint default 10000,c bigint default null,iterations integer default 3) returns jsonb language sql as $$ select jsonb_build_object('userTokens',u,'featureTokens',f,'globalTokens',g,'userCostMicros',c,'featureCostMicros',null,'globalCostMicros',null,'maxIterations',iterations); $$;

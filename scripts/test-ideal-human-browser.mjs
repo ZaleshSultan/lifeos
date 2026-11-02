@@ -8,6 +8,11 @@ import {
   emptyIdealHumanDay,
   parseIdealHumanDay,
 } from "../packages/core/src/ideal-human.ts";
+import {
+  buildDailyBriefings,
+  projectDailyHealth,
+  DEFAULT_DAILY_LIFE_PREFERENCES,
+} from "../packages/core/src/daily-life.ts";
 const { chromium } = await import(
   process.env.LIFEOS_PLAYWRIGHT_MODULE || "playwright"
 );
@@ -61,6 +66,18 @@ async function fixture(width, options = {}) {
   const page = await context.newPage();
   await page.clock.install({ time: new Date("2026-11-03T05:00:00+05:00") });
   const days = new Map();
+  const entries = [];
+  const waterKeys = new Set();
+  let preferences = { ...DEFAULT_DAILY_LIFE_PREFERENCES };
+  const waterSummary = () => ({
+    date: "2026-11-03",
+    timezone: "Asia/Almaty",
+    totalMl: entries
+      .filter((v) => !v.undoneAt)
+      .reduce((n, v) => n + v.amountMl, 0),
+    entries: [...entries].reverse(),
+    truncated: false,
+  });
   let saves = 0,
     failSave = false,
     failLoad = !!options.failLoad,
@@ -92,6 +109,85 @@ async function fixture(width, options = {}) {
           google: { connected: false },
           health: { connected: false },
         },
+      };
+    else if (url.pathname === "/api/tma/daily-life/summary") {
+      const date = url.searchParams.get("date") || "2026-11-03",
+        day = days.get(date) || null;
+      const health = projectDailyHealth({
+        date,
+        manual: day,
+        metrics: {},
+        records: [],
+        now: new Date("2026-11-03T00:00:00Z"),
+      });
+      data = {
+        date,
+        timezone: "Asia/Almaty",
+        dayNumber: 1,
+        health,
+        hydration: waterSummary(),
+        nutrition: {
+          mealCount: day?.meals.length || 0,
+          caloriesKcal: null,
+          proteinG: null,
+          fatG: null,
+          carbsG: null,
+          estimated: false,
+          incomplete: true,
+        },
+        ...buildDailyBriefings({
+          date,
+          day,
+          health,
+          classes: [],
+          deadlines: [],
+          tasks: [],
+          workouts: [],
+          lmsStale: true,
+        }),
+        documentary: {
+          shots: [],
+          filmingDays: 0,
+          backupConfirmedDays: 0,
+          weeklyReflection: [],
+        },
+        sourceWarnings: [],
+        generatedBy: "deterministic",
+      };
+    } else if (url.pathname === "/api/tma/daily-life/preferences") {
+      if (route.request().method() === "PUT") {
+        const v = JSON.parse(route.request().postData());
+        if (v.revision !== preferences.revision) {
+          status = 409;
+          error = "daily_life_conflict";
+        } else preferences = { ...v, revision: v.revision + 1 };
+      }
+      data = preferences;
+    } else if (url.pathname === "/api/tma/hydration") {
+      if (route.request().method() === "POST") {
+        const v = JSON.parse(route.request().postData());
+        if (!waterKeys.has(v.requestId)) {
+          waterKeys.add(v.requestId);
+          entries.push({
+            id: crypto.randomUUID(),
+            amountMl: v.amountMl,
+            occurredAt: "2026-11-03T00:00:00Z",
+            source: "tma",
+            undoneAt: null,
+          });
+        }
+      }
+      data = waterSummary();
+    } else if (/^\/api\/tma\/hydration\/.+\/undo$/.test(url.pathname)) {
+      const v = entries.find((e) => e.id === url.pathname.split("/")[4]);
+      if (v) v.undoneAt = "2026-11-03T00:01:00Z";
+      data = waterSummary();
+    } else if (url.pathname === "/api/tma/nutrition/capabilities")
+      data = {
+        available: false,
+        requiresConsent: true,
+        reason: "vision_not_configured",
+        retainsPhotos: false,
       };
     else if (url.pathname === "/api/tma/ideal-human/days") {
       if (route.request().method() === "PUT") {
@@ -520,6 +616,68 @@ try {
       path: resolve(artifacts, `ideal-human-${width}.png`),
       fullPage: true,
     });
+    assert.deepEqual(f.errors, []);
+    await f.context.close();
+  }
+  for (const width of [320, 390]) {
+    const f = await fixture(width),
+      { page } = f;
+    await scenario(
+      `daily-life ${width}: mobile navigation, unknown health and disabled provider fallback`,
+      async () => {
+        await page.goto(origin + "/tma/?screen=daily-life");
+        await page
+          .getByRole("heading", { name: "Твой день", exact: true })
+          .waitFor();
+        await page
+          .getByRole("button", { name: "+250 мл", exact: true })
+          .waitFor();
+        await page.getByText("Нет данных", { exact: false }).first().waitFor();
+        await noOverflow(page);
+      },
+    );
+    await scenario(
+      `daily-life ${width}: water add, reload and targeted undo persist`,
+      async () => {
+        await page
+          .getByRole("button", { name: "+250 мл", exact: true })
+          .click();
+        await page.getByText("250 мл", { exact: true }).first().waitFor();
+        await page.reload();
+        await page.getByText("250 мл", { exact: true }).first().waitFor();
+        await page
+          .getByRole("button", { name: "Отменить", exact: true })
+          .first()
+          .click();
+        await page.getByText("0 мл", { exact: true }).waitFor();
+        await page.reload();
+        await page.getByText("0 мл", { exact: true }).waitFor();
+        assert.equal(f.saves(), 0);
+      },
+    );
+    await scenario(
+      `daily-life ${width}: reminders default off and explicit opt-in survives reload`,
+      async () => {
+        const morning = page.getByRole("checkbox", {
+          name: "Утренний обзор",
+          exact: true,
+        });
+        assert.equal(await morning.isChecked(), false);
+        await morning.check();
+        await page
+          .getByRole("button", {
+            name: "Сохранить настройки уведомлений",
+            exact: true,
+          })
+          .click();
+        await page
+          .getByText("Настройки уведомлений сохранены.", { exact: true })
+          .waitFor();
+        await page.reload();
+        assert.equal(await morning.isChecked(), true);
+        await noOverflow(page);
+      },
+    );
     assert.deepEqual(f.errors, []);
     await f.context.close();
   }

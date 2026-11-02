@@ -9,8 +9,8 @@ lifeos-main/
 ├── apps/
 │   ├── bot/          # Node HTTP — Telegram, TMA API, health ingest (trust boundary)
 │   ├── tma/          # Vite React Telegram Mini App
-│   ├── web/          # Next.js dashboard (scaffold)
-│   └── health-bridge/ # Android Kotlin scaffold
+│   ├── web/          # Authenticated Next.js dashboard
+│   └── health-bridge/ # Kotlin Health Connect project/scaffold
 ├── packages/
 │   ├── core/         # Pure domain logic — NO I/O
 │   ├── db/           # Supabase client + LifeOSStore
@@ -54,7 +54,7 @@ All external input enters through:
 - Telegram webhook
 - TMA REST (`/api/tma/*`)
 - Health ingest (`/health/ingest`)
-- Future web API (`/api/web/*`)
+- Web login exchange/logout (`/api/web/auth/*`); protected data reuses the authenticated `/api/tma/*` boundary
 
 Bot holds `SUPABASE_SERVICE_ROLE_KEY`. Frontends never do.
 
@@ -138,31 +138,35 @@ Never edit applied migrations — add new timestamped files.
 
 - Background job that should not block HTTP (reminders, mirror, sync)
 - Requires service role + long-running process
-- Deploy on Arch with systemd unit from `workers/*/lifeos-*.service.example`
+- Deploy on the current Debian host with reviewed systemd units from `workers/*/lifeos-*.service.example`; older Arch examples are historical
 
 ## Deployment Topology
 
-| Component       | Target                         | Package                   |
-| --------------- | ------------------------------ | ------------------------- |
-| Backend         | Railway                        | `apps/bot`                |
-| Web dashboard   | Vercel                         | `apps/web`                |
-| TMA static      | Vercel or bot `TMA_STATIC_DIR` | `apps/tma` build          |
-| Obsidian mirror | Arch Linux                     | `workers/obsidian-mirror` |
-| Reminders       | Arch Linux                     | `workers/reminder-worker` |
+| Component     | Current target                        | Package                |
+| ------------- | ------------------------------------- | ---------------------- |
+| Backend + TMA | Debian/systemd, loopback port 3000    | `apps/bot`, `apps/tma` |
+| Web dashboard | Debian/systemd, port 3001, `/web`     | `apps/web`             |
+| Workers       | Debian/systemd                        | `workers/*`            |
+| Public HTTPS  | Existing Cloudflare Tunnel            | `lifeos.zalewko.me`    |
+| Database      | Existing Supabase PostgreSQL with RLS | `packages/db`          |
 
-## Phase Boundaries (Do Not Skip)
+See `docs/OPERATIONS.md` for the current topology and verified release reports for
+the deployed SHA. Railway/Vercel and Arch/Tailscale guides describe alternative or
+historical installations; never infer production from an old example or default branch.
 
-Current acceptance slice (from `docs/ARCHITECTURE.md`):
+## Acceptance Scope and Verification
 
-- ✅ Telegram capture, tasks, workouts
-- ✅ TMA workout/focus/finance flows
-- ✅ Health ingest + scoring
-- ✅ Supabase persistence + Obsidian queue
-- ❌ Production web dashboard auth
-- ❌ Android production build
-- ❌ `/api/web/*` summary endpoints
-
-Do not add web auth shortcuts (anon RLS reads from browser) — implement properly through bot.
+The original stabilization slice covers Telegram, TMA, health ingest, Supabase
+and the Obsidian queue. The explicitly authorized November 3 overnight mission
+extends it to authenticated web workspaces and the Android Health Connect
+application. Previous web-auth/Android exclusions are historical. Web sessions
+use the trusted bot boundary and an HttpOnly cookie; no anon browser read shortcut
+or service-role exposure is acceptable. Android build/install evidence must remain
+separate from physical Health Connect permission, scheduled-sync and phone tests.
+The audited release host lacks the Android/JDK/Gradle-wrapper toolchain; no
+installable APK or successful phone sync is implied by the source audit.
+External campus/creator authorization remains blocked unless an actual supported
+grant and user consent are available; a sign-in link does not establish a connection.
 
 ## Anti-Patterns
 

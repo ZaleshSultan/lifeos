@@ -1,3 +1,4 @@
+import { createAiGovernor } from "./ai-governor.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createConfiguredLifeosAiService,
@@ -7,6 +8,12 @@ import {
   type LifeosAiClient,
   type LifeosAiConfig,
 } from "./lifeos-ai.js";
+
+const testGovernor = (source: Record<string, string> = {}) =>
+  createAiGovernor({
+    source,
+    store: { reserve: async () => "reserved", finish: async () => undefined },
+  });
 
 const messages = [
   { role: "user" as const, text: "What should I focus on today?" },
@@ -20,7 +27,10 @@ const reply = {
   suggestions: [],
 };
 
-function fixture(overrides: Partial<LifeosAiConfig> = {}) {
+function fixture(
+  overrides: Partial<LifeosAiConfig> = {},
+  governorSettings: Record<string, string> = {},
+) {
   const config = {
     ...readLifeosAiConfig({
       LIFEOS_AI_ENABLED: "true",
@@ -36,13 +46,19 @@ function fixture(overrides: Partial<LifeosAiConfig> = {}) {
     .fn<LifeosAiClient["models"]["generateContent"]>()
     .mockResolvedValue({ text: JSON.stringify(reply) });
   const client = { models: { get, generateContent } };
+  const governor = testGovernor(governorSettings);
   let timestamp = Date.parse("2026-10-10T09:00:00Z");
   return {
     config,
     client,
     get,
     generateContent,
-    service: createLifeosAiService(config, { client, now: () => timestamp }),
+    governor,
+    service: createLifeosAiService(config, {
+      client,
+      now: () => timestamp,
+      governor,
+    }),
     advance: (ms: number) => {
       timestamp += ms;
     },
@@ -166,12 +182,15 @@ describe("LifeOS Gemini configuration", () => {
 
   it("preserves valid configured choices without contacting the provider during startup", () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
-    const service = createConfiguredLifeosAiService({
-      LIFEOS_AI_ENABLED: "true",
-      GEMINI_API_KEY: "secret-test-key",
-      LIFEOS_AI_TEXT_MODEL: "gemini-custom-flash",
-      LIFEOS_AI_LIVE_MODEL: "gemini-3.8-live",
-    });
+    const service = createConfiguredLifeosAiService(
+      {
+        LIFEOS_AI_ENABLED: "true",
+        GEMINI_API_KEY: "secret-test-key",
+        LIFEOS_AI_TEXT_MODEL: "gemini-custom-flash",
+        LIFEOS_AI_LIVE_MODEL: "gemini-3.8-live",
+      },
+      { governor: testGovernor() },
+    );
     expect(service.status()).toMatchObject({
       enabled: true,
       available: true,
@@ -378,7 +397,16 @@ describe("LifeOS Gemini text service", () => {
       maxConcurrent: 1,
       requestsPerMinute: 2,
     });
-    generateContent.mockImplementationOnce(() => new Promise(() => {}));
+    generateContent.mockImplementationOnce(
+      ({ config }) =>
+        new Promise((_resolve, reject) => {
+          config?.abortSignal?.addEventListener(
+            "abort",
+            () => reject(new Error("cancelled")),
+            { once: true },
+          );
+        }),
+    );
     const pending = service.ask("user-a", messages, context);
     const assertion = expect(pending).rejects.toMatchObject({
       code: "ai_timeout",
@@ -397,6 +425,35 @@ describe("LifeOS Gemini text service", () => {
     ).rejects.toMatchObject({ code: "ai_rate_limited" });
   });
 
+  it("retains the shared slot until an abort-ignoring SDK generation actually settles", async () => {
+    vi.useFakeTimers();
+    const { service, generateContent, governor } = fixture(
+      { timeoutMs: 100 },
+      { LIFEOS_AI_EXECUTION_MAX_CONCURRENT: "1" },
+    );
+    let settle: (value: { text: string }) => void = () => undefined;
+    generateContent.mockImplementationOnce(
+      () => new Promise((resolve) => (settle = resolve)),
+    );
+    const pending = service.ask("user-a", messages, context);
+    const assertion = expect(pending).rejects.toMatchObject({
+      code: "ai_timeout",
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    await assertion;
+    expect(governor.status().active).toBe(1);
+    await expect(
+      service.ask("user-b", messages, context),
+    ).rejects.toMatchObject({ code: "ai_budget_exceeded" });
+    expect(generateContent).toHaveBeenCalledTimes(1);
+    settle({ text: JSON.stringify(reply) });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(governor.status().active).toBe(0);
+    await expect(
+      service.ask("user-b", messages, context),
+    ).resolves.toMatchObject({ provider: "gemini" });
+  });
+
   it("bounds and aborts the capability discovery call too", async () => {
     vi.useFakeTimers();
     const { service, get, generateContent } = fixture({ timeoutMs: 100 });
@@ -408,6 +465,30 @@ describe("LifeOS Gemini text service", () => {
     await vi.advanceTimersByTimeAsync(100);
     await assertion;
     expect(get.mock.calls[0][0].config?.abortSignal?.aborted).toBe(true);
+    expect(generateContent).not.toHaveBeenCalled();
+  });
+
+  it("never starts generation after timed-out capability discovery resolves late", async () => {
+    vi.useFakeTimers();
+    const { service, get, generateContent, governor } = fixture(
+      { timeoutMs: 100 },
+      { LIFEOS_AI_EXECUTION_MAX_CONCURRENT: "1" },
+    );
+    let settle: (value: { supportedActions: string[] }) => void = () =>
+      undefined;
+    get.mockImplementationOnce(
+      () => new Promise((resolve) => (settle = resolve)),
+    );
+    const pending = service.ask("user-a", messages, context);
+    const assertion = expect(pending).rejects.toMatchObject({
+      code: "ai_timeout",
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    await assertion;
+    expect(governor.status().active).toBe(1);
+    settle({ supportedActions: ["generateContent"] });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(governor.status().active).toBe(0);
     expect(generateContent).not.toHaveBeenCalled();
   });
 

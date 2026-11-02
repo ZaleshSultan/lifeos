@@ -1,3 +1,4 @@
+import { AITU_BROWSER_SIGN_IN_URL } from "../../../../packages/core/src/aitu-authorization.js";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -38,7 +39,12 @@ export function LmsConnectionDetails({
   connection: LmsConnection;
 }) {
   const connected = connection.configured;
-  const status = connection.state === "syncing" ? "syncing" : connected ? "connected" : "not_connected";
+  const status =
+    connection.state === "syncing"
+      ? "syncing"
+      : connected
+        ? "connected"
+        : "not_connected";
 
   return (
     <section className="lo-lms-hero" aria-label="Состояние подключения">
@@ -48,32 +54,55 @@ export function LmsConnectionDetails({
         </div>
         <div className="min-w-0">
           <div className="lo-lms-eyebrow">УНИВЕРСИТЕТ · AITU</div>
-          <div className="mt-1 text-lg font-bold tracking-tight text-white">Moodle LMS</div>
+          <div className="mt-1 text-lg font-bold tracking-tight text-white">
+            Moodle LMS
+          </div>
         </div>
       </div>
       <div className="lo-lms-status" data-state={status}>
         {connection.state === "syncing"
           ? "Обновляем учебные данные"
-          : lmsConnectionLabels[connection.state] ?? "Состояние неизвестно"}
+          : (lmsConnectionLabels[connection.state] ?? "Состояние неизвестно")}
       </div>
       <dl className="lo-lms-details">
         <div className="lo-lms-detail">
           <dt>Последнее успешное обновление</dt>
-          <dd>{lmsDateLabel(connection.lastSyncSuccessAt, undefined, "Пока не было")}</dd>
+          <dd>
+            {lmsDateLabel(
+              connection.lastSyncSuccessAt,
+              undefined,
+              "Пока не было",
+            )}
+          </dd>
         </div>
         <div className="lo-lms-detail">
           <dt>Сессия хранится до</dt>
-          <dd>{lmsDateLabel(connection.sessionExpiresAt, undefined, "Не подключена")}</dd>
+          <dd>
+            {lmsDateLabel(
+              connection.sessionExpiresAt,
+              undefined,
+              "Не подключена",
+            )}
+          </dd>
         </div>
       </dl>
-      {(connection.lastErrorCategory || connection.unsupportedFeatures.length > 0 || connection.syncRequestedAt || connection.state === "legacy_configuration") ? (
+      {connection.lastErrorCategory ||
+      connection.unsupportedFeatures.length > 0 ||
+      connection.syncRequestedAt ||
+      connection.state === "legacy_configuration" ? (
         <details className="lo-lms-advanced">
           <summary>Подробности подключения</summary>
           {connection.lastErrorCategory ? (
-            <p className="text-amber-200">{lmsErrorCategoryMessage(connection.lastErrorCategory)}</p>
+            <p className="text-amber-200">
+              {lmsErrorCategoryMessage(connection.lastErrorCategory)}
+            </p>
           ) : null}
           {connection.syncRequestedAt ? (
-            <p>Запрос на синхронизацию: {lmsDateLabel(connection.syncRequestedAt)}. Это ещё не подтверждение завершения.</p>
+            <p>
+              Запрос на синхронизацию:{" "}
+              {lmsDateLabel(connection.syncRequestedAt)}. Это ещё не
+              подтверждение завершения.
+            </p>
           ) : null}
           {connection.unsupportedFeatures.length > 0 ? (
             <ul className="mt-2 space-y-1 text-xs text-zinc-300">
@@ -83,11 +112,51 @@ export function LmsConnectionDetails({
             </ul>
           ) : null}
           {connection.state === "legacy_configuration" ? (
-            <p>Старый синхронизатор может работать отдельно. Избегай одновременной синхронизации одного аккаунта.</p>
+            <p>
+              Старый синхронизатор может работать отдельно. Избегай
+              одновременной синхронизации одного аккаунта.
+            </p>
           ) : null}
-          <p>Последняя попытка: {lmsDateLabel(connection.lastSyncAttemptAt, undefined, "Не было")}. Даты показаны по времени устройства.</p>
+          <p>
+            Последняя попытка:{" "}
+            {lmsDateLabel(connection.lastSyncAttemptAt, undefined, "Не было")}.
+            Даты показаны по времени устройства.
+          </p>
         </details>
       ) : null}
+    </section>
+  );
+}
+
+export function LmsAuthorizedSignIn() {
+  return (
+    <section
+      className="space-y-3 rounded-xl border border-cyan-300/20 bg-cyan-300/[0.03] p-4"
+      aria-label="Официальный вход AITU"
+    >
+      <h2 className="text-base font-semibold text-white">Войти в AITU</h2>
+      <p className="text-sm leading-relaxed text-zinc-300">
+        Вход проходит на настоящей странице университета и Microsoft.
+        Подтверждения и MFA выполняются там.
+      </p>
+      <a
+        href={AITU_BROWSER_SIGN_IN_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="lo-lms-primary"
+      >
+        Открыть официальный вход AITU
+      </a>
+      <p className="text-xs leading-relaxed text-amber-100">
+        Вход в браузере сам по себе не подключает LifeOS и не передаёт ему
+        cookies. Автоматическое подключение пока недоступно: нужен разрешённый
+        университетом API-доступ.
+      </p>
+      <p className="text-xs leading-relaxed text-zinc-400">
+        Старые оценки и задания остаются доступны. До предоставления доступа
+        можно добавить недостающие сроки вручную и обновить состояние после
+        проверки подключения.
+      </p>
     </section>
   );
 }
@@ -279,96 +348,114 @@ export function LmsConnectionScreen({ onBack }: { onBack: () => void }) {
           onRetry={() => void query.refetch()}
         />
       ) : null}
-      <form
-        onSubmit={validate}
-        autoComplete="off"
-        className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4"
-      >
-        <div className="lo-lms-step">
-          <div className="lo-lms-number">1</div>
-          <div>
-            <h2>{query.data?.configured ? "Обновить доступ" : "Подключить аккаунт"}</h2>
-            <p>Подтверди сессию Microsoft, чтобы LifeOS мог читать учебные данные.</p>
-          </div>
-        </div>
-        <details id="lms-session-help" className="lo-lms-advanced mb-3">
-          <summary>Где найти ESTSAUTHPERSISTENT?</summary>
-          <p>Войди в AITU LMS в своём браузере, открой инструменты разработчика и найди cookie ESTSAUTHPERSISTENT для login.microsoftonline.com. Вставь только значение, без имени, кавычек и других cookies.</p>
-          <p>LifeOS не обходит интерактивный вход или MFA. Сессия должна быть действующей.</p>
-        </details>
-        <label
-          htmlFor="lms-session-cookie"
-          className="mt-4 block text-sm font-medium text-zinc-200"
-        >
-          Значение ESTSAUTHPERSISTENT
-        </label>
-        <input
-          ref={secretInput}
-          id="lms-session-cookie"
-          type="password"
+      <LmsAuthorizedSignIn />
+      <details className="rounded-xl border border-white/[0.08] bg-white/[0.03]">
+        <summary className="min-h-11 cursor-pointer px-4 py-3 text-sm text-zinc-300">
+          Дополнительно: ранее настроенный доступ через сессию
+        </summary>
+        <form
+          onSubmit={validate}
           autoComplete="off"
-          autoCapitalize="none"
-          autoCorrect="off"
-          spellCheck={false}
-          maxLength={LMS_COOKIE_MAX_LENGTH}
-          disabled={busy || syncing}
-          aria-describedby="lms-session-help lms-session-privacy"
-          onChange={(event) => {
-            setHasInput(event.currentTarget.value.length > 0);
-            discardReceipt();
-            setNotice(null);
-          }}
-          className="mt-2 min-h-11 w-full min-w-0 rounded-lg border border-white/[0.08] bg-graphite-900 px-3 py-3 text-base text-white disabled:opacity-50"
-        />
-        <p
-          id="lms-session-privacy"
-          className="mt-2 text-xs leading-relaxed text-zinc-400"
+          className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4"
         >
-          Поле очищается сразу при проверке. Проверка не заменяет сохранённую
-          сессию; подтверждение действует до 5 минут. Секрет передаётся только
-          защищённому backend LifeOS и не отправляется AI. Для постоянного
-          подключения используется шифрование.
-        </p>
-        <button
-          disabled={!hasInput || busy || syncing}
-          type="submit"
-          className="lo-lms-primary mt-4 disabled:opacity-50"
-        >
-          <ShieldCheck className="h-4 w-4" />
-          {operation === "validate" ? "Проверяем…" : "Проверить без сохранения"}
-        </button>
-        {validated ? (
-          <div className="mt-3 space-y-2">
-            <button
-              disabled={busy || syncing}
-              type="button"
-              onClick={save}
-              className="lo-lms-primary disabled:opacity-50"
-            >
-              Сохранить проверенную сессию
-            </button>
-            <button
-              disabled={busy}
-              type="button"
-              onClick={() => {
-                discardReceipt();
-                setNotice("Проверка отменена. Сохранённая сессия не изменена.");
-              }}
-              className="min-h-11 w-full rounded-lg px-3 text-sm text-zinc-300 hover:bg-white/[0.06]"
-            >
-              Не сохранять
-            </button>
+          <div className="lo-lms-step">
+            <div className="lo-lms-number">1</div>
+            <div>
+              <h2>Расширенный способ подключения</h2>
+              <p>
+                Существующий ручной способ сохранён для совместимости. Он не
+                является автоматическим входом и может требовать повторного
+                подтверждения Microsoft.
+              </p>
+            </div>
           </div>
-        ) : null}
-      </form>
+          <details id="lms-session-help" className="lo-lms-advanced mb-3">
+            <summary>Где найти ESTSAUTHPERSISTENT?</summary>
+            <p>
+              Войди в AITU LMS в своём браузере, открой инструменты разработчика
+              и найди cookie ESTSAUTHPERSISTENT для login.microsoftonline.com.
+              Вставь только значение, без имени, кавычек и других cookies.
+            </p>
+            <p>
+              LifeOS не обходит интерактивный вход или MFA. Сессия должна быть
+              действующей.
+            </p>
+          </details>
+          <label
+            htmlFor="lms-session-cookie"
+            className="mt-4 block text-sm font-medium text-zinc-200"
+          >
+            Значение ESTSAUTHPERSISTENT
+          </label>
+          <input
+            ref={secretInput}
+            id="lms-session-cookie"
+            type="password"
+            autoComplete="off"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            maxLength={LMS_COOKIE_MAX_LENGTH}
+            disabled={busy || syncing}
+            aria-describedby="lms-session-help lms-session-privacy"
+            onChange={(event) => {
+              setHasInput(event.currentTarget.value.length > 0);
+              discardReceipt();
+              setNotice(null);
+            }}
+            className="mt-2 min-h-11 w-full min-w-0 rounded-lg border border-white/[0.08] bg-graphite-900 px-3 py-3 text-base text-white disabled:opacity-50"
+          />
+          <p
+            id="lms-session-privacy"
+            className="mt-2 text-xs leading-relaxed text-zinc-400"
+          >
+            Поле очищается сразу при проверке. Проверка не заменяет сохранённую
+            сессию; подтверждение действует до 5 минут. Секрет передаётся только
+            защищённому backend LifeOS и не отправляется AI. Для постоянного
+            подключения используется шифрование.
+          </p>
+          <button
+            disabled={!hasInput || busy || syncing}
+            type="submit"
+            className="lo-lms-primary mt-4 disabled:opacity-50"
+          >
+            <ShieldCheck className="h-4 w-4" />
+            {operation === "validate"
+              ? "Проверяем…"
+              : "Проверить без сохранения"}
+          </button>
+          {validated ? (
+            <div className="mt-3 space-y-2">
+              <button
+                disabled={busy || syncing}
+                type="button"
+                onClick={save}
+                className="lo-lms-primary disabled:opacity-50"
+              >
+                Сохранить проверенную сессию
+              </button>
+              <button
+                disabled={busy}
+                type="button"
+                onClick={() => {
+                  discardReceipt();
+                  setNotice(
+                    "Проверка отменена. Сохранённая сессия не изменена.",
+                  );
+                }}
+                className="min-h-11 w-full rounded-lg px-3 text-sm text-zinc-300 hover:bg-white/[0.06]"
+              >
+                Не сохранять
+              </button>
+            </div>
+          ) : null}
+        </form>
+      </details>
       {operation === "save" ? (
         <LoadingPanel title="Сохраняем проверенную сессию…" />
       ) : null}
       {notice ? (
-        <p
-          role="status"
-          className="lo-lms-notice"
-        >
+        <p role="status" className="lo-lms-notice">
           {notice}
         </p>
       ) : null}
@@ -378,7 +465,13 @@ export function LmsConnectionScreen({ onBack }: { onBack: () => void }) {
         </div>
       ) : null}
       <section className="space-y-3 rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
-        <div className="lo-lms-step"><div className="lo-lms-number">2</div><div><h2>Обновить данные</h2><p>Синхронизируй оценки и дедлайны после подключения.</p></div></div>
+        <div className="lo-lms-step">
+          <div className="lo-lms-number">2</div>
+          <div>
+            <h2>Обновить данные</h2>
+            <p>Синхронизируй оценки и дедлайны после подключения.</p>
+          </div>
+        </div>
         <button
           type="button"
           disabled={busy || syncing || !query.data?.configured}

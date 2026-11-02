@@ -56,7 +56,7 @@ done
 
 task_pids=()
 for task_worker in {1..8}; do
-  task_psql -c "begin; set local role service_role; insert into notification_test.digest_claims(worker,id,claim_token) select $task_worker,id,claim_token from public.claim_daily_digest('00000000-0000-4000-8000-000000000001',(clock_timestamp() at time zone 'America/New_York')::date); select pg_sleep(0.25); commit;" >"$task_results/digest-$task_worker.log" 2>&1 &
+  task_psql -c "begin; set local role service_role; insert into notification_test.digest_claims(worker,id,claim_token) select $task_worker,id,claim_token from public.claim_daily_life_digest('00000000-0000-4000-8000-000000000001',(clock_timestamp() at time zone 'America/New_York')::date,1); select pg_sleep(0.25); commit;" >"$task_results/digest-$task_worker.log" 2>&1 &
   task_pids+=("$!")
 done
 for task_pid in "${task_pids[@]}"; do
@@ -71,5 +71,19 @@ if ! task_psql <"$task_root/scripts/notification-test-fixtures/assertions.sql" >
   exit 1
 fi
 
+task_psql <"$task_root/scripts/daily-life-notification-test-fixtures/setup.sql" >"$task_results/daily-setup.log" 2>&1
+task_pids=()
+for task_worker in {1..8}; do
+  task_psql -c "begin; set local role service_role; insert into notification_test.job_enqueues select $task_worker,public.enqueue_daily_life_notification('00000000-0000-4000-8000-000000000004',(clock_timestamp() at time zone 'UTC')::date,'evening',1,'synthetic reflection',clock_timestamp()); select pg_sleep(0.10); commit;" >"$task_results/daily-$task_worker.log" 2>&1 &
+  task_pids+=("$!")
+done
+for task_pid in "${task_pids[@]}"; do
+  if ! wait "$task_pid"; then cat "$task_results"/daily-*.log >&2; exit 1; fi
+done
+if ! task_psql <"$task_root/scripts/daily-life-notification-test-fixtures/assertions.sql" >"$task_results/daily-assertions.log" 2>&1; then
+  cat "$task_results/daily-assertions.log" >&2
+  exit 1
+fi
+
 task_count="$(task_psql -c 'select count(*) from notification_test.assertions;')"
-printf 'PASS: %s notification SQL assertions; full migration chain, 8 concurrent reminder workers and 8 concurrent digest workers\n' "$task_count"
+printf 'PASS: %s notification SQL assertions; full migration chain, 8 concurrent reminder workers, 8 digest workers and 8 optional-job writers\n' "$task_count"

@@ -150,3 +150,7 @@ Run `corepack pnpm typecheck`, `corepack pnpm test`, and
 at most two workers to avoid timer starvation on small machines. Tests cover
 timezones/DST, invalid proposals, ownership/context filtering, disabled and
 misconfigured AI, provider failures, limits, read-only routes and TMA behavior.
+
+## Shared execution safety
+
+External calls now require durable, owner-scoped budget reservations through the shared backend governor. See [AI execution safety](AI_EXECUTION_SAFETY.md) for migration, token and estimated-cost limits, cancellation, kill switch and verification. Existing in-process request limits remain additional controls; no provider is enabled by this change.

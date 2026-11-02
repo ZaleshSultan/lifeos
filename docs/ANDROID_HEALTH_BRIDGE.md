@@ -1,86 +1,27 @@
-# Xiaomi Watch 4 Android Health Bridge
+# Android health integration
 
-## Architecture
+The source path is Xiaomi Watch 4 → Mi Fitness on Samsung Galaxy S23+ → authorized Health Connect reads → LifeOS bridge → `POST https://lifeos.zalewko.me/api/health/ingest` → Supabase → Health/Ideal Human. Upstream record availability must be confirmed on the phone. Other Health Connect writers can contribute measurements; LifeOS does not assume direct access to a watch or sensor.
 
-```text
-Xiaomi Watch 4
--> Mi Fitness on Samsung Galaxy S23+
--> Android Health Connect, when Mi Fitness publishes the record
--> LifeOS Android bridge or manual/import fallback
--> POST https://archlinux.tail2492c9.ts.net/api/health/ingest
--> Supabase health_metrics
--> TMA Health, Telegram /health, and Obsidian Health
-```
+## Delivered source and remaining device work
 
-LifeOS does not depend on Samsung Health and does not scrape the Mi account.
-Health Connect permissions and the per-user health session token stay on the phone. The
-backend receives only normalized daily metrics.
+The Android project now contains encrypted personal-token storage, HTTPS-only transport with redirects refused, partial data permissions, separate background permission/feature checks, manual today/yesterday sync, seven-day backfill, persistent periodic work and private local result/last-success status. Reporting uses Asia/Almaty. Source math assigns completed sleep to the wake-up date and leaves asleep duration unknown when no sleep stages exist. Automatic projections preserve manual Ideal Human entries and identify stale/missing source data.
 
-## Health Connect Records
+No Java/Gradle/Kotlin/Android SDK/adb toolchain or physical Android phone was available in the November 3 session. Compilation, Android unit tests/lint, APK assembly/install, Keystore behavior and physical background sync remain **UNVERIFIED**. No Android artifact or production-device success is claimed. Static API review used the official Health Connect 1.1.0 source and [Android setup guidance](https://developer.android.com/health-and-fitness/health-connect/get-started). It found and corrected the Android 13 rationale intent and Android 14 protected rationale alias.
 
-The bridge should request only the records the user grants:
+Follow [the bridge README](../apps/health-bridge/README.md) for build prerequisites, exact commands and the handset verification sequence. Use a separate test identity for write/retry tests. Install a verified signed/debug build, obtain a personal token from Mini App Health, grant the desired measurement permissions, verify manual sync, then optionally permit supported background reading. A disabled upstream writer, missing permission or unsupported background feature cannot be repaired by backend deployment.
 
-- `StepsRecord`
-- `SleepSessionRecord`
-- `HeartRateRecord`
-- `ExerciseSessionRecord`
-- `TotalCaloriesBurnedRecord`
-- `ActiveCaloriesBurnedRecord`
-- `WeightRecord`
-- `OxygenSaturationRecord`
+## Backend and privacy
 
-Aggregate records per local day in `Asia/Qyzylorda`. Start with manual sync;
-add scheduled WorkManager sync only after Xiaomi/Mi Fitness record availability
-is verified on the Samsung Galaxy S23+.
+The bridge sends normalized day metrics, stable workout IDs and bounded actual samples through the [health ingest contract](HEALTH_BRIDGE_CONTRACT.md). A per-user health credential, issued by authenticated Telegram Mini App access, determines the owner. The phone never sends a configurable user ID, shared ingest secret or Supabase key. Backend health data remains authoritative; Obsidian is a mirror.
 
-## API Contract
+Current automatic data comes from permitted recorded measurements, not estimates of nonexistent sensor access. Sleep stages are merged, ordinary and resting heart rate remain distinct, and null measurements stay unknown. WorkManager runs approximately near midnight and morning with network constraints/backoff; Android can delay it. [Android background reading requirements](https://developer.android.com/health-and-fitness/health-connect/read-data).
 
-```json
-{
-  "date": "2026-06-07",
-  "source": "xiaomi_health_connect",
-  "device": "Xiaomi Watch 4",
-  "timezone": "Asia/Qyzylorda",
-  "metrics": [
-    { "type": "steps", "value": 8200, "unit": "steps" },
-    { "type": "sleep_minutes", "value": 420, "unit": "min" },
-    { "type": "resting_heart_rate", "value": 62, "unit": "bpm" },
-    { "type": "active_energy_kcal", "value": 450, "unit": "kcal" }
-  ],
-  "raw": {}
-}
-```
+## Fallbacks and troubleshooting
 
-Send the per-user token only in the `Authorization: Bearer <health-session-token>` header:
-
-```bash
-curl -X POST "https://archlinux.tail2492c9.ts.net/api/health/ingest" \
-  -H "content-type: application/json" \
-  -H "Authorization: Bearer $LIFEOS_HEALTH_SESSION_TOKEN" \
-  --data @health.json
-```
-
-The API validates metric types and source, then upserts idempotently by
-`user_id, metric_date, metric_type, source`.
-
-## Manual And Import Fallbacks
-
-Telegram manual entry:
-
-```text
-/health_log steps:8000 sleep:7h rhr:62 weight:70.5 mood:7 energy:6
-```
-
-For exports that cannot be read through Health Connect, normalize JSON or CSV
-locally and send with source `import_json` or `import_csv`. Do not upload phone
-tokens or Mi account credentials to Supabase.
-
-## Troubleshooting
-
-- Mi Fitness has the metric but LifeOS does not: check whether Mi Fitness
-  actually published that record to Health Connect.
-- Empty TMA Health: use `/health_sources`, then test `/health_log`.
-- HTTP 401: the health session token is missing, expired, or not signed by `LIFEOS_HEALTH_INGEST_JWT_SECRET`, or
-  a per-user Bearer token issued by `POST /api/tma/health/ingest-token`.
-- HTTP 400: inspect the response for an unsupported source, metric type, date,
-  or value.
+- Missing metric: confirm it exists in Health Connect, then confirm that metric's read permission. A record shown only inside Mi Fitness is insufficient.
+- Background unavailable: check the displayed feature/permission status and use manual sync while open. Do not bypass platform permission controls.
+- HTTP 401/403: use Mini App Health to replace an expired/revoked personal token. Do not copy service-role credentials to the phone.
+- HTTP 400/413/422: check bridge/API version and supported payload sizes/types. Raw server bodies are not displayed in local logs.
+- Network/429/5xx: foreground errors retain the prior backend history; scheduled transient failures retry through WorkManager backoff. Repeated calls upsert stable identities.
+- Keystore restore/failure: reissue and save the personal token. Android application backup is disabled; the local encryption key is not an off-device credential backup.
+- No Android build yet: continue `/health_log steps:8000 sleep:7h rhr:62 weight:70.5 mood:7 energy:6` for actual observations, or the documented authorized JSON/CSV import. Manual measurements remain authoritative in the journal.

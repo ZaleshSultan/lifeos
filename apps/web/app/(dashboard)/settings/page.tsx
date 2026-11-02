@@ -1,3 +1,6 @@
+import { LmsStatus } from "@/components/LmsStatus";
+import { dashboardData } from "@/lib/dashboard-data";
+import type { WebLmsConnection } from "@/lib/lms-contracts";
 import { Bot, CalendarDays, CloudSun, ShieldCheck } from "lucide-react";
 import { redirect } from "next/navigation";
 import { MetricCard } from "@/components/MetricCard";
@@ -12,10 +15,13 @@ import {
 export default async function SettingsPage() {
   const [session, home] = await Promise.all([
     lifeosApi<WebSessionStatus>("/api/tma/session"),
-    lifeosApi<WebHomeSummary>("/api/tma/home"),
+    dashboardData<WebHomeSummary>("/api/tma/home"),
   ]);
-  if (!session || !home) redirect("/access");
+  if (!session) redirect("/access");
 
+  const lmsConnection = await dashboardData<WebLmsConnection>(
+    "/api/tma/lms/connection",
+  );
   const google = session.integrations.google;
   const googleReady =
     google.connected &&
@@ -28,7 +34,11 @@ export default async function SettingsPage() {
       <PageHeader
         kicker="Personal settings"
         summary="Эти статусы относятся только к текущему LifeOS-пользователю и его подключениям."
-        title={session.displayName ? `Настройки · ${session.displayName}` : "Настройки"}
+        title={
+          session.displayName
+            ? `Настройки · ${session.displayName}`
+            : "Настройки"
+        }
       />
 
       <div className="dashboard-grid">
@@ -54,27 +64,35 @@ export default async function SettingsPage() {
         />
         <MetricCard
           detail={
-            home.weather
+            home?.weather
               ? "Используется в Web, Mini App и ежедневной сводке."
               : "Задай через /weather <город> в Telegram."
           }
           icon={CloudSun}
           label="Weather"
           tone="violet"
-          value={home.weather?.locationName ?? "Not set"}
+          value={home?.weather?.locationName ?? "Not set"}
         />
         <MetricCard
-          detail="Браузер хранит подписанную HttpOnly-сессию; service-role и OAuth tokens не отдаются клиенту."
+          detail="Защищённая сессия отзывается при выходе или блокировке. Для нового входа используй /web в Telegram."
           icon={ShieldCheck}
           label="Session"
           value="Scoped"
         />
       </div>
 
+      <div className="mt-6">
+        <LmsStatus connection={lmsConnection} work={null} />
+      </div>
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
-        <SectionPanel eyebrow="Weather" title={home.weather?.locationName ?? "Город не выбран"}>
+        <SectionPanel
+          eyebrow="Weather"
+          title={home?.weather?.locationName ?? "Город не выбран"}
+        >
           <p className="text-sm leading-relaxed text-zinc-400">
-            Чтобы изменить город, напиши боту <code>/weather Almaty</code>, <code>/weather Astana</code> или другой город. Настройка сохраняется отдельно для твоего аккаунта.
+            Чтобы изменить город, напиши боту <code>/weather Almaty</code>,{" "}
+            <code>/weather Astana</code> или другой город. Настройка сохраняется
+            отдельно для твоего аккаунта.
           </p>
         </SectionPanel>
 

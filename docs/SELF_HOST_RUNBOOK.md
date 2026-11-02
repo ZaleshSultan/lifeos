@@ -1,13 +1,16 @@
 # LifeOS Self-Host Runbook
 
-Production runs on Arch with systemd and Tailscale Funnel:
+Production runs on Debian with systemd and the existing Cloudflare Tunnel.
+The earlier Arch/Tailscale hostname is historical; the active public origin is:
 
 ```text
-https://archlinux.tail2492c9.ts.net
+https://lifeos.zalewko.me
 ```
 
-The bot serves the TMA from `apps/tma/dist` at `/tma/`. Do not run Vite as a
-production service.
+The bot serves the TMA from `apps/tma/dist` at `/tma/` on local port 3000.
+Next.js serves the authenticated dashboard at `/web` on local port 3001.
+Do not run Vite as a production service. See [operations](OPERATIONS.md) for
+backup, monitoring, current service ownership and release verification.
 
 ## Build And Deploy
 
@@ -47,8 +50,11 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now lifeos-daily-digest.service
 ```
 
-The default delivery time is 08:00 in each profile timezone. The worker keeps a
-per-day delivery record, so restarts do not create duplicate morning messages.
+Morning/evening/hydration preferences default OFF. Users explicitly choose
+notification times and quiet hours; missing preferences never imply consent.
+The worker retains per-day delivery fencing and rechecks consent before sending.
+See [Daily Life notifications](DAILY_LIFE_NOTIFICATIONS.md) for migration order
+and safe worker restart/cancellation behavior.
 
 ## Status And Logs
 
@@ -75,9 +81,9 @@ sudo systemctl restart lifeos-obsidian-mirror.service
 
 ```bash
 curl -fsS http://localhost:3000/healthz
-curl -fsS https://archlinux.tail2492c9.ts.net/healthz
-curl -fsS https://archlinux.tail2492c9.ts.net/tma/
-tailscale funnel status
+curl -fsS https://lifeos.zalewko.me/healthz
+curl -fsS https://lifeos.zalewko.me/tma/
+systemctl --user status lifeos-cloudflared.service
 ```
 
 ## Black TMA Screen

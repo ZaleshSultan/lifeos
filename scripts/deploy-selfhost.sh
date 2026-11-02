@@ -77,6 +77,14 @@ restart_service() {
 }
 
 cd "$REPO_ROOT"
+OPS_PYTHON="${LIFEOS_OPS_PYTHON:-$REPO_ROOT/workers/university-sync/.venv/bin/python}"
+OPS_CONFIG="${LIFEOS_OPS_CONFIG:-$HOME/.config/lifeos/ops.json}"
+if [[ ! -x "$OPS_PYTHON" || ! -f "$OPS_CONFIG" ]]; then
+  printf 'ERROR: verified backup operations configuration is required before deployment\n' >&2
+  exit 1
+fi
+printf 'Verifying recent encrypted backup and isolated restore ...\n'
+"$OPS_PYTHON" "$REPO_ROOT/scripts/ops/lifeos_backup.py" predeploy --config "$OPS_CONFIG"
 bash "$REPO_ROOT/scripts/build-tma-selfhost.sh"
 
 printf 'Restarting lifeos-bot.service ...\n'

@@ -13,8 +13,7 @@ Personal LifeOS monorepo for automation, knowledge workflows, and user-facing in
 - `workers/obsidian-mirror` - Supabase to Obsidian Markdown mirror
 - `workers/reminder-worker` - Supabase reminders to Telegram worker
 - `workers/daily-digest-worker` - daily Telegram briefing with tasks, classes, and deadlines
-- `apps/android-health-bridge` - installable manual Android Health Connect bridge
-- `apps/health-bridge` - legacy Android Health Connect bridge scaffold
+- `apps/health-bridge` - Kotlin Health Connect project/scaffold; APK build and phone verification remain unverified
 - `docs` - architecture, contracts, deployment, and operations docs
 - `deploy` - platform deployment assets
 
@@ -68,7 +67,8 @@ cp .env.example .env
 .venv/bin/python reminder_worker.py status
 ```
 
-See `docs/REMINDER_WORKER.md` for Arch/systemd setup.
+See `docs/OPERATIONS.md` for current Debian/systemd operations; older Arch setup
+notes in `docs/REMINDER_WORKER.md` are historical examples.
 
 Run the daily briefing worker locally:
 
@@ -78,10 +78,11 @@ cp .env.example .env
 python3 daily_digest_worker.py
 ```
 
-The default briefing time is `08:00` in each profile timezone; change
-`DAILY_DIGEST_TIME` in the worker `.env` if needed. Apply the latest Supabase
-migrations first so `daily_digest_deliveries` is available for duplicate
-protection. The default catch-up window is 12 hours after the configured time.
+Briefings and optional evening/hydration reminders require explicit saved Daily
+Life preferences; missing preferences and first-run defaults are OFF. Users choose
+local times and quiet hours in the app. Apply the additive migrations before
+restarting updated workers; existing delivery leases preserve deduplication.
+See `docs/DAILY_LIFE_NOTIFICATIONS.md` for consent, scheduling and safe deployment.
 
 ## Multi-User Telegram Onboarding
 
@@ -120,7 +121,6 @@ ALLOW_UNSAFE_TMA_DEV_AUTH=false
 ```
 
 These default-user variables are legacy/dev bootstrap helpers. They are not used to register new production users. If `/start` sees the configured Telegram id, it will try to link that one profile as active/admin. If the `auth.users` row is missing, it replies with the exact profile SQL to run.
-
 
 ## Personal Web, Weather, and Google Calendar
 
@@ -209,7 +209,15 @@ Start with:
 
 ## Status
 
-The repository now has backend foundations, Telegram webhook commands, Supabase migrations, health ingest, TMA scaffold, Obsidian worker, Android Health Connect scaffold, personal multi-user web dashboard, and deployment docs. Full Android build hardening and additional web surfaces remain future phases.
+The repository has the authenticated bot/TMA/web experience, shared Ideal Human
+and Daily Life journals, Supabase persistence, health ingest, trusted workers and
+the Kotlin Health Connect source project. Current production uses Debian/systemd
+and Cloudflare Tunnel; see `docs/OPERATIONS.md` and release reports for actual
+deployed commits and checks. The November 3 mission authorizes web authentication
+and Android work beyond the original stabilization slice, but the audited host
+lacks the JDK/Android SDK/Gradle wrapper. No installable APK or physical-device
+health-sync success is claimed. External campus/creator grants and other runtime
+limitations remain explicit in `docs/OVERNIGHT_PHASE2_REPORT.md`.
 
 ## Academic sync
 

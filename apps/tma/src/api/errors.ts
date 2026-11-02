@@ -24,6 +24,22 @@ export function apiErrorMessage(error: unknown): string {
       return "Заявка ожидает одобрения. После одобрения откройте LifeOS снова.";
     if (code === "telegram_user_blocked")
       return "Доступ к LifeOS заблокирован. Обратитесь к администратору.";
+    if (code === "daily_life_conflict" || code === "ideal_human_conflict")
+      return "Запись изменилась в другой сессии. Загрузите сохранённую версию и повторите правки.";
+    if (code === "meal_draft_expired")
+      return "Черновик фото истёк. Выберите фото заново или запишите еду вручную.";
+    if (code === "meal_vision_unavailable")
+      return "Фотоанализ пока не подключён. Запишите еду вручную в дневнике.";
+    if (code === "invalid_daily_life_input" || code === "invalid_meal_analysis")
+      return "Проверьте введённые значения и формат фото. Изменения не сохранены.";
+    if (code === "record_not_found")
+      return "Запись больше недоступна. Обновите экран.";
+    if (
+      typeof code === "string" &&
+      code.startsWith("ai_") &&
+      error.status === 429
+    )
+      return "Достигнут лимит AI. Еду можно записать вручную; автоматического повтора не будет.";
     if (error.status === 401 || error.status === 403)
       return "Откройте LifeOS заново из Telegram, чтобы обновить доступ.";
     if (code === "database_not_configured" || error.status === 503)

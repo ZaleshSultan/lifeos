@@ -17,6 +17,24 @@ export interface IdealHumanMeal {
   caloriesKcal: number | null;
   proteinG: number | null;
   estimated: boolean;
+  fatG?: number | null;
+  carbsG?: number | null;
+  mealTime?: string | null;
+  portion?: string;
+  analysisSource?: "manual" | "gemini" | "agata";
+  corrected?: boolean;
+}
+export interface IdealHumanFootage {
+  id: string;
+  label: string;
+  kind: "a_roll" | "b_roll" | "reflection" | "other";
+  capturedAt: string | null;
+  filename: string;
+  location: string;
+  notes: string;
+  backupStatus: "not_backed_up" | "user_confirmed";
+  editingStatus: "not_started" | "in_progress" | "done";
+  storyBeat: string;
 }
 export interface IdealHumanLearningSession {
   id: string;
@@ -78,6 +96,8 @@ export interface IdealHumanDay {
   whatDidNotWork: string;
   tomorrowPlan: string;
   plan: IdealHumanPlanBlock[];
+  footage?: IdealHumanFootage[];
+  storyboard?: string;
 }
 
 export class IdealHumanInputError extends Error {
@@ -381,7 +401,11 @@ function planSignature(plan: IdealHumanPlanBlock[]): string {
 export function parseIdealHumanDay(input: unknown): IdealHumanDay {
   const v = object(
     input,
-    Object.keys(emptyIdealHumanDay(IDEAL_HUMAN_START)),
+    [
+      ...Object.keys(emptyIdealHumanDay(IDEAL_HUMAN_START)),
+      "footage",
+      "storyboard",
+    ],
     "day",
   );
   if (typeof v.date !== "string" || idealHumanDayNumber(v.date) === null)
@@ -446,7 +470,19 @@ export function parseIdealHumanDay(input: unknown): IdealHumanDay {
   day.meals = list(v.meals, "meals", 30, (entry) => {
     const m = object(
       entry,
-      ["id", "label", "caloriesKcal", "proteinG", "estimated"],
+      [
+        "id",
+        "label",
+        "caloriesKcal",
+        "proteinG",
+        "estimated",
+        "fatG",
+        "carbsG",
+        "mealTime",
+        "portion",
+        "analysisSource",
+        "corrected",
+      ],
       "meal",
     );
     const label = textValue(m.label, "meal label", 240);
@@ -457,9 +493,99 @@ export function parseIdealHumanDay(input: unknown): IdealHumanDay {
       caloriesKcal: numeric(m.caloriesKcal, "meal calories", 0, 10000),
       proteinG: numeric(m.proteinG, "meal protein", 0, 400, false),
       estimated: flag(m.estimated, "estimated") ?? true,
+      ...(m.fatG !== undefined
+        ? { fatG: numeric(m.fatG, "meal fat", 0, 1000, false) }
+        : {}),
+      ...(m.carbsG !== undefined
+        ? { carbsG: numeric(m.carbsG, "meal carbs", 0, 2000, false) }
+        : {}),
+      ...(m.mealTime !== undefined
+        ? { mealTime: timeValue(m.mealTime, "meal time") }
+        : {}),
+      ...(m.portion !== undefined
+        ? { portion: textValue(m.portion, "portion", 240) }
+        : {}),
+      ...(m.analysisSource !== undefined
+        ? {
+            analysisSource:
+              enumeration(m.analysisSource, "analysis source", [
+                "manual",
+                "gemini",
+                "agata",
+              ] as const) ?? ("manual" as const),
+          }
+        : {}),
+      ...(m.corrected !== undefined
+        ? { corrected: flag(m.corrected, "corrected") ?? false }
+        : {}),
     };
   });
   uniqueIds(day.meals, "meal");
+  if (v.storyboard !== undefined)
+    day.storyboard = textValue(v.storyboard, "storyboard", 4000);
+  if (v.footage !== undefined) {
+    day.footage = list(v.footage, "footage", 80, (item) => {
+      const f = object(
+        item,
+        [
+          "id",
+          "label",
+          "kind",
+          "capturedAt",
+          "filename",
+          "location",
+          "notes",
+          "backupStatus",
+          "editingStatus",
+          "storyBeat",
+        ],
+        "footage",
+      );
+      const label = textValue(f.label, "footage label", 240);
+      const kind = enumeration(f.kind, "footage kind", [
+        "a_roll",
+        "b_roll",
+        "reflection",
+        "other",
+      ] as const);
+      const backupStatus = enumeration(f.backupStatus, "backup status", [
+        "not_backed_up",
+        "user_confirmed",
+      ] as const);
+      const editingStatus = enumeration(f.editingStatus, "editing status", [
+        "not_started",
+        "in_progress",
+        "done",
+      ] as const);
+      if (!label || !kind || !backupStatus || !editingStatus)
+        throw new IdealHumanInputError("Invalid footage metadata");
+      let capturedAt: string | null = null;
+      if (f.capturedAt != null) {
+        if (
+          typeof f.capturedAt !== "string" ||
+          !/^\d{4}-\d\d-\d\dT.*(?:Z|[+-]\d\d:\d\d)$/.test(f.capturedAt) ||
+          !Number.isFinite(Date.parse(f.capturedAt)) ||
+          !validIsoDate(f.capturedAt.slice(0, 10))
+        )
+          throw new IdealHumanInputError("Invalid capture time");
+        capturedAt = f.capturedAt;
+      }
+      return {
+        id: identifier(f.id),
+        label,
+        kind,
+        backupStatus,
+        editingStatus,
+        capturedAt,
+        filename: textValue(f.filename, "filename", 240),
+        location: textValue(f.location, "location", 1000),
+        notes: textValue(f.notes, "footage notes", 2000),
+        storyBeat: textValue(f.storyBeat, "story beat", 1000),
+      };
+    });
+    uniqueIds(day.footage, "footage");
+  }
+
   day.learningSessions = list(
     v.learningSessions,
     "learningSessions",
@@ -543,6 +669,7 @@ export function parseIdealHumanDay(input: unknown): IdealHumanDay {
     day.studyPriorities ||
     day.tomorrowPlan ||
     day.baselineHeightCm !== null ||
+    Boolean(day.storyboard) ||
     planSignature(day.plan) !== planSignature(defaultIdealHumanPlan(day.date));
   if (!hasIdealHumanObservation(day) && !configured)
     throw new IdealHumanInputError(
@@ -591,6 +718,7 @@ export function hasIdealHumanObservation(day: IdealHumanDay): boolean {
       day.whatDidNotWork,
     ].some(Boolean) ||
     day.meals.length > 0 ||
+    (day.footage?.length ?? 0) > 0 ||
     day.learningSessions.some(
       (l) => l.minutes !== null || l.completed !== null || Boolean(l.notes),
     ) ||
@@ -731,7 +859,8 @@ export function idealHumanStats(
         d.footageCaptured === true ||
         d.aRoll === true ||
         d.bRoll === true ||
-        (d.filmingMinutes ?? 0) > 0,
+        (d.filmingMinutes ?? 0) > 0 ||
+        (d.footage?.length ?? 0) > 0,
     ).length,
     avgWeightKg: mean(measured("weightKg")),
     avgSleepMinutes: mean(sleep),

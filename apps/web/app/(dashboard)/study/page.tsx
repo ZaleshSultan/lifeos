@@ -5,6 +5,9 @@ import {
   GraduationCap,
 } from "lucide-react";
 import { redirect } from "next/navigation";
+import { LmsStatus } from "@/components/LmsStatus";
+import { dashboardData, dateTime } from "@/lib/dashboard-data";
+import type { WebLmsConnection, WebLmsWork } from "@/lib/lms-contracts";
 import { MetricCard } from "@/components/MetricCard";
 import { PageHeader } from "@/components/PageHeader";
 import { SectionPanel } from "@/components/SectionPanel";
@@ -31,7 +34,11 @@ const dayLabels: Record<string, string> = {
 };
 
 export default async function StudyPage() {
-  const study = await lifeosApi<WebStudySummary>("/api/tma/study");
+  const [study, lmsConnection, lmsWork] = await Promise.all([
+    lifeosApi<WebStudySummary>("/api/tma/study"),
+    dashboardData<WebLmsConnection>("/api/tma/lms/connection"),
+    dashboardData<WebLmsWork>("/api/tma/lms/work"),
+  ]);
   if (!study) redirect("/access");
 
   const scheduleCount = study.courses.reduce(
@@ -80,6 +87,12 @@ export default async function StudyPage() {
         />
       </div>
 
+      <div className="mt-6">
+        <LmsStatus connection={lmsConnection} work={lmsWork} />
+      </div>
+      <p className="mt-4 text-sm text-amber-100">
+        Сохранённое расписание; проверь актуальность в AITU.
+      </p>
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
         {study.courses.map((course) => {
           const schedules = [...course.schedules].sort((left, right) => {
@@ -104,38 +117,108 @@ export default async function StudyPage() {
                     >
                       <div>
                         <span className="font-medium text-zinc-200">
-                          {dayLabels[slot.dayOfWeek.toLowerCase()] ?? slot.dayOfWeek}
+                          {dayLabels[slot.dayOfWeek.toLowerCase()] ??
+                            slot.dayOfWeek}
                           {" · "}
-                          {slot.startTime.slice(0, 5)}–{slot.endTime.slice(0, 5)}
+                          {slot.startTime.slice(0, 5)}–
+                          {slot.endTime.slice(0, 5)}
                         </span>
-                        <p className="mt-0.5 text-xs text-zinc-500">
+                        <p className="mt-0.5 text-xs text-zinc-400">
                           {[slot.sessionType, slot.instructorName]
                             .filter(Boolean)
                             .join(" · ") || "Занятие"}
                         </p>
                       </div>
-                      <span className="text-xs text-zinc-500">
+                      <span className="text-xs text-zinc-400">
                         {slot.room || "—"}
                       </span>
                     </div>
                   ))}
                 </div>
               ) : (
-                <p className="text-sm text-zinc-500">Расписание ещё не добавлено.</p>
+                <p className="text-sm text-zinc-400">
+                  Расписание ещё не добавлено.
+                </p>
               )}
-              <div className="mt-3 text-xs text-zinc-600">
-                {course.calculator ? "Калькулятор силабуса настроен" : "Калькулятор пока не настроен"}
+              <div className="mt-3 text-xs text-zinc-400">
+                {course.calculator
+                  ? "Калькулятор силабуса настроен"
+                  : "Калькулятор пока не настроен"}
               </div>
             </SectionPanel>
           );
         })}
       </div>
 
+      <div className="mt-6 grid gap-4 lg:grid-cols-2">
+        <SectionPanel title="Работы и дедлайны">
+          <div className="space-y-3">
+            {lmsWork?.items.length ? (
+              lmsWork.items.slice(0, 40).map((item, index) => (
+                <article
+                  key={index}
+                  className="rounded-lg border border-white/[0.08] p-3"
+                >
+                  <p className="break-words text-sm font-semibold text-zinc-100">
+                    {item.title}
+                  </p>
+                  <p className="mt-1 break-words text-xs text-zinc-400">
+                    {item.courseTitle} · {item.category} ·{" "}
+                    {item.submissionStatus}
+                  </p>
+                  <p className="mt-2 text-xs text-zinc-300">
+                    Дедлайн: {dateTime(item.dueAt)}
+                    {item.score !== null
+                      ? ` · оценка ${item.score}${item.maxScore === null ? "" : `/${item.maxScore}`}`
+                      : ""}
+                  </p>
+                </article>
+              ))
+            ) : (
+              <p className="text-sm text-zinc-400">
+                Нет доступных подтверждённых работ. Это не означает отсутствие
+                заданий в LMS.
+              </p>
+            )}
+          </div>
+        </SectionPanel>
+        <SectionPanel title="Сохранённые оценки">
+          <div className="space-y-3">
+            {study.records
+              .filter(
+                (record) => record.score !== null && record.score !== undefined,
+              )
+              .slice(0, 60)
+              .map((record, index) => (
+                <article
+                  key={record.id ?? index}
+                  className="rounded-lg border border-white/[0.08] p-3"
+                >
+                  <p className="break-words text-sm font-medium text-zinc-100">
+                    {record.title ?? "Оценка"}
+                  </p>
+                  <p className="mt-1 break-words text-xs text-zinc-400">
+                    {record.courseTitle ??
+                      record.courseCode ??
+                      "Курс не указан"}
+                  </p>
+                  <p className="mt-2 text-sm text-zinc-200">
+                    {record.score}
+                    {record.maxScore === null || record.maxScore === undefined
+                      ? ""
+                      : ` / ${record.maxScore}`}
+                  </p>
+                </article>
+              ))}
+          </div>
+        </SectionPanel>
+      </div>
       {!study.courses.length && (
         <div className="mt-6">
           <SectionPanel eyebrow="Study" title="Пока нет предметов">
-            <p className="text-sm text-zinc-500">
-              Импортируй учебные данные через LifeOS — после этого они появятся здесь только у твоего аккаунта.
+            <p className="text-sm text-zinc-400">
+              Импортируй учебные данные через LifeOS — после этого они появятся
+              здесь только у твоего аккаунта.
             </p>
           </SectionPanel>
         </div>

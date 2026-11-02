@@ -7,15 +7,12 @@
 
 The web dashboard is the **desktop command center** for LifeOS. It complements (does not replace) Telegram capture and the TMA.
 
-| Route       | Purpose                            | Data source (target)          |
-| ----------- | ---------------------------------- | ----------------------------- |
-| `/today`    | Daily operating queue, focus, mode | `/api/web/home` (planned)     |
-| `/health`   | Recovery mode, ingest status       | `/api/web/health` (planned)   |
-| `/finance`  | Monthly spend, categories          | `/api/web/finance` (planned)  |
-| `/study`    | Academic sources, courses          | `/api/web/academic` (planned) |
-| `/settings` | System status, env hints           | `GET /healthz` (live today)   |
-
-**Current state:** Pages are scaffold UI with placeholder copy (“API pending”). New work should wire real backend endpoints without changing visual structure.
+The original scaffold proposed `/api/web/*` summary endpoints. The current
+implementation reuses owned `/api/tma/*` projections through secure server sessions
+and the same-origin allowlisted bridge. It includes daily-life, health, study,
+workouts, nutrition, Ideal Human and creator workspaces; see `docs/WEB_DASHBOARD.md`.
+Do not reintroduce placeholder metrics or duplicate stores. Public login/access
+pages stay separate from authenticated document, RSC and API requests.
 
 ## Layout Architecture
 

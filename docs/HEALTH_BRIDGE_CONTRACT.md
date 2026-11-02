@@ -1,6 +1,6 @@
 # Health Bridge Contract
 
-`POST /health/ingest` accepts trusted previous-day sync payloads from the Android Health Connect bridge.
+`POST /health/ingest` and its `/api/health/ingest` alias accept authenticated, validated daily sync payloads from the Android Health Connect bridge. All supplied fields remain untrusted until backend validation. The bridge can send completed prior days or today's partial measurements; it never sends future observations.
 
 ## Headers
 
@@ -9,7 +9,7 @@ content-type: application/json
 Authorization: Bearer $LIFEOS_HEALTH_SESSION_TOKEN
 ```
 
-The backend verifies the Bearer token as a signed HS256 JWT using `LIFEOS_HEALTH_INGEST_JWT_SECRET` and binds the payload to the token subject, not to any user id supplied by the client.
+The backend verifies the personal HS256 Bearer token with `LIFEOS_HEALTH_INGEST_JWT_SECRET`, checks its maximum 30-day expiry and stored token-hash credential/revocation, then verifies the active owner. The backend resolves the owner; the bridge does not send a user ID or shared ingest secret. Issue/revoke personal credentials through authenticated Mini App Health, never by embedding a backend key in an APK.
 
 ## Sync Reasons
 
@@ -19,15 +19,16 @@ The backend verifies the Bearer token as a signed HS256 JWT using `LIFEOS_HEALTH
 - `manual`
 - `backfill`
 
+These are accepted reason labels, not exact timer guarantees. The v2 Android source uses approximate WorkManager periodic requests near 00:01/06:00 and exponential transient retry; it has no separate exact 00:15 alarm. Device background feature support and permission are required. See [Android operations](ANDROID_HEALTH_BRIDGE.md).
+
 ## Payload Shape
 
 ```json
 {
-  "user_id": "00000000-0000-0000-0000-000000000000",
   "date": "2026-05-17",
   "sync_reason": "nightly_00_01",
   "source": "xiaomi_health_connect",
-  "timezone": "Asia/Qyzylorda",
+  "timezone": "Asia/Almaty",
   "metrics": {
     "sleep_minutes": 480,
     "deep_sleep_minutes": 90,
@@ -41,6 +42,7 @@ The backend verifies the Bearer token as a signed HS256 JWT using `LIFEOS_HEALTH
     "hrv_ms": 45,
     "spo2_avg": 97,
     "distance_meters": 6200,
+    "weight_kg": 70.5,
     "mood_score": 7,
     "energy_score": 6,
     "stress_score": 3
@@ -71,6 +73,8 @@ The backend verifies the Bearer token as a signed HS256 JWT using `LIFEOS_HEALTH
 ```
 
 The backend accepts both snake_case and camelCase field names for compatibility.
+
+Example numbers illustrate the format and are not real observations. Missing numeric measurements stay absent/null, never zero-filled. Current Android source aggregates only granted types, assigns stage-derived sleep to its wake-up date and keeps sleep unknown when a session has no stages. Ordinary heart rate never substitutes for resting heart rate. Stable upstream workout/sample identities support retry deduplication.
 
 ## Backend Effects
 

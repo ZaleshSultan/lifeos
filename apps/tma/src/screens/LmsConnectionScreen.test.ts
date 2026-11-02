@@ -54,6 +54,16 @@ describe("Secure LMS connection screen", () => {
     expect(html).toContain("не отправляется AI");
     expect(html).toContain("Сессия должна быть действующей");
     expect(html).toContain("MFA");
+    expect(html).toContain("Открыть официальный вход AITU");
+    expect(html).toContain(
+      'href="https://lms.astanait.edu.kz/auth/oidc/?source=loginpage"',
+    );
+    expect(html).toContain('rel="noopener noreferrer"');
+    expect(html).toContain("сам по себе не подключает LifeOS");
+    expect(html).toContain("нужен разрешённый университетом API-доступ");
+    expect(html).toContain(
+      "Дополнительно: ранее настроенный доступ через сессию",
+    );
     expect(html).toContain("Сессия истекла");
     expect(html).toContain("Последнее успешное обновление");
     expect(html).not.toContain("validationToken");

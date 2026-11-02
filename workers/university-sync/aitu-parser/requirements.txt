@@ -1,2 +1,5 @@
 requests>=2.31.0
 beautifulsoup4>=4.12.0
+# Soup Sieve 3.0/3.0.1 accept Python 3.11.2 but its regex engine breaks selectors.
+# Debian's existing runtime needs the maintained 2.x branch until Python >=3.11.5.
+soupsieve>=2.9.2,<3; python_full_version < "3.11.5"

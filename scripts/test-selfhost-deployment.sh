@@ -106,6 +106,18 @@ STUB
 chmod +x "$FIXTURE_ROOT/bin/"*
 export PATH="$FIXTURE_ROOT/bin:$PATH"
 export COMMAND_LOG="$FIXTURE_ROOT/commands.log"
+export LIFEOS_OPS_CONFIG="$FIXTURE_ROOT/ops-config.json"
+export LIFEOS_OPS_PYTHON="$FIXTURE_ROOT/bin/ops-python"
+export OPS_GUARD_LOG="$FIXTURE_ROOT/guard.log"
+printf '{}' > "$LIFEOS_OPS_CONFIG"
+cat > "$LIFEOS_OPS_PYTHON" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$1" == */scripts/ops/lifeos_backup.py && "$2" == predeploy && "$3" == --config && "$4" == "$LIFEOS_OPS_CONFIG" ]]
+printf 'verified backup and restore guard\n' >> "$OPS_GUARD_LOG"
+[[ "${OPS_GUARD_FIXTURE:-success}" == success ]]
+STUB
+chmod +x "$LIFEOS_OPS_PYTHON"
 
 fingerprint() {
   node --input-type=module - "$LIVE_DIR" <<'NODE'
@@ -143,7 +155,16 @@ VITE_ALLOW_MOCK_DATA=true VITE_BASE_PATH=/wrong/ BUILD_FIXTURE=success \
 [[ "$(cat "$LIVE_DIR/index.html")" == *'/tma/assets/new.js'* ]]
 printf 'PASS: successful staged build forces production settings and retains previous and lazy assets\n'
 
+protected_fingerprint="$(fingerprint)"
+if OPS_GUARD_FIXTURE=failed BUILD_FIXTURE=success bash "$FIXTURE_ROOT/repo/scripts/deploy-selfhost.sh" > "$FIXTURE_ROOT/guard-failed.log" 2>&1; then
+  printf 'FAIL: deployment bypassed a failed backup guard\n' >&2
+  exit 1
+fi
+[[ "$(fingerprint)" == "$protected_fingerprint" && ! -f "$COMMAND_LOG" ]]
+printf 'PASS: failed backup guard prevents publication and service restart\n'
+
 BUILD_FIXTURE=success bash "$FIXTURE_ROOT/repo/scripts/deploy-selfhost.sh" > "$FIXTURE_ROOT/deploy.log" 2>&1
+[[ -s "$OPS_GUARD_LOG" ]]
 [[ "$(cat "$COMMAND_LOG")" == $'sudo -n systemctl restart lifeos-bot.service\nsystemctl is-active --quiet lifeos-bot.service' ]]
 printf 'PASS: deployment uses noninteractive sudo and restarts only the bot\n'
 
@@ -186,4 +207,4 @@ for invalid_health in html unhealthy; do
   printf 'PASS: HTTP 200 with %s body fails health verification\n' "$invalid_health"
 done
 
-printf 'OK: 12 self-host deployment fixtures passed; no live build or service was touched\n'
+printf 'OK: 13 self-host deployment fixtures passed; no live build or service was touched\n'
