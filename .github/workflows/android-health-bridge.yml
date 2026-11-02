@@ -27,6 +27,9 @@ jobs:
     if: github.event.repository.private == false
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    env:
+      # The standard public Ubuntu runner has 16 GiB; do not apply this to production.
+      GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx3g
     steps:
       - uses: actions/checkout@v4
         with:
@@ -45,18 +48,29 @@ jobs:
           log-accepted-android-sdk-licenses: false
       - name: Install the declared Android SDK
         run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
-      - name: Compile, run JVM tests and lint
+      - name: Compile and run JVM tests
         run: >-
           gradle --no-daemon --console=plain --max-workers=2
           -p apps/health-bridge
-          :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+          :app:testDebugUnitTest
+      - name: Run Android lint
+        run: >-
+          gradle --no-daemon --console=plain --max-workers=2
+          -p apps/health-bridge :app:lintDebug
+      - name: Assemble the debug APK
+        run: >-
+          gradle --no-daemon --console=plain --max-workers=2
+          -p apps/health-bridge :app:assembleDebug
       - name: Verify and describe the debug artifact
         shell: bash
         run: |
           set -euo pipefail
           task_apk=apps/health-bridge/app/build/outputs/apk/debug/app-debug.apk
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$task_apk"
-          sha256sum "$task_apk" > apps/health-bridge/app/build/outputs/apk/debug/SHA256SUMS
+          (
+            cd apps/health-bridge/app/build/outputs/apk/debug
+            sha256sum app-debug.apk > SHA256SUMS
+          )
           {
             printf 'LifeOS Health Bridge debug build\nSource commit: %s\n' "$GITHUB_SHA"
             printf 'Checks: assembleDebug, testDebugUnitTest, lintDebug\n'
@@ -64,6 +78,32 @@ jobs:
             printf 'Contains no configured user token or backend credentials. Connect on the phone after installation.\n'
             printf 'Debug signing is for testing; this is not a production-signed Play release.\n'
           } > apps/health-bridge/app/build/outputs/apk/debug/BUILD-VERIFICATION.txt
+          python3 - <<'PY'
+          import json, os, pathlib, xml.etree.ElementTree as ET
+          build = pathlib.Path('apps/health-bridge/app/build')
+          reports = list((build / 'test-results/testDebugUnitTest').glob('TEST-*.xml'))
+          assert reports, 'No JVM test results were produced'
+          totals = {key: 0 for key in ('tests', 'failures', 'errors', 'skipped')}
+          for report in reports:
+              suite = ET.parse(report).getroot()
+              for key in totals:
+                  totals[key] += int(suite.attrib.get(key, '0'))
+          assert totals['tests'] > 0 and totals['failures'] == totals['errors'] == 0, totals
+          lint = ET.parse(build / 'reports/lint-results-debug.xml').getroot()
+          issues = lint.findall('issue')
+          errors = [issue for issue in issues if issue.attrib.get('severity') in ('Error', 'Fatal')]
+          assert not errors, 'Android lint reported errors'
+          result = {
+              'sourceCommit': os.environ['GITHUB_SHA'],
+              'unitTests': totals,
+              'lintErrors': len(errors),
+              'lintWarnings': len(issues) - len(errors),
+              'physicalDeviceVerified': False,
+              'productionSigning': False,
+          }
+          (build / 'outputs/apk/debug/BUILD-VERIFICATION.json').write_text(json.dumps(result, indent=2) + '\n')
+          print(json.dumps(result, indent=2))
+          PY
       - name: Upload the verified debug APK
         uses: actions/upload-artifact@v4
         with:
@@ -72,6 +112,7 @@ jobs:
             apps/health-bridge/app/build/outputs/apk/debug/app-debug.apk
             apps/health-bridge/app/build/outputs/apk/debug/SHA256SUMS
             apps/health-bridge/app/build/outputs/apk/debug/BUILD-VERIFICATION.txt
+            apps/health-bridge/app/build/outputs/apk/debug/BUILD-VERIFICATION.json
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
