@@ -39,6 +39,7 @@ jobs:
         with:
           gradle-version: '8.13'
           cache-disabled: true
+      - uses: android-actions/setup-android@v3
       - name: Install the declared Android SDK
         run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
       - name: Compile, run JVM tests and lint
