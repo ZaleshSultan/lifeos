@@ -146,6 +146,48 @@ export function WorkoutProgramEditor({
             Создай дни A/B или назови их по-своему. Перед тренировкой выберешь
             нужный день.
           </p>
+          {!program ? (
+            <button
+              type="button"
+              className={`${workoutButtonClass} mt-3 w-full`}
+              disabled={dirty}
+              onClick={() => {
+                const starter: WorkoutProgram = {
+                  title: "Ознакомительная тренировка · Underground GYM",
+                  days: [
+                    {
+                      id: "ideal-human-intro",
+                      title: "Всё тело · с Алинуром",
+                      exercises: [
+                        "Приседание к скамье без веса",
+                        "Тяга верхнего блока · комфортная нагрузка",
+                        "Жим в тренажёре · комфортная нагрузка",
+                      ].map((name) => ({
+                        name,
+                        sets: Array.from({ length: 2 }, () => ({
+                          reps: 8,
+                          weightKg: null,
+                          restSeconds: 90,
+                        })),
+                      })),
+                    },
+                  ],
+                };
+                setTitle(starter.title);
+                setDays(programDays(starter));
+                setDirty(true);
+              }}
+            >
+              Выбрать ознакомительный план
+            </button>
+          ) : null}
+          {!program ? (
+            <p className="mt-2 text-xs text-zinc-400">
+              Это редактируемый план: сначала разминка, затем спокойная работа
+              над техникой. Вес оставлен пустым — выбери комфортный на месте.
+              Сохрани программу и начни её, когда будешь в зале.
+            </p>
+          ) : null}
           {hasActiveWorkout ? (
             <p className="mt-2 text-sm text-amber-200">
               Изменения программы применятся к следующей тренировке.

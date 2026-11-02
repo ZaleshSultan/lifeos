@@ -1,3 +1,4 @@
+import { idealHumanStore } from "./ideal-human-store.js";
 import type { ScholarshipConfig } from "../../core/src/scholarship.js";
 import { healthCredentialStore, type HealthCredentialStore } from "./health-credential-store.js";
 import { webSessionStore, type WebSessionStore } from "./web-session-store.js";
@@ -70,7 +71,6 @@ import {
   type TmaReceiptDisplayStatus,
   type CurrencyCode,
   parseWorkoutGifUrl,
-  parseIdealHumanDay,
   type IdealHumanDay,
   parseWorkoutProgram,
   parseWorkoutSet,
@@ -1511,7 +1511,7 @@ export interface LifeOSStore extends LmsSessionStore, WebSessionStore, HealthCre
     workoutId?: string;
   }): Promise<CurrentWorkoutSummary | null>;
   getIdealHumanDays?(userId: string): Promise<IdealHumanDay[]>;
-  saveIdealHumanDay?(userId: string, day: IdealHumanDay): Promise<IdealHumanDay>;
+  saveIdealHumanDay?(userId: string, day: IdealHumanDay, expectedRevision: number): Promise<IdealHumanDay>;
   getWorkoutProgram(userId: string): Promise<WorkoutProgram | null>;
   saveWorkoutProgram(userId: string, program: WorkoutProgram): Promise<WorkoutProgram>;
   getWorkoutHistory(userId: string): Promise<WorkoutHistorySession[]>;
@@ -4766,31 +4766,11 @@ export class SupabaseLifeOSStore implements LifeOSStore {
 
 
   async getIdealHumanDays(userId: string): Promise<IdealHumanDay[]> {
-    const { data, error } = await this.client.from("user_settings")
-      .select("settings").eq("user_id", userId).maybeSingle();
-    if (error) throwSupabaseError(error, "Failed to load Ideal Human days");
-    const saved = jsonObject(jsonObject(data?.settings).ideal_human_days as Json | null | undefined);
-    const days: IdealHumanDay[] = [];
-    for (const entry of Object.values(saved)) {
-      try { days.push(parseIdealHumanDay(entry)); }
-      catch { /* Ignore malformed legacy entries rather than inventing progress. */ }
-    }
-    return days.sort((a,b) => a.date.localeCompare(b.date));
+    return idealHumanStore(this.client).getDays(userId);
   }
 
-  async saveIdealHumanDay(userId: string, input: IdealHumanDay): Promise<IdealHumanDay> {
-    const day = parseIdealHumanDay(input);
-    const { data, error: readError } = await this.client.from("user_settings")
-      .select("settings").eq("user_id", userId).maybeSingle();
-    if (readError) throwSupabaseError(readError, "Failed to load Ideal Human settings");
-    const settings = jsonObject(data?.settings);
-    const existing = jsonObject(settings.ideal_human_days as Json | null | undefined);
-    const { error } = await this.client.from("user_settings").upsert({
-      user_id: userId,
-      settings: {...settings, ideal_human_days: {...existing, [day.date]: day}} as unknown as Json,
-    }, {onConflict:"user_id"});
-    if (error) throwSupabaseError(error, "Failed to save Ideal Human day");
-    return day;
+  async saveIdealHumanDay(userId: string, input: IdealHumanDay, expectedRevision: number): Promise<IdealHumanDay> {
+    return idealHumanStore(this.client).saveDay(userId, input, expectedRevision);
   }
 
   async getWorkoutProgram(userId: string): Promise<WorkoutProgram | null> {

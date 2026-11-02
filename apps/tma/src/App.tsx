@@ -46,7 +46,9 @@ const SourcesScreen = lazy(() =>
 );
 
 const IdealHumanScreen = lazy(() =>
-  import("./screens/IdealHumanScreen").then(module => ({default:module.IdealHumanScreen})),
+  import("./screens/IdealHumanScreen").then((module) => ({
+    default: module.IdealHumanScreen,
+  })),
 );
 
 const WorkoutScreen = lazy(() =>
@@ -107,7 +109,21 @@ function initialScreen(): ScreenId {
 }
 
 export default function App() {
-  const [screen, setScreen] = useState<ScreenId>(initialScreen);
+  const [screen, setRawScreen] = useState<ScreenId>(initialScreen);
+  const [idealHumanDirty, setIdealHumanDirty] = useState(false);
+  const setScreen = (next: ScreenId) => {
+    if (
+      next !== screen &&
+      screen === "ideal-human" &&
+      idealHumanDirty &&
+      !window.confirm(
+        "Есть несохранённые изменения дневника. Открыть другой раздел и отменить их?",
+      )
+    )
+      return;
+    setIdealHumanDirty(false);
+    setRawScreen(next);
+  };
   const [aiDate, setAiDate] = useState<string>();
   const sessionQuery = useSessionQuery();
 
@@ -204,7 +220,15 @@ export default function App() {
               <AiScreen date={aiDate} onBack={() => setScreen("home")} />
             ) : null}
             {screen === "workout" ? <WorkoutScreen /> : null}
-            {screen === "ideal-human" ? <IdealHumanScreen onOpenWorkout={() => setScreen("workout")} onOpenHealth={() => setScreen("health")} onOpenStudy={() => setScreen("study")} /> : null}
+            {screen === "ideal-human" ? (
+              <IdealHumanScreen
+                onOpenWorkout={() => setScreen("workout")}
+                onOpenHealth={() => setScreen("health")}
+                onOpenStudy={() => setScreen("study")}
+                onOpenReminders={() => setScreen("reminders")}
+                onDirtyChange={setIdealHumanDirty}
+              />
+            ) : null}
             {screen === "dashboard" ? (
               <StudyDashboardScreen
                 onOpenStudy={() => setScreen("study")}

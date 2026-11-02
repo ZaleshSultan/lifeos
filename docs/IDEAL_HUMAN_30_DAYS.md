@@ -1,37 +1,39 @@
-# IDEAL HUMAN · 30 days
+# Ideal Human · November 3–December 2, 2026
 
-**Start:** 2026-11-03 (day 1). **Finish:** 2026-12-02 (day 30). Local time: Asia/Almaty.
-No backfilled achievements and no invented footage. The 2026 series is documentary, not an inflexible streak system.
+The 30 calendar days use `Asia/Almaty` (UTC+05:00), independently of the phone or server timezone. November 3 is Day 1; December 2 is Day 30. Open **Ideal Human** from Today or More in the Telegram Mini App. The private journal accepts partial entries; blank measurements remain unknown. A saved plan does not count as an observed check-in.
 
-## Deliverable
+## First morning
 
-A private Telegram Mini App screen called **IDEAL HUMAN** accessed from Today and More. It records body weight, sleep, rough calories/protein, training/recovery category, energy, neuroscience/cybernetics, English, programming, filming minutes, footage backup confirmation, and honest reflections. Data is stored on the server in the authenticated user's `user_settings.settings.ideal_human_days` JSON by date. No new database migration is needed. No public sharing; the metric CSV export omits notes and private learning/filming text.
+Open Day 1, measure morning weight and record actual sleep duration. Height is an optional editable baseline; no weight, sleep, nutrition or fitness result is prefilled. Save whenever convenient, then reopen to retrieve the database copy.
 
-This release reuses existing Workout (actual exercises and sets), Health (Health Connect where connected), Study (AITU assignments and LMS), and LifeOS's daily digest/reminder infrastructure. **The Ideal Human daily form is manually entered; it does not claim to automatically calculate food totals, import exercise sets, sync videos or send new reminders.**
+Day 1 has editable, ordered blocks: morning → university → Underground GYM with Alinur → sports Mafia → flexible evening. Times are blank. The separate university panel reads existing courses/schedules and LMS assignments. It never invents classes or deadlines; check synchronization freshness and confirm your actual timetable. Rest and social time belong in the plan.
 
-## Day zero / day one preparation
+## Daily use
 
-1. Before filming, use current Health/Workout/Study pages to verify that all needed integrations and existing workout program are functional. Do not reset, replace or bulk-modify existing LifeOS data.
-2. Record a starting morning weight under comparable conditions, and measure sleep only from actual data; no guessed baseline. Take a reproducible English baseline test; repeat the same procedure on day 30.
-3. In the Ideal Human screen, select day 1 and save actual measurements and notes at the end of November 3. Keep blank anything that was not measured.
-4. Film Samsung S23+ landscape at 4K/30, 1× main lens; check 15 seconds of sound, then copy originals and verify the copied files. Keep private projects and family matters out of frame.
-5. For strength training: prioritize technique and recovery, avoid heavy lifts with back discomfort until medically cleared. No aggressive weight gain promises or automatic calorie targets.
+- **Body and recovery:** optional weight, sleep hours, bedtime/wake time, energy, mood, training effort and recovery notes. Sleep duration is an actual observation, not inferred from two clock times.
+- **Plan and habits:** edit block names, notes, optional times and task status. Unknown status does not count as failure. Add or reorder flexible blocks as life changes.
+- **Workout:** open the existing Workout screen for exercises, sets, repetitions, weights and duration/history. A manual journal training label is not another workout session. With no saved program, the program editor offers an editable introductory plan; no training starts or completes automatically. Weights remain blank until selected in the gym.
+- **Nutrition:** describe meals manually; calories and protein are optional. Mark estimates explicitly. Meal totals include only recorded values and indicate incomplete coverage. The daily total remains available for legacy entries; meal entries take precedence to avoid counting the same nutrition twice. No photo analysis or calorie prescription is claimed.
+- **Learning:** choose programming, English, cybersecurity, science or another category; enter a topic, optional minutes, resource, notes and completion. Detailed sessions take precedence over legacy totals in the same category.
+- **Documentary:** record captured footage, A-roll, B-roll, minutes, reflection and editing status. Confirm backup only after checking the actual copied files. LifeOS does not upload or verify footage and never marks a backup automatically.
+- **Evening:** note what worked, what did not, memorable events and tomorrow's plan. Fields are optional. Save the day before closing Telegram.
 
-## Daily rhythm (adapt around AITU commitments)
+Weekly summaries use recorded observations. They report sample counts and missing data, without filling gaps with zeros. Workout frequency comes from existing workout history when available. Weight/sleep trends, study minutes, filming days, journal completion and explicitly answered task adherence are shown across the experiment.
 
-- Morning: note sleep and comparable weight when measured; view Study deadlines and Today's tasks.
-- During day: actual classes, study, English, science study topic + takeaway, and workout/rest as appropriate.
-- Evening (3–5 minutes): note food estimates only where defensible; record filming and backup; save the daily entry and a true highlight or difficulty.
-- Make progress even on partial days. **No mandatory perfect streak.**
+The full JSON export includes private notes, plans, meals and learning sessions. Export stays on your device; choose a private destination. It does not fetch or upload video files.
 
-Weekly editorial checkpoints: **Nov 9 (day 7), Nov 16 (day 14), Nov 23 (day 21), Dec 2 (day 30)**. Compare trends using recorded values, not fabricated data; for body weight use averages of comparable morning weights. Notes are private and not exported with metrics.
+## Reminders
 
-## Technical boundaries
+Use the existing Reminders screen to choose the actual times for morning check-in, workout logging, evening reflection and sleep preparation. Confirm each reminder through its normal creation flow. No reminders or Telegram messages are created by experiment initialization. Delivery depends on an active linked profile, configured worker and your chosen timezone; check the displayed next delivery time.
 
-- Frontend: `apps/tma/src/screens/IdealHumanScreen.tsx`, `apps/tma/src/api/ideal-human.ts`.
-- API: `GET/PUT /api/tma/ideal-human/days` after the existing TMA user authentication in `server.ts`; `user_id` always comes from authenticated identity and never the body.
-- Domain: `packages/core/src/ideal-human.ts` validates 30 allowed dates and caps values/strings.
-- Persistence: `packages/db/src/lifeos-store.ts` under `user_settings`, preserving other settings keys.
-- Caveat: this is a short-run 30-day log using the existing JSON settings pattern (same strategy as workout programs). Concurrent writes to different `user_settings` keys can theoretically overwrite each other; a dedicated table/atomic RPC is the preferred follow-up if expanding beyond a single-user experiment.
-- Before deploy: `corepack pnpm typecheck && corepack pnpm test && corepack pnpm --filter @lifeos/tma build`; manually verify on mobile, TMA re-auth, owner isolation, blank fields, invalid dates, CSV export, and no data leaks. Do not merge or deploy before tests and backup/rollback review.
-- This branch is based on `codex/overnight-stabilization-20261031`, **not** the stale `main-v2`; check the actually deployed SHA before release to avoid rolling back later fixes.
+## Persistence and recovery
+
+The authenticated bot API owns `GET/PUT /api/tma/ideal-human/days`. A write sends `{day, expectedRevision}`. `user_id` comes exclusively from the existing authentication boundary. Each day is stored in `ideal_human_days` under `(user_id,date)`, with a monotonically increasing revision and an atomic service-only RPC. A stale write returns 409; the form retains edits and offers a deliberate reload of the saved version. Exact retries after a lost response return the already saved revision.
+
+The additive migration `20261102120000_ideal_human_days.sql` copies recognizable legacy `user_settings.settings.ideal_human_days` entries without deleting or modifying that JSON or unrelated settings. Apply it before restarting the new backend. RLS remains enabled; browsers have no direct table or RPC privileges. Workouts and LMS retain their existing databases and authentication.
+
+Edits remain in memory during a failed save. The form warns before date changes, navigation or page exit that would discard unsaved work. A reload after a successful save reads Supabase. An offline reload cannot retrieve a server record; retry once connected. No credentials or private journal are written into URLs or persistent browser storage.
+
+## Release and rollback
+
+Read `docs/IDEAL_HUMAN_DEPLOYMENT_REPORT.md` for actual production revision, backup evidence, tests, health checks and remaining integration/security limits. Use the existing self-host deployment/publisher; never build directly into the live static directory before validation. Rollback restores prior application code and TMA entrypoint while retaining the additive journal table and all observations. Never reset a database or remove journal data to roll back code.

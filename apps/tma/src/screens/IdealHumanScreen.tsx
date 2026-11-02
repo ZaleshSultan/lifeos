@@ -1,167 +1,934 @@
-import { useEffect, useMemo, useState } from "react";
-import { CalendarDays, Check, Dumbbell, HeartPulse, BookOpen, Camera, Save } from "lucide-react";
-import { apiErrorMessage } from "../api/errors";
-import { type IdealHumanDay, useIdealHumanDays, useSaveIdealHumanDay } from "../api/ideal-human";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  CalendarDays,
+  Check,
+  Download,
+  Dumbbell,
+  HeartPulse,
+  Save,
+} from "lucide-react";
+import {
+  IDEAL_HUMAN_CONFIG,
+  IDEAL_HUMAN_START,
+  IDEAL_HUMAN_END,
+  IdealHumanInputError,
+  emptyIdealHumanDay,
+  hasIdealHumanObservation,
+  idealHumanAdherence,
+  idealHumanDate,
+  idealHumanDayNumber,
+  idealHumanExperimentStatus,
+  idealHumanLocalDate,
+  idealHumanStats,
+  idealHumanStudyMinutes,
+  parseIdealHumanDay,
+  type IdealHumanDay,
+} from "../../../../packages/core/src/ideal-human.js";
+import { ApiError, apiErrorMessage } from "../api/errors";
+import { useIdealHumanDays, useSaveIdealHumanDay } from "../api/ideal-human";
+import { useWorkoutHistoryQuery, useWorkoutSessionQuery } from "../api/workout";
+import { ErrorPanel, LoadingPanel } from "../components/AsyncState";
+import { UniversityIntegration } from "../components/ideal-human/UniversityIntegration";
+import {
+  DayPlan,
+  LearningJournal,
+  NutritionJournal,
+  ReflectionJournal,
+  VideoJournal,
+} from "../components/ideal-human/JournalSections";
+import {
+  ChoiceField,
+  Fold,
+  NumberField,
+  StatusTile,
+  TextField,
+  buttonClass,
+  inputClass,
+  panelClass,
+} from "../components/ideal-human/Fields";
 
-const START = Date.UTC(2026, 10, 3);
-const dates = Array.from({ length: 30 }, (_, i) => new Date(START + i * 86_400_000).toISOString().slice(0, 10));
-const dayNumber = (date:string) => dates.indexOf(date) + 1;
-function todayInAstana(): string {
-  return new Intl.DateTimeFormat("sv-SE", {timeZone:"Asia/Almaty", year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
-}
-function blank(date:string):IdealHumanDay {
-  return {date, weightKg:null,sleepMinutes:null,caloriesKcal:null,proteinG:null,training:null,
-    scienceMinutes:null,scienceTopic:"",scienceTakeaway:"",englishMinutes:null,codingMinutes:null,
-    filmingMinutes:null,footageBackedUp:null,energy:null,highlights:"",notes:""};
-}
-const inputClass = "mt-1 w-full min-h-11 rounded-lg border border-white/15 bg-zinc-950 px-3 py-2 text-sm text-white placeholder:text-zinc-600 focus:border-cyan-400";
-const panelClass = "rounded-xl border border-white/10 bg-white/[0.03] p-4";
-const labelClass = "block text-xs font-medium text-zinc-300";
-function NumberField({title, value, onChange, step = 1, max}:{
-  title:string;value:number|null;onChange:(value:number|null)=>void;step?:number;max?:number;
-}) {
-  return <label className={labelClass}>{title}
-    <input className={inputClass} type="number" inputMode="decimal" min="0" max={max} step={step}
-      value={value ?? ""} onChange={event => onChange(event.target.value === "" ? null : Number(event.target.value))} />
-  </label>;
+const dates = Array.from({ length: 30 }, (_, i) => idealHumanDate(i + 1));
+const hours = (minutes: number | null) =>
+  minutes === null ? "Нет записи" : `${(minutes / 60).toFixed(1)} ч`;
+const dayLabel = (date: string) =>
+  new Intl.DateTimeFormat("ru-RU", {
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  }).format(new Date(`${date}T12:00:00Z`));
+const sameContent = (a: IdealHumanDay, b: IdealHumanDay) =>
+  JSON.stringify({ ...a, revision: 0 }) ===
+  JSON.stringify({ ...b, revision: 0 });
+
+function downloadJson(value: unknown, filename: string) {
+  const url = URL.createObjectURL(
+    new Blob([JSON.stringify(value, null, 2)], {
+      type: "application/json;charset=utf-8",
+    }),
+  );
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function IdealHumanScreen({onOpenWorkout,onOpenHealth,onOpenStudy}:{
-  onOpenWorkout:()=>void;onOpenHealth:()=>void;onOpenStudy:()=>void;
+function validationMessage(error: IdealHumanInputError) {
+  const messages: Record<string, string> = {
+    "Invalid weightKg":
+      "Вес: введи измеренное значение от 25 до 300 кг или оставь поле пустым.",
+    "Invalid baselineHeightCm":
+      "Рост: введи измеренное значение от 80 до 250 см или оставь поле пустым.",
+    "Invalid sleepMinutes": "Сон: введи продолжительность от 0 до 24 часов.",
+    "Invalid energy": "Энергия должна быть от 1 до 5.",
+    "Invalid mood": "Настроение должно быть от 1 до 5.",
+    "Invalid workoutEffort": "Оцени усилие от 1 до 10 или оставь поле пустым.",
+    "Meal needs a description":
+      "Добавь описание приёма пищи или убери пустую запись.",
+    "Plan block needs a title and kind":
+      "У каждого блока плана должно быть название.",
+    "Task needs a title": "Добавь название задачи или убери её из плана.",
+    "Record at least one observation, reflection, or plan change":
+      "Запиши хотя бы одно наблюдение, заметку или изменение плана.",
+  };
+  return (
+    messages[error.message] ??
+    "Проверь значения: время в формате ЧЧ:ММ, минуты до 900, калории до 10000, белок до 400 г. Поля можно оставить пустыми."
+  );
+}
+
+export function IdealHumanScreen({
+  onOpenWorkout,
+  onOpenHealth,
+  onOpenStudy,
+  onOpenReminders,
+  onDirtyChange,
+}: {
+  onOpenWorkout: () => void;
+  onOpenHealth: () => void;
+  onOpenStudy: () => void;
+  onOpenReminders: () => void;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
-  const now = todayInAstana();
-  const initial = now < dates[0] ? dates[0] : now > dates[29] ? dates[29] : now;
-  const [date,setDate] = useState(initial);
-  const [draft,setDraft] = useState<IdealHumanDay>(() => blank(initial));
-  const [dirty,setDirty] = useState(false);
-  const [saved,setSaved] = useState(false);
+  const [today, setToday] = useState(() => idealHumanLocalDate(new Date()));
+  const initialDate =
+    today < IDEAL_HUMAN_START
+      ? IDEAL_HUMAN_START
+      : today > IDEAL_HUMAN_END
+        ? IDEAL_HUMAN_END
+        : today;
+  const [date, setDate] = useState(initialDate);
+  const previousToday = useRef(today);
+  const [draft, setDraft] = useState(() => emptyIdealHumanDay(initialDate));
+  const [dirty, setDirty] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [validation, setValidation] = useState<string | null>(null);
+  const [conflict, setConflict] = useState(false);
+  const [reloading, setReloading] = useState(false);
+  const saving = useRef(false);
   const query = useIdealHumanDays();
   const mutation = useSaveIdealHumanDay();
-  const record = query.data?.find(day=>day.date===date);
+  const busy = mutation.isPending || reloading;
+  const workoutHistory = useWorkoutHistoryQuery();
+  const currentWorkout = useWorkoutSessionQuery();
+  const record = query.data?.find((day) => day.date === date);
+  const experiment = idealHumanExperimentStatus(today);
+  const selectedDay = idealHumanDayNumber(date)!;
+
   useEffect(() => {
-    if (!dirty) setDraft(record ?? blank(date));
-  }, [date,record,dirty]);
-  const stats = useMemo(() => {
-    const days = query.data ?? [];
-    const measured = days.filter(day=>day.weightKg !== null).map(day=>day.weightKg!);
-    const sleep = days.filter(day=>day.sleepMinutes !== null).map(day=>day.sleepMinutes!);
-    return {
-      saved:days.length,
-      gyms:days.filter(day=>day.training==="gym").length,
-      science:days.reduce((s,d)=>s+(d.scienceMinutes??0),0),
-      film:days.filter(day=>(day.filmingMinutes??0)>0).length,
-      avgWeight:measured.length ? measured.reduce((a,b)=>a+b,0)/measured.length:null,
-      avgSleep:sleep.length ? sleep.reduce((a,b)=>a+b,0)/sleep.length:null,
+    const update = () => setToday(idealHumanLocalDate(new Date()));
+    const timer = window.setInterval(update, 60_000);
+    document.addEventListener("visibilitychange", update);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", update);
     };
-  }, [query.data]);
-  function change<K extends keyof IdealHumanDay>(key:K,value:IdealHumanDay[K]) {
-    setDraft(previous=>({...previous,[key]:value}));
+  }, []);
+  useEffect(() => {
+    if (
+      previousToday.current !== today &&
+      date === previousToday.current &&
+      !dirty &&
+      !saving.current &&
+      idealHumanDayNumber(today) !== null
+    ) {
+      setDate(today);
+      setSaved(false);
+    }
+    previousToday.current = today;
+  }, [today, date, dirty]);
+  useEffect(() => {
+    if (!dirty && !saving.current) setDraft(record ?? emptyIdealHumanDay(date));
+  }, [record, date, dirty]);
+  useEffect(() => onDirtyChange(dirty || busy), [dirty, busy, onDirtyChange]);
+  useEffect(() => {
+    if (!dirty) return;
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", beforeUnload);
+    return () => window.removeEventListener("beforeunload", beforeUnload);
+  }, [dirty]);
+
+  const workoutDates = useMemo(
+    () =>
+      workoutHistory.data?.map((item) =>
+        idealHumanLocalDate(new Date(item.endedAt)),
+      ),
+    [workoutHistory.data],
+  );
+  const stats = useMemo(
+    () => idealHumanStats(query.data ?? [], workoutDates),
+    [query.data, workoutDates],
+  );
+  const dayWorkouts = (workoutHistory.data ?? []).filter(
+    (item) => idealHumanLocalDate(new Date(item.endedAt)) === date,
+  );
+  const activeWorkout =
+    currentWorkout.data &&
+    idealHumanLocalDate(new Date(currentWorkout.data.startedAt)) === date
+      ? currentWorkout.data
+      : null;
+  const studyMinutes = idealHumanStudyMinutes(draft);
+  const adherence = idealHumanAdherence(draft);
+
+  function change<K extends keyof IdealHumanDay>(
+    key: K,
+    value: IdealHumanDay[K],
+  ) {
+    if (saving.current) return;
+    setDraft((previous) => ({ ...previous, [key]: value }));
     setDirty(true);
     setSaved(false);
+    setValidation(null);
   }
-  function navigateDate(next:string) {
-    if (dirty && !window.confirm("Есть несохранённые изменения. Перейти к другому дню?")) return;
-    setDirty(false); setSaved(false); setDate(next);
-    setDraft(query.data?.find(d=>d.date===next) ?? blank(next));
+  function navigateDate(next: string) {
+    if (saving.current) return;
+    if (
+      dirty &&
+      !window.confirm(
+        "Есть несохранённые изменения. Перейти к другому дню и отменить их?",
+      )
+    )
+      return;
+    setDate(next);
+    setDraft(
+      query.data?.find((day) => day.date === next) ?? emptyIdealHumanDay(next),
+    );
+    setDirty(false);
+    setSaved(false);
+    setConflict(false);
+    setValidation(null);
+    mutation.reset();
   }
   async function save() {
+    if (saving.current) return;
+    let input: IdealHumanDay;
     try {
-      await mutation.mutateAsync(draft);
-      setDirty(false);setSaved(true);
-    } catch { setSaved(false); }
+      input = parseIdealHumanDay(draft);
+    } catch (error) {
+      setValidation(
+        error instanceof IdealHumanInputError
+          ? validationMessage(error)
+          : "Проверь поля дневника.",
+      );
+      return;
+    }
+    saving.current = true;
+    setValidation(null);
+    try {
+      const result = await mutation.mutateAsync(input);
+      setDraft(result);
+      setDirty(false);
+      setSaved(true);
+      setConflict(false);
+    } catch (error) {
+      setSaved(false);
+      if (error instanceof ApiError && error.status === 409) {
+        const refreshed = await query.refetch();
+        const remote = refreshed.data?.find((day) => day.date === date);
+        // A response can be lost after a successful save. Retrying the same content
+        // should recover the receipt without replacing newer, different content.
+        if (remote && sameContent(input, remote)) {
+          setDraft(remote);
+          setDirty(false);
+          setSaved(true);
+          setConflict(false);
+          mutation.reset();
+        } else setConflict(true);
+      }
+    } finally {
+      saving.current = false;
+    }
   }
-  function exportCsv() {
-    const fields = ["date","weightKg","sleepMinutes","caloriesKcal","proteinG","training","scienceMinutes","englishMinutes","codingMinutes","filmingMinutes","footageBackedUp","energy"] as const;
-    const quote=(v:unknown)=>'"'+String(v??"").replaceAll('"','""')+'"';
-    const csv=[fields.join(","),...(query.data??[]).map(day=>fields.map(f=>quote(day[f])).join(","))].join("\r\n");
-    const url=URL.createObjectURL(new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8"}));
-    const link=document.createElement("a");link.href=url;link.download="ideal-human-2026.csv";link.click();
-    URL.revokeObjectURL(url);
+  async function loadSaved() {
+    if (saving.current) return;
+    if (
+      dirty &&
+      !window.confirm(
+        "Заменить несохранённые правки сохранённой версией? Сначала можно экспортировать свои правки.",
+      )
+    )
+      return;
+    const requestedDate = date;
+    saving.current = true;
+    setReloading(true);
+    try {
+      const result = await query.refetch();
+      if (result.isError) return;
+      setDraft(
+        result.data?.find((day) => day.date === requestedDate) ??
+          emptyIdealHumanDay(requestedDate),
+      );
+      setDirty(false);
+      setSaved(false);
+      setConflict(false);
+      setValidation(null);
+      mutation.reset();
+    } finally {
+      saving.current = false;
+      setReloading(false);
+    }
   }
-  return <div className="space-y-4 pb-5">
-    <header className={panelClass}>
-      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">IDEAL HUMAN • 2026</p>
-      <h1 className="mt-2 text-2xl font-bold text-white">DAY {String(dayNumber(date)).padStart(2,"0")} / 30</h1>
-      <p className="mt-1 text-sm text-zinc-400">3 ноября — 2 декабря · Не идеальное расписание, а честный эксперимент.</p>
-      <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
-        <div className="h-full rounded-full bg-cyan-400" style={{width: `${stats.saved/30*100}%`}} />
-      </div>
-      <p className="mt-2 text-xs text-zinc-400">Дней с сохранёнными записями: {stats.saved}/30. Пропуски не засчитываются.</p>
-      <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-        <div className="rounded-lg bg-white/5 p-2"><div className="text-lg text-white">{stats.gyms}</div><div className="text-[10px] text-zinc-400">Зал, дней</div></div>
-        <div className="rounded-lg bg-white/5 p-2"><div className="text-lg text-white">{stats.science}</div><div className="text-[10px] text-zinc-400">Наука, мин</div></div>
-        <div className="rounded-lg bg-white/5 p-2"><div className="text-lg text-white">{stats.film}</div><div className="text-[10px] text-zinc-400">Снято, дней</div></div>
-      </div>
-      <p className="mt-3 text-xs text-zinc-500">Средний вес: {stats.avgWeight===null?"нет данных":stats.avgWeight.toFixed(1)+" кг"} · средний сон: {stats.avgSleep===null?"нет данных":(stats.avgSleep/60).toFixed(1)+" ч"} (только измеренные дни).</p>
-    </header>
-    <section className={panelClass}>
-      <label className="flex items-center gap-2 text-sm font-semibold text-white" htmlFor="ideal-human-day"><CalendarDays className="h-4 w-4 text-cyan-300"/> Выбери день</label>
-      <select id="ideal-human-day" className={inputClass} value={date} onChange={event=>navigateDate(event.target.value)}>
-        {dates.map((d,i)=><option value={d} key={d}>День {i+1} · {d}{query.data?.some(item=>item.date===d)?" ✓":""}</option>)}
-      </select>
-      {date>now ? <p className="mt-2 text-xs text-amber-300">Будущие дни лучше заполнять после фактического выполнения.</p> : null}
-    </section>
-    {query.isLoading ? <p className="text-sm text-zinc-400">Загружаем дневник…</p> : query.isError ? <p className="text-sm text-rose-300">Не удалось загрузить дневник. <button className="underline" onClick={()=>void query.refetch()}>Повторить</button></p> : <>
-      <section className={panelClass}>
-        <h2 className="flex items-center gap-2 font-semibold text-white"><HeartPulse className="h-4 w-4 text-emerald-300"/> Тело и восстановление</h2>
-        <div className="mt-3 grid grid-cols-2 gap-3">
-          <NumberField title="Утренний вес, кг" step={0.1} max={300} value={draft.weightKg} onChange={v=>change("weightKg",v)}/>
-          <NumberField title="Сон, минут" max={1440} value={draft.sleepMinutes} onChange={v=>change("sleepMinutes",v)}/>
-          <NumberField title="Калории, ккал (оценка)" max={10000} value={draft.caloriesKcal} onChange={v=>change("caloriesKcal",v)}/>
-          <NumberField title="Белок, г (оценка)" step={0.1} max={400} value={draft.proteinG} onChange={v=>change("proteinG",v)}/>
+
+  return (
+    <div className="space-y-4 pb-5">
+      <header className={panelClass}>
+        <p className="text-xs font-semibold uppercase tracking-[0.15em] text-cyan-300">
+          IDEAL HUMAN · 03.11 — 02.12.2026
+        </p>
+        <h1 className="mt-2 text-2xl font-bold text-white">
+          Ideal Human — Day {selectedDay}/30
+        </h1>
+        <p className="mt-1 text-sm text-zinc-300">
+          {dayLabel(date)} · {date === today ? "Сегодня" : "Выбранный день"}
+        </p>
+        <p className="mt-2 text-xs leading-relaxed text-zinc-400">
+          Сегодня {today} · Asia/Almaty (UTC+05:00).{" "}
+          {experiment.phase === "upcoming"
+            ? "Старт 3 ноября. День 1 уже подготовлен."
+            : experiment.phase === "complete"
+              ? "30 дней завершены. Дневник остаётся доступным."
+              : `После сегодняшнего дня остаётся ${experiment.daysRemaining}.`}
+        </p>
+        <div
+          className="mt-3 h-2 overflow-hidden rounded-full bg-white/10"
+          role="progressbar"
+          aria-label="Дни с наблюдениями"
+          aria-valuemin={0}
+          aria-valuemax={30}
+          aria-valuenow={stats.checkins}
+        >
+          <div
+            className="h-full rounded-full bg-cyan-400"
+            style={{ width: `${(stats.checkins / 30) * 100}%` }}
+          />
         </div>
-        <label className={labelClass + " mt-3"}>Активность / восстановление
-          <select className={inputClass} value={draft.training ?? ""} onChange={e=>change("training",(e.target.value||null) as IdealHumanDay["training"])}>
-            <option value="">Нет записи</option><option value="gym">Тренировка в зале</option><option value="recovery">День восстановления</option><option value="other">Другая активность</option><option value="none">Не тренировался</option>
-          </select>
-        </label>
-        <label className={labelClass + " mt-3"}>Энергия (1–5)
-          <select className={inputClass} value={draft.energy??""} onChange={e=>change("energy",e.target.value?Number(e.target.value):null)}>
-            <option value="">Нет оценки</option>{[1,2,3,4,5].map(n=><option value={n} key={n}>{n}</option>)}
-          </select>
-        </label>
-        <button className="mt-3 min-h-11 rounded-lg border border-emerald-400/30 px-3 text-sm text-emerald-200" onClick={onOpenWorkout}><Dumbbell className="mr-1 inline h-4 w-4"/> Подходы и история тренировок</button>
-        <button className="ml-2 mt-3 min-h-11 rounded-lg border border-white/20 px-3 text-sm text-zinc-300" onClick={onOpenHealth}>Health Connect</button>
-      </section>
+        <p className="mt-2 text-xs text-zinc-400">
+          Наблюдения: {stats.checkins}/30 · дневник: {stats.journalDays} дн.
+          Пустой день означает «нет данных».
+        </p>
+      </header>
+
       <section className={panelClass}>
-        <h2 className="flex items-center gap-2 font-semibold text-white"><BookOpen className="h-4 w-4 text-violet-300"/> Интеллект</h2>
-        <div className="mt-3 grid grid-cols-2 gap-3">
-          <NumberField title="Науки, минут" max={900} value={draft.scienceMinutes} onChange={v=>change("scienceMinutes",v)}/>
-          <NumberField title="Английский, минут" max={900} value={draft.englishMinutes} onChange={v=>change("englishMinutes",v)}/>
-          <NumberField title="Программирование, мин" max={900} value={draft.codingMinutes} onChange={v=>change("codingMinutes",v)}/>
+        <label
+          className="flex items-center gap-2 text-sm font-semibold text-white"
+          htmlFor="ideal-human-day"
+        >
+          <CalendarDays className="h-4 w-4 text-cyan-300" /> День эксперимента
+        </label>
+        <select
+          id="ideal-human-day"
+          className={inputClass}
+          value={date}
+          disabled={busy}
+          onChange={(event) => navigateDate(event.target.value)}
+        >
+          {dates.map((day, i) => (
+            <option value={day} key={day}>
+              День {i + 1} · {day}
+              {query.data?.some((item) => item.date === day)
+                ? " · сохранено"
+                : ""}
+            </option>
+          ))}
+        </select>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            className={buttonClass}
+            disabled={selectedDay === 1 || busy}
+            onClick={() => navigateDate(idealHumanDate(selectedDay - 1))}
+          >
+            Предыдущий
+          </button>
+          <button
+            type="button"
+            className={buttonClass}
+            disabled={selectedDay === 30 || busy}
+            onClick={() => navigateDate(idealHumanDate(selectedDay + 1))}
+          >
+            Следующий
+          </button>
         </div>
-        <label className={labelClass + " mt-3"}>Тема (нейробиология / кибернетика)
-          <input className={inputClass} maxLength={160} value={draft.scienceTopic} onChange={e=>change("scienceTopic",e.target.value)}/>
-        </label>
-        <label className={labelClass + " mt-3"}>Что понял (3–5 предложений + пример применения)
-          <textarea className={inputClass} rows={4} maxLength={1500} value={draft.scienceTakeaway} onChange={e=>change("scienceTakeaway",e.target.value)}/>
-        </label>
-        <button className="mt-3 min-h-11 rounded-lg border border-violet-400/30 px-3 text-sm text-violet-200" onClick={onOpenStudy}>Перейти к учёбе и дедлайнам</button>
+        {date > today ? (
+          <p className="mt-3 text-xs text-amber-200">
+            Можно редактировать план будущего дня. Фактические измерения и
+            выполнение отмечай после события.
+          </p>
+        ) : null}
       </section>
-      <section className={panelClass}>
-        <h2 className="flex items-center gap-2 font-semibold text-white"><Camera className="h-4 w-4 text-amber-300"/> Документальный фильм</h2>
-        <div className="mt-3 grid grid-cols-2 gap-3">
-          <NumberField title="Съёмка, минут" max={900} value={draft.filmingMinutes} onChange={v=>change("filmingMinutes",v)}/>
-        </div>
-        <label className="mt-3 flex items-center gap-2 text-sm text-zinc-300">
-          <input type="checkbox" checked={draft.footageBackedUp===true} onChange={e=>change("footageBackedUp",e.target.checked)} />
-          Исходники скопированы и проверены
-        </label>
-        <label className={labelClass + " mt-3"}>Что сегодня стоит показать в фильме?
-          <textarea className={inputClass} rows={2} maxLength={500} value={draft.highlights} onChange={e=>change("highlights",e.target.value)}/>
-        </label>
-        <label className={labelClass + " mt-3"}>Честная заметка о дне (включая сложности)
-          <textarea className={inputClass} rows={3} maxLength={2000} value={draft.notes} onChange={e=>change("notes",e.target.value)}/>
-        </label>
-        <p className="mt-2 text-xs text-zinc-500">Не включай в видео приватные экраны, закрытые проекты и чужие данные.</p>
-      </section>
-      {mutation.isError ? <p role="alert" className="text-sm text-rose-300">{apiErrorMessage(mutation.error)}</p> : null}
-      <button type="button" disabled={mutation.isPending||query.isError||date>now} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-cyan-500 px-4 font-semibold text-zinc-950 disabled:opacity-50" onClick={()=>void save()}>
-        {saved&&!dirty?<Check className="h-5 w-5"/>:<Save className="h-5 w-5"/>}
-        {mutation.isPending?"Сохраняем…":saved&&!dirty?"Сохранено":"Сохранить день"}
-      </button>
-      <button className="min-h-11 w-full text-xs text-zinc-500 underline" type="button" onClick={exportCsv}>Экспорт метрик для монтажа (CSV, без личных заметок)</button>
-    </>}
-    <p className="text-xs text-zinc-600">В дни 7, 14, 21 и 30 подведи итоги. Пустое поле означает «нет данных», а не ноль. Отдых — часть эксперимента.</p>
-  </div>;
+
+      {query.isLoading ? (
+        <LoadingPanel title="Загружаем дневник…" />
+      ) : query.isError && query.data === undefined ? (
+        <ErrorPanel
+          title="Не удалось загрузить дневник"
+          detail={apiErrorMessage(query.error)}
+          onRetry={() => void query.refetch()}
+        />
+      ) : (
+        <>
+          {query.isError ? (
+            <ErrorPanel
+              title="Не удалось обновить сохранённые данные"
+              detail="Несохранённые правки остаются на экране. Проверь соединение."
+              onRetry={() => void query.refetch()}
+            />
+          ) : null}
+          <section
+            className="grid grid-cols-2 gap-2"
+            aria-label="Статус выбранного дня"
+          >
+            <StatusTile
+              title="Чек-ин"
+              value={
+                record && hasIdealHumanObservation(record)
+                  ? "Есть наблюдения"
+                  : "Нет наблюдений"
+              }
+              recorded={Boolean(record && hasIdealHumanObservation(record))}
+            />
+            <StatusTile
+              title="Сон"
+              value={hours(draft.sleepMinutes)}
+              recorded={draft.sleepMinutes !== null}
+            />
+            <StatusTile
+              title="Питание"
+              value={
+                draft.meals.length
+                  ? `${draft.meals.length} приёмов пищи`
+                  : draft.caloriesKcal !== null || draft.proteinG !== null
+                    ? "Внесён итог"
+                    : "Нет записи"
+              }
+              recorded={Boolean(
+                draft.meals.length ||
+                draft.caloriesKcal !== null ||
+                draft.proteinG !== null,
+              )}
+            />
+            <StatusTile
+              title="Тренировка"
+              value={
+                dayWorkouts.length
+                  ? `${dayWorkouts.length} завершено в LifeOS`
+                  : activeWorkout
+                    ? "Идёт тренировка"
+                    : workoutHistory.isError
+                      ? "История недоступна"
+                      : "Нет завершённой записи"
+              }
+              recorded={dayWorkouts.length > 0}
+            />
+            <StatusTile
+              title="Учёба"
+              value={
+                studyMinutes === null ? "Нет записи" : `${studyMinutes} мин`
+              }
+              recorded={studyMinutes !== null}
+            />
+            <StatusTile
+              title="Съёмка"
+              value={
+                draft.footageCaptured === true ||
+                draft.aRoll === true ||
+                draft.bRoll === true ||
+                (draft.filmingMinutes ?? 0) > 0
+                  ? "Материал отмечен"
+                  : "Нет подтверждения"
+              }
+              recorded={
+                draft.footageCaptured === true ||
+                draft.aRoll === true ||
+                draft.bRoll === true ||
+                (draft.filmingMinutes ?? 0) > 0
+              }
+            />
+            <StatusTile
+              title="Привычки"
+              value={
+                adherence === null
+                  ? "Нет отметок"
+                  : `${Math.round(adherence * 100)}% отмеченных`
+              }
+              recorded={adherence !== null}
+            />
+            <StatusTile
+              title="Копия видео"
+              value={
+                draft.footageBackedUp === true
+                  ? "Проверена тобой"
+                  : "Не подтверждена"
+              }
+              recorded={draft.footageBackedUp === true}
+            />
+          </section>
+
+          <form
+            noValidate
+            onSubmit={(event) => {
+              event.preventDefault();
+              void save();
+            }}
+            className="space-y-4"
+          >
+            <div className="sticky top-2 z-20 rounded-xl border border-white/15 bg-zinc-950/95 p-3 shadow-panel backdrop-blur-md">
+              <p aria-live="polite" className="mb-2 text-xs text-zinc-300">
+                {mutation.isPending
+                  ? "Сохраняем в LifeOS…"
+                  : saved && !dirty
+                    ? "Сохранено в LifeOS. Можно закрыть и открыть снова."
+                    : dirty
+                      ? "Есть несохранённые изменения. Они останутся на экране при ошибке сети."
+                      : "Все поля необязательны. Записывай только реальные данные."}
+              </p>
+              <button
+                type="submit"
+                disabled={busy || !dirty || conflict}
+                className="flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-cyan-400 px-4 text-sm font-semibold text-zinc-950 hover:bg-cyan-300 active:scale-[0.98] disabled:opacity-50"
+              >
+                {saved && !dirty ? (
+                  <Check className="h-4 w-4" />
+                ) : (
+                  <Save className="h-4 w-4" />
+                )}
+                {mutation.isPending ? "Сохраняем…" : "Сохранить день"}
+              </button>
+              {validation ? (
+                <p role="alert" className="mt-2 text-sm text-rose-200">
+                  {validation}
+                </p>
+              ) : null}
+              {mutation.isError && !conflict ? (
+                <p role="alert" className="mt-2 text-sm text-rose-200">
+                  {apiErrorMessage(mutation.error)} Правки не удалены; повтори
+                  сохранение.
+                </p>
+              ) : null}
+            </div>
+            {conflict ? (
+              <section
+                className="space-y-3 rounded-xl border border-amber-300/30 bg-amber-300/[0.05] p-4"
+                role="alert"
+              >
+                <p className="text-sm text-amber-100">
+                  Запись изменилась на другом устройстве. Твои правки сохранены
+                  на этом экране. Экспортируй их, затем загрузи актуальную
+                  версию и перенеси нужное.
+                </p>
+                <button
+                  type="button"
+                  className={`${buttonClass} w-full`}
+                  onClick={() =>
+                    downloadJson(
+                      { config: IDEAL_HUMAN_CONFIG, unsavedDay: draft },
+                      `ideal-human-unsaved-${date}.json`,
+                    )
+                  }
+                >
+                  Экспортировать мои несохранённые правки
+                </button>
+                <button
+                  type="button"
+                  className={`${buttonClass} w-full`}
+                  onClick={() => void loadSaved()}
+                >
+                  Загрузить сохранённую версию
+                </button>
+              </section>
+            ) : null}
+            <fieldset disabled={busy} className="min-w-0 space-y-4">
+              <section className={panelClass}>
+                <h2 className="flex items-center gap-2 font-semibold text-white">
+                  <HeartPulse className="h-4 w-4 text-emerald-300" /> Утренний
+                  чек-ин
+                </h2>
+                <p className="mt-2 text-xs text-zinc-400">
+                  Взвесься и запиши фактический сон. Приблизительные исходные
+                  50–52 кг не считаются измерением.
+                </p>
+                <div className="mt-3 grid grid-cols-2 gap-3">
+                  <NumberField
+                    title="Утренний вес, кг"
+                    min={25}
+                    max={300}
+                    step={0.1}
+                    value={draft.weightKg}
+                    onChange={(value) => change("weightKg", value)}
+                  />
+                  <NumberField
+                    title="Сон, часов"
+                    max={24}
+                    step={0.25}
+                    value={
+                      draft.sleepMinutes === null
+                        ? null
+                        : Math.round((draft.sleepMinutes / 60) * 100) / 100
+                    }
+                    onChange={(value) =>
+                      change(
+                        "sleepMinutes",
+                        value === null ? null : Math.round(value * 60),
+                      )
+                    }
+                  />
+                  <TextField
+                    title="Лёг спать (если известно)"
+                    type="time"
+                    value={draft.bedtime ?? ""}
+                    onChange={(value) => change("bedtime", value || null)}
+                  />
+                  <TextField
+                    title="Проснулся (если известно)"
+                    type="time"
+                    value={draft.wakeTime ?? ""}
+                    onChange={(value) => change("wakeTime", value || null)}
+                  />
+                </div>
+                <details className="mt-3">
+                  <summary className="min-h-11 cursor-pointer text-sm text-zinc-300">
+                    Исходное измерение роста
+                  </summary>
+                  <NumberField
+                    title="Измеренный рост, см"
+                    min={80}
+                    max={250}
+                    step={0.1}
+                    value={draft.baselineHeightCm}
+                    onChange={(value) => change("baselineHeightCm", value)}
+                  />
+                  <p className="mt-2 text-xs text-zinc-400">
+                    Измерь один раз и сохрани в День 1. Пропуски допустимы.
+                  </p>
+                </details>
+              </section>
+              <DayPlan day={draft} change={change} />
+
+              <UniversityIntegration date={date} onOpenStudy={onOpenStudy} />
+
+              <Fold
+                title="Тренировка и восстановление"
+                open
+                detail="Подходы и история хранятся в существующем разделе тренировок."
+              >
+                {workoutHistory.isLoading || currentWorkout.isLoading ? (
+                  <p className="text-xs text-zinc-400">
+                    Проверяем тренировки LifeOS…
+                  </p>
+                ) : null}
+                {workoutHistory.isError || currentWorkout.isError ? (
+                  <ErrorPanel
+                    title="Не удалось проверить тренировки"
+                    onRetry={() => {
+                      void workoutHistory.refetch();
+                      void currentWorkout.refetch();
+                    }}
+                  />
+                ) : null}
+                {dayWorkouts.map((workout) => (
+                  <div
+                    key={workout.id}
+                    className="rounded-lg border border-emerald-300/20 p-3"
+                  >
+                    <p className="text-sm font-semibold text-emerald-100">
+                      {workout.title} · завершена
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-300">
+                      {workout.completedSets} подходов ·{" "}
+                      {Math.max(
+                        0,
+                        Math.round(
+                          (Date.parse(workout.endedAt) -
+                            Date.parse(workout.startedAt)) /
+                            60000,
+                        ),
+                      )}{" "}
+                      мин
+                    </p>
+                  </div>
+                ))}
+                {activeWorkout ? (
+                  <p className="text-sm text-cyan-200">
+                    Сейчас: {activeWorkout.title}, {activeWorkout.completedSets}
+                    /{activeWorkout.totalSets} подходов.
+                  </p>
+                ) : null}
+                {!dayWorkouts.length &&
+                !activeWorkout &&
+                !workoutHistory.isError &&
+                !currentWorkout.isError ? (
+                  <p className="text-xs text-zinc-400">
+                    Завершённая тренировка на этот день пока не
+                    зарегистрирована.
+                  </p>
+                ) : null}
+                <p className="text-xs leading-relaxed text-zinc-400">
+                  День 1: Underground GYM с Алинуром после университета. Начни с
+                  разминки, знакомых упражнений и комфортного веса; оставь запас
+                  сил. Существующая программа и история сохраняются.
+                </p>
+                <button
+                  type="button"
+                  className={`${buttonClass} w-full border-emerald-400/25 text-emerald-200`}
+                  onClick={onOpenWorkout}
+                >
+                  <Dumbbell className="h-4 w-4" /> Открыть тренировку и подходы
+                </button>
+                <ChoiceField
+                  title="Активность / восстановление (заметка)"
+                  value={draft.training}
+                  choices={[
+                    { value: "gym", label: "Был в зале" },
+                    { value: "recovery", label: "Восстановление" },
+                    { value: "other", label: "Другая активность" },
+                    { value: "none", label: "Без тренировки" },
+                  ]}
+                  onChange={(value) => change("training", value)}
+                />
+                <p className="text-xs text-zinc-400">
+                  Эта отметка не создаёт тренировку. Частота тренировок берётся
+                  из завершённых сессий LifeOS.
+                </p>
+                <NumberField
+                  title="Ощущаемое усилие, 1–10"
+                  min={1}
+                  max={10}
+                  value={draft.workoutEffort}
+                  onChange={(value) => change("workoutEffort", value)}
+                />
+                <TextField
+                  title="Заметки после тренировки"
+                  multiline
+                  value={draft.workoutNotes}
+                  onChange={(value) => change("workoutNotes", value)}
+                />
+                <TextField
+                  title="Восстановление и самочувствие"
+                  multiline
+                  value={draft.recoveryNotes}
+                  onChange={(value) => change("recoveryNotes", value)}
+                />
+                <p className="text-xs text-zinc-400">
+                  После нагрузки: поесть, попить воды и оставить время на сон.
+                  Усталость помогает скорректировать следующий день.
+                </p>
+                <button
+                  type="button"
+                  className={`${buttonClass} w-full`}
+                  onClick={onOpenHealth}
+                >
+                  Открыть здоровье и восстановление
+                </button>
+              </Fold>
+              <NutritionJournal day={draft} change={change} />
+              <LearningJournal day={draft} change={change} />
+              <VideoJournal day={draft} change={change} />
+              <ReflectionJournal day={draft} change={change} />
+            </fieldset>
+          </form>
+
+          <Fold
+            title="Прогресс за 30 дней"
+            detail="Тренды только по сохранённым измерениям. Пустые значения не превращаются в нули."
+          >
+            <div className="grid grid-cols-2 gap-2">
+              <StatusTile
+                title="Зал, дней"
+                value={
+                  workoutHistory.isError
+                    ? "История недоступна"
+                    : String(stats.gymDays)
+                }
+                recorded={stats.gymDays > 0}
+              />
+              <StatusTile
+                title="Учёба"
+                value={
+                  stats.studyMinutes === null
+                    ? "Нет записей"
+                    : `${stats.studyMinutes} мин`
+                }
+                recorded={stats.studyMinutes !== null}
+              />
+              <StatusTile
+                title="Съёмка, дней"
+                value={String(stats.filmedDays)}
+                recorded={stats.filmedDays > 0}
+              />
+              <StatusTile
+                title="Средний сон"
+                value={hours(stats.avgSleepMinutes)}
+                recorded={stats.avgSleepMinutes !== null}
+              />
+              <StatusTile
+                title="Средний вес"
+                value={
+                  stats.avgWeightKg === null
+                    ? "Нет измерений"
+                    : `${stats.avgWeightKg.toFixed(1)} кг`
+                }
+                recorded={stats.avgWeightKg !== null}
+              />
+              <StatusTile
+                title="Разброс сна"
+                value={
+                  stats.sleepVariationMinutes === null
+                    ? "Нужно 2+ измерения"
+                    : `${Math.round(stats.sleepVariationMinutes)} мин`
+                }
+                recorded={stats.sleepVariationMinutes !== null}
+              />
+            </div>
+            <p className="text-xs text-zinc-400">
+              Разброс сна описывает изменчивость измеренной продолжительности.
+              Один короткий сон не означает провал. Время отхода ко сну и
+              подъёма можно сравнить в записях ниже.
+            </p>
+            {stats.weekly.map((week) => (
+              <article
+                key={week.week}
+                className="rounded-lg border border-white/[0.08] p-3"
+              >
+                <h3 className="text-sm font-semibold text-zinc-100">
+                  Неделя {week.week} · {week.recordedDays}/{week.totalDays} дней
+                  с наблюдениями
+                </h3>
+                <p className="mt-2 text-xs leading-relaxed text-zinc-400">
+                  Сон: {hours(week.avgSleepMinutes)} · вес:{" "}
+                  {week.avgWeightKg === null
+                    ? "нет измерений"
+                    : `${week.avgWeightKg.toFixed(1)} кг`}{" "}
+                  · отмеченные привычки:{" "}
+                  {week.adherence === null
+                    ? "нет отметок"
+                    : `${Math.round(week.adherence * 100)}%`}
+                  .
+                </p>
+              </article>
+            ))}
+            {stats.weightTrend.length || stats.sleepTrend.length ? (
+              <div className="space-y-2">
+                <h3 className="text-sm font-semibold text-white">
+                  Измеренные дни
+                </h3>
+                {(query.data ?? [])
+                  .filter(
+                    (day) =>
+                      day.weightKg !== null ||
+                      day.sleepMinutes !== null ||
+                      day.bedtime ||
+                      day.wakeTime,
+                  )
+                  .map((day) => (
+                    <p
+                      key={day.date}
+                      className="text-xs leading-relaxed text-zinc-300"
+                    >
+                      {dayLabel(day.date)} ·{" "}
+                      {day.weightKg === null ? "вес —" : `${day.weightKg} кг`} ·
+                      сон {hours(day.sleepMinutes)}
+                      {day.bedtime ? ` · лёг ${day.bedtime}` : ""}
+                      {day.wakeTime ? ` · встал ${day.wakeTime}` : ""}
+                    </p>
+                  ))}
+              </div>
+            ) : (
+              <p className="text-xs text-zinc-400">
+                Для трендов запиши реальные сон и вес. Неизмеренные дни остаются
+                пустыми.
+              </p>
+            )}
+            <button
+              type="button"
+              className={`${buttonClass} w-full`}
+              onClick={() =>
+                downloadJson(
+                  {
+                    config: IDEAL_HUMAN_CONFIG,
+                    exportedAt: new Date().toISOString(),
+                    days: query.data ?? [],
+                    workoutHistory:
+                      workoutHistory.data?.filter(
+                        (workout) =>
+                          idealHumanDayNumber(
+                            idealHumanLocalDate(new Date(workout.endedAt)),
+                          ) !== null,
+                      ) ?? null,
+                  },
+                  "ideal-human-2026.json",
+                )
+              }
+            >
+              <Download className="h-4 w-4" /> Экспорт всех сохранённых данных
+              (JSON)
+            </button>
+            <p className="text-xs text-zinc-400">
+              Экспорт содержит личные заметки. Файл скачивается на твоё
+              устройство.
+            </p>
+            <details className="rounded-lg border border-white/[0.08] p-3">
+              <summary className="min-h-11 cursor-pointer text-sm text-zinc-300">
+                JSON для копирования, если скачивание недоступно
+              </summary>
+              <textarea
+                aria-label="Экспорт дневника для копирования"
+                readOnly
+                className={inputClass}
+                rows={6}
+                value={JSON.stringify(
+                  { config: IDEAL_HUMAN_CONFIG, days: query.data ?? [] },
+                  null,
+                  2,
+                )}
+                onFocus={(event) => event.currentTarget.select()}
+              />
+            </details>
+          </Fold>
+          <section className={panelClass}>
+            <h2 className="text-sm font-semibold text-white">
+              Напоминания по твоему выбору
+            </h2>
+            <p className="mt-2 text-xs leading-relaxed text-zinc-400">
+              Утренний чек-ин, запись тренировки, вечерняя рефлексия и
+              подготовка ко сну. Выбери удобные время и текст в существующем
+              разделе. Сообщения начнут приходить только после создания
+              напоминания.
+            </p>
+            <button
+              type="button"
+              className={`${buttonClass} mt-3 w-full`}
+              onClick={onOpenReminders}
+            >
+              Настроить напоминания
+            </button>
+          </section>
+        </>
+      )}
+    </div>
+  );
 }

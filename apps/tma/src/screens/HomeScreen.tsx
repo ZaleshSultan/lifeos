@@ -1,3 +1,7 @@
+import {
+  idealHumanDayNumber,
+  idealHumanLocalDate,
+} from "../../../../packages/core/src/ideal-human.js";
 import { ScholarshipDailySummary } from "../components/scholarship/ScholarshipDailySummary";
 import {
   Activity,
@@ -44,6 +48,7 @@ export function HomeScreen({
   onOpenAi,
   session,
 }: HomeScreenProps) {
+  const idealHumanDay = idealHumanDayNumber(idealHumanLocalDate(new Date()));
   const query = useHomeQuery();
   const academicQuery = useAcademicQuery();
   const monthlyReviewQuery = useMonthlyReviewQuery();
@@ -95,9 +100,13 @@ export function HomeScreen({
         <div className="flex items-center gap-4">
           <ProgressRing label="focus" value={home.focusScore ?? 0} />
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400">{home.localDate}</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400">
+              {home.localDate}
+            </p>
             <h2 className="mt-1 truncate text-[26px] font-semibold leading-tight tracking-tight text-white">
-              {home.displayName ? `Привет, ${home.displayName}` : "Твой день, твой ритм"}
+              {home.displayName
+                ? `Привет, ${home.displayName}`
+                : "Твой день, твой ритм"}
             </h2>
             <div className="mt-3 inline-flex rounded-full border border-emerald-300/20 bg-emerald-300/[0.08] px-2.5 py-1 text-xs font-semibold text-emerald-200">
               {home.modeLabel}
@@ -107,12 +116,26 @@ export function HomeScreen({
       </section>
 
       <TodayPanel date={home.localDate} onOpenAi={onOpenAi} />
-      <button type="button" onClick={onOpenIdealHuman} className="w-full rounded-xl border border-cyan-400/30 bg-cyan-400/[0.08] p-4 text-left shadow-panel active:scale-[0.99]">
-        <span className="block text-xs font-semibold uppercase tracking-[0.15em] text-cyan-300">IDEAL HUMAN · 03.11 — 02.12</span>
-        <span className="mt-1 block text-lg font-semibold text-white">Открыть дневник 30 дней</span>
-        <span className="mt-1 block text-xs text-zinc-400">Тело · интеллект · съёмка · честные итоги</span>
+      <button
+        type="button"
+        onClick={onOpenIdealHuman}
+        className="w-full rounded-xl border border-cyan-400/30 bg-cyan-400/[0.08] p-4 text-left shadow-panel active:scale-[0.99]"
+      >
+        <span className="block text-xs font-semibold uppercase tracking-[0.15em] text-cyan-300">
+          IDEAL HUMAN · 03.11 — 02.12
+        </span>
+        <span className="mt-1 block text-lg font-semibold text-white">
+          {idealHumanDay
+            ? `Ideal Human — Day ${idealHumanDay}/30`
+            : "Открыть дневник 30 дней"}
+        </span>
+        <span className="mt-1 block text-xs text-zinc-400">
+          Тело · интеллект · съёмка · честные итоги
+        </span>
       </button>
-      {onOpenScholarship ? <ScholarshipDailySummary onOpen={onOpenScholarship}/> : null}
+      {onOpenScholarship ? (
+        <ScholarshipDailySummary onOpen={onOpenScholarship} />
+      ) : null}
 
       <section className="rounded-xl border border-cyan-400/15 bg-cyan-400/[0.05] p-4 shadow-panel">
         <div className="flex items-start gap-3">
