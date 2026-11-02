@@ -1,3 +1,4 @@
+import { idealHumanStore } from "./ideal-human-store.js";
 import type { ScholarshipConfig } from "../../core/src/scholarship.js";
 import { healthCredentialStore, type HealthCredentialStore } from "./health-credential-store.js";
 import { webSessionStore, type WebSessionStore } from "./web-session-store.js";
@@ -70,6 +71,7 @@ import {
   type TmaReceiptDisplayStatus,
   type CurrencyCode,
   parseWorkoutGifUrl,
+  type IdealHumanDay,
   parseWorkoutProgram,
   parseWorkoutSet,
   workoutVolumeKg,
@@ -1508,6 +1510,8 @@ export interface LifeOSStore extends LmsSessionStore, WebSessionStore, HealthCre
     userId: string;
     workoutId?: string;
   }): Promise<CurrentWorkoutSummary | null>;
+  getIdealHumanDays?(userId: string): Promise<IdealHumanDay[]>;
+  saveIdealHumanDay?(userId: string, day: IdealHumanDay, expectedRevision: number): Promise<IdealHumanDay>;
   getWorkoutProgram(userId: string): Promise<WorkoutProgram | null>;
   saveWorkoutProgram(userId: string, program: WorkoutProgram): Promise<WorkoutProgram>;
   getWorkoutHistory(userId: string): Promise<WorkoutHistorySession[]>;
@@ -4758,6 +4762,15 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     }
 
     return this.buildWorkoutSummary(data);
+  }
+
+
+  async getIdealHumanDays(userId: string): Promise<IdealHumanDay[]> {
+    return idealHumanStore(this.client).getDays(userId);
+  }
+
+  async saveIdealHumanDay(userId: string, input: IdealHumanDay, expectedRevision: number): Promise<IdealHumanDay> {
+    return idealHumanStore(this.client).saveDay(userId, input, expectedRevision);
   }
 
   async getWorkoutProgram(userId: string): Promise<WorkoutProgram | null> {

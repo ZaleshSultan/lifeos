@@ -5,6 +5,7 @@ export type ScreenId =
   | "dashboard"
   | "lms"
   | "workout"
+  | "ideal-human"
   | "health"
   | "focus"
   | "finance"

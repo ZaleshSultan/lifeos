@@ -2,6 +2,33 @@
 
 Supabase Postgres is the durable LifeOS store.
 
+## Production diagnostics and recovery
+
+Verify the public project reference from the running service before querying a
+database. Compare it with the service's environment file without printing keys,
+passwords, connection strings or complete process environments. Use read-only
+queries and distinguish a missing profile from an unavailable database or an
+anonymous client filtered by RLS. The production backend requires its service
+role; browser credentials are not a fallback.
+
+`supabase db reset --linked` destroys data in the linked remote project. Never
+use it against production. The reset command under **Local Supabase Flow**
+below is only for a disposable local stack. Production migrations need a reviewed
+dry run, a verified recovery point and explicit release authorization.
+
+An intact migration ledger or a successful build does not establish that user
+data is intact. Check authorized aggregate counts and identity relationships
+before and after a release. Record manual schema changes as migrations; a reset
+can remove objects that exist only in an ad hoc schema snapshot.
+
+Recovery requires explicit owner approval before any production restore or data
+import. First restore the backup in isolation with networking disabled, validate
+its original identities and grades, and compare its schema with the current
+database. Do not blindly replay a data dump or old migration ledger into a newer
+schema. Preserve original user IDs and foreign keys; never create replacement
+users to make missing data appear recovered. Review stale credentials and
+outbound queues before any approved cutover.
+
 ## Optional assistant persistence
 
 `20261011084249_assistant_brain_persistence.sql` adds separate user-owned

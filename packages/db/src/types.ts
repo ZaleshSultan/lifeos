@@ -183,6 +183,24 @@ export interface Database {
           updated_at?: string;
         }
       >;
+      ideal_human_days: TableDefinition<
+        {
+          user_id: string;
+          date: string;
+          entry: Json;
+          revision: number;
+          created_at: string;
+          updated_at: string;
+        },
+        {
+          user_id: string;
+          date: string;
+          entry: Json;
+          revision?: number;
+          created_at?: string;
+          updated_at?: string;
+        }
+      >;
       user_settings: TableDefinition<
         {
           user_id: string;
@@ -2037,6 +2055,16 @@ export interface Database {
       };
     };
     Functions: {
+      save_ideal_human_day: {
+        Args: {
+          p_user_id: string;
+          p_date: string;
+          p_entry: Json;
+          p_expected_revision: number;
+        };
+        Returns: Json;
+      };
+
       issue_health_ingest_credential: {
         Args: {p_user_id: string; p_token_hash: string; p_expires_at: string};
         Returns: string | null;

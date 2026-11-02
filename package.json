@@ -22,6 +22,13 @@
     "prettier": "^3.5.3",
     "tsx": "^4.19.4",
     "typescript": "^5.8.3",
-    "vitest": "^3.1.4"
+    "vitest": "^3.2.6"
+  },
+  "pnpm": {
+    "overrides": {
+      "baseline-browser-mapping@<2.11.0": "^2.11.0",
+      "source-map-js@<1.2.2": "^1.2.2",
+      "browserslist@<4.28.7": "^4.28.7"
+    }
   }
 }

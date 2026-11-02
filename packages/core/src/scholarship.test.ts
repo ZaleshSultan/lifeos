@@ -383,6 +383,74 @@ describe("scholarship survival planner", () => {
 });
 
 describe("user-confirmed DBMS Moodle rubric", () => {
+  it("reconciles the restored Moodle assignment-prefixed external Async record using the DBMS course code", () => {
+    const c = { ...course(), title: "Локализованное название курса" };
+    const records = [
+      grade(c, "Assignment 1", 75),
+      grade(c, "Assignment 2", 50),
+      grade(c, "Assignment 3", 70),
+      {
+        ...grade(c, "Assignment Lecture Async 1", 88),
+        recordType: "assignment",
+        rawJson: { _is_mocked: false },
+      },
+      grade(c, "Quiz Midterm", 81),
+      grade(c, "Calculated grade Register Midterm", 72.1),
+    ];
+    const p = calculateScholarshipCourse(c, records);
+    for (const scenario of Object.values(p.scenarios!))
+      expect(scenario.att1).toBe(72.1);
+    expect(p.confirmedCount).toBe(5);
+    expect(p.attestationChecks).toEqual([
+      { period: "att1", official: 72.1, calculated: 72.1, matches: true },
+    ]);
+    const async = p.evidence.find((row) => row.id === "quiz_1")!;
+    expect(async.confirmed).toBe(88);
+    expect(async.weightInFinal).toBe(3);
+    expect(async.label).toBe(
+      "Assignment Lecture Async 1 · итог внешней платформы",
+    );
+    expect(async.label).not.toMatch(/quiz|квиз/i);
+    expect(p.evidence.find((row) => row.id === "quiz_2")!.confirmed).toBeNull();
+    expect(records[3]).toMatchObject({ recordType: "assignment" });
+    expect(c.calculator!.values).toEqual({});
+  });
+
+  it("never sums duplicate academic and assessment projections of one external Async result", () => {
+    const c = course();
+    const academic = grade(c, "Assignment Lecture Async 1", 88, "academic");
+    const p = calculateScholarshipCourse(c, [
+      grade(c, "Assignment 1", 75),
+      grade(c, "Assignment 2", 50),
+      grade(c, "Assignment 3", 70),
+      academic,
+      { ...academic, id: "assessment-mirror" },
+      grade(c, "Quiz Midterm", 81),
+      grade(c, "Calculated grade Register Midterm", 72.1),
+    ]);
+    expect(
+      p.evidence.filter((row) => row.originalFieldId === "quiz_1"),
+    ).toHaveLength(1);
+    expect(p.evidence.find((row) => row.id === "quiz_1")!.confirmed).toBeNull();
+    expect(p.confirmedCount).toBe(4);
+    expect(p.attestationChecks[0].calculated).toBeNull();
+    expect(p.warnings.join(" ")).toContain("неоднозначные оценки");
+  });
+
+  it("does not take a prefixed external Async score from another course", () => {
+    const c = course();
+    const p = calculateScholarshipCourse(c, [
+      grade(course("OS52-EN"), "Assignment Lecture Async 1", 88),
+    ]);
+    expect(p.confirmedCount).toBe(0);
+    expect(p.evidence.find((row) => row.id === "quiz_1")!.confirmed).toBeNull();
+    expect(
+      calculateScholarshipCourse(course("OS52-EN"), [
+        grade(course("OS52-EN"), "Assignment Lecture Async 1", 88),
+      ]).confirmedCount,
+    ).toBe(0);
+  });
+
   it.each([
     "Calculated Register Midterm",
     "Register Midterm",

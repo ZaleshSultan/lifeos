@@ -3,6 +3,7 @@ import {
   Bell,
   Dumbbell,
   HeartPulse,
+  Target,
   House,
   GraduationCap,
   LayoutDashboard,
@@ -36,6 +37,7 @@ const primaryTabs: NavigationItem[] = [
 ];
 
 const secondaryTabs: NavigationItem[] = [
+  { id: "ideal-human", label: "Ideal Human", icon: Target },
   { id: "health", label: "Здоровье", icon: HeartPulse },
   { id: "workout", label: "Тренировки", icon: Dumbbell },
   { id: "focus", label: "Фокус", icon: Activity },
@@ -52,6 +54,7 @@ const screenNames: Partial<Record<ScreenId, string>> = {
   lms: "Подключение LMS",
   ai: "AI-помощник",
   workout: "Тренировки",
+  "ideal-human": "Ideal Human · 30 дней",
   health: "Здоровье",
   focus: "Фокус",
   finance: "Финансы",

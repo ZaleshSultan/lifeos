@@ -23,6 +23,9 @@ __pycache__/
 !.env.selfhost.example
 !**/.env.selfhost.example
 
+# Private incident evidence stays local; publish only a sanitized summary.
+/docs/PRODUCTION_INCIDENT_REPORT.md
+
 # Logs
 *.log
 npm-debug.log*

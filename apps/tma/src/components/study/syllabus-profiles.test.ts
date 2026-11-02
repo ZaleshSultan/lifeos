@@ -190,6 +190,24 @@ describe("safe optional Moodle grade import", () => {
     expect(safe.updates.midterm).toBeUndefined();
   });
 
+  it("previews the actual Moodle assignment-prefixed external Async without replacing a manual scenario", () => {
+    const actual = {
+      ...grade("async-restored", "Assignment Lecture Async 1", 88),
+      rawJson: { _is_mocked: false },
+    };
+    const preview = previewMoodleGrades(course, draft, [actual]);
+    expect(preview.updates).toEqual({ quiz_1: "88" });
+    expect(preview.matches).toBe(1);
+    expect(
+      previewMoodleGrades(
+        course,
+        { ...draft, inputs: { ...draft.inputs, quiz_1: "65" } },
+        [actual],
+      ).updates,
+    ).toEqual({});
+    expect(actual.recordType).toBe("assignment");
+  });
+
   it("accepts exact unique assignments but refuses ambiguous duplicates", () => {
     const preview = previewMoodleGrades(course, draft, [
       grade("a", "Assignment 1", 90),

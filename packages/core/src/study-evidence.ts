@@ -94,7 +94,7 @@ export function studyEvidencePeriodTotal(
 export function studyAssessmentIsAmbiguous(title: string): boolean {
   const identities = [
     ...normalizeStudyTitle(title).matchAll(
-      /(?:^| )(?:assignment\s*\d+|асаймент\s*\d+|задание\s*\d+|midterm|endterm|final exam|final test|итоговый экзамен|cisco certificate|quiz)(?= |$)/g,
+      /(?:^| )(?:assignment\s*\d+|асаймент\s*\d+|задание\s*\d+|lecture async\s*\d+|midterm|endterm|final exam|final test|итоговый экзамен|cisco certificate|quiz)(?= |$)/g,
     ),
   ];
   return (
@@ -103,6 +103,18 @@ export function studyAssessmentIsAmbiguous(title: string): boolean {
       title,
     )
   );
+}
+/** Exact DBMS external-platform totals, including Moodle's assignment prefix. */
+export function studyEvidenceExternalAsyncField(
+  record: Pick<StudyGradeEvidence, "title">,
+  course: { title: string; code: string },
+): "quiz_1" | "quiz_2" | null {
+  if (matchSyllabusProfile(course.title, course.code)?.id !== "dbms")
+    return null;
+  const match = /^(?:assignment )?lecture async ([12])$/.exec(
+    normalizeStudyTitle(record.title),
+  );
+  return match ? (match[1] === "1" ? "quiz_1" : "quiz_2") : null;
 }
 /** Conservative matching, with the user-confirmed DBMS component totals as explicit exceptions. */
 export function studyEvidenceMatchesField(
@@ -118,8 +130,8 @@ export function studyEvidenceMatchesField(
     course &&
     matchSyllabusProfile(course.title, course.code)?.id === "dbms"
   ) {
-    if (title === "lecture async 1") return field.id === "quiz_1";
-    if (title === "lecture async 2") return field.id === "quiz_2";
+    const asyncField = studyEvidenceExternalAsyncField(record, course);
+    if (asyncField) return field.id === asyncField;
     if (title === "quiz midterm") return field.id === "midterm";
   }
   if (studyEvidenceIsAggregate(record)) return false;

@@ -78,7 +78,7 @@ function workspace() {
     ["Assignment 1", 75],
     ["Assignment 2", 50],
     ["Assignment 3", 70],
-    ["Lecture Async 1", 88],
+    ["Assignment Lecture Async 1", 88],
     ["Quiz Midterm", 81],
     ["Calculated Register Midterm", 72.1],
   ].map(([title, score], i) => ({
@@ -87,7 +87,7 @@ function workspace() {
     sourceEventId: null,
     courseTitle: courses[0].title,
     title,
-    recordType: "grade",
+    recordType: title === "Assignment Lecture Async 1" ? "assignment" : "grade",
     score,
     maxScore: 100,
     percentage: score,
@@ -292,6 +292,27 @@ try {
           1,
         );
       assert.ok((await page.locator("main").innerText()).includes("72,10"));
+      const dbms = page.getByRole("article", {
+        name: syllabusProfiles[0].title,
+        exact: true,
+      });
+      assert.match(
+        await dbms.innerText(),
+        /официальный итог Moodle 72,10; по компонентам 72,10/,
+      );
+      const evidenceSummary = dbms.getByText(
+        "Подтверждённые оценки и допущения",
+        { exact: true },
+      );
+      await evidenceSummary.click();
+      const external = evidenceSummary
+        .locator("..")
+        .getByText("Assignment Lecture Async 1 · итог внешней платформы", {
+          exact: false,
+        });
+      await external.waitFor();
+      assert.ok((await external.locator("..").innerText()).includes("88,00"));
+      await evidenceSummary.click();
       assert.ok(
         (await page.locator("main").innerText()).includes(
           "не гарантирует выплату",
