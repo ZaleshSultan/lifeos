@@ -72,6 +72,15 @@ export interface HealthIngestComputedDaily {
   dataCompletenessScore: number;
 }
 
+/** Scoring needs presence counts, not private workout/sample contents. */
+export type HealthIngestScoringInput = Pick<
+  HealthIngestPayload,
+  "metrics" | "missing"
+> & {
+  workouts: { readonly length: number };
+  samples: { readonly length: number };
+};
+
 export const HEALTH_METRIC_TYPES = [
   "steps",
   "sleep_minutes",
@@ -491,10 +500,7 @@ export function parseHealthMetricsIngestPayload(
 }
 
 export function calculateDataCompletenessScore(
-  payload: Pick<
-    HealthIngestPayload,
-    "metrics" | "workouts" | "samples" | "missing"
-  >,
+  payload: HealthIngestScoringInput,
 ): number {
   const hasSleepStages =
     payload.metrics.deepSleepMinutes !== undefined ||
@@ -529,10 +535,7 @@ export function calculateDataCompletenessScore(
 }
 
 export function calculateHealthIngestDaily(
-  payload: Pick<
-    HealthIngestPayload,
-    "metrics" | "workouts" | "samples" | "missing"
-  >,
+  payload: HealthIngestScoringInput,
 ): HealthIngestComputedDaily {
   return {
     recoveryMode: resolveHealthMode({

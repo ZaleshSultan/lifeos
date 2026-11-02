@@ -92,6 +92,26 @@ Example numbers illustrate the format and are not real observations. Missing num
 - Create or update `life_entities` with `entity_type = health_daily`.
 - Enqueue `obsidian_sync_queue`.
 
+Daily recovery and completeness use the authoritative stored measurements after
+source corrections, plus actual retained workout/sample availability for that
+owned day. A steps-only request preserves recorded sleep, stages and HRV instead
+of resetting recovery or treating omitted values as absent. An explicit supported
+watch missing flag can invalidate its measurement; existing source priority and
+manual fallback remain unchanged. The Ideal Human manual journal is not modified.
+
+Derived-score updates compare the stored timestamp and scoring inputs, write only
+the two derived fields, and retry at most three conflicts. Persistent contention
+fails the sync rather than recording a false success. Already accepted measurements
+remain stored; retry with the same stable source identities. This is a bounded
+cache reconciliation step, not a claim that the existing multi-table ingest is
+one atomic transaction.
+
+The rich ingest response keeps `{ok, result}` with the stored date, recovery mode,
+completeness and processed counts. Normalized ingest returns date/source/counts
+and explicit scalar metric fields. Neither success response includes internal
+user/record IDs, raw payloads or private source metadata. The Android bridge uses
+the success HTTP status and does not depend on those internal fields.
+
 `/healthsync_status` reports `health_sync_runs`, not the Obsidian queue. Obsidian queue status remains a separate mirror concern.
 
 ## Health Mode Labels

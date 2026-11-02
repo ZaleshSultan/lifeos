@@ -11,6 +11,8 @@ class HealthClient {
     action: string;
     filters: Record<string, unknown>;
   }> = [];
+  beforeRun?: (query: HealthQuery) => void;
+  updates: Array<{ table: string; payload: Row }> = [];
   rows(table: string): Row[] {
     return (this.tables[table] ??= []);
   }
@@ -35,6 +37,10 @@ class HealthQuery implements PromiseLike<any> {
     return this;
   }
   eq(key: string, value: unknown): this {
+    this.filters[key] = value;
+    return this;
+  }
+  is(key: string, value: null): this {
     this.filters[key] = value;
     return this;
   }
@@ -73,7 +79,13 @@ class HealthQuery implements PromiseLike<any> {
     this.payload = Array.isArray(payload) ? payload : [payload];
     return this;
   }
+  update(payload: Row): this {
+    this.action = "update";
+    this.payload = [payload];
+    return this;
+  }
   private run() {
+    this.client.beforeRun?.(this);
     this.client.queries.push({
       table: this.table,
       action: this.action,
@@ -81,7 +93,16 @@ class HealthQuery implements PromiseLike<any> {
     });
     let data: Row[];
     const rows = this.client.rows(this.table);
-    if (this.action === "delete") {
+    if (this.action === "update") {
+      const payload = JSON.parse(JSON.stringify(this.payload[0]));
+      this.client.updates.push({ table: this.table, payload });
+      data = rows.filter((row) =>
+        Object.entries(this.filters).every(([key, value]) =>
+          value === null ? row[key] == null : row[key] === value,
+        ),
+      );
+      for (const row of data) Object.assign(row, payload);
+    } else if (this.action === "delete") {
       data = rows.filter(
         (row) =>
           Object.entries(this.filters).every(
@@ -136,7 +157,11 @@ class HealthQuery implements PromiseLike<any> {
       });
       data = data.slice(0, this.rowLimit);
     }
-    return { data, count: data.length, error: null };
+    return {
+      data: JSON.parse(JSON.stringify(data)),
+      count: data.length,
+      error: null,
+    };
   }
   async single() {
     const result = this.run();
@@ -208,6 +233,238 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 describe("health ingest persistence", () => {
+  it("retains short-sleep recovery and whole-day availability after a steps-only sync", async () => {
+    const { client, store } = setup();
+    const first = payload();
+    first.metrics.sleepMinutes = 180;
+    const initial = await store.ingestHealthPayload(first);
+    const partial = {
+      ...payload(),
+      metrics: { steps: 6200 },
+      missing: {},
+      workouts: [],
+      samples: [],
+    };
+    const result = await store.ingestHealthPayload(partial);
+    expect(initial).toMatchObject({
+      recoveryMode: "recovery",
+      dataCompletenessScore: 85,
+    });
+    expect(result).toMatchObject({
+      recoveryMode: "recovery",
+      dataCompletenessScore: 85,
+    });
+    expect(client.rows("health_daily")[0]).toMatchObject({
+      sleep_minutes: 180,
+      deep_sleep_minutes: 70,
+      hrv_ms: 41,
+      steps: 6200,
+      recovery_mode: "recovery",
+      data_completeness_score: 85,
+    });
+    expect(client.rows("health_workouts")).toHaveLength(1);
+    expect(client.rows("health_samples")).toHaveLength(1);
+    expect(client.rows("health_sync_runs").at(-1)).toMatchObject({
+      recovery_mode: "recovery",
+      data_completeness_score: 85,
+    });
+    expect(store.enqueueObsidianSync).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          recoveryMode: "recovery",
+          dataCompletenessScore: 85,
+        }),
+      }),
+    );
+  });
+
+  it("includes retained stages, HRV and child rows when normalized manual metrics are added", async () => {
+    const { client, store } = setup();
+    const first = payload();
+    first.metrics.sleepMinutes = 180;
+    await store.ingestHealthPayload(first);
+    await store.upsertHealthMetrics({
+      userId: "user-a",
+      date: first.date,
+      source: "manual",
+      metrics: [{ type: "mood_score", value: 8 }],
+    });
+    expect(client.rows("health_daily")[0]).toMatchObject({
+      sleep_minutes: 180,
+      deep_sleep_minutes: 70,
+      hrv_ms: 41,
+      mood_score: 8,
+      recovery_mode: "recovery",
+      data_completeness_score: 95,
+    });
+  });
+
+  it("recalculates after explicit missing corrections instead of retaining invalidated availability", async () => {
+    const { client, store } = setup();
+    const first = {
+      ...payload(),
+      metrics: { sleepMinutes: 180, deepSleepMinutes: 30, hrvMs: 20 },
+      workouts: [],
+      samples: [],
+      missing: {},
+    };
+    expect(await store.ingestHealthPayload(first)).toMatchObject({
+      recoveryMode: "recovery",
+      dataCompletenessScore: 35,
+    });
+    const correction = {
+      ...first,
+      metrics: { steps: 1200 },
+      missing: { sleep_minutes: true, sleep_stages: true, hrv_ms: true },
+    };
+    expect(await store.ingestHealthPayload(correction)).toMatchObject({
+      recoveryMode: "baseline",
+      dataCompletenessScore: 10,
+    });
+    expect(client.rows("health_daily")[0]).toMatchObject({
+      sleep_minutes: null,
+      deep_sleep_minutes: null,
+      hrv_ms: null,
+      steps: 1200,
+    });
+    expect(await store.ingestHealthPayload(correction)).toMatchObject({
+      recoveryMode: "baseline",
+      dataCompletenessScore: 10,
+    });
+  });
+
+  it("scores a preserved manual fallback and never clears manual daily-only stages on watch corrections", async () => {
+    const { client, store } = setup();
+    await store.upsertHealthMetrics({
+      userId: "user-a",
+      date: "2026-09-23",
+      source: "manual",
+      metrics: [{ type: "sleep_minutes", value: 180 }],
+    });
+    const first = {
+      ...payload(),
+      metrics: { sleepMinutes: 480 },
+      workouts: [],
+      samples: [],
+      missing: {},
+    };
+    await store.ingestHealthPayload(first);
+    Object.assign(client.rows("health_daily")[0], {
+      deep_sleep_minutes: 30,
+      hrv_ms: 20,
+      source: "manual",
+      metadata: {
+        fieldSources: {
+          sleep_minutes: "xiaomi_health_connect",
+          deep_sleep_minutes: "manual",
+          hrv_ms: "manual",
+        },
+      },
+    });
+    const correction = {
+      ...first,
+      metrics: { steps: 2000 },
+      missing: { sleep_minutes: true, sleep_stages: true, hrv_ms: true },
+    };
+    expect(await store.ingestHealthPayload(correction)).toMatchObject({
+      recoveryMode: "recovery",
+      dataCompletenessScore: 45,
+    });
+    expect(client.rows("health_daily")[0]).toMatchObject({
+      sleep_minutes: 180,
+      deep_sleep_minutes: 30,
+      hrv_ms: 20,
+      steps: 2000,
+    });
+  });
+
+  it("retries a concurrent measurement change even when the legacy timestamp is unchanged", async () => {
+    const { client, store } = setup();
+    await store.ingestHealthPayload(payload());
+    client.updates.length = 0;
+    let conflicts = 0;
+    client.beforeRun = (query) => {
+      if (
+        query.action === "update" &&
+        query.payload[0]?.data_completeness_score !== undefined &&
+        conflicts++ === 0
+      ) {
+        // Another writer commits after the read but before the score-only CAS.
+        Object.assign(client.rows("health_daily")[0], {
+          sleep_minutes: 180,
+          steps: 7777,
+        });
+      }
+    };
+    const result = await store.ingestHealthPayload({
+      ...payload(),
+      metrics: { steps: 6200 },
+      missing: {},
+      workouts: [],
+      samples: [],
+    });
+    expect(result).toMatchObject({
+      recoveryMode: "recovery",
+      dataCompletenessScore: 85,
+    });
+    expect(client.rows("health_daily")[0]).toMatchObject({
+      sleep_minutes: 180,
+      steps: 7777,
+      recovery_mode: "recovery",
+    });
+    const scoreWrites = client.updates.filter(
+      (update) => update.payload.data_completeness_score !== undefined,
+    );
+    expect(scoreWrites).toHaveLength(2);
+    expect(
+      scoreWrites.every(
+        (update) =>
+          Object.keys(update.payload).sort().join(",") ===
+          "data_completeness_score,recovery_mode",
+      ),
+    ).toBe(true);
+    expect(
+      client.queries
+        .filter((query) => query.action === "update")
+        .every((query) => query.filters.user_id === "user-a"),
+    ).toBe(true);
+  });
+
+  it("bounds score conflicts and fails without recording a false successful sync or replacing metrics", async () => {
+    const { client, store } = setup();
+    const first = payload();
+    first.metrics.sleepMinutes = 180;
+    await store.ingestHealthPayload(first);
+    const previousRuns = client.rows("health_sync_runs").length;
+    let conflicts = 0;
+    client.beforeRun = (query) => {
+      if (
+        query.action === "update" &&
+        query.payload[0]?.data_completeness_score !== undefined
+      ) {
+        client.rows("health_daily")[0]!.steps = 8000 + ++conflicts;
+      }
+    };
+    await expect(
+      store.ingestHealthPayload({
+        ...payload(),
+        metrics: { steps: 6200 },
+        missing: {},
+        workouts: [],
+        samples: [],
+      }),
+    ).rejects.toThrow(
+      "Health daily changed during score calculation; retry the sync",
+    );
+    expect(conflicts).toBe(3);
+    expect(client.rows("health_daily")[0]).toMatchObject({
+      sleep_minutes: 180,
+      steps: 8003,
+      recovery_mode: "recovery",
+    });
+    expect(client.rows("health_sync_runs")).toHaveLength(previousRuns);
+  });
+
   it("clears bogus watch RHR and sleep stages only on explicit missing corrections", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-24T10:00:00Z"));
