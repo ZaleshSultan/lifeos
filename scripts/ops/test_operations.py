@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from backup_crypto import decrypt, encrypt
-from lifeos_backup import MANAGED_BY, archive_counts, assert_archive_data, predeploy, retention_candidates, run_backup, verify_backup
+from lifeos_backup import MANAGED_BY, PostgresClient, archive_counts, assert_archive_data, predeploy, retention_candidates, run_backup, verify_backup
 from lifeos_monitor import run_monitor, update_incident
 from ops_common import OpsError, atomic_json, lock
 from restore_drill import assert_isolated
@@ -156,6 +156,35 @@ class RetentionTests(unittest.TestCase):
 
 
 class BackupFailureTests(unittest.TestCase):
+    def test_dump_is_consistent_bounded_readonly_tls_and_cleans_temporary_password(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            certificate = root / "ca.crt"
+            certificate.write_text("-----BEGIN CERTIFICATE-----\nfixture\n")
+            certificate.chmod(0o600)
+            client = PostgresClient({"database_ca_file": str(certificate)})
+            class ManagementFixture:
+                ref = PROJECT
+                def request(self, route, body=None):
+                    if route == "/config/database/pooler":
+                        return [{"db_host": "aws-0-test.pooler.supabase.com"}]
+                    return {"role": "cli_login_supabase_read_only_user", "ttl_seconds": 300,
+                            "password": "fixture-secret"}
+            with patch("lifeos_backup.time.sleep"), \
+                    patch("lifeos_backup.command", return_value=b"supabase_read_only_user|on\n") as probe, \
+                    patch.object(client, "run", return_value=b"PGDMPfixture") as dump:
+                self.assertEqual(client.dump(ManagementFixture(), root), b"PGDMPfixture")
+            options = dump.call_args
+            self.assertNotIn("--serializable-deferrable", options.args[1])
+            self.assertIn("--lock-wait-timeout=15000", options.args[1])
+            self.assertIn("--role=supabase_read_only_user", options.args[1])
+            self.assertEqual(options.kwargs["timeout"], 180)
+            self.assertEqual(options.kwargs["environment"]["PGSSLMODE"], "verify-full")
+            self.assertIn("default_transaction_read_only=on", options.kwargs["environment"]["PGOPTIONS"])
+            self.assertIn("statement_timeout=120000", options.kwargs["environment"]["PGOPTIONS"])
+            self.assertEqual(probe.call_count, 1)
+            self.assertFalse((root / "pgpass").exists())
+
     def test_offsite_quota_failure_preserves_verified_local_success_and_pauses_pruning(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -192,7 +221,8 @@ class BackupFailureTests(unittest.TestCase):
             now = dt.datetime.now(dt.timezone.utc).isoformat()
             atomic_json(root / "last-success.json", {"verified": True, "completed_at_utc": now, "manifest": str(manifest)})
             config = {"state_dir": str(root)}
-            with patch("lifeos_backup.verify_backup"):
+            with patch("lifeos_backup.verify_backup"), patch("lifeos_backup.Management"), \
+                    patch("lifeos_backup.source_preflight", return_value={"migration_count": 48}) as current:
                 with self.assertRaisesRegex(OpsError, "matching_schema_restore"):
                     predeploy(config)
                 atomic_json(root / "last-restore-success.json", {"success": True, "migration_count": 47, "finished_at_utc": now})
@@ -200,6 +230,9 @@ class BackupFailureTests(unittest.TestCase):
                     predeploy(config)
                 atomic_json(root / "last-restore-success.json", {"success": True, "migration_count": 48, "finished_at_utc": now})
                 self.assertTrue(predeploy(config)["verified"])
+                current.return_value = {"migration_count": 49}
+                with self.assertRaisesRegex(OpsError, "current_schema_backup"):
+                    predeploy(config)
 
 
 class RestoreGuardTests(unittest.TestCase):
@@ -240,6 +273,21 @@ class RestoreGuardTests(unittest.TestCase):
 
 
 class IncidentTests(unittest.TestCase):
+    def test_upgrade_does_not_preserve_a_suppressed_critical_failure(self):
+        failed = {"status": "FAIL", "code": "backup_last_attempt_failed"}
+        legacy = {**failed, "failures": 3, "baseline": True, "reserved": False}
+        state, notify = update_incident(legacy, failed)
+        self.assertFalse(state["baseline"])
+        self.assertTrue(notify)
+
+    def test_initial_critical_failure_alerts_after_threshold(self):
+        failed = {"status": "FAIL", "code": "backend_unavailable"}
+        state, notify = update_incident(None, failed)
+        self.assertFalse(notify)
+        self.assertFalse(state["baseline"])
+        state, notify = update_incident(state, failed)
+        self.assertTrue(notify)
+
     def test_known_initial_degraded_baseline_does_not_spam(self):
         current = {"status": "WARN", "code": "lms_reconnect_required"}
         state = None

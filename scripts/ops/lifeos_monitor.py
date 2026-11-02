@@ -180,7 +180,7 @@ def update_incident(previous: dict | None, current: dict, *, threshold=2, suppre
     state = {"status": current["status"], "code": current["code"],
              "failures": previous.get("failures", 0) + 1 if same else 1,
              "reserved": bool(previous.get("reserved")) if same else False,
-             "baseline": bool(previous.get("baseline")) if same else previous is None and suppress_initial}
+             "baseline": current["status"] == "WARN" and (bool(previous.get("baseline")) if same else previous is None and suppress_initial)}
     notify = state["failures"] >= threshold and not state["reserved"] and not state["baseline"]
     return state, notify
 

@@ -124,7 +124,8 @@ class PostgresClient:
         environment = {"PGHOST": host, "PGPORT": port, "PGDATABASE": "postgres", "PGUSER": username,
                        "PGPASSFILE": "/run/pgpass", "PGSSLMODE": "verify-full",
                        "PGSSLROOTCERT": "/run/database-ca.crt", "PGCONNECT_TIMEOUT": "10",
-                       "PGOPTIONS": "-c default_transaction_read_only=on"}
+                       "PGAPPNAME": "lifeos-backup-v1",
+                       "PGOPTIONS": "-c default_transaction_read_only=on -c statement_timeout=120000"}
         try:
             # A newly provisioned login can take a few seconds to reach the
             # pooler's authentication cache. Reuse the same short-lived password
@@ -146,8 +147,12 @@ class PostgresClient:
                         raise
                     time.sleep(3 * (attempt + 1))
             try:
+                # pg_dump's default repeatable-read snapshot is already
+                # consistent under concurrent application writes. Requiring a
+                # serializable-deferrable snapshot can wait indefinitely for
+                # unrelated writers before any archive bytes are produced.
                 archive = self.run("pg_dump", ["--format=custom", "--compress=6", "--no-password",
-                                   "--role=supabase_read_only_user", "--serializable-deferrable"],
+                                   "--role=supabase_read_only_user", "--lock-wait-timeout=15000"],
                                    mounts=[(passfile, "/run/pgpass"), (certificate, "/run/database-ca.crt")],
                                    environment=environment, network="host", timeout=180)
             except OpsError as error:
@@ -359,6 +364,12 @@ def predeploy(config: dict) -> dict:
     manifest_path = Path(success["manifest"])
     verify_backup(config, manifest_path)
     manifest = read_json(manifest_path)
+    # A valid old archive and its matching drill do not cover a migration
+    # applied since that archive was taken. Recheck the live identity/data
+    # floors and require the schema actually in production to be protected.
+    current = source_preflight(config, Management(config))
+    if current.get("migration_count") != manifest.get("migration_count"):
+        raise OpsError("predeploy_current_schema_backup_required")
     drill = read_json(Path(config["state_dir"]) / "last-restore-success.json", {})
     if not drill.get("success") or drill.get("migration_count") != manifest.get("migration_count"):
         raise OpsError("predeploy_matching_schema_restore_required")

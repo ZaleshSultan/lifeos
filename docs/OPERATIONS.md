@@ -23,6 +23,15 @@ or domain record is created, reassigned, restored or deleted by a backup job.
 The shared temporary login is allowed to expire rather than blindly revoking
 another operator's later login.
 
+The dump uses PostgreSQL's normal consistent repeatable-read snapshot. It does
+not request `--serializable-deferrable`, whose safe-snapshot wait can stall a
+backup on a busy database. A 15-second table-lock wait, 120-second statement
+timeout and 180-second whole-dump timeout keep failures bounded; the existing
+backup remains intact if any limit is reached. TLS verification and the
+read-only role remain mandatory. These are ordinary
+[PostgreSQL 17 pg_dump guarantees and options](https://www.postgresql.org/docs/17/app-pgdump.html),
+not a claim that every network or provider outage can be repaired automatically.
+
 The host's PostgreSQL 15 client cannot dump PostgreSQL 17. A bounded, temporary
 `postgres:17` client container supplies the compatible tool. It publishes no
 ports, runs without capabilities, mounts its password/CA files read-only and
@@ -165,8 +174,10 @@ rearms a future incident. This avoids duplicates across timer restarts, at the
 cost of possibly losing an alert if the process dies immediately after its
 reservation. It does not promise exactly-once Telegram delivery. Messages
 contain component/error codes only, never credentials or private records.
-Dry runs do not send or mutate incident state; first-run known degraded states
-are suppressed. The release must explicitly enable the private alert setting
+Dry runs do not send or mutate incident state; first-run known `WARN` states
+are suppressed. Critical `FAIL` states still alert after the observation
+threshold, including a critical baseline suppressed by an older monitor
+version. The release must explicitly enable the private alert setting
 after checking its baseline. Do not induce production outages just to test it.
 
 ```bash
@@ -183,8 +194,10 @@ properties; do not dump token-bearing legacy unit commands or process environmen
 Before each release, inspect the actual production checkout and live processes,
 run the predeploy guard, test compatible migrations on an isolated copy and
 retain source/build rollback artifacts. The guard requires a verified backup
-no older than 24 hours and a recent actual restore for the same migration
-version. Schema migration dry-runs and application smoke tests remain required;
+no older than 24 hours, live identity/data floors, a backup matching the current
+production migration count and a recent actual restore for that schema. After
+applying a migration, take and rehearse a new backup before deploying the app.
+Schema migration dry-runs and application smoke tests remain required;
 the backup guard cannot replace them. Apply reviewed migrations atomically with
 their ledger record, and verify public HTTPS, auth, owned data and services.
 
