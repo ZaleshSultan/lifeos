@@ -10,7 +10,7 @@ LifeOS is a **personal operating system** monorepo:
 - **Backend:** `apps/bot` — Node HTTP server (Telegram, TMA API, health ingest)
 - **TMA:** `apps/tma` — Telegram Mini App (Vite + React)
 - **Web:** `apps/web` — authenticated Next.js dashboard with a same-origin, allowlisted backend bridge
-- **Android:** `apps/health-bridge` — Kotlin Health Connect project; no APK or physical-device verification is claimed
+- **Android:** `apps/health-bridge` — Kotlin Health Connect project; hosted debug APK verification is documented separately from unverified device behavior
 - **Core:** `packages/core` (pure domain), `packages/db` (Supabase store), `packages/obsidian`
 - **Workers:** Python services in `workers/` (Obsidian mirror, reminders, sync)
 - **Database:** Supabase Postgres with RLS
@@ -145,5 +145,6 @@ Production currently uses Debian/systemd, Cloudflare Tunnel and Supabase at
 Arch/Tailscale examples are alternative or historical deployments. Verify the
 actual deployed SHA and service configuration before releases. Keep all existing
 authentication, RLS and secret boundaries; never substitute browser service keys
-or an auth bypass. The audited host lacks the Android/JDK/Gradle-wrapper toolchain;
-an installable APK and physical-phone sync remain unverified.
+or an auth bypass. The audited production host lacks the Android/JDK/Gradle-wrapper toolchain.
+Hosted CI build/JVM/lint/debug-APK evidence is recorded in
+`docs/ANDROID_HEALTH_BRIDGE.md`; physical-phone sync remains unverified.

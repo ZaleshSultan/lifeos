@@ -37,31 +37,47 @@ class HealthAggregator(private val healthConnectClient: HealthConnectClient) {
     suspend fun aggregateDay(range: PreviousDayRange, grantedPermissions: Set<String>? = null): AggregatedHealthDay {
         // Caller passes the actual granted set so users can share steps without
         // granting unrelated weight/oxygen/sleep permissions.
-        fun permitted(permission: String) = grantedPermissions == null || permission in grantedPermissions
+        val groupPermissions = mapOf(
+            HealthReadGroup.SLEEP to HealthPermission.getReadPermission(SleepSessionRecord::class),
+            HealthReadGroup.STEPS to HealthPermission.getReadPermission(StepsRecord::class),
+            HealthReadGroup.WEIGHT to HealthPermission.getReadPermission(WeightRecord::class),
+            HealthReadGroup.HEART_RATE to HealthPermission.getReadPermission(HeartRateRecord::class),
+            HealthReadGroup.RESTING_HEART_RATE to HealthPermission.getReadPermission(RestingHeartRateRecord::class),
+            HealthReadGroup.HRV to HealthPermission.getReadPermission(HeartRateVariabilityRmssdRecord::class),
+            HealthReadGroup.OXYGEN to HealthPermission.getReadPermission(OxygenSaturationRecord::class),
+            HealthReadGroup.ACTIVE_ENERGY to HealthPermission.getReadPermission(ActiveCaloriesBurnedRecord::class),
+            HealthReadGroup.TOTAL_ENERGY to HealthPermission.getReadPermission(TotalCaloriesBurnedRecord::class),
+            HealthReadGroup.WORKOUT to HealthPermission.getReadPermission(ExerciseSessionRecord::class),
+            HealthReadGroup.DISTANCE to HealthPermission.getReadPermission(DistanceRecord::class),
+        )
+        val queriedGroups = groupPermissions.filterValues {
+            grantedPermissions == null || it in grantedPermissions
+        }.keys
+        fun permitted(group: HealthReadGroup) = group in queriedGroups
         val filter = TimeRangeFilter.between(range.start, range.end)
         val requested = mutableSetOf<AggregateMetric<*>>()
-        if (permitted(HealthPermission.getReadPermission(StepsRecord::class))) requested.add(StepsRecord.COUNT_TOTAL)
-        if (permitted(HealthPermission.getReadPermission(TotalCaloriesBurnedRecord::class))) requested.add(TotalCaloriesBurnedRecord.ENERGY_TOTAL)
-        if (permitted(HealthPermission.getReadPermission(ActiveCaloriesBurnedRecord::class))) requested.add(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL)
-        if (permitted(HealthPermission.getReadPermission(HeartRateRecord::class))) requested.add(HeartRateRecord.BPM_AVG)
-        if (permitted(HealthPermission.getReadPermission(RestingHeartRateRecord::class))) requested.add(RestingHeartRateRecord.BPM_AVG)
-        if (permitted(HealthPermission.getReadPermission(DistanceRecord::class))) requested.add(DistanceRecord.DISTANCE_TOTAL)
-        if (permitted(HealthPermission.getReadPermission(WeightRecord::class))) requested.add(WeightRecord.WEIGHT_AVG)
+        if (permitted(HealthReadGroup.STEPS)) requested.add(StepsRecord.COUNT_TOTAL)
+        if (permitted(HealthReadGroup.TOTAL_ENERGY)) requested.add(TotalCaloriesBurnedRecord.ENERGY_TOTAL)
+        if (permitted(HealthReadGroup.ACTIVE_ENERGY)) requested.add(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL)
+        if (permitted(HealthReadGroup.HEART_RATE)) requested.add(HeartRateRecord.BPM_AVG)
+        if (permitted(HealthReadGroup.RESTING_HEART_RATE)) requested.add(RestingHeartRateRecord.BPM_AVG)
+        if (permitted(HealthReadGroup.DISTANCE)) requested.add(DistanceRecord.DISTANCE_TOTAL)
+        if (permitted(HealthReadGroup.WEIGHT)) requested.add(WeightRecord.WEIGHT_AVG)
         val aggregate = if (requested.isNotEmpty()) {
             healthConnectClient.aggregate(AggregateRequest(metrics = requested, timeRangeFilter = filter))
         } else null
 
         // Include the preceding evening; assign a completed session to its wake-up day.
         val sleepFilter = TimeRangeFilter.between(range.start.minus(Duration.ofDays(1)), range.end)
-        val sleepRecords = if (permitted(HealthPermission.getReadPermission(SleepSessionRecord::class)))
+        val sleepRecords = if (permitted(HealthReadGroup.SLEEP))
             readAll<SleepSessionRecord>(sleepFilter).distinctBy { it.metadata.id } else emptyList()
-        val exerciseRecords = if (permitted(HealthPermission.getReadPermission(ExerciseSessionRecord::class)))
+        val exerciseRecords = if (permitted(HealthReadGroup.WORKOUT))
             readAll<ExerciseSessionRecord>(filter).distinctBy { it.metadata.id } else emptyList()
-        val heartRateRecords = if (permitted(HealthPermission.getReadPermission(HeartRateRecord::class)))
+        val heartRateRecords = if (permitted(HealthReadGroup.HEART_RATE))
             readAll<HeartRateRecord>(filter).distinctBy { it.metadata.id } else emptyList()
-        val hrvRecords = if (permitted(HealthPermission.getReadPermission(HeartRateVariabilityRmssdRecord::class)))
+        val hrvRecords = if (permitted(HealthReadGroup.HRV))
             readAll<HeartRateVariabilityRmssdRecord>(filter).distinctBy { it.metadata.id } else emptyList()
-        val oxygenRecords = if (permitted(HealthPermission.getReadPermission(OxygenSaturationRecord::class)))
+        val oxygenRecords = if (permitted(HealthReadGroup.OXYGEN))
             readAll<OxygenSaturationRecord>(filter).distinctBy { it.metadata.id } else emptyList()
         val sleep = sleepTotalsForWakeDay(
             sleepRecords.map { session ->
@@ -131,23 +147,7 @@ class HealthAggregator(private val healthConnectClient: HealthConnectClient) {
             metrics = metrics,
             workouts = workouts,
             samples = samples,
-            missing = mapOf(
-                "sleep_minutes" to (metrics.sleepMinutes == null),
-                "deep_sleep_minutes" to (sleep.deepMinutes == null),
-                "rem_sleep_minutes" to (sleep.remMinutes == null),
-                "awake_minutes" to (sleep.awakeMinutes == null),
-                "sleep_stages" to (sleep.deepMinutes == null && sleep.remMinutes == null && sleep.awakeMinutes == null),
-                "resting_heart_rate" to (metrics.restingHeartRate == null),
-                "average_heart_rate" to (metrics.averageHeartRate == null),
-                "hrv_ms" to (metrics.hrvMs == null),
-                "spo2_percent" to (metrics.spo2Avg == null),
-                "steps" to (metrics.steps == null),
-                "active_energy_kcal" to (metrics.activeEnergyKcal == null),
-                "total_energy_kcal" to (metrics.caloriesBurned == null),
-                "workout_minutes" to (metrics.workoutMinutes == null),
-                "distance_m" to (metrics.distanceMeters == null),
-                "weight_kg" to (metrics.weightKg == null),
-            ),
+            missing = queriedMissingMetrics(metrics, queriedGroups),
         )
     }
 }

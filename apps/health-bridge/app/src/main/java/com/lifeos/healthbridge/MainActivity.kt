@@ -41,6 +41,7 @@ import com.lifeos.healthbridge.health.HealthConnectBridge
 import com.lifeos.healthbridge.sync.HealthSyncRunner
 import com.lifeos.healthbridge.model.SyncReason
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
 import com.lifeos.healthbridge.ui.HealthBridgeTheme
 import kotlinx.coroutines.launch
@@ -72,11 +73,20 @@ private fun MainScreen() {
     val backgroundSupported = available && bridge.backgroundReadSupported()
 
     suspend fun refreshPermissions() {
-        if (available) {
-            val granted = bridge.client().permissionController.getGrantedPermissions()
-            missingPermissionCount = (bridge.permissions - granted).size
-            grantedReadCount = (bridge.permissions intersect granted).size
-            backgroundGranted = bridge.backgroundReadGranted()
+        try {
+            if (available) {
+                val granted = bridge.client().permissionController.getGrantedPermissions()
+                missingPermissionCount = (bridge.permissions - granted).size
+                grantedReadCount = (bridge.permissions intersect granted).size
+                backgroundGranted = bridge.backgroundReadGranted()
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            missingPermissionCount = null
+            grantedReadCount = 0
+            backgroundGranted = false
+            status = "Не удалось проверить разрешения Health Connect. Обнови результат или перезапусти приложение."
         }
     }
 
