@@ -6,6 +6,8 @@ are alternative/historical deployment notes, not the current production target.
 The bot serves `/tma/` and authenticated APIs on local port 3000; Next.js serves
 `/web` on port 3001. The existing workers remain separate system services.
 
+The production web start command binds `127.0.0.1`; keep the existing bot `HOST=127.0.0.1` in its private systemd environment. Cloudflare Tunnel provides public HTTPS on this host. Development web binding is unchanged. Alternative container deployments that require wildcard binding must explicitly pass `-H 0.0.0.0` to the web start command and configure the bot host for that topology. Verify actual listeners with `ss`, plus both loopback and public health, after release.
+
 ## Backup design
 
 `scripts/ops/lifeos_backup.py` makes a consistent PostgreSQL 17 custom archive
