@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   emptyIdealHumanDay,
@@ -53,22 +53,25 @@ export function IdealHumanJournal({
   );
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [ready, setReady] = useState(false);
   const saving = useRef(false);
   const [message, setMessage] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
+  useEffect(() => setReady(true), []);
   useUnsavedGuard(dirty || busy);
   const stats = idealHumanStats(data.data ?? []);
   function change<K extends keyof IdealHumanDay>(
     key: K,
     value: IdealHumanDay[K],
   ) {
-    if (saving.current) return;
+    if (!ready || saving.current) return;
     setDay((previous) => ({ ...previous, [key]: value }));
     setDirty(true);
     setMessage(null);
   }
   function selectDate(next: string) {
     if (
+      !ready ||
       saving.current ||
       (dirty &&
         !window.confirm(
@@ -86,7 +89,7 @@ export function IdealHumanJournal({
     setConflict(false);
   }
   async function save() {
-    if (saving.current) return;
+    if (!ready || saving.current) return;
     let input: IdealHumanDay;
     try {
       input = parseIdealHumanDay(day);
@@ -126,6 +129,7 @@ export function IdealHumanJournal({
   }
   async function reload() {
     if (
+      !ready ||
       saving.current ||
       (dirty &&
         !window.confirm(
@@ -151,7 +155,8 @@ export function IdealHumanJournal({
     }
   }
   async function clearReflection() {
-    if (saving.current || dirty || conflict || day.revision < 1) return;
+    if (!ready || saving.current || dirty || conflict || day.revision < 1)
+      return;
     saving.current = true;
     setBusy(true);
     setMessage(null);
@@ -190,7 +195,12 @@ export function IdealHumanJournal({
     }
   }
   return (
-    <div className="space-y-5">
+    <div className="space-y-5" aria-busy={!ready || busy}>
+      {!ready ? (
+        <p role="status" className="text-sm text-zinc-400">
+          Подготавливаем дневник…
+        </p>
+      ) : null}
       <SectionPanel
         title={`Ideal Human — Day ${idealHumanDayNumber(date)}/30`}
         eyebrow={`${date} · Asia/Almaty`}
@@ -204,7 +214,7 @@ export function IdealHumanJournal({
           <select
             className={inputClass}
             value={date}
-            disabled={busy}
+            disabled={!ready || busy}
             onChange={(event) => selectDate(event.target.value)}
           >
             {Array.from({ length: 30 }, (_, i) => idealHumanDate(i + 1)).map(
@@ -229,7 +239,7 @@ export function IdealHumanJournal({
           <button
             type="button"
             className={buttonClass}
-            disabled={busy || data.busy}
+            disabled={!ready || busy || data.busy}
             onClick={() => void reload()}
           >
             Повторить загрузку
@@ -253,7 +263,7 @@ export function IdealHumanJournal({
           />
           <button
             type="button"
-            disabled={busy}
+            disabled={!ready || busy}
             className={`${buttonClass} mt-3`}
             onClick={() => void reload()}
           >
@@ -273,13 +283,13 @@ export function IdealHumanJournal({
           <div className="sticky top-16 z-20 rounded-xl border border-white/15 bg-graphite-950/95 p-3 backdrop-blur-md xl:top-2">
             <button
               type="submit"
-              disabled={busy || !dirty || conflict}
+              disabled={!ready || busy || !dirty || conflict}
               className={`${buttonClass} w-full border-cyan-300/30 bg-cyan-300/10 text-cyan-100`}
             >
               {busy ? "Сохраняем…" : "Сохранить день"}
             </button>
           </div>
-          <fieldset disabled={busy} className="min-w-0 space-y-5">
+          <fieldset disabled={!ready || busy} className="min-w-0 space-y-5">
             <SectionPanel title="Утренний чек-ин">
               <p className="mb-3 text-xs text-zinc-400">
                 Только реальные измерения. Все поля необязательны.
@@ -372,7 +382,7 @@ export function IdealHumanJournal({
               day={day}
               change={change}
               onClear={() => void clearReflection()}
-              clearDisabled={busy || conflict}
+              clearDisabled={!ready || busy || conflict}
               dirty={dirty}
             />
           </fieldset>
