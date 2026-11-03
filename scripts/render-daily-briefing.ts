@@ -51,7 +51,7 @@ async function main() {
     ...view.suggestions.map((s) => "• " + s),
     ...view.questions.map((s) => "• " + s),
     ...data.sourceWarnings
-      .filter((s) => includeHealth || !s.startsWith("Health "))
+      .filter((s) => includeHealth || !/^(?:Health|Workouts) /.test(s))
       .map((s) => "⚠ " + s),
   ];
   let text = "";

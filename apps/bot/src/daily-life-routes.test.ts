@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_DAILY_LIFE_PREFERENCES,
   DailyLifeConflictError,
+  parseIdealHumanDay,
+  type IdealHumanDay,
   type TaskWorkspaceItem,
 } from "@lifeos/core";
 import {
@@ -13,6 +15,7 @@ import {
   type TelegramUserRecord,
 } from "@lifeos/db";
 import { createBotServer } from "./server.js";
+import { dailyLifeSummary } from "./daily-life-routes.js";
 import { createWebSessionToken, hashWebToken } from "./web-session.js";
 
 const BOT = "daily-life-http-synthetic-bot";
@@ -130,16 +133,18 @@ async function fixture(status: TelegramUserRecord["status"] = "active") {
       return { ...task, ...patch };
     },
   );
-  const getIdealHumanDays = vi.fn(async () => []);
-  const getHealthMetricDay = vi.fn(async () => ({
-    date: DATE,
-    metrics: {},
-    records: [],
-    sources: [],
-    sourceLabel: null,
-    latestSource: null,
-    missingMetrics: {},
-  }));
+  const getIdealHumanDays = vi.fn(async (): Promise<IdealHumanDay[]> => []);
+  const getHealthMetricDay = vi.fn<LifeOSStore["getHealthMetricDay"]>(
+    async () => ({
+      date: DATE,
+      metrics: {},
+      records: [],
+      sources: [],
+      sourceLabel: null,
+      latestSource: null,
+      missingMetrics: {},
+    }),
+  );
   const getHealthSyncStatus = vi.fn(
     async (): Promise<HealthSyncStatusSummary> => ({
       counts: {},
@@ -230,6 +235,7 @@ async function fixture(status: TelegramUserRecord["status"] = "active") {
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
   return {
+    store,
     base,
     call,
     web,
@@ -503,6 +509,95 @@ describe("Daily Life HTTP authenticated owner boundary", () => {
     expect(JSON.stringify(data.evening)).toMatch(/не сохран|not saved/i);
     expect(f.getIdealHumanDays).toHaveBeenCalledWith(OWNER);
     expect(f.getWorkoutHistory).toHaveBeenCalledWith(OWNER);
+  });
+  it("keeps failed task/workout/journal sources unknown rather than reporting zero completed actions", async () => {
+    const f = await fixture();
+    f.tasks.mockRejectedValueOnce(new Error("private-task-diagnostic"));
+    f.getWorkoutHistory.mockRejectedValueOnce(
+      new Error("private-workout-diagnostic"),
+    );
+    f.getIdealHumanDays.mockRejectedValueOnce(
+      new Error("private-journal-diagnostic"),
+    );
+    const response = await f.call(`/api/tma/daily-life/summary?date=${DATE}`);
+    expect(response.status).toBe(200);
+    const { data } = await response.json();
+    expect(data.evening.facts.join(" ")).not.toContain("завершения сегодня: 0");
+    expect(data.evening.warnings.join(" ")).toMatch(
+      /Источник задач недоступен/,
+    );
+    expect(data.evening.warnings.join(" ")).toMatch(
+      /Источник тренировок недоступен/,
+    );
+    expect(data.evening.warnings.join(" ")).toContain(
+      "Источник дневника недоступен",
+    );
+    expect(data.evening.warnings.join(" ")).not.toContain(
+      "Дневник дня пока не сохранён",
+    );
+    expect(data.evening.warnings.join(" ")).not.toContain(
+      "тренировка на эту дату не зарегистрирована",
+    );
+    expect(JSON.stringify(data)).not.toContain("private-");
+  });
+  it("passes real stored sleep/recovery into both views and excludes health warnings from private delivery", async () => {
+    const f = await fixture();
+    f.getIdealHumanDays.mockResolvedValue([
+      parseIdealHumanDay({ date: DATE, recoveryNotes: "Recorded tiredness" }),
+    ]);
+    f.getHealthMetricDay.mockResolvedValue({
+      date: DATE,
+      metrics: { sleep_minutes: 415 },
+      sources: ["health_connect"],
+      sourceLabel: "Health Connect",
+      latestSource: "health_connect",
+      missingMetrics: {},
+      records: [
+        {
+          id: ENTRY,
+          userId: OWNER,
+          metricDate: DATE,
+          metricType: "sleep_minutes",
+          value: 415,
+          unit: "minutes",
+          source: "xiaomi_health_connect",
+          confidence: null,
+          rawJson: {},
+          createdAt: "2026-10-25T00:00:00Z",
+          updatedAt: "2026-10-25T00:00:00Z",
+        },
+      ],
+    });
+    const response = await f.call(`/api/tma/daily-life/summary?date=${DATE}`);
+    expect(response.status).toBe(200);
+    const { data } = await response.json();
+    for (const view of [data.morning, data.evening]) {
+      expect(view.facts.join(" ")).toContain(
+        "415 мин · xiaomi_health_connect · устаревшая запись",
+      );
+      expect(view.facts.join(" ")).toContain("Recorded tiredness");
+      expect(view.warnings.join(" ")).toContain("stale");
+    }
+    f.getHealthMetricDay.mockRejectedValueOnce(
+      new Error("private-health-diagnostic"),
+    );
+    f.getWorkoutHistory.mockRejectedValueOnce(
+      new Error("private-workout-diagnostic"),
+    );
+    const owner = await f.store.resolveTelegramUser(20);
+    const hidden = await dailyLifeSummary(f.store, owner!, DATE, new Date(), {
+      includeHealth: false,
+      includeFilming: true,
+    });
+    expect(
+      JSON.stringify({
+        morning: hidden.morning,
+        evening: hidden.evening,
+        warnings: hidden.sourceWarnings,
+      }),
+    ).not.toMatch(
+      /Recorded tiredness|415|stale|Health unavailable|Workouts unavailable|тренировок|восстановлении/,
+    );
   });
   it("projects only safe ingest status metadata and keeps record timestamps distinct", async () => {
     const f = await fixture();

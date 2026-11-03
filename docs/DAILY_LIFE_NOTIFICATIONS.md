@@ -25,6 +25,13 @@ health/filming inclusion preferences. It never calls a model, sends notification
 or persists private journal text. Messages are bounded plain text, avoiding HTML
 parse errors after truncation. This is not a claim that a paid AI briefing runs.
 
+When health inclusion is enabled, both overviews can include recorded sleep with
+its source and stale marker, plus a short excerpt of an explicitly saved manual
+recovery note. Missing values remain unknown; no recovery score is inferred.
+Health facts and health/workout source warnings are omitted from delivery when
+health inclusion is off. Failed task/workout/journal reads produce an unavailable
+warning, not a claim of zero completed tasks, no recorded workout or an unsaved day.
+
 If rendering is unavailable, morning uses the existing saved study digest with
 an explicit uncertain-freshness warning; empty LMS data is not presented as proof
 that no classes or assignments exist. Evening uses optional reflection questions
