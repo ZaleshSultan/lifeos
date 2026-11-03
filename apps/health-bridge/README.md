@@ -4,9 +4,11 @@ Android source for the Samsung Galaxy S23+ to read permitted Health Connect reco
 
 ## Current implementation and verification
 
-Source includes a Compose setup/status screen, partial read-permission handling, optional background-read permission, foreground manual sync, seven-day backfill, WorkManager scheduling, Android Keystore AES-GCM token storage and bounded HTTPS requests. These are implemented source capabilities, not a tested handset release.
+Source includes a Compose setup/status screen, partial read-permission handling, optional background-read permission, foreground manual sync, seven-day backfill, WorkManager scheduling, Android Keystore AES-GCM token storage and bounded HTTPS requests. These are implemented capabilities with hosted compilation/JVM/lint/APK evidence; handset behavior remains unverified.
 
-The November 3 engineering host has no Java, Gradle, Kotlin compiler, Android SDK or adb. The repository also has no checked-in Gradle wrapper. Android compilation, unit tests, lint, APK creation/install, Keystore execution and physical-device background behavior are **UNVERIFIED**. No APK was built or installed. Static inspection checked the used Health Connect symbols against the official `connect-client:1.1.0` source; that does not replace compilation.
+The production Debian host has no Java/Android toolchain, so verification runs on the standard free GitHub-hosted Ubuntu runner for this public repository. [Run 41530287979](https://github.com/ZaleshSultan/lifeos/actions/runs/41530287979), source `dbff42005b036470fe9badcf379450687be44283`, passed 21 JVM tests (zero failures/errors/skips), Android lint (zero errors, 13 warnings), APK assembly and `apksigner verify`. The workflow uploads the debug APK, SHA256SUMS and a machine-readable BUILD-VERIFICATION.json; artifact retention is one day. The engineering release state retains a verified local copy after download. This debug build contains no configured personal token or backend credentials.
+
+APK installation, Android Keystore execution, actual Health Connect reads, Galaxy S23+/Mi Fitness accuracy and background execution remain **UNVERIFIED**. No phone was available. The debug certificate is for testing, not a production signing identity. The repository still has no checked-in Gradle wrapper; CI uses pinned Gradle 8.13 without adding a toolchain to production.
 
 ## Build on an Android development machine
 
@@ -44,4 +46,4 @@ The source schedules approximate daily work near 00:01 and 06:00 in Asia/Almaty.
 
 Read permissions cover active/total energy, distance, workouts, heart/resting heart rate, RMSSD HRV, oxygen, sleep, steps and weight. The manifest contains rationale routes for both Android 13 and lower and Android 14+, plus a separately requested background-read permission. [Health Connect setup and manifest](https://developer.android.com/health-and-fitness/health-connect/get-started).
 
-See [the HTTP contract](../../docs/HEALTH_BRIDGE_CONTRACT.md) and [device operations](../../docs/ANDROID_HEALTH_BRIDGE.md). Remaining release work is Android build/lint/JVM tests, fake-provider instrumentation, signed artifact delivery and real Galaxy S23+/Mi Fitness permission, accuracy and background verification. None is represented as completed by backend/browser checks.
+See [the HTTP contract](../../docs/HEALTH_BRIDGE_CONTRACT.md) and [device operations](../../docs/ANDROID_HEALTH_BRIDGE.md). Hosted Android build/lint/JVM tests and a debug-signed APK are available from the workflow above. Remaining work is fake-provider instrumentation, production release signing if distribution requires it, and real Galaxy S23+/Mi Fitness permission, accuracy, retries and background verification. Backend/browser checks cannot prove those device behaviors.

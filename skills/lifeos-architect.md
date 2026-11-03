@@ -163,8 +163,9 @@ application. Previous web-auth/Android exclusions are historical. Web sessions
 use the trusted bot boundary and an HttpOnly cookie; no anon browser read shortcut
 or service-role exposure is acceptable. Android build/install evidence must remain
 separate from physical Health Connect permission, scheduled-sync and phone tests.
-The audited release host lacks the Android/JDK/Gradle-wrapper toolchain; no
-installable APK or successful phone sync is implied by the source audit.
+The audited release host lacks the Android/JDK/Gradle-wrapper toolchain; hosted
+CI build/JVM/lint/debug-APK evidence is documented in `docs/ANDROID_HEALTH_BRIDGE.md`.
+Successful phone installation or sync is not implied by compilation.
 External campus/creator authorization remains blocked unless an actual supported
 grant and user consent are available; a sign-in link does not establish a connection.
 

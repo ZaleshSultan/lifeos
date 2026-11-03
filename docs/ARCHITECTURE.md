@@ -29,7 +29,7 @@ LifeOS is a personal operating system monorepo. The center of the system is a Su
 - `apps/bot` - Node HTTP server for Telegram webhooks, health ingest, and backend API boundaries.
 - `apps/tma` - Vite React Telegram Mini App for workout and focus workflows.
 - `apps/web` - Next.js dashboard for desktop and mobile browser use.
-- `apps/health-bridge` - Kotlin Health Connect project/scaffold; no installable APK is verified.
+- `apps/health-bridge` - Kotlin Health Connect app; hosted CI verifies a debug APK, JVM tests and lint. Physical-phone behavior remains unverified; see `ANDROID_HEALTH_BRIDGE.md`.
 - `packages/core` - Pure domain logic, parsers, health mode, ingest scoring, and shared types.
 - `packages/db` - Supabase client/config/store boundary.
 - `packages/obsidian` - Obsidian path safety utilities.

@@ -3,14 +3,14 @@ name: Android Health Bridge
 on:
   push:
     branches:
-      - 'ci/android-health-bridge-*'
+      - "ci/android-health-bridge-*"
     paths:
-      - 'apps/health-bridge/**'
-      - '.github/workflows/android-health-bridge.yml'
+      - "apps/health-bridge/**"
+      - ".github/workflows/android-health-bridge.yml"
   pull_request:
     paths:
-      - 'apps/health-bridge/**'
-      - '.github/workflows/android-health-bridge.yml'
+      - "apps/health-bridge/**"
+      - ".github/workflows/android-health-bridge.yml"
   workflow_dispatch:
 
 permissions:
@@ -37,10 +37,10 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: "21"
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.13'
+          gradle-version: "8.13"
           cache-disabled: true
       - uses: android-actions/setup-android@v4
         with:
@@ -98,6 +98,15 @@ jobs:
               'unitTests': totals,
               'lintErrors': len(errors),
               'lintWarnings': len(issues) - len(errors),
+              'lintIssues': [
+                  {
+                      'id': issue.attrib.get('id'),
+                      'severity': issue.attrib.get('severity'),
+                      'message': issue.attrib.get('message'),
+                      'locations': [dict(location.attrib) for location in issue.findall('location')],
+                  }
+                  for issue in issues
+              ],
               'physicalDeviceVerified': False,
               'productionSigning': False,
           }
