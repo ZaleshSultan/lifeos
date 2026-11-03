@@ -454,7 +454,7 @@ describe("reviewed action execution", () => {
       expect(f.ports.confirm).not.toHaveBeenCalled();
     }
   });
-  it("does not reread or rewrite a journal for an already committed action replay", async () => {
+  it("does not prepare another journal mutation for an already committed action replay", async () => {
     const done = actions([
       {
         kind: "reflection.add",
@@ -469,7 +469,9 @@ describe("reviewed action execution", () => {
       actionIds: ["action-1"],
       confirmed: true,
     });
-    expect(f.store.getIdealHumanDays).not.toHaveBeenCalled();
+    // One owner-only read refreshes display context; replay prepares no write.
+    expect(f.store.getIdealHumanDays).toHaveBeenCalledExactlyOnceWith(owner);
     expect(f.ports.confirm).toHaveBeenCalledOnce();
+    expect(f.ports.confirm.mock.calls[0][3]).not.toHaveProperty("journalEntries");
   });
 });
