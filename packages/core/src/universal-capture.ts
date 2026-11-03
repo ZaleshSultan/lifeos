@@ -22,6 +22,10 @@ import {
   parseStoredIdealHumanDay,
   type IdealHumanDay,
 } from "./ideal-human.js";
+import {
+  analyzeCaptureText,
+  parseCapturePresentation,
+} from "./capture-intelligence.js";
 
 export const CAPTURE_ACTION_KINDS = [
   "task.create",
@@ -124,16 +128,31 @@ export type CaptureActionArgs = {
 export type CaptureActionPayload = {
   [K in CaptureActionKind]: { kind: K; args: CaptureActionArgs[K] };
 }[CaptureActionKind];
+export type CaptureLanguage = "ru" | "kk" | "en" | "mixed" | "und";
+export interface CaptureProposalPresentation {
+  title: string;
+  description: string | null;
+  suggestedDate: string | null;
+  timeHint: string | null;
+  relation: string | null;
+  language: CaptureLanguage;
+  evidence: "user_statement" | "recommendation";
+  warnings: string[];
+  timezone: string;
+  dateBasis: "profile" | "ideal_human";
+}
 export type CaptureProposal = CaptureActionPayload & {
   id: string;
   origin: CaptureActionOrigin;
   summary: string;
   missingFields: string[];
+  presentation?: CaptureProposalPresentation;
 };
 export type CaptureActionView = CaptureProposal & {
   status: CaptureActionStatus;
   resultSummary: string | null;
   completedAt: string | null;
+  extractionOrigin?: "deterministic" | "model" | null;
 };
 export interface CaptureContextView {
   date: string;
@@ -163,6 +182,8 @@ export interface CaptureView {
   errorCode: string | null;
   actions: CaptureActionView[];
   context?: CaptureContextView;
+  processingStage?: "extracting" | "transcribing" | null;
+  transcriptSource?: "manual" | "provider" | null;
 }
 export interface CaptureSearchInput {
   query: string;
@@ -182,6 +203,7 @@ export interface CaptureCapabilities {
   transcription: "unavailable" | "configured_unverified";
   transcriptionRequiresConsent: boolean;
   aiExtraction: boolean;
+  externalModel?: "unavailable" | "configured_unverified";
   maxTextLength: number;
   maxVoiceBytes: number;
   maxVoiceSeconds: number;
@@ -199,6 +221,7 @@ export interface CaptureExtractContext {
   now: Date;
   timezone: string;
   date?: string;
+  sourceText?: string;
 }
 export interface CaptureIngestRequest {
   requestId: string;
@@ -752,6 +775,13 @@ export function extractCaptureActions(
   raw: string,
   context: CaptureExtractContext,
 ): CaptureProposal[] {
+  return analyzeCaptureText(raw, context).proposals;
+}
+/** Existing typed single-clause fallback, also preserving explicit memory grammar. */
+export function extractCaptureClause(
+  raw: string,
+  context: CaptureExtractContext,
+): CaptureProposal[] {
   const input = safeText(raw, CAPTURE_MAX_TEXT, 1),
     normalized = input.normalize("NFKC").replace(/\p{Cf}/gu, "");
   const memory = explicitMemory(normalized);
@@ -1190,6 +1220,8 @@ export function parseCaptureView(raw: unknown): CaptureView {
       "errorCode",
       "actions",
       "context",
+      "processingStage",
+      "transcriptSource",
     ],
     [
       "id",
@@ -1231,6 +1263,8 @@ export function parseCaptureView(raw: unknown): CaptureView {
         "status",
         "resultSummary",
         "completedAt",
+        "presentation",
+        "extractionOrigin",
       ],
       [
         "id",
@@ -1256,6 +1290,13 @@ export function parseCaptureView(raw: unknown): CaptureView {
     )
       throw new CaptureInputError();
     const action = parseCaptureActionPayload({ kind: a.kind, args: a.args });
+    if (
+      a.extractionOrigin !== undefined &&
+      a.extractionOrigin !== null &&
+      a.extractionOrigin !== "deterministic" &&
+      a.extractionOrigin !== "model"
+    )
+      throw new CaptureInputError();
     return {
       ...action,
       id: a.id,
@@ -1266,6 +1307,17 @@ export function parseCaptureView(raw: unknown): CaptureView {
       resultSummary:
         a.resultSummary === null ? null : text(a.resultSummary, 8000),
       completedAt: instant(a.completedAt, true),
+      ...(a.presentation === undefined
+        ? {}
+        : { presentation: parseCapturePresentation(a.presentation) }),
+      ...(a.extractionOrigin === undefined
+        ? {}
+        : {
+            extractionOrigin: a.extractionOrigin as
+              | "deterministic"
+              | "model"
+              | null,
+          }),
     };
   });
   if (new Set(actions.map((a) => a.id)).size !== actions.length)
@@ -1288,6 +1340,24 @@ export function parseCaptureView(raw: unknown): CaptureView {
     errorCode: v.errorCode === null ? null : text(v.errorCode, 100),
     actions,
   };
+  if (v.processingStage !== undefined) {
+    if (
+      v.processingStage !== null &&
+      v.processingStage !== "extracting" &&
+      v.processingStage !== "transcribing"
+    )
+      throw new CaptureInputError();
+    result.processingStage = v.processingStage;
+  }
+  if (v.transcriptSource !== undefined) {
+    if (
+      v.transcriptSource !== null &&
+      v.transcriptSource !== "manual" &&
+      v.transcriptSource !== "provider"
+    )
+      throw new CaptureInputError();
+    result.transcriptSource = v.transcriptSource;
+  }
   if (v.context !== undefined) {
     const c = object(v.context);
     keys(
