@@ -4936,7 +4936,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       .select("id, started_at, ended_at")
       .eq("user_id", input.userId)
       .eq("id", input.workoutId)
-      .single();
+      .maybeSingle();
 
     if (existingError) {
       throwSupabaseError(
@@ -4944,6 +4944,8 @@ export class SupabaseLifeOSStore implements LifeOSStore {
         "Failed to load workout for completion",
       );
     }
+
+    if (!existing) throw new WorkoutStateError("workout_not_found");
 
     const completedAt = existing.ended_at ?? input.completedAt;
     const durationMinutes = Math.max(

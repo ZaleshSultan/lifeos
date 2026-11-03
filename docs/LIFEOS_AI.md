@@ -4,8 +4,9 @@ Supabase remains authoritative. `packages/core/src/planner.ts` produces
 deterministic daily candidates and validates AI schedule proposals. `apps/bot`
 authenticates users, reads bounded owned data and optionally calls the official
 `@google/genai` SDK. TMA Today shows commitments, proposals, priorities, reminders
-and seven-day task activity. Existing Home widgets and OpenRouter finance and
-monthly review flows remain available.
+and seven-day task activity. Existing Home widgets and governed OpenRouter
+finance flows remain available. The standalone monthly review keeps its
+deterministic fallback; its direct AI path requires a shared-governor gateway.
 
 With `LIFEOS_ASSISTANT_ENABLED=true`, the same chat endpoint first routes supported
 requests through local authorized tools and explicit memory. TMA writes use
@@ -17,8 +18,10 @@ feature-flagged extension is documented in
 [assistant architecture](ASSISTANT_ARCHITECTURE.md) and
 [assistant operations](ASSISTANT_ROLLOUT.md).
 
-Agata is an independent external authenticated read-only consumer, outside this
-implementation. No Agata UI, agent, worker, write API or project changes are added.
+AGATA remains separate. The current release exposes an authenticated, disabled
+capability projection and proposed v1 payload contract; no deployed personal-data
+service or outbound AGATA analysis is verified. See the
+[AGATA boundary](AGATA_INTEGRATION.md) for the current status and setup blockers.
 The old Agata prompt file is not an implementation instruction.
 
 ## Configuration and model verification
@@ -90,7 +93,10 @@ Weekly and rolling thirty-day activity count actual task creation/completion
 timestamps, including completions of older tasks. They are not inferred grades,
 focus hours or productivity scores. History queries cap each creation/completion
 selection at 1000 rows; incomplete history is labeled and has no completion-rate
-claim. The existing monthly review keeps its optional OpenRouter provider.
+claim. The standalone monthly worker's optional direct OpenRouter path fails
+closed with `shared_ai_governor_required` when its legacy AI flag and key are
+present. Its deterministic report remains available when the worker is explicitly
+configured and opted in; see [AI execution safety](AI_EXECUTION_SAFETY.md).
 
 ## Privacy and reliability
 
@@ -122,11 +128,21 @@ provider logging or conversation/context persistence. TMA retains conversation
 only in screen memory, clears it on exit/Clear, and aborts client requests on
 exit/Clear. Google's retention follows the user's Gemini API agreement/settings.
 
-Default limits: six requests/minute/user, forty/day/user, two hundred/day globally,
-four concurrent calls. Environment examples document timeout/context/output and
-tracked-user limits too. Counters are per process and reset on restart. Multiple
-replicas need a shared limiter for deployment-wide billing caps. Provider quotas
-still apply. AI failure never disables the planner or existing LifeOS functions.
+The additional Gemini request throttle defaults to six requests/minute/user,
+forty/day/user, two hundred/day globally and four concurrent calls. These request
+counters are per process and reset on restart. Environment examples document
+timeout/context/output and tracked-user limits too.
+
+Supported Gemini and backend OpenRouter operations also pass through the shared
+backend governor, with durable owner/feature/global token and estimated-cost
+reservations and a task iteration ceiling. Those reservations survive restarts
+and are shared across connected backend processes. The governor defaults to two
+concurrent external operations and a 20-second deadline per process; concurrency
+and circuit state remain process-local. Estimates do not guarantee provider
+billing caps, and provider-side quotas still apply. See
+[AI execution safety](AI_EXECUTION_SAFETY.md) for current limits, cancellation,
+shutdown and fallback behavior. AI failure never disables deterministic planning
+or manual LifeOS flows.
 
 Malformed optional AI settings disable AI safely instead of stopping backend
 startup. Strict configuration parsing remains independently testable.

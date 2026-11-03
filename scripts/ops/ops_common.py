@@ -20,6 +20,17 @@ class OpsError(Exception):
     """A fixed public error code; no provider response/credential interpolation."""
 
 
+class RejectRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, response, code, message, headers, new_url):
+        # Privileged operations have fixed destinations. A redirect cannot
+        # authorize forwarding bearer credentials, signed headers or payloads.
+        return None
+
+
+def fixed_destination_request(request, *, timeout):
+    return urllib.request.build_opener(RejectRedirects()).open(request, timeout=timeout)
+
+
 def utcnow() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
 
@@ -149,7 +160,7 @@ class Management:
             method="GET" if body is None else "POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=45) as response:
+            with fixed_destination_request(request, timeout=45) as response:
                 raw = response.read(64 * 1024 * 1024 + 1)
             if len(raw) > 64 * 1024 * 1024:
                 raise OpsError("management_response_too_large")

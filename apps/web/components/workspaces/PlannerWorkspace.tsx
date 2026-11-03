@@ -129,14 +129,6 @@ function TaskEdit({
           >
             Отменить правки задачи
           </button>
-          <button
-            type="button"
-            className={buttonClass}
-            onClick={() => setDirty(false)}
-            disabled={busy || !dirty}
-          >
-            Отменить правки задачи
-          </button>
         </fieldset>
       </form>
     </details>

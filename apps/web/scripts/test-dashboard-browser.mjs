@@ -777,7 +777,9 @@ try {
       await p.goto(`${origin}/web/ideal-human`, { waitUntil: "commit" });
       await firstScript;
       const weight = p.getByLabel("Утренний вес, кг", { exact: true });
-      const dateSelector = p.getByRole("combobox", { name: /^День эксперимента/ });
+      const dateSelector = p.getByRole("combobox", {
+        name: /^День эксперимента/,
+      });
       const save = p.getByRole("button", {
         name: "Сохранить день",
         exact: true,
@@ -841,12 +843,64 @@ try {
       .getByLabel("Название", { exact: true })
       .fill("Fixture study priority");
     await page
+      .getByRole("textbox", { name: "Заметки", exact: true })
+      .fill("Fixture saved task notes");
+    await page
+      .getByLabel("Дедлайн, если известен (Asia/Almaty)", { exact: true })
+      .fill("2026-11-03T17:30");
+    await page
       .getByRole("button", { name: "Добавить задачу", exact: true })
       .click();
     await page
       .getByRole("heading", { name: "Fixture study priority" })
       .waitFor();
     await page.getByText("Изменить задачу", { exact: true }).click();
+    const editTitle = page.getByRole("textbox", {
+      name: "Новое название",
+      exact: true,
+    });
+    const editNotes = page.getByRole("textbox", {
+      name: "Заметки задачи",
+      exact: true,
+    });
+    const editDue = page.getByLabel("Дедлайн задачи (Asia/Almaty)", {
+      exact: true,
+    });
+    const discard = page.getByRole("button", {
+      name: "Отменить правки задачи",
+      exact: true,
+    });
+    assert.equal(await discard.count(), 1);
+    const savedTask = { ...tasks.get("A")[0] };
+    const taskPatchesBeforeDiscard = trace.filter(
+      (request) =>
+        request.method === "PATCH" &&
+        request.path.startsWith("/api/tma/tasks/"),
+    ).length;
+    await editTitle.fill("Unsaved title to discard");
+    await editNotes.fill("Unsaved notes to discard");
+    await editDue.fill("2026-11-04T09:15");
+    assert.equal(await discard.isEnabled(), true);
+    await discard.click();
+    await page.waitForFunction(() =>
+      [...document.querySelectorAll("input")].some(
+        (input) => input.value === "Fixture study priority",
+      ),
+    );
+    assert.equal(await editTitle.inputValue(), "Fixture study priority");
+    assert.equal(await editNotes.inputValue(), "Fixture saved task notes");
+    assert.equal(await editDue.inputValue(), "2026-11-03T17:30");
+    assert.equal(await discard.isDisabled(), true);
+    await page.waitForLoadState("networkidle");
+    assert.equal(
+      trace.filter(
+        (request) =>
+          request.method === "PATCH" &&
+          request.path.startsWith("/api/tma/tasks/"),
+      ).length,
+      taskPatchesBeforeDiscard,
+    );
+    assert.deepEqual(tasks.get("A")[0], savedTask);
     await page
       .getByLabel("Новое название", { exact: true })
       .fill("Fixture edited priority");
@@ -1087,27 +1141,59 @@ try {
     }
     assert.deepEqual(errors, []);
   });
-  await test("logout revokes the browser session and protected routes fail closed", async () => {
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto(`${origin}/web/settings`);
-    const [logoutResponse] = await Promise.all([
-      page.waitForResponse(
-        (response) => new URL(response.url()).pathname === "/web/logout",
-      ),
-      page.getByRole("button", { name: "Выйти", exact: true }).click(),
-    ]);
-    if (logoutResponse.status() >= 400)
-      console.log(
-        "Fixture logout rejection",
-        JSON.stringify({
-          status: logoutResponse.status(),
-          body: await logoutResponse.text(),
-          requestOrigin: logoutResponse.request().headers().origin ?? null,
-        }),
+  await test("logout waits for client readiness, revokes the session and protected routes fail closed", async () => {
+    const delayed = await isolatedContext({
+      viewport: { width: 1440, height: 900 },
+    });
+    await delayed.addCookies(await context.cookies());
+    const p = await delayed.newPage();
+    const logoutErrors = [];
+    p.on("pageerror", (error) => logoutErrors.push(error.message));
+    let releaseScripts;
+    const scriptGate = new Promise((resolve) => {
+      releaseScripts = resolve;
+    });
+    const isNextScript = (request) =>
+      new URL(request.url()).origin === origin &&
+      new URL(request.url()).pathname.startsWith("/web/_next/") &&
+      request.resourceType() === "script";
+    await p.route("**/*", async (route) => {
+      if (isNextScript(route.request())) await scriptGate;
+      return route.fallback();
+    });
+    try {
+      const firstScript = p.waitForRequest(isNextScript);
+      await p.goto(`${origin}/web/settings`, { waitUntil: "commit" });
+      await firstScript;
+      const logout = p.getByRole("button", { name: "Выйти", exact: true });
+      await logout.waitFor();
+      assert.equal(await logout.isDisabled(), true);
+      assert.equal(sessions.has(sessionA), true);
+      releaseScripts();
+      await logout.click({ trial: true });
+      assert.equal(await logout.isEnabled(), true);
+      const [response] = await Promise.all([
+        p.waitForResponse(
+          (response) => new URL(response.url()).pathname === "/web/logout",
+        ),
+        logout.click(),
+      ]);
+      assert.equal(response.status(), 303);
+      assert.equal(new URL(response.request().headers().origin).origin, origin);
+      await p.getByRole("heading", { name: "Твой LifeOS Web" }).waitFor();
+      await p.waitForLoadState("networkidle");
+      assert.equal(sessions.has(sessionA), false);
+      assert.equal(
+        (await delayed.cookies()).some(
+          (cookie) => cookie.name === "lifeos_web_session",
+        ),
+        false,
       );
-    assert.ok(logoutResponse.status() < 400, "Logout returned an error");
-    await page.getByRole("heading", { name: "Твой LifeOS Web" }).waitFor();
-    assert.equal(sessions.has(sessionA), false);
+      assert.deepEqual(logoutErrors, []);
+    } finally {
+      releaseScripts();
+      await delayed.close();
+    }
     await page.goto(`${origin}/web/ideal-human`);
     await page.getByRole("heading", { name: "Твой LifeOS Web" }).waitFor();
   });

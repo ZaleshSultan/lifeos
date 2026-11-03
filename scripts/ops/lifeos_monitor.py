@@ -17,8 +17,8 @@ import urllib.parse
 import urllib.request
 
 from lifeos_backup import source_preflight
-from ops_common import (Management, OpsError, atomic_json, command, env_file, load_config,
-                        lock, private_dir, read_json, sha256, utcnow, utcstamp)
+from ops_common import (Management, OpsError, atomic_json, command, env_file, fixed_destination_request,
+                        load_config, lock, private_dir, read_json, sha256, utcnow, utcstamp)
 
 USER_AGENT = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/130.0.0.0 Mobile Telegram-Android/11.0.0"
 UNITS = ("lifeos-bot.service", "lifeos-web.service", "lifeos-lms-grades-worker.service",
@@ -52,7 +52,7 @@ def webhook_status(status: int, data: dict, origin: str, now: float) -> dict:
 def http(url: str, headers=None):
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, **(headers or {})})
     try:
-        with urllib.request.urlopen(request, timeout=15) as response:
+        with fixed_destination_request(request, timeout=15) as response:
             body = response.read(2 * 1024 * 1024 + 1)
             if len(body) > 2 * 1024 * 1024:
                 raise OpsError("monitor_response_too_large")
@@ -197,12 +197,24 @@ def collect(config: dict) -> dict:
 def update_incident(previous: dict | None, current: dict, *, threshold=2, suppress_initial=True) -> tuple[dict, bool]:
     """Pure decision; a stable existing degraded baseline does not spam the user."""
     if current["status"] == "OK":
-        return {"status": "OK", "code": current["code"], "failures": 0, "reserved": False, "baseline": False}, False
+        same = previous and previous.get("status") == "OK"
+        acknowledged = bool(previous and previous.get("alert_acknowledged"))
+        reserved = bool(previous and previous.get("recovery_reserved"))
+        notify = bool(previous and previous.get("status") in {"FAIL", "WARN"} and acknowledged and not reserved)
+        return {"status": "OK", "code": current["code"], "failures": 0,
+                "reserved": False, "baseline": False,
+                "alert_acknowledged": acknowledged,
+                "recovery_reserved": reserved,
+                "recovery_acknowledged": bool(same and previous.get("recovery_acknowledged"))}, notify
     same = previous and previous.get("status") == current["status"] and previous.get("code") == current["code"]
     state = {"status": current["status"], "code": current["code"],
              "failures": previous.get("failures", 0) + 1 if same else 1,
              "reserved": bool(previous.get("reserved")) if same else False,
-             "baseline": current["status"] == "WARN" and (bool(previous.get("baseline")) if same else previous is None and suppress_initial)}
+             "baseline": current["status"] == "WARN" and (bool(previous.get("baseline")) if same else previous is None and suppress_initial),
+             # Keep an acknowledged outage across changed degradation codes,
+             # but start a new incident after an intervening healthy state.
+             "alert_acknowledged": bool(previous and previous.get("status") in {"FAIL", "WARN"} and previous.get("alert_acknowledged")),
+             "recovery_reserved": False, "recovery_acknowledged": False}
     notify = state["failures"] >= threshold and not state["reserved"] and not state["baseline"]
     return state, notify
 
@@ -217,9 +229,9 @@ def send_alert(config: dict, component: str, code: str) -> None:
                                     data=json.dumps({"chat_id": destination, "text": "LifeOS operations: " + component + " — " + code + ". Check the private operations status/runbook."}).encode(),
                                     headers={"Content-Type": "application/json"}, method="POST")
     try:
-        with urllib.request.urlopen(request, timeout=15) as response:
+        with fixed_destination_request(request, timeout=15) as response:
             data = json.loads(response.read(4096))
-        if not data.get("ok"):
+        if data.get("ok") is not True:
             raise OpsError("alert_delivery_unconfirmed")
     except Exception:
         raise OpsError("alert_delivery_unconfirmed") from None
@@ -240,18 +252,24 @@ def run_monitor(config: dict, *, dry_run=False) -> dict:
             if notify and config.get("alerts_enabled") and not dry_run:
                 # Durable reservation BEFORE networking: a crash or ambiguous
                 # response cannot resend the same incident after a restart.
-                state["reserved"] = True
-                alerts.append((component, current["code"]))
+                kind = "recovery" if current["status"] == "OK" else "failure"
+                state["recovery_reserved" if kind == "recovery" else "reserved"] = True
+                alerts.append((component, "recovered" if kind == "recovery" else current["code"], kind))
             incidents[component] = state
         if not dry_run:
             atomic_json(path, incidents)
         delivery = []
-        for component, code in alerts:
+        for component, code, kind in alerts:
             try:
                 send_alert(config, component, code)
-                delivery.append({"component": component, "status": "acknowledged"})
+                # A reservation alone is never evidence of Telegram acceptance.
+                # Losing this write can omit a recovery notice, never duplicate
+                # the already-reserved failure or recovery transmission.
+                incidents[component]["recovery_acknowledged" if kind == "recovery" else "alert_acknowledged"] = True
+                atomic_json(path, incidents)
+                delivery.append({"component": component, "kind": kind, "status": "acknowledged"})
             except OpsError:
-                delivery.append({"component": component, "status": "unconfirmed_no_automatic_retry"})
+                delivery.append({"component": component, "kind": kind, "status": "unconfirmed_no_automatic_retry"})
         status = "FAIL" if any(value["status"] == "FAIL" for value in checks.values()) else "WARN" if any(value["status"] == "WARN" for value in checks.values()) else "OK"
         result = {"checked_at_utc": utcstamp(), "status": status, "checks": checks,
                   "dry_run": dry_run, "alerts_attempted": len(delivery), "alert_delivery": delivery}

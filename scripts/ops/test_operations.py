@@ -1,23 +1,111 @@
 from __future__ import annotations
 
 import copy
+from contextlib import contextmanager
 import datetime as dt
 import hashlib
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
 import tempfile
+import threading
 import unittest
+import urllib.request
 from unittest.mock import patch
 
 from backup_crypto import decrypt, encrypt
 from lifeos_backup import MANAGED_BY, PostgresClient, archive_counts, assert_archive_data, predeploy, retention_candidates, run_backup, verify_backup
-from lifeos_monitor import run_monitor, update_incident, webhook_status
-from ops_common import OpsError, atomic_json, lock
+from lifeos_monitor import http as monitor_http, run_monitor, send_alert, update_incident, webhook_status
+from ops_common import Management, OpsError, atomic_json, lock
 from restore_drill import assert_isolated
 
 PROJECT = "abcdefghijklmnopqrst"
 OWNER = "00000000-0000-4000-8000-000000000001"
+
+
+@contextmanager
+def redirect_fixture():
+    """Two real local origins; no provider connection or credential is used."""
+    destination_requests, source_requests = [], []
+    class Destination(BaseHTTPRequestHandler):
+        def do_GET(self):
+            destination_requests.append(self.headers.get("X-Telegram-Init-Data"))
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'{"ok":true}')
+        do_POST = do_GET
+        def log_message(self, *args):
+            pass
+    destination = ThreadingHTTPServer(("127.0.0.1", 0), Destination)
+    class Source(BaseHTTPRequestHandler):
+        def do_GET(self):
+            source_requests.append({"method": self.command, "authorization": self.headers.get("Authorization"),
+                                    "init_data": self.headers.get("X-Telegram-Init-Data")})
+            self.send_response(int(self.path[1:]))
+            self.send_header("Location", "http://127.0.0.1:" + str(destination.server_port) + "/destination")
+            self.end_headers()
+        do_POST = do_GET
+        def log_message(self, *args):
+            pass
+    source = ThreadingHTTPServer(("127.0.0.1", 0), Source)
+    servers = [source, destination]
+    threads = [threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
+               for server in servers]
+    for thread in threads:
+        thread.start()
+    try:
+        yield "http://127.0.0.1:" + str(source.server_port), destination_requests, source_requests
+    finally:
+        for server in servers:
+            server.shutdown()
+            server.server_close()
+        for thread in threads:
+            thread.join(timeout=2)
+
+
+class MonitorTransportTests(unittest.TestCase):
+    def test_authenticated_probes_never_forward_signed_headers_through_redirects(self):
+        with redirect_fixture() as (origin, destination, source):
+            for status in [301, 302, 303, 307, 308]:
+                with self.subTest(status=status):
+                    actual, body, _ = monitor_http(origin + "/" + str(status),
+                        {"X-Telegram-Init-Data": "synthetic-no-real-authority"})
+                    self.assertEqual(actual, status)
+                    self.assertEqual(body, b"")
+            self.assertEqual(len(source), 5)
+            self.assertTrue(all(request["init_data"] == "synthetic-no-real-authority" for request in source))
+            self.assertEqual(destination, [])
+
+    def test_alert_post_never_follows_redirect_or_accepts_destination_acknowledgment(self):
+        with redirect_fixture() as (origin, destination, source):
+            original = urllib.request.Request
+            def local_telegram_request(url, *args, **kwargs):
+                if url == "https://api.telegram.org/botfixture-bot-token/sendMessage":
+                    url = origin + "/302"
+                return original(url, *args, **kwargs)
+            environment = {"LIFEOS_ADMIN_TELEGRAM_IDS": "12345", "TELEGRAM_BOT_TOKEN": "fixture-bot-token"}
+            config = {"bot_env_file": "unused-fixture", "canonical_telegram_user_id": 12345}
+            with patch("lifeos_monitor.env_file", return_value=environment), \
+                    patch("lifeos_monitor.urllib.request.Request", side_effect=local_telegram_request):
+                with self.assertRaisesRegex(OpsError, "alert_delivery_unconfirmed"):
+                    send_alert(config, "backend", "unavailable")
+            self.assertEqual([request["method"] for request in source], ["POST"])
+            self.assertEqual(destination, [])
+
+    def test_management_post_never_forwards_bearer_through_redirects(self):
+        with tempfile.TemporaryDirectory() as temporary, redirect_fixture() as (origin, destination, source):
+            token = Path(temporary) / "management-token"
+            token.write_text("synthetic-no-real-authority")
+            token.chmod(0o600)
+            management = Management({"project_ref": PROJECT, "management_token_file": str(token)})
+            management.base = origin
+            with self.assertRaisesRegex(OpsError, "management_http_302"):
+                management.request("/302", {"query": "SELECT 1"})
+            self.assertEqual(len(source), 1)
+            self.assertEqual(source[0]["method"], "POST")
+            self.assertEqual(source[0]["authorization"], "Bearer synthetic-no-real-authority")
+            self.assertEqual(destination, [])
 
 
 class EncryptionTests(unittest.TestCase):
@@ -335,6 +423,127 @@ class WebhookTests(unittest.TestCase):
 
 
 class IncidentTests(unittest.TestCase):
+    def test_acknowledged_failure_has_one_recovery_across_changed_degradation_and_rearms(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config = {"state_dir": temporary, "alerts_enabled": True, "suppress_initial_alerts": False}
+            path = Path(temporary) / "incidents.json"
+            before_send = []
+            def acknowledge(*args):
+                before_send.append(json.loads(path.read_text())["backend"])
+            def observe(status, code):
+                with patch("lifeos_monitor.collect", return_value={"backend": {"status": status, "code": code}}):
+                    return run_monitor(config)
+            with patch("lifeos_monitor.send_alert", side_effect=acknowledge) as send:
+                observe("OK", "available")
+                observe("FAIL", "unavailable")
+                observe("FAIL", "unavailable")
+                observe("FAIL", "unavailable")
+                self.assertTrue(json.loads(path.read_text())["backend"]["alert_acknowledged"])
+                observe("WARN", "partially_available")
+                recovered = observe("OK", "available")
+                observe("OK", "available")
+                self.assertEqual([call.args[2] for call in send.call_args_list], ["unavailable", "recovered"])
+                self.assertEqual(recovered["alert_delivery"],
+                    [{"component": "backend", "kind": "recovery", "status": "acknowledged"}])
+                self.assertTrue(before_send[0]["reserved"])
+                self.assertFalse(before_send[0]["alert_acknowledged"])
+                self.assertTrue(before_send[1]["alert_acknowledged"])
+                self.assertTrue(before_send[1]["recovery_reserved"])
+                self.assertTrue(json.loads(path.read_text())["backend"]["recovery_acknowledged"])
+                observe("FAIL", "unavailable")
+                observe("FAIL", "unavailable")
+                self.assertEqual(send.call_count, 3)
+                self.assertFalse(before_send[2]["alert_acknowledged"])
+
+    def test_unnotified_blips_baselines_and_old_reservations_have_no_recovery_message(self):
+        for initial in [None, "baseline", "legacy_reservation"]:
+            with self.subTest(initial=initial), tempfile.TemporaryDirectory() as temporary:
+                config = {"state_dir": temporary, "alerts_enabled": True}
+                path = Path(temporary) / "incidents.json"
+                if initial == "legacy_reservation":
+                    atomic_json(path, {"backend": {"status": "FAIL", "code": "unavailable", "failures": 3,
+                                                   "reserved": True, "baseline": False}})
+                status = "WARN" if initial == "baseline" else "FAIL"
+                with patch("lifeos_monitor.send_alert") as send:
+                    if initial != "legacy_reservation":
+                        with patch("lifeos_monitor.collect", return_value={"backend": {"status": status, "code": "unavailable"}}):
+                            for _ in range(5 if initial == "baseline" else 1):
+                                run_monitor(config)
+                    with patch("lifeos_monitor.collect", return_value={"backend": {"status": "OK", "code": "available"}}):
+                        run_monitor(config)
+                        run_monitor(config)
+                    send.assert_not_called()
+
+    def test_unconfirmed_failure_delivery_does_not_claim_a_recovery(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config = {"state_dir": temporary, "alerts_enabled": True, "alert_failure_threshold": 1}
+            with patch("lifeos_monitor.collect", return_value={"backend": {"status": "FAIL", "code": "unavailable"}}), \
+                    patch("lifeos_monitor.send_alert", side_effect=OpsError("ambiguous")):
+                run_monitor(config)
+            state = json.loads((Path(temporary) / "incidents.json").read_text())["backend"]
+            self.assertTrue(state["reserved"])
+            self.assertFalse(state["alert_acknowledged"])
+            with patch("lifeos_monitor.collect", return_value={"backend": {"status": "OK", "code": "available"}}), \
+                    patch("lifeos_monitor.send_alert") as send:
+                run_monitor(config)
+                send.assert_not_called()
+
+    def test_recovery_is_reserved_before_send_and_a_crash_cannot_resend_it(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config = {"state_dir": temporary, "alerts_enabled": True, "alert_failure_threshold": 1}
+            path = Path(temporary) / "incidents.json"
+            with patch("lifeos_monitor.collect", return_value={"backend": {"status": "FAIL", "code": "unavailable"}}), \
+                    patch("lifeos_monitor.send_alert"):
+                run_monitor(config)
+            def crash(*args):
+                persisted = json.loads(path.read_text())["backend"]
+                self.assertEqual(persisted["status"], "OK")
+                self.assertTrue(persisted["alert_acknowledged"])
+                self.assertTrue(persisted["recovery_reserved"])
+                raise KeyboardInterrupt("simulated interruption before delivery acknowledgment")
+            with patch("lifeos_monitor.collect", return_value={"backend": {"status": "OK", "code": "available"}}):
+                with patch("lifeos_monitor.send_alert", side_effect=crash):
+                    with self.assertRaises(KeyboardInterrupt):
+                        run_monitor(config)
+                with patch("lifeos_monitor.send_alert") as send:
+                    run_monitor(config)
+                    run_monitor(config)
+                    send.assert_not_called()
+
+    def test_ambiguous_recovery_delivery_is_not_retried(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config = {"state_dir": temporary, "alerts_enabled": True, "alert_failure_threshold": 1}
+            with patch("lifeos_monitor.collect", return_value={"backend": {"status": "FAIL", "code": "unavailable"}}), \
+                    patch("lifeos_monitor.send_alert"):
+                run_monitor(config)
+            with patch("lifeos_monitor.collect", return_value={"backend": {"status": "OK", "code": "available"}}), \
+                    patch("lifeos_monitor.send_alert", side_effect=OpsError("ambiguous")) as send:
+                result = run_monitor(config)
+                run_monitor(config)
+                self.assertEqual(send.call_count, 1)
+                self.assertEqual(result["alert_delivery"][0]["kind"], "recovery")
+                self.assertEqual(result["alert_delivery"][0]["status"], "unconfirmed_no_automatic_retry")
+            persisted = json.loads((Path(temporary) / "incidents.json").read_text())["backend"]
+            self.assertTrue(persisted["recovery_reserved"])
+            self.assertFalse(persisted["recovery_acknowledged"])
+
+    def test_recovery_dry_run_preserves_state_and_the_real_run_can_notify_once(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config = {"state_dir": temporary, "alerts_enabled": True, "alert_failure_threshold": 1}
+            path = Path(temporary) / "incidents.json"
+            with patch("lifeos_monitor.collect", return_value={"backend": {"status": "FAIL", "code": "unavailable"}}), \
+                    patch("lifeos_monitor.send_alert"):
+                run_monitor(config)
+            original = path.read_bytes()
+            with patch("lifeos_monitor.collect", return_value={"backend": {"status": "OK", "code": "available"}}), \
+                    patch("lifeos_monitor.send_alert") as send:
+                run_monitor(config, dry_run=True)
+                self.assertEqual(path.read_bytes(), original)
+                send.assert_not_called()
+                run_monitor(config)
+                run_monitor(config)
+                self.assertEqual(send.call_count, 1)
+
     def test_upgrade_does_not_preserve_a_suppressed_critical_failure(self):
         failed = {"status": "FAIL", "code": "backup_last_attempt_failed"}
         legacy = {**failed, "failures": 3, "baseline": True, "reserved": False}
