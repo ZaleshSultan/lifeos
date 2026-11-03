@@ -29,4 +29,4 @@ Mail text and attachments are untrusted input. They cannot issue tool instructio
 - BLOCKED: owner-account OAuth test, live channel metrics/retention and designated-inbox reads. A registered authorized Google client, explicit selected creator account/channel/label consent and a test account are required.
 - UNVERIFIED: actual account API availability, quota behavior, provider refresh/revocation and scheduled creator checks. No fake successful analytics or inbox synchronization is claimed.
 
-The exact inspiration video could not be verified because the ordinary local browser received HTTP 429; see [video evidence audit](VIDEO_IDEAS_AUDIT.md). Google API findings above are independently based on official documentation, not on that video's reported claims.
+The exact inspiration video's public metadata, description and creator chapter labels were verified in an authorized local browser on November 3, 2026. No transcript was retrieved, so its spoken feature claims remain unverified; see [video evidence audit](VIDEO_IDEAS_AUDIT.md). Google API findings above are independently based on official documentation, not on that video's reported claims.
