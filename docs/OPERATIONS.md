@@ -168,6 +168,10 @@ Authenticated probes use server-key-signed service test headers held only in
 memory. They do not create web sessions, edit a journal or demonstrate a real
 handset session. Web entry health is not a claim that every authenticated web
 screen has been exercised.
+Monitor probes, Telegram alert POSTs and privileged Supabase Management requests
+reject redirects. A redirect is a failed probe, unconfirmed alert or Management
+error, never permission to forward a signed user header, bearer credential,
+bot-token URL or payload to another destination.
 
 Telegram's [`getWebhookInfo`](https://core.telegram.org/bots/api#getwebhookinfo)
 retains the most recent error and its timestamp. A correct webhook with no pending
@@ -185,11 +189,20 @@ recorded quietly, not presented as healthy and not repeatedly messaged.
 Operational alerts are explicitly authorized to the configured original
 administrator through the existing bot. Alerts require two consecutive changed
 failure observations by default. A durable reservation is written **before**
-network transmission; ambiguous delivery is not automatically resent. Recovery
-rearms a future incident. This avoids duplicates across timer restarts, at the
-cost of possibly losing an alert if the process dies immediately after its
-reservation. It does not promise exactly-once Telegram delivery. Messages
-contain component/error codes only, never credentials or private records.
+network transmission; ambiguous delivery is not automatically resent. Confirmed
+Telegram acceptance is recorded separately from that reservation. A transition
+back to healthy sends one best-effort `recovered` notice only if an earlier
+failure alert was acknowledged. A reservation without acknowledgment, an
+unnotified brief failure or an initial suppressed warning produces no recovery
+message. Existing reservations from older releases are not treated as proof of
+delivery. Changed degradation codes retain an acknowledged outage until recovery.
+
+Recovery is also reserved durably before sending, and ambiguous recovery delivery
+is not retried. Recovery rearms a future incident. This avoids duplicates across
+timer restarts, at the cost of possibly losing an alert if the process dies
+immediately after its reservation or before persisting acknowledgment. It does
+not promise exactly-once Telegram delivery. Messages contain component/error
+codes only, never credentials or private records.
 Dry runs do not send or mutate incident state; first-run known `WARN` states
 are suppressed. Critical `FAIL` states still alert after the observation
 threshold, including a critical baseline suppressed by an older monitor
