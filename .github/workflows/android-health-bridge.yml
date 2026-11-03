@@ -97,7 +97,8 @@ jobs:
               'sourceCommit': os.environ['GITHUB_SHA'],
               'unitTests': totals,
               'lintErrors': len(errors),
-              'lintWarnings': len(issues) - len(errors),
+              'lintWarnings': sum(issue.attrib.get('severity') == 'Warning' for issue in issues),
+              'lintOtherFindings': sum(issue.attrib.get('severity') not in ('Error', 'Fatal', 'Warning') for issue in issues),
               'lintIssues': [
                   {
                       'id': issue.attrib.get('id'),
