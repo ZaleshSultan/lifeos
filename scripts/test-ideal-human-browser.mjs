@@ -778,6 +778,7 @@ try {
         }),
       );
       await page.reload();
+      await page.getByLabel("Утренний вес, кг", { exact: true }).waitFor();
       await openDetails(page, "Вечерняя рефлексия");
       page.once("dialog", (dialog) => dialog.accept());
       await page
