@@ -25,6 +25,13 @@ export async function captureBrowserScenarios({
   await test(`${prefix}: ambiguous ingest retry keeps one capture and all actions unapproved`, async () => {
     await open();
     await composer().waitFor();
+    const stateFilter = await page
+      .getByLabel("Состояние", { exact: false })
+      .boundingBox();
+    assert.ok(
+      stateFilter && stateFilter.width >= 180,
+      "Capture state filter must remain readable on narrow screens",
+    );
     fixture.failCreateAfterCommitOnce = true;
     await composer().fill(taskText);
     await saveCapture().click();

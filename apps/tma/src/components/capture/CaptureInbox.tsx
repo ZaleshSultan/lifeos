@@ -800,7 +800,7 @@ export function CaptureInbox({
                 />
               </label>
               <div className="flex flex-wrap items-end gap-3">
-                <label className="min-w-0 flex-1 text-sm text-zinc-300">
+                <label className="min-w-[12rem] flex-1 text-sm text-zinc-300">
                   Состояние
                   <select
                     className={captureInputClass}
