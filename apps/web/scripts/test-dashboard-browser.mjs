@@ -13,6 +13,11 @@ import {
   parseIdealHumanDay,
 } from "../../../packages/core/src/ideal-human.ts";
 import { DEFAULT_DAILY_LIFE_PREFERENCES } from "../../../packages/core/src/daily-life.ts";
+import {
+  AI_ROUTER_PROVIDERS,
+  defaultAiRouterSettings,
+  parseAiRouterSettings,
+} from "../../../packages/core/src/ai-model-router.ts";
 const { chromium } = await import(
   process.env.LIFEOS_PLAYWRIGHT_MODULE || "playwright"
 );
@@ -45,6 +50,90 @@ const water = new Map([
   ["B", []],
 ]);
 const receipts = new Map();
+const routerSettings = new Map([
+  ["A", { settings: defaultAiRouterSettings(), revision: 0 }],
+  ["B", { settings: defaultAiRouterSettings(), revision: 0 }],
+]);
+let routerSettingsPuts = 0,
+  routerSaveFailure = 0,
+  routerChatEnabled = false;
+const routerChats = [];
+const routerModels = [
+  {
+    id: "fixture-or-balanced",
+    label: "Fixture OpenRouter Balanced",
+    provider: "openrouter",
+    model: "fixture/route-balanced",
+    tiers: ["fast", "balanced"],
+    capabilities: ["text", "json"],
+    billing: "api",
+    inputCostMicrosPer1k: 100,
+    outputCostMicrosPer1k: 200,
+    configured: true,
+    authorized: true,
+    status: "configured",
+    privacy: "external",
+    metadataVerified: true,
+  },
+  {
+    id: "fixture-gemini-balanced",
+    label: "Fixture Gemini Balanced",
+    provider: "gemini",
+    model: "gemini-fixture-fallback",
+    tiers: ["balanced"],
+    capabilities: ["text", "json"],
+    billing: "api",
+    inputCostMicrosPer1k: 300,
+    outputCostMicrosPer1k: 500,
+    configured: true,
+    authorized: true,
+    status: "configured",
+    privacy: "external",
+    metadataVerified: true,
+  },
+];
+const routerSnapshot = (owner) => ({
+  ...structuredClone(routerSettings.get(owner)),
+  models: routerModels.map((model) =>
+    owner === "A"
+      ? { ...model }
+      : {
+          ...model,
+          configured: false,
+          authorized: false,
+          status: "disconnected",
+        },
+  ),
+  providers: AI_ROUTER_PROVIDERS.map((id) => ({
+    id,
+    status:
+      id === "chatgpt_plan"
+        ? "permission_required"
+        : owner === "A" && ["gemini", "openrouter"].includes(id)
+          ? "configured_unverified"
+          : "not_configured",
+    credentialLabels:
+      owner === "A" && ["gemini", "openrouter"].includes(id)
+        ? ["fixture-" + id + "-project"]
+        : [],
+    verified: false,
+  })),
+  recentExecutions: [],
+  operatorLimits: {
+    routerEnabled: true,
+    maxRequestCostMicros: 1_000_000,
+    maxDailyCostMicros: 5_000_000,
+    paidRequestsEnabled: true,
+    maxOutputTokens: 256,
+  },
+  chatgptPlan: {
+    status: "prepared",
+    identityConnected: false,
+    planUsageAuthorized: false,
+    usesApiCredits: false,
+    manageUsageUrl: "https://chatgpt.com/settings/usage",
+  },
+});
 let taskVersion = 0,
   waterVersion = 0,
   workout = null;
@@ -503,11 +592,79 @@ const backend = createServer(async (req, res) => {
       });
     if (path === "/api/tma/ai/status")
       return json(res, {
-        enabled: false,
-        available: false,
-        reason: "disabled",
+        enabled: routerChatEnabled,
+        available: routerChatEnabled,
+        reason: routerChatEnabled ? null : "disabled",
         liveEnabled: false,
       });
+    if (path === "/api/tma/ai/router/settings") {
+      if (req.method === "PUT") {
+        routerSettingsPuts++;
+        assert.deepEqual(Object.keys(input).sort(), [
+          "expectedRevision",
+          "settings",
+        ]);
+        if (routerSaveFailure)
+          return json(
+            res,
+            { error: "fixture_router_failure" },
+            routerSaveFailure,
+          );
+        const old = routerSettings.get(owner);
+        if (input.expectedRevision !== old.revision)
+          return json(res, { error: "ai_router_settings_conflict" }, 409);
+        routerSettings.set(owner, {
+          settings: parseAiRouterSettings(input.settings),
+          revision: old.revision + 1,
+        });
+      }
+      return json(res, routerSnapshot(owner));
+    }
+    if (path === "/api/tma/ai/chat") {
+      if (!routerChatEnabled) return json(res, { error: "ai_disabled" }, 503);
+      assert.equal(req.method, "POST");
+      assert.ok(
+        Object.keys(input).every((key) =>
+          [
+            "messages",
+            "date",
+            "requestId",
+            "previousModelId",
+            "confirmationToken",
+          ].includes(key),
+        ),
+      );
+      assert.match(input.requestId, /^[a-f0-9-]{36}$/i);
+      assert.ok(Array.isArray(input.messages) && input.messages.length > 0);
+      for (const message of input.messages)
+        assert.deepEqual(Object.keys(message).sort(), ["role", "text"]);
+      routerChats.push({ owner, input: structuredClone(input) });
+      const count = routerChats.filter((item) => item.owner === owner).length;
+      const fallback = count === 2,
+        model = routerModels[fallback ? 1 : 0];
+      return json(res, {
+        answer: `Fixture routed answer ${count}`,
+        suggestions: [],
+        provider: model.provider,
+        readOnly: true,
+        modelRoute: {
+          version: 1,
+          requestId: input.requestId,
+          modelId: model.id,
+          provider: model.provider,
+          model: model.model,
+          billing: "api",
+          estimatedCostMicros: fallback ? 1500 : 1200,
+          reportedCostMicros: fallback ? 900 : 800,
+          costSource: fallback ? "provider_reported" : "rate_estimate",
+          latencyMs: fallback ? 84 : 42,
+          fallback,
+          reason: fallback ? "automatic_fallback" : "automatic_tier",
+          privacy: "external",
+          ...(fallback ? {} : { upstreamProvider: "Fixture OR host" }),
+        },
+      });
+    }
     if (path === "/api/tma/reminders") return json(res, { reminders: [] });
     return json(res, { error: "not_found" }, 404);
   } catch {
@@ -1109,6 +1266,302 @@ try {
     assert.equal(response.status(), 403);
     assert.equal(tasks.get("A").length, before);
   });
+  await test("router settings save manual/automatic policy and retain drafts on failure or CAS conflict", async () => {
+    const beforeChats = routerChats.length,
+      beforePuts = routerSettingsPuts;
+    await page.setViewportSize({ width: 320, height: 900 });
+    await page.goto(`${origin}/web/settings`);
+    const region = page.getByRole("region", {
+      name: "AI Model Router settings",
+      exact: true,
+    });
+    const mode = region.getByRole("combobox", {
+      name: "Выбор модели",
+      exact: true,
+    });
+    const manual = region.getByRole("combobox", {
+      name: "Ручная модель",
+      exact: true,
+    });
+    const save = region.getByRole("button", {
+      name: "Сохранить настройки AI",
+      exact: true,
+    });
+    const requestLimit = region.getByRole("textbox", {
+      name: "Максимум на запрос, USD",
+      exact: true,
+    });
+    const dailyLimit = region.getByRole("textbox", {
+      name: "Максимум за день, USD",
+      exact: true,
+    });
+    const saveWithStatus = async (status) => {
+      const response = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname ===
+            "/web/api/bridge/ai/router/settings" &&
+          response.request().method() === "PUT",
+      );
+      await save.click();
+      assert.equal((await response).status(), status);
+    };
+    await mode.selectOption("manual");
+    await manual.selectOption("fixture-gemini-balanced");
+    await region
+      .getByRole("checkbox", { name: "OpenRouter", exact: true })
+      .check();
+    await region
+      .getByRole("checkbox", { name: "Gemini API", exact: true })
+      .check();
+    await region
+      .getByRole("checkbox", { name: "Быстрые задачи", exact: true })
+      .check();
+    await region
+      .getByRole("checkbox", { name: "Повседневные задачи", exact: true })
+      .check();
+    await region
+      .getByRole("combobox", { name: "Добавить модель: fast", exact: true })
+      .selectOption("fixture-or-balanced");
+    await region
+      .getByRole("combobox", { name: "Добавить модель: balanced", exact: true })
+      .selectOption("fixture-or-balanced");
+    await region
+      .getByRole("combobox", { name: "Добавить модель: balanced", exact: true })
+      .selectOption("fixture-gemini-balanced");
+    for (const category of ["Обычный текст", "Университет"]) {
+      await region
+        .locator("summary")
+        .filter({ hasText: new RegExp("^" + category) })
+        .click();
+      for (const provider of ["OpenRouter", "Gemini API"])
+        await region
+          .getByRole("checkbox", {
+            name: `Разрешить ${category} для ${provider}`,
+            exact: true,
+          })
+          .check();
+    }
+    await region
+      .getByRole("checkbox", { name: /Я разрешаю платные запросы/ })
+      .check();
+    await requestLimit.fill("0.015");
+    await dailyLimit.fill("0.05");
+    await region
+      .getByRole("checkbox", {
+        name: "Разрешить ограниченные запасные попытки",
+        exact: true,
+      })
+      .check();
+    await region
+      .getByRole("checkbox", {
+        name: "Разрешить смену провайдера в пределах моих разрешений",
+        exact: true,
+      })
+      .check();
+    await region
+      .getByRole("combobox", { name: "Максимум попыток", exact: true })
+      .selectOption("2");
+    await saveWithStatus(200);
+    await region.getByText(/Настройки сохранены\./).waitFor();
+    const saved = routerSettings.get("A");
+    assert.equal(saved.settings.mode, "manual");
+    assert.equal(saved.settings.manualModelId, "fixture-gemini-balanced");
+    assert.deepEqual(saved.settings.allowedProviders, ["openrouter", "gemini"]);
+    assert.deepEqual(saved.settings.allowedTiers, [
+      "deterministic",
+      "fast",
+      "balanced",
+    ]);
+    assert.deepEqual(saved.settings.tierModels.balanced, [
+      "fixture-or-balanced",
+      "fixture-gemini-balanced",
+    ]);
+    assert.deepEqual(saved.settings.privacy.health, []);
+    assert.deepEqual(saved.settings.privacy.finance, []);
+    assert.deepEqual(saved.settings.privacy.university, [
+      "openrouter",
+      "gemini",
+    ]);
+    assert.deepEqual(saved.settings.spending, {
+      paidCallsAuthorized: true,
+      maxRequestCostMicros: 15000,
+      maxDailyCostMicros: 50000,
+    });
+    assert.deepEqual(saved.settings.fallback, {
+      enabled: true,
+      maxAttempts: 2,
+      allowProviderChange: true,
+    });
+    assert.equal(routerChats.length, beforeChats);
+    await page.reload();
+    await mode.waitFor();
+    assert.equal(await mode.inputValue(), "manual");
+    assert.equal(await manual.inputValue(), "fixture-gemini-balanced");
+    assert.equal(await requestLimit.inputValue(), "0.015");
+    assert.match(await region.innerText(), /Учётная запись ещё не подключена/);
+    assert.equal(
+      await region
+        .getByRole("link", {
+          name: "Управлять использованием плана ChatGPT",
+          exact: true,
+        })
+        .getAttribute("href"),
+      "https://chatgpt.com/settings/usage",
+    );
+    await mode.selectOption("auto");
+    await saveWithStatus(200);
+    await region.getByText(/Настройки сохранены\./).waitFor();
+    await requestLimit.fill("0.02");
+    routerSaveFailure = 503;
+    await saveWithStatus(503);
+    await region
+      .getByText(/Несохранённые изменения остались на экране\./)
+      .waitFor();
+    assert.equal(await requestLimit.inputValue(), "0.02");
+    assert.equal(
+      routerSettings.get("A").settings.spending.maxRequestCostMicros,
+      15000,
+    );
+    routerSaveFailure = 0;
+    routerSettings.get("A").revision++;
+    routerSettings.get("A").settings.spending.maxDailyCostMicros = 60000;
+    await saveWithStatus(409);
+    await region.getByText(/Запись изменилась в другом окне/).waitFor();
+    assert.equal(await requestLimit.inputValue(), "0.02");
+    assert.equal(
+      routerSettings.get("A").settings.spending.maxRequestCostMicros,
+      15000,
+    );
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    page.off("dialog", acceptDialog);
+    let navigationDialog = false;
+    page.once("dialog", (dialog) => {
+      navigationDialog = true;
+      return dialog.dismiss();
+    });
+    try {
+      await page
+        .getByRole("navigation", { name: "Разделы LifeOS", exact: true })
+        .getByRole("link", { name: "Задачи и план", exact: true })
+        .click();
+      assert.equal(navigationDialog, true);
+      assert.equal(new URL(page.url()).pathname, "/web/settings");
+      assert.equal(await requestLimit.inputValue(), "0.02");
+    } finally {
+      page.on("dialog", acceptDialog);
+    }
+    const reloaded = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname ===
+          "/web/api/bridge/ai/router/settings" &&
+        response.request().method() === "GET",
+    );
+    await region
+      .getByRole("button", { name: "Обновить настройки AI", exact: true })
+      .click();
+    assert.equal((await reloaded).status(), 200);
+    await region
+      .getByText("Есть несохранённые изменения.", { exact: true })
+      .waitFor({ state: "hidden" });
+    assert.equal(await mode.inputValue(), "auto");
+    assert.equal(await requestLimit.inputValue(), "0.015");
+    assert.equal(await dailyLimit.inputValue(), "0.06");
+    assert.equal(await save.isDisabled(), true);
+    assert.equal(routerSettingsPuts, beforePuts + 4);
+    assert.equal(routerChats.length, beforeChats);
+    assert.deepEqual(routerSettings.get("B"), {
+      settings: defaultAiRouterSettings(),
+      revision: 0,
+    });
+    for (const width of [320, 390, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      assert.ok(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+        `router settings overflow at ${width}`,
+      );
+    }
+    await page.screenshot({
+      path: resolve(artifacts, "web-ai-router-settings.png"),
+    });
+  });
+  await test("routed chat shows actual model/cost provenance and retains only safe conversation continuity", async () => {
+    routerChatEnabled = true;
+    try {
+      await page.setViewportSize({ width: 320, height: 900 });
+      await page.goto(`${origin}/web/ai`);
+      const question = page.getByRole("textbox", {
+        name: "Сообщение",
+        exact: true,
+      });
+      const send = page.getByRole("button", { name: "Отправить", exact: true });
+      const details = page.locator('[aria-label="Использование AI модели"]');
+      await question.fill("First fixture planning question");
+      await send.click();
+      await page
+        .getByText("Fixture routed answer 1", { exact: true })
+        .waitFor();
+      await details.first().waitFor();
+      const first = await details.first().innerText();
+      assert.match(first, /OpenRouter/);
+      assert.match(first, /fixture\/route-balanced/);
+      assert.match(first, /Fixture OR host/);
+      assert.match(first, /42 мс/);
+      assert.match(first, /Оценка по использованным токенам/);
+      assert.doesNotMatch(first, /Стоимость от провайдера/);
+      assert.equal(routerChats[0].input.previousModelId, undefined);
+      await question.fill("Second fixture planning question");
+      await send.click();
+      await page
+        .getByText("Fixture routed answer 2", { exact: true })
+        .waitFor();
+      assert.equal(await details.count(), 2);
+      const second = await details.nth(1).innerText();
+      assert.match(second, /Google Gemini/);
+      assert.match(second, /gemini-fixture-fallback/);
+      assert.match(second, /84 мс/);
+      assert.match(second, /Стоимость от провайдера/);
+      assert.match(second, /Использован резервный маршрут/);
+      assert.match(second, /Внешняя обработка/);
+      assert.equal(routerChats[1].input.previousModelId, "fixture-or-balanced");
+      for (const entry of routerChats)
+        for (const message of entry.input.messages)
+          assert.deepEqual(Object.keys(message).sort(), ["role", "text"]);
+      assert.equal(
+        routerChats[1].input.messages[1].text,
+        "Fixture routed answer 1",
+      );
+      assert.equal(await details.first().innerText(), first);
+      assert.ok(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+        "routed receipt overflow at320",
+      );
+      await page
+        .getByRole("button", { name: "Очистить экран", exact: true })
+        .click();
+      assert.equal(await details.count(), 0);
+      await question.fill("Fresh fixture conversation");
+      await send.click();
+      await page
+        .getByText("Fixture routed answer 3", { exact: true })
+        .waitFor();
+      assert.equal(routerChats[2].input.previousModelId, undefined);
+      assert.equal(routerChats[2].input.messages.length, 1);
+      assert.equal(
+        new Set(routerChats.map((entry) => entry.input.requestId)).size,
+        3,
+      );
+      assert.equal(await details.count(), 1);
+      await page.screenshot({
+        path: resolve(artifacts, "web-ai-model-receipt-320.png"),
+      });
+    } finally {
+      routerChatEnabled = false;
+    }
+  });
   await test("reflection deletion confirms intent, blocks dirty drafts and preserves other facts", async () => {
     const original = days.get("A").find((v) => v.date === date);
     original.notes = "Private reflection to remove";
@@ -1265,6 +1718,8 @@ try {
         api: "isolated_loopback_fixtures",
         productionVerified: false,
         realProviderCalls: 0,
+        mockRoutedReplies: routerChats.length,
+        mockRouterSettingsPuts: routerSettingsPuts,
       },
       null,
       2,

@@ -108,6 +108,7 @@ export interface TelegramBotRuntime {
     fetchForUser?: (userId: string) => typeof fetch;
     enabled: boolean;
     openRouterApiKey?: string;
+    trustedRouterTransport?: true;
     model?: string;
   };
   now?: () => Date;

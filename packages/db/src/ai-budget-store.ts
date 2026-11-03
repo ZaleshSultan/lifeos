@@ -30,7 +30,7 @@ export function createAiBudgetStore(
   return {
     async reserve(input, signal) {
       const data = await invoke(
-        "reserve_ai_execution",
+        input.routing ? "reserve_ai_router_execution" : "reserve_ai_execution",
         {
           p_user_id: input.userId,
           p_feature: input.feature,
@@ -39,6 +39,9 @@ export function createAiBudgetStore(
           p_tokens: input.reservedTokens,
           p_estimated_cost_micros: input.estimatedCostMicros,
           p_limits: input.limits as unknown as Json,
+          ...(input.routing
+            ? { p_routing: input.routing as unknown as Json }
+            : {}),
         },
         signal,
       );
@@ -58,12 +61,15 @@ export function createAiBudgetStore(
     },
     async finish(input, signal) {
       const result = await invoke(
-        "finish_ai_execution",
+        input.routing ? "finish_ai_router_execution" : "finish_ai_execution",
         {
           p_user_id: input.userId,
           p_request_id: input.requestId,
           p_state: input.state,
           p_reported_tokens: input.reportedTokens,
+          ...(input.routing
+            ? { p_routing: input.routing as unknown as Json }
+            : {}),
         },
         signal,
       );

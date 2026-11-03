@@ -21,7 +21,14 @@ export interface IdealHumanMeal {
   carbsG?: number | null;
   mealTime?: string | null;
   portion?: string;
-  analysisSource?: "manual" | "gemini" | "agata";
+  analysisSource?:
+    | "manual"
+    | "gemini"
+    | "agata"
+    | "openrouter"
+    | "openai"
+    | "anthropic"
+    | "chatgpt_plan";
   corrected?: boolean;
 }
 export interface IdealHumanFootage {
@@ -526,6 +533,10 @@ function parseDay(input: unknown, allowEmpty: boolean): IdealHumanDay {
                 "manual",
                 "gemini",
                 "agata",
+                "openrouter",
+                "openai",
+                "anthropic",
+                "chatgpt_plan",
               ] as const) ?? ("manual" as const),
           }
         : {}),

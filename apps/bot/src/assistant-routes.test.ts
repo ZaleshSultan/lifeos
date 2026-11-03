@@ -284,6 +284,11 @@ describe("assistant HTTP boundary", () => {
       user.userId,
       [{ role: "user", text: "Explain my planning priorities" }],
       expect.any(Object),
+      {
+        requestId: "http-request",
+        previousModelId: undefined,
+        signal: expect.any(AbortSignal),
+      },
     );
     expect(JSON.stringify(f.ask.mock.calls)).not.toContain(
       "private saved fact",

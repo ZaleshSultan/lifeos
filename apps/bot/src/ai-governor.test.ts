@@ -387,3 +387,93 @@ describe("owned OpenRouter transport", () => {
     ).rejects.toMatchObject({ code: "ai_output_budget_exceeded" });
   });
 });
+
+describe("router extensions preserve the single governor", () => {
+  it("a catalog estimate cannot lower operator pricing and owner caps only tighten", async () => {
+    const base = readAiGovernorConfig({});
+    const f = fixture({
+      ...base,
+      inputCostMicrosPer1k: 10,
+      outputCostMicrosPer1k: 20,
+      limits: { ...base.limits, userCostMicros: 500 },
+    });
+    const result = await f.governor.run(
+      {
+        ...request,
+        estimatedCostMicros: 1,
+        maxUserDailyCostMicros: 100,
+        maxRequestCostMicros: 10,
+      },
+      async () => ({ usage: { total_tokens: 110, completion_tokens: 10 } }),
+    );
+    expect(result.receipt.estimatedCostMicros).toBe(2);
+    expect(f.store.reserve).toHaveBeenCalledWith(
+      expect.objectContaining({
+        estimatedCostMicros: 2,
+        limits: expect.objectContaining({ userCostMicros: 100 }),
+      }),
+      expect.any(AbortSignal),
+    );
+  });
+  it("blocks a configured price floor beyond the request ceiling before any reservation or provider", async () => {
+    const f = fixture({
+      inputCostMicrosPer1k: 1000,
+      outputCostMicrosPer1k: 1000,
+    });
+    const operation = vi.fn(async () => ({}));
+    await expect(
+      f.governor.run(
+        { ...request, estimatedCostMicros: 0, maxRequestCostMicros: 1 },
+        operation,
+      ),
+    ).rejects.toMatchObject({ code: "ai_cost_budget_exceeded" });
+    expect(f.store.reserve).not.toHaveBeenCalled();
+    expect(operation).not.toHaveBeenCalled();
+  });
+  it("reserves routed metadata before work and finishes with actual served-model metadata", async () => {
+    const f = fixture();
+    const routing = {
+      version: 1 as const,
+      provider: "openrouter" as const,
+      model: "vendor/first",
+      selectedModelId: "first",
+      credentialLabel: "project",
+      billing: "api" as const,
+      attempts: 1,
+      fallback: false,
+      inputTokens: null,
+      outputTokens: null,
+      reportedCostMicros: null,
+      costSource: "unknown" as const,
+    };
+    const actual = {
+      ...routing,
+      model: "vendor/second",
+      selectedModelId: "second",
+      fallback: true,
+      inputTokens: 100,
+      outputTokens: 10,
+      reportedCostMicros: 2,
+      costSource: "provider_reported" as const,
+    };
+    await f.governor.run(
+      { ...request, estimatedCostMicros: 5, maxRequestCostMicros: 10, routing },
+      async () => ({
+        routing: actual,
+        usage: { total_tokens: 110, completion_tokens: 10 },
+      }),
+    );
+    expect(f.store.reserve).toHaveBeenCalledWith(
+      expect.objectContaining({ routing }),
+      expect.any(AbortSignal),
+    );
+    expect(f.store.finish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routing: actual,
+        state: "completed",
+        reportedTokens: 110,
+      }),
+      expect.any(AbortSignal),
+    );
+  });
+});

@@ -118,17 +118,20 @@ function initialScreen(): ScreenId {
 export default function App() {
   const [screen, setRawScreen] = useState<ScreenId>(initialScreen);
   const [idealHumanDirty, setIdealHumanDirty] = useState(false);
+  const [aiRouterDirty, setAiRouterDirty] = useState(false);
   const setScreen = (next: ScreenId) => {
     if (
       next !== screen &&
-      (screen === "ideal-human" || screen === "daily-life") &&
-      idealHumanDirty &&
+      (((screen === "ideal-human" || screen === "daily-life") &&
+        idealHumanDirty) ||
+        (screen === "ai" && aiRouterDirty)) &&
       !window.confirm(
-        "Есть несохранённые изменения дневника. Открыть другой раздел и отменить их?",
+        "Есть несохранённые изменения. Открыть другой раздел и отменить их?",
       )
     )
       return;
     setIdealHumanDirty(false);
+    setAiRouterDirty(false);
     setRawScreen(next);
   };
   const [aiDate, setAiDate] = useState<string>();
@@ -225,7 +228,11 @@ export default function App() {
               />
             ) : null}
             {screen === "ai" ? (
-              <AiScreen date={aiDate} onBack={() => setScreen("home")} />
+              <AiScreen
+                date={aiDate}
+                onBack={() => setScreen("home")}
+                onDirtyChange={setAiRouterDirty}
+              />
             ) : null}
             {screen === "workout" ? <WorkoutScreen /> : null}
             {screen === "daily-life" ? (

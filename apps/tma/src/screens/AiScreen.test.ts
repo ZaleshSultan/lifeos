@@ -66,10 +66,11 @@ describe("Optional LifeOS AI interface", () => {
     });
     expect(html).toContain("textarea");
     expect(html).toContain('maxLength="2000"');
-    expect(html).toContain("Google Gemini");
+    expect(html).toContain("approved configured provider");
     expect(html).toContain("private commitment times");
     expect(html).toContain("Health and finance records are excluded");
-    expect(html).toContain("Anything you type is sent");
+    expect(html).toContain("Anything you type may be sent");
+    expect(html).toContain("routing, privacy and spending settings");
     expect(html).toContain("It cannot change your data");
     expect(html).toContain("Clear conversation");
     expect(html).not.toContain("microphone");
@@ -116,7 +117,7 @@ describe("Optional LifeOS AI interface", () => {
     expect(html).toContain("delete memory study.time");
     expect(html).toContain("Permanent deletion may be disabled");
     expect(html).toContain("without sending them to an AI provider");
-    expect(html).toContain("Gemini planning is currently unavailable");
+    expect(html).toContain("Model planning is currently unavailable");
     expect(html).not.toContain("It cannot change your data");
     expect(fetch).not.toHaveBeenCalled();
   });

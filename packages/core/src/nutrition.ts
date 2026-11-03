@@ -28,7 +28,8 @@ export interface MealPhotoDraft {
   expiresAt: string;
   items: MealPhotoItem[];
   uncertainty: string[];
-  source: "gemini";
+  source: "gemini" | "openrouter" | "openai" | "anthropic" | "chatgpt_plan";
+  modelRoute?: import("./ai-execution.js").AiModelRouteReceipt;
   estimated: true;
   requiresReview: true;
 }

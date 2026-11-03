@@ -33,6 +33,10 @@ export async function webRequest<T>(
 }
 export function webErrorMessage(error: unknown): string {
   if (error instanceof WebApiError) {
+    if (error.status === 403 && error.code === "ai_router_blocked")
+      return "Выбор модели ограничен настройками провайдеров, приватности или расходов. Проверь настройки AI; обычные функции LifeOS доступны.";
+    if (error.status === 403 && error.code === "ai_router_consent_changed")
+      return "Настройки AI изменились, пока запрос ожидал выполнения. Проверь их перед новым запросом.";
     if (error.status === 401 || error.status === 403)
       return "Доступ истёк или отозван. Открой новый вход командой /web в Telegram.";
     if (error.status === 409)

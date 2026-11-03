@@ -41,4 +41,27 @@ describe("web resource boundary", () => {
     ])
       expect(bridgeQuery(new URLSearchParams(value))).toBeNull();
   });
+
+  it("allows router policy and offline preview but never keys, OAuth or inference-control endpoints", () => {
+    for (const method of ["GET", "PUT"])
+      expect(bridgeResourceAllowed("ai/router/settings", method)).toBe(true);
+    expect(bridgeResourceAllowed("ai/router/preview", "POST")).toBe(true);
+    for (const method of ["POST", "PATCH", "DELETE"])
+      expect(bridgeResourceAllowed("ai/router/settings", method)).toBe(false);
+    for (const method of ["GET", "PUT", "PATCH", "DELETE"])
+      expect(bridgeResourceAllowed("ai/router/preview", method)).toBe(false);
+    for (const path of [
+      "ai/router/credentials",
+      "ai/router/keys",
+      "ai/router/connect",
+      "ai/router/execute",
+      "ai/router/admin",
+      "ai/router/oauth/callback",
+      "ai/router/settings/other-owner",
+      "ai/router/settings?user_id=other",
+      "https://untrusted.example/ai/router/settings",
+    ])
+      for (const method of ["GET", "POST", "PUT", "PATCH", "DELETE"])
+        expect(bridgeResourceAllowed(path, method)).toBe(false);
+  });
 });

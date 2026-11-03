@@ -18,7 +18,7 @@ The existing assistant executes at most one classified, allowlisted tool for eac
 - A provider that ignores cancellation retains its concurrency slot until its promise settles; it cannot silently free capacity for more paid work.
 - Gemini uses the shorter of its configured timeout and the governor deadline. The governor observes the actual SDK promise, including model discovery, so an internal timeout cannot release a still-running request's slot. Late discovery cannot start a generation after cancellation.
 - Three consecutive provider failures open the process-local circuit for 60 seconds by default. A successful operation resets the failure counter.
-- No automatic retries. An explicit new request consumes a new reservation; repeating the same request ID never calls the provider again.
+- The governor does not retry operations. The optional [model router](AI_MODEL_ROUTER.md) can perform explicitly authorized, bounded fallback inside one conservative reservation. An explicit new request consumes a new reservation; repeating the same request ID never calls the provider again.
 - OpenRouter transport allows only `https://openrouter.ai/api/v1/chat/completions`, refuses redirects, bounds request/response sizes, clamps output and strips untrusted destinations from the interface.
 - Existing Gemini per-minute/day/context limits remain in addition to durable reservations, and SDK retries remain limited to one attempt.
 
@@ -60,3 +60,14 @@ For emergency shutdown, set `LIFEOS_AI_KILL_SWITCH=true` in the existing protect
 ## Legacy monthly review
 
 The standalone Python monthly-review worker has no shared-governor gateway. Its optional direct OpenRouter path now fails closed even when the legacy AI flag and key are present, returning the deterministic report with `shared_ai_governor_required`. It makes no request to a configured arbitrary base URL. Its original single-user opt-in guard remains enforced. This is a safe fallback, not a claim that worker AI generation is connected or production-verified.
+
+## Unified model router extension
+
+The [router](AI_MODEL_ROUTER.md) retains this governor and ledger. Trusted model
+pricing can raise the configured conservative price estimate; it cannot lower an
+operator floor. Owner request/day ceilings only tighten operator limits. Router
+metadata uses service-only reservation/finish RPCs, so absent migrations stop
+provider dispatch. Final provider/model/key aliases, observed usage and cost-source
+labels contain no prompts or credentials. Reported higher costs constrain future
+requests; failed work is never refunded. Plan usage is a distinct billing path,
+not an API credit balance, and remains prepared until consent/eligibility is verified.
