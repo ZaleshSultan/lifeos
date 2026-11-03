@@ -182,12 +182,45 @@ def collect(config: dict) -> dict:
     check("offsite_backup", offsite_backup)
 
     def restore_age():
-        state = read_json(Path(config["state_dir"]) / "last-restore-success.json", {})
-        if not state.get("success"):
+        directory = Path(config["state_dir"])
+        state = read_json(directory / "last-restore-success.json", {})
+        attempt = read_json(directory / "last-restore-attempt.json", {})
+        if not isinstance(state, dict) or state.get("success") is not True:
             raise OpsError("restore_drill_missing")
-        age = (utcnow() - dt.datetime.fromisoformat(state["finished_at_utc"])).total_seconds()
+
+        def finished_at(value):
+            try:
+                if not isinstance(value, str) or len(value) > 100:
+                    raise ValueError()
+                parsed = dt.datetime.fromisoformat(value)
+                if parsed.tzinfo is None or parsed.utcoffset() is None:
+                    raise ValueError()
+                return parsed
+            except (TypeError, ValueError):
+                raise OpsError("restore_drill_timestamp_invalid") from None
+
+        now = utcnow()
+        successful_at = finished_at(state.get("finished_at_utc"))
+        age = (now - successful_at).total_seconds()
         if age < 0 or age > 8 * 86400:
             raise OpsError("restore_drill_stale")
+        if not isinstance(attempt, dict):
+            raise OpsError("restore_drill_attempt_invalid")
+        if attempt:
+            if type(attempt.get("success")) is not bool:
+                raise OpsError("restore_drill_attempt_invalid")
+            attempted_at = finished_at(attempt.get("finished_at_utc"))
+            if attempted_at > now:
+                raise OpsError("restore_drill_timestamp_invalid")
+            if attempt["success"] is False and attempted_at >= successful_at:
+                raise OpsError("restore_drill_last_attempt_failed")
+        # A killed/timed-out oneshot cannot always persist its failed attempt.
+        # A completed successful oneshot is normally inactive, not running.
+        properties = command(["systemctl", "--user", "show", "lifeos-restore-drill.service",
+                              "-p", "LoadState", "-p", "Result"], timeout=10).decode()
+        unit = dict(line.split("=", 1) for line in properties.splitlines() if "=" in line)
+        if unit.get("LoadState") == "loaded" and unit.get("Result") not in {None, "success"}:
+            raise OpsError("restore_drill_service_failed")
         return {"status": "OK", "code": "isolated_restore_verified", "age_hours": round(age / 3600, 1)}
     check("restore_drill", restore_age)
     check("disk", lambda: {"status": "OK" if shutil.disk_usage(config["backup_dir"]).free >= 2 * 1024**3 else "FAIL", "code": "space_available" if shutil.disk_usage(config["backup_dir"]).free >= 2 * 1024**3 else "disk_space_low"})
