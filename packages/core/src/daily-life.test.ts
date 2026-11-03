@@ -16,6 +16,136 @@ import {
 } from "./daily-life.js";
 const now = new Date("2026-11-03T06:00:00Z");
 describe("daily Life facts and inputs", () => {
+  it("includes actual sleep, stale markers and a bounded manual recovery note in both briefings", () => {
+    const day = parseIdealHumanDay({
+      date: "2026-11-03",
+      recoveryNotes: "Need a slower start " + "x".repeat(500),
+    });
+    const health = projectDailyHealth({
+      date: day.date,
+      manual: day,
+      metrics: { sleep_minutes: 410 },
+      records: [
+        {
+          metricType: "sleep_minutes",
+          value: 410,
+          source: "health_connect",
+          updatedAt: "2026-10-25T00:00:00Z",
+          confidence: null,
+        },
+      ],
+      now,
+    });
+    const input = {
+      date: day.date,
+      day,
+      health,
+      classes: [],
+      deadlines: [],
+      tasks: [],
+      workouts: [],
+      lmsStale: false,
+    };
+    const views = buildDailyBriefings(input);
+    for (const view of [views.morning, views.evening]) {
+      expect(view.facts).toContain(
+        "Записанный сон: 410 мин · health_connect · устаревшая запись",
+      );
+      expect(view.warnings).toEqual(expect.arrayContaining(health.warnings));
+      const recovery = view.facts.find((fact) =>
+        fact.includes("Твоя запись о восстановлении:"),
+      );
+      expect(recovery).toContain("Need a slower start");
+      expect(recovery).toContain("manual_journal");
+      expect(recovery!.length).toBeLessThan(320);
+      expect(recovery).not.toContain("x".repeat(500));
+    }
+    const privateViews = buildDailyBriefings({
+      ...input,
+      deliveryPrivacy: { includeHealth: false, includeFilming: true },
+    });
+    expect(JSON.stringify(privateViews)).not.toMatch(
+      /410|health_connect|Need a slower|stale|сон|восстановлении/,
+    );
+  });
+  it("marks missing sleep and recovery as unknown in both views instead of inventing a score", () => {
+    const views = buildDailyBriefings({
+      date: "2026-11-03",
+      day: null,
+      health: projectDailyHealth({
+        date: "2026-11-03",
+        manual: null,
+        metrics: {},
+        records: [],
+        now,
+      }),
+      classes: [],
+      deadlines: [],
+      tasks: [],
+      workouts: [],
+      lmsStale: false,
+    });
+    for (const view of [views.morning, views.evening]) {
+      expect(view.warnings.join(" ")).toContain(
+        "Записанный сон недоступен в этом обзоре",
+      );
+      expect(view.warnings.join(" ")).toContain(
+        "Ручная запись о восстановлении недоступна в этом обзоре",
+      );
+      expect(view.facts.join(" ")).not.toMatch(
+        /Записанный сон|Твоя запись о восстановлении/,
+      );
+    }
+  });
+  it("distinguishes failed task/workout sources from verified empty history", () => {
+    const input = {
+      date: "2026-11-03",
+      day: null,
+      health: projectDailyHealth({
+        date: "2026-11-03",
+        manual: null,
+        metrics: {},
+        records: [],
+        now,
+      }),
+      classes: [],
+      deadlines: [],
+      tasks: [],
+      workouts: [],
+      lmsStale: false,
+    };
+    const verified = buildDailyBriefings(input);
+    expect(verified.evening.facts.join(" ")).toContain("завершения сегодня: 0");
+    expect(verified.evening.warnings.join(" ")).toContain(
+      "тренировка на эту дату не зарегистрирована",
+    );
+    const unavailable = buildDailyBriefings({
+      ...input,
+      sourceAvailability: { tasks: false, workouts: false },
+    });
+    expect(unavailable.evening.facts.join(" ")).not.toContain(
+      "завершения сегодня: 0",
+    );
+    expect(unavailable.evening.warnings.join(" ")).not.toContain(
+      "тренировка на эту дату не зарегистрирована",
+    );
+    expect(unavailable.evening.warnings.join(" ")).toMatch(
+      /Источник задач недоступен/,
+    );
+    expect(unavailable.evening.warnings.join(" ")).toMatch(
+      /Источник тренировок недоступен/,
+    );
+    expect(unavailable.evening.tomorrowOrder).toEqual([]);
+    const privateViews = buildDailyBriefings({
+      ...input,
+      sourceAvailability: { tasks: false, workouts: false },
+      deliveryPrivacy: { includeHealth: false, includeFilming: false },
+    });
+    expect(JSON.stringify(privateViews)).not.toContain("тренировок");
+    expect(privateViews.evening.warnings.join(" ")).toContain(
+      "Источник задач недоступен",
+    );
+  });
   it("omits health and filming facts at their source for notification privacy without filtering unrelated user text", () => {
     const day = parseIdealHumanDay({
       ...emptyIdealHumanDay("2026-11-03"),

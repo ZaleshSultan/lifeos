@@ -339,6 +339,7 @@ export function buildDailyBriefings(input: {
   tasks: TaskWorkspaceItem[];
   workouts: Array<{ title: string | null; startedAt: string; endedAt: string }>;
   lmsStale: boolean;
+  sourceAvailability?: { tasks: boolean; workouts: boolean; journal?: boolean };
   deliveryPrivacy?: { includeHealth: boolean; includeFilming: boolean };
 }): { morning: BriefingView; evening: BriefingView } {
   const warnings = input.lmsStale
@@ -372,23 +373,13 @@ export function buildDailyBriefings(input: {
           `Дедлайн: ${d.title}${d.dueAt ? ` · ${d.dueAt}` : " · дата неизвестна"}`,
       ),
   );
-  const available = input.tasks
+  const tasks = input.sourceAvailability?.tasks === false ? [] : input.tasks;
+  const available = tasks
     .filter((t) => !["done", "cancelled"].includes(t.status))
     .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
   morning.facts.push(
     ...available.slice(0, 3).map((t) => `Открытая задача: ${t.title}`),
   );
-  if (
-    input.deliveryPrivacy?.includeHealth !== false &&
-    input.health.sleepMinutes
-  )
-    morning.facts.push(
-      `Записанный сон: ${input.health.sleepMinutes.value} мин · ${input.health.sleepMinutes.source}`,
-    );
-  else if (input.deliveryPrivacy?.includeHealth !== false)
-    morning.warnings.push(
-      "Сон не записан; оценка восстановления не выдумывается.",
-    );
   const plans = (
     input.day?.plan ??
     (idealHumanDayNumber(input.date) ? defaultIdealHumanPlan(input.date) : [])
@@ -421,15 +412,58 @@ export function buildDailyBriefings(input: {
     ],
     tomorrowOrder: available.slice(0, 5).map((t) => t.title),
   };
-  const completed = input.tasks.filter(
+  if (input.sourceAvailability?.tasks === false) {
+    morning.warnings.push(
+      "Источник задач недоступен; приоритеты задач неизвестны.",
+    );
+    evening.warnings.push(
+      "Источник задач недоступен; завершения и порядок на завтра неизвестны.",
+    );
+  }
+  if (input.deliveryPrivacy?.includeHealth !== false) {
+    const sleep = input.health.sleepMinutes;
+    const recoveryNote = input.day?.recoveryNotes.trim() ?? "";
+    const recoveryCharacters = Array.from(recoveryNote.replace(/\s+/g, " "));
+    for (const view of [morning, evening]) {
+      view.warnings.push(...input.health.warnings);
+      if (sleep)
+        view.facts.push(
+          `Записанный сон: ${sleep.value} мин · ${sleep.source}${sleep.stale ? " · устаревшая запись" : ""}`,
+        );
+      else
+        view.warnings.push(
+          "Записанный сон недоступен в этом обзоре; оценка восстановления не выдумывается.",
+        );
+      if (recoveryNote)
+        view.facts.push(
+          `Твоя запись о восстановлении: ${recoveryCharacters.slice(0, 240).join("")}${recoveryCharacters.length > 240 ? "…" : ""} · manual_journal`,
+        );
+      else
+        view.warnings.push(
+          "Ручная запись о восстановлении недоступна в этом обзоре; оценка не выдумывается.",
+        );
+    }
+  }
+  const completed = tasks.filter(
     (t) =>
       t.completedAt &&
       idealHumanLocalDate(new Date(t.completedAt)) === input.date,
   );
-  evening.facts.push(
-    `Задач с фактической отметкой завершения сегодня: ${completed.length}.`,
-  );
-  if (input.deliveryPrivacy?.includeHealth !== false && input.workouts.length)
+  if (input.sourceAvailability?.tasks !== false)
+    evening.facts.push(
+      `Задач с фактической отметкой завершения сегодня: ${completed.length}.`,
+    );
+  if (
+    input.deliveryPrivacy?.includeHealth !== false &&
+    input.sourceAvailability?.workouts === false
+  )
+    evening.warnings.push(
+      "Источник тренировок недоступен; число завершённых тренировок неизвестно.",
+    );
+  else if (
+    input.deliveryPrivacy?.includeHealth !== false &&
+    input.workouts.length
+  )
     evening.facts.push(
       `Завершённых тренировок LifeOS: ${input.workouts.length}.`,
     );
@@ -463,7 +497,9 @@ export function buildDailyBriefings(input: {
   }
   if (!input.day)
     evening.warnings.push(
-      "Дневник дня пока не сохранён; достижения не предполагаются.",
+      input.sourceAvailability?.journal === false
+        ? "Источник дневника недоступен; записи и достижения неизвестны."
+        : "Дневник дня пока не сохранён; достижения не предполагаются.",
     );
   return { morning, evening };
 }

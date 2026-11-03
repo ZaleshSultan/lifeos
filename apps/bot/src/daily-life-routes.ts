@@ -147,6 +147,12 @@ export async function dailyLifeSummary(
     tasks: tasks.tasks,
     workouts,
     lmsStale: !work || work.stale,
+    sourceAvailability: {
+      tasks: Boolean(store.dailyLife) && results[3].status === "fulfilled",
+      workouts: results[5].status === "fulfilled",
+      journal:
+        Boolean(store.getIdealHumanDays) && results[0].status === "fulfilled",
+    },
     deliveryPrivacy,
   });
   const meals = day?.meals ?? [];
@@ -208,7 +214,10 @@ export async function dailyLifeSummary(
         .map((d) => d.videoReflection || d.highlights)
         .filter(Boolean),
     },
-    sourceWarnings: warnings,
+    sourceWarnings:
+      deliveryPrivacy?.includeHealth === false
+        ? warnings.filter((warning) => !/^(?:Health|Workouts) /.test(warning))
+        : warnings,
     generatedBy: "deterministic",
   };
 }
