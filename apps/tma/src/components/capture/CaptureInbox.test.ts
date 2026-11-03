@@ -56,6 +56,8 @@ describe("private capture review rendering", () => {
       }),
     );
     expect(html).toContain("Голос в Telegram");
+    expect(html).toContain('aria-label="Мысль, команда или ссылка"');
+    expect(html).toContain('aria-label="Поиск по исходным записям"');
     expect(html).toContain("&lt;script&gt;untrusted original&lt;/script&gt;");
     expect(html).not.toContain("<script>");
     expect(html).not.toContain(record().id);
@@ -82,6 +84,7 @@ describe("private capture review rendering", () => {
       }),
     );
     expect(html).toContain("Ручная расшифровка");
+    expect(html).toContain('aria-label="Ручная расшифровка"');
     expect(html).toContain("LifeOS не заявляет, что речь распознана");
     expect(html).not.toContain("<audio");
     expect(html).not.toContain("transcription_unavailable");

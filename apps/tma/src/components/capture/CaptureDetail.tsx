@@ -210,6 +210,7 @@ export function CaptureDetail({
               <label className="block text-sm text-zinc-300">
                 Ручная расшифровка
                 <textarea
+                  aria-label="Ручная расшифровка"
                   rows={5}
                   maxLength={capabilities.maxTextLength}
                   className={captureInputClass}

@@ -43,6 +43,20 @@ function editor(action: CaptureActionPayload) {
   );
 }
 describe("capture typed action forms", () => {
+  it("gives filled multiline fields a stable accessible name independent of their controlled text node", () => {
+    const html = editor({
+      kind: "learning.note",
+      args: {
+        date: "2026-11-03",
+        topic: "Owned topic",
+        content: "Retained <private> multiline content",
+      },
+    });
+    expect(html).toContain('aria-label="Учебная заметка"');
+    expect(html).toContain(
+      "Retained &lt;private&gt; multiline content</textarea>",
+    );
+  });
   it("keeps unknown nutrition values blank and identifies estimates", () => {
     const html = editor({
       kind: "meal.record",

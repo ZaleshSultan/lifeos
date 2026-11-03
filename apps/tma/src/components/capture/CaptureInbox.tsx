@@ -694,6 +694,7 @@ export function CaptureInbox({
                   Мысль, команда или ссылка
                   <textarea
                     ref={composeInput}
+                    aria-label="Мысль, команда или ссылка"
                     className={captureInputClass}
                     rows={5}
                     maxLength={capabilities?.maxTextLength ?? 8000}
@@ -790,6 +791,7 @@ export function CaptureInbox({
               <label className="block text-sm text-zinc-300">
                 Поиск по исходным записям
                 <textarea
+                  aria-label="Поиск по исходным записям"
                   rows={1}
                   maxLength={200}
                   className={captureInputClass}

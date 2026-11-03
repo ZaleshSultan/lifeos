@@ -77,6 +77,7 @@ export function CaptureActionEditor({
         ? tasks.find((task) => task.id === args.taskId)?.notes
         : args[key];
     const props = {
+      "aria-label": label,
       value: typeof original === "string" ? original : "",
       maxLength,
       className: captureInputClass,
