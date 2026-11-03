@@ -1,5 +1,7 @@
 import { readFile } from "node:fs/promises";
 import type { AssistantBrain } from "../assistant/brain.js";
+import * as weather from "../weather.js";
+import type { CaptureTelegramPort } from "./capture.js";
 import { normalizeFinanceCategory } from "@lifeos/core";
 import type {
   HealthIngestPayload,
@@ -1948,6 +1950,214 @@ function runtime(store = new FakeStore()): TelegramBotRuntime & {
     },
   };
 }
+
+describe("Telegram persistent menu with capture enabled", () => {
+  const menuCases = [
+    ["Сегодня", "/today", "На сегодня записей пока нет"],
+    ["Дедлайны", "/deadlines", "Ближайших дедлайнов нет"],
+    ["Учёба", "/study", "Курс:"],
+    ["Напоминания", "/reminders", "Предстоящих напоминаний нет"],
+    ["Тренировки", "/workout_menu", "Активной тренировки нет"],
+    ["Финансы", "/finance", "Финансы:"],
+    ["Здоровье", "/health", "Health today:"],
+    ["Фокус", "/focus", "Focus score:"],
+    ["Источники", "/sources", "Data sources:"],
+    ["Режим", "/mode", "Mode:"],
+    ["Погода", "/weather", "Synthetic Almaty"],
+    ["Web", "/web", "2 минуты"],
+    ["Банк", "/bank unmatched", "Банковских операций без чека нет"],
+  ] as const;
+
+  function captureContext() {
+    const store = new FakeStore();
+    store.user = { ...store.user!, telegramUserId: 30 };
+    store.hasCurrentWorkout = false;
+    store.weatherSettings = {
+      locationName: "Synthetic Almaty",
+      latitude: 43.2,
+      longitude: 76.9,
+    };
+    const context = runtime(store);
+    context.webDashboardUrl = "https://lifeos.example/web";
+    context.webSessionSecret = "synthetic-menu-session-secret";
+    const assistantHandle = vi.fn();
+    context.assistant = {
+      status: () => ({ assistantEnabled: true }),
+      handle: assistantHandle,
+    } as unknown as AssistantBrain;
+    const result = {
+      id: "10000000-0000-4000-8000-000000000001",
+      state: "needs_review" as const,
+      duplicate: false,
+    };
+    const capture = {
+      ingestText: vi.fn<CaptureTelegramPort["ingestText"]>(async () => result),
+      ingestVoice: vi.fn<CaptureTelegramPort["ingestVoice"]>(
+        async () => result,
+      ),
+      setTranscript: vi.fn<CaptureTelegramPort["setTranscript"]>(
+        async () => result,
+      ),
+    };
+    return Object.assign(context, { capture, assistantHandle });
+  }
+
+  function privateUpdate(text: string) {
+    const incoming = update(text);
+    incoming.message!.chat.id = 30;
+    incoming.message!.date = Math.floor(
+      Date.parse("2026-05-18T12:00:00.000Z") / 1000,
+    );
+    return incoming;
+  }
+
+  function expectNoCapture(context: ReturnType<typeof captureContext>) {
+    expect(context.capture.ingestText).not.toHaveBeenCalled();
+    expect(context.capture.ingestVoice).not.toHaveBeenCalled();
+    expect(context.capture.setTranscript).not.toHaveBeenCalled();
+    expect(context.store.captures).toHaveLength(0);
+    expect(context.assistantHandle).not.toHaveBeenCalled();
+  }
+
+  it("covers every label displayed by the real persistent keyboard", async () => {
+    const context = captureContext();
+    await handleTelegramUpdate(privateUpdate("/start"), context);
+    const markup = context.sent.at(-1)?.replyMarkup;
+    expect(
+      markup && "keyboard" in markup
+        ? markup.keyboard.flat().map((button) => button.text)
+        : [],
+    ).toEqual(menuCases.map(([label]) => label));
+    expect(menuCases).toHaveLength(13);
+    expectNoCapture(context);
+  });
+
+  it.each(menuCases)(
+    "keeps %s on its existing %s route with an active capture port",
+    async (label, slash, expectedText) => {
+      const weatherRequest = vi
+        .spyOn(weather, "fetchWeatherSnapshot")
+        .mockResolvedValue({
+          locationName: "Synthetic Almaty",
+          temperatureC: 20,
+          apparentTemperatureC: 19,
+          weatherCode: 0,
+          weatherLabel: "ясно",
+          windSpeedKmh: 1,
+          minTemperatureC: 10,
+          maxTemperatureC: 21,
+          precipitationProbabilityPercent: 0,
+        });
+      const fetcher = vi
+        .spyOn(globalThis, "fetch")
+        .mockRejectedValue(
+          new Error("External calls forbidden in menu fixtures"),
+        );
+      try {
+        const menu = captureContext(),
+          explicit = captureContext();
+        await handleTelegramUpdate(privateUpdate(label), menu);
+        await handleTelegramUpdate(privateUpdate(slash), explicit);
+        expect(menu.sent.length).toBeGreaterThan(0);
+        expect(menu.sent.map((message) => message.text)).toEqual(
+          explicit.sent.map((message) => message.text),
+        );
+        expect(menu.sent.at(-1)?.text).toContain(expectedText);
+        expectNoCapture(menu);
+        expectNoCapture(explicit);
+        expect(fetcher).not.toHaveBeenCalled();
+        expect(weatherRequest).toHaveBeenCalledTimes(
+          label === "Погода" ? 2 : 0,
+        );
+      } finally {
+        fetcher.mockRestore();
+        weatherRequest.mockRestore();
+      }
+    },
+  );
+
+  it("still captures ordinary private text before the legacy assistant can write", async () => {
+    const context = captureContext();
+    await handleTelegramUpdate(
+      privateUpdate("Add task review the synthetic capture"),
+      context,
+    );
+    expect(context.capture.ingestText).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        userId: "user-1",
+        requestId: "tg-capture:30:10",
+        text: "Add task review the synthetic capture",
+      }),
+    );
+    expect(context.assistantHandle).not.toHaveBeenCalled();
+    expect(context.store.tasks).toHaveLength(0);
+    expect(context.store.captures).toHaveLength(0);
+  });
+
+  it("leaves malformed messages without a chat to the capture boundary", async () => {
+    const context = captureContext();
+    const incoming = privateUpdate("Сегодня");
+    delete (incoming.message as unknown as { chat?: unknown }).chat;
+    await expect(handleTelegramUpdate(incoming, context)).resolves.toBeUndefined();
+    expectNoCapture(context);
+    expect(context.sent).toHaveLength(0);
+  });
+
+  it("preserves explicit legacy slash writes with capture enabled", async () => {
+    const context = captureContext();
+    await handleTelegramUpdate(
+      privateUpdate("/task Explicit synthetic task"),
+      context,
+    );
+    expect(context.store.tasks).toHaveLength(1);
+    expect(context.store.tasks[0].title).toBe("Explicit synthetic task");
+    expect(context.sent.at(-1)?.text).toContain("Task id:");
+    expectNoCapture(context);
+  });
+
+  it.each(["voice", "audio", "document", "photo"] as const)(
+    "retains capture media safety for menu-like text with %s",
+    async (attachment) => {
+      const context = captureContext();
+      const incoming = privateUpdate("Сегодня");
+      if (attachment === "voice")
+        incoming.message!.voice = {
+          file_id: "synthetic_voice",
+          file_unique_id: "synthetic_unique",
+          duration: 10,
+          file_size: 100,
+          mime_type: "audio/ogg",
+        };
+      else if (attachment === "photo")
+        incoming.message!.photo = [
+          {
+            file_id: "synthetic_photo",
+            file_unique_id: "synthetic_unique",
+            width: 1,
+            height: 1,
+            file_size: 100,
+          },
+        ];
+      else incoming.message![attachment] = {};
+      const downloader = vi.spyOn(context.telegram, "getFileUrl");
+      await handleTelegramUpdate(incoming, context);
+      expect(context.capture.ingestText).not.toHaveBeenCalled();
+      expect(context.capture.ingestVoice).toHaveBeenCalledTimes(
+        attachment === "voice" ? 1 : 0,
+      );
+      expect(context.assistantHandle).not.toHaveBeenCalled();
+      expect(downloader).not.toHaveBeenCalled();
+      expect(context.sent.at(-1)?.text).not.toContain(
+        "На сегодня записей пока нет",
+      );
+      if (attachment !== "voice")
+        expect(context.sent.at(-1)?.text).toContain(
+          "Этот тип файла пока не поддерживается",
+        );
+      downloader.mockRestore();
+    },
+  );
+});
 
 describe("Telegram commands", () => {
   it("keeps quick finance input on its existing path when assistant tools are enabled", async () => {
