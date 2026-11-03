@@ -153,7 +153,10 @@ describe("actual HTTP Telegram capture ingress", () => {
     expect(f.telegram.getFileUrl).not.toHaveBeenCalled();
     expect(f.assistant.handle).not.toHaveBeenCalled();
     expect(f.sent.at(-1)?.text).toContain(
-      "Автоматическая расшифровка сейчас недоступна",
+      "Аудио не скачано и не отправлено внешнему AI",
+    );
+    expect(f.sent.at(-1)?.text).toContain(
+      "отдельно согласиться на распознавание, если оно настроено",
     );
   });
   it("retries scoped pre-persistence errors without producing duplicate captures on repeated updates", async () => {
