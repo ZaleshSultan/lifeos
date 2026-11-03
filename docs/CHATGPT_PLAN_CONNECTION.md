@@ -126,8 +126,10 @@ The current preview excludes several ordinary Responses fields, including
 therefore sends no tools or unsupported overrides. Output bytes are bounded
 locally and execution still needs the existing LifeOS governor, permissions and
 spending checks. Local cancellation cannot prove a provider billing stop. The
-router keeps this path disabled pending owner consent and a separately authorized
-live contract/usage test. See [preview limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations).
+router rejects this provider in the current release. Connecting the companion
+still requires future wiring of the encrypted vault, account-specific model catalog
+and governed runtime adapter, followed by owner browser consent, eligibility
+verification and a separately authorized live contract/usage test. See [preview limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations).
 
 ## Native developer clients remain separate
 

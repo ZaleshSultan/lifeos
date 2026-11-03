@@ -16,7 +16,7 @@ SQL, run a shell, or approve a proposed change.
 | OpenRouter           | Multiple models on one key, approved `models` arrays, provider/price/privacy filters and separately scoped optional keys    | No live inference tested for this feature                                              |
 | Direct OpenAI API    | Fixed official API endpoint and API-key billing                                                                             | Unconfigured unless an operator explicitly supplies a scoped API key                   |
 | Direct Anthropic API | Fixed official Messages endpoint, Console API keys only                                                                     | Optional and unconfigured; subscription OAuth tokens are rejected                      |
-| ChatGPT plan usage   | Official local OAuth companion, encrypted owner/host-bound transfer, refresh/revoke and strict Responses completion helpers | Prepared, not connected; browser consent and integration eligibility remain unverified |
+| ChatGPT plan usage   | Official local OAuth companion, encrypted owner/host-bound transfer, refresh/revoke and strict Responses completion helpers | Prepared helpers; runtime adapter/catalog wiring, owner consent and eligibility verification remain pending |
 | Voice                | Policy tier/capability representation                                                                                       | No audio transport or live voice feature enabled                                       |
 | `openrouter/auto`    | Documented optional future path                                                                                             | Blocked: its variable-price catalog entry is not a priced approved model               |
 
