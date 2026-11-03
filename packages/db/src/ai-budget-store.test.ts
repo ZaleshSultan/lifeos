@@ -92,3 +92,47 @@ describe("durable AI budget RPC adapter", () => {
     ).rejects.toThrow("AI budget receipt unavailable");
   });
 });
+
+it("requires the new router RPC before work and does not fall back to an unmetered legacy reservation", async () => {
+  const routing = {
+    version: 1 as const,
+    provider: "openrouter" as const,
+    model: "vendor/model",
+    selectedModelId: "model",
+    credentialLabel: "project",
+    billing: "api" as const,
+    attempts: 1,
+    fallback: false,
+    inputTokens: null,
+    outputTokens: null,
+    reportedCostMicros: null,
+    costSource: "unknown" as const,
+  };
+  const f = fixture("reserved");
+  await f.store.reserve({ ...input, routing });
+  expect(f.rpc).toHaveBeenCalledExactlyOnceWith(
+    "reserve_ai_router_execution",
+    expect.objectContaining({ p_user_id: input.userId, p_routing: routing }),
+  );
+  const unavailable = fixture(null, { message: "function unavailable" });
+  await expect(
+    unavailable.store.reserve({ ...input, routing }),
+  ).rejects.toThrow("AI budget storage unavailable");
+  expect(unavailable.rpc).toHaveBeenCalledTimes(1);
+  const receipt = fixture(true);
+  await receipt.store.finish({
+    userId: input.userId,
+    requestId: input.requestId,
+    state: "failed",
+    reportedTokens: null,
+    routing,
+  });
+  expect(receipt.rpc).toHaveBeenCalledExactlyOnceWith(
+    "finish_ai_router_execution",
+    expect.objectContaining({
+      p_user_id: input.userId,
+      p_routing: routing,
+      p_state: "failed",
+    }),
+  );
+});

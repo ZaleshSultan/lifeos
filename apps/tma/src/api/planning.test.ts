@@ -8,6 +8,7 @@ import { ApiError } from "./client";
 import {
   aiUnavailableMessage,
   confirmAiChatRequest,
+  completeAiConversation,
   getAiStatus,
   getToday,
   planningErrorMessage,
@@ -15,6 +16,7 @@ import {
   prepareAiMessages,
   sendAiChat,
   type AiMessage,
+  type AiChatAnswer,
 } from "./planning";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -153,6 +155,91 @@ describe("Today and AI API boundary", () => {
 });
 
 describe("AI conversation limits and safe error copy", () => {
+  const routedAnswer: AiChatAnswer = {
+    answer: "A completed routed answer",
+    provider: "openrouter",
+    readOnly: true,
+    suggestions: [],
+    modelRoute: {
+      version: 1,
+      requestId: "fixture",
+      modelId: "approved-model",
+      provider: "openrouter",
+      model: "approved/model",
+      billing: "api",
+      estimatedCostMicros: 100,
+      reportedCostMicros: 80,
+      costSource: "provider_reported",
+      latencyMs: 123,
+      fallback: true,
+      reason: "approved_fallback",
+      privacy: "external",
+    },
+  };
+  it("retains completed model receipts for display while outgoing history contains only role/text", async () => {
+    const first = prepareAiChatRequest([], "First question");
+    const display = completeAiConversation([], first, routedAnswer);
+    expect(display.at(-1)?.modelRoute).toEqual(routedAnswer.modelRoute);
+    const next = prepareAiChatRequest(
+      display,
+      "Next question",
+      undefined,
+      routedAnswer.modelRoute!.modelId,
+    );
+    expect(next.previousModelId).toBe("approved-model");
+    expect(next.messages.at(-2)).toEqual({
+      role: "assistant",
+      text: routedAnswer.answer,
+    });
+    const fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ data: routedAnswer }),
+    });
+    vi.stubGlobal("fetch", fetch);
+    await sendAiChat({ ...next, messages: display });
+    const sent = JSON.parse(fetch.mock.calls[0][1].body);
+    expect(sent.previousModelId).toBe("approved-model");
+    expect(
+      sent.messages.every(
+        (message: object) =>
+          Object.keys(message).sort().join(",") === "role,text",
+      ),
+    ).toBe(true);
+    expect(sent.messages.at(-1)).not.toHaveProperty("modelRoute");
+    expect(confirmAiChatRequest(next, "signed-confirmation")).toMatchObject({
+      requestId: next.requestId,
+      previousModelId: "approved-model",
+    });
+  });
+  it("keeps provenance aligned as bounded context shifts and confirmation replaces a pending answer", () => {
+    const first = prepareAiChatRequest([], "First question");
+    let display = completeAiConversation([], first, routedAnswer);
+    for (let i = 0; i < 6; i++) {
+      const request = prepareAiChatRequest(display, `Question ${i}`);
+      display = completeAiConversation(display, request, {
+        ...routedAnswer,
+        answer: `Answer ${i}`,
+        modelRoute: { ...routedAnswer.modelRoute!, modelId: `model-${i}` },
+      });
+    }
+    expect(display).toHaveLength(12);
+    expect(display.at(-3)?.modelRoute?.modelId).toBe("model-4");
+    const request = prepareAiChatRequest(display, "Review an action");
+    const pending = completeAiConversation(display, request, {
+      answer: "Confirm it",
+      suggestions: [],
+      provider: "lifeos",
+      readOnly: true,
+    });
+    const confirmed = completeAiConversation(
+      pending,
+      confirmAiChatRequest(request, "signed"),
+      { answer: "Saved", suggestions: [], provider: "lifeos", readOnly: false },
+    );
+    expect(confirmed.at(-3)?.modelRoute?.modelId).toBe("model-5");
+    expect(confirmed.at(-1)?.text).toBe("Saved");
+  });
   it("retains whole recent exchanges and leaves room for the new answer", () => {
     const history: AiMessage[] = Array.from({ length: 12 }, (_, index) => ({
       role: index % 2 === 0 ? "user" : "assistant",
@@ -236,6 +323,24 @@ describe("AI conversation limits and safe error copy", () => {
     expect(
       planningErrorMessage(new ApiError("secret debug payload", 500)),
     ).not.toContain("secret");
+  });
+  it("distinguishes routing policy denials from an expired login", () => {
+    for (const code of ["ai_router_blocked", "ai_router_consent_changed"]) {
+      const message = planningErrorMessage(
+        new ApiError(
+          JSON.stringify({ error: code, message: "secret details" }),
+          403,
+        ),
+      );
+      expect(message).toContain("AI settings");
+      expect(message).not.toContain("Reopen");
+      expect(message).not.toContain("secret");
+    }
+    expect(
+      planningErrorMessage(
+        new ApiError('{"error":"invalid_web_session"}', 403),
+      ),
+    ).toContain("Reopen LifeOS");
   });
 
   it("explains assistant safety failures without exposing backend metadata", () => {

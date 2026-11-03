@@ -2,6 +2,8 @@ import { handleCreatorRoute } from "./creator-routes.js";
 import { handleAgataRoute } from "./agata-routes.js";
 import { createMealVisionService, handleNutritionRoute, type MealVisionService } from "./nutrition-routes.js";
 import { governedOpenRouterFetch, type AiGovernor } from "./ai-governor.js";
+import { handleAiModelRouterRoute } from "./ai-model-router-routes.js";
+import { routedOpenRouterFetch, routerModeRequested, type AiModelRouter } from "./ai-model-router.js";
 import { handleDailyLifeRoute } from "./daily-life-routes.js";
 import {
   issueHealthCredential,
@@ -114,6 +116,7 @@ interface TmaSessionStatus {
 
 export interface BotServerOptions {
   aiGovernor?: AiGovernor;
+  aiRouter?: AiModelRouter;
   mealVision?: MealVisionService;
   assistant?: AssistantBrain;
   lmsSessions?: LmsSessionService;
@@ -175,6 +178,7 @@ interface HealthResponse {
 
 interface ResolvedBotServerOptions {
   aiGovernor?: AiGovernor;
+  aiRouter?: AiModelRouter;
   mealVision: MealVisionService;
   assistant?: AssistantBrain;
   nodeEnv?: string;
@@ -1513,7 +1517,8 @@ async function handleTelegramWebhook(
       adminTelegramUserIds: options.adminTelegramUserIds,
       signupMode: options.signupMode,
       financeAi: {
-        fetchForUser: (userId) => governedOpenRouterFetch(options.aiGovernor, userId, "finance"),
+        fetchForUser: (userId) => routerModeRequested(options.aiRouter) ? routedOpenRouterFetch(options.aiRouter,userId,"finance") : governedOpenRouterFetch(options.aiGovernor,userId,"finance"),
+        ...(routerModeRequested(options.aiRouter)?{trustedRouterTransport:true as const}:{}),
         enabled: options.financeAiEnabled,
         openRouterApiKey: options.openRouterApiKey,
         model: options.financeAiModel,
@@ -2160,7 +2165,8 @@ function parseTmaFinanceSettingsBody(
 function financeAiOptions(options: ResolvedBotServerOptions, userId: string) {
   return {
     aiEnabled: options.financeAiEnabled,
-    fetchImpl: governedOpenRouterFetch(options.aiGovernor, userId, "finance"),
+    fetchImpl: routerModeRequested(options.aiRouter) ? routedOpenRouterFetch(options.aiRouter,userId,"finance") : governedOpenRouterFetch(options.aiGovernor,userId,"finance"),
+    ...(routerModeRequested(options.aiRouter)?{trustedRouterTransport:true as const}:{}),
     openRouterApiKey: options.openRouterApiKey,
     model: options.financeAiModel,
   };
@@ -2460,6 +2466,8 @@ async function handleRequest(
       });
       return;
     }
+
+    if (await handleAiModelRouterRoute({request,response,url:requestUrl,userId:auth.user.userId,router:options.aiRouter,readJsonBody,writeJson})) return;
 
     if (await handleLmsRoute({
       request,response,url:requestUrl,user:auth.user,store,
@@ -3630,7 +3638,7 @@ async function handleRequest(
 export function createBotServer(options: BotServerOptions = {}): Server {
   // Enforce production security for direct server constructors too.
   validateBotSecurity(options.config ?? {});
-  const ai = options.ai ?? createConfiguredLifeosAiService(process.env, {governor: options.aiGovernor});
+  const ai = options.ai ?? createConfiguredLifeosAiService(process.env, {governor:options.aiGovernor,router:routerModeRequested(options.aiRouter)?options.aiRouter:undefined});
   const assistant = options.assistant ?? (options.store
     ? new AssistantBrain({
         store: options.store,
@@ -3642,7 +3650,8 @@ export function createBotServer(options: BotServerOptions = {}): Server {
     : undefined);
   const resolvedOptions: ResolvedBotServerOptions = {
     aiGovernor: options.aiGovernor,
-    mealVision: options.mealVision ?? createMealVisionService({governor:options.aiGovernor}),
+    aiRouter: options.aiRouter,
+    mealVision: options.mealVision ?? createMealVisionService({governor:options.aiGovernor,router:routerModeRequested(options.aiRouter)?options.aiRouter:undefined}),
     nodeEnv: options.config?.nodeEnv,
     corsAllowedOrigins: corsOrigins(options.config?.corsAllowedOrigins ?? [], options.config?.nodeEnv),
     ai,

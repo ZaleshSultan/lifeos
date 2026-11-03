@@ -12,6 +12,10 @@ import {
   syllabusProfiles,
 } from "../packages/core/src/study-syllabi.ts";
 import { defaultScholarshipConfig } from "../packages/core/src/scholarship.ts";
+import {
+  defaultAiRouterSettings,
+  parseAiRouterSettings,
+} from "../packages/core/src/ai-model-router.ts";
 const artifact = resolve(
   process.env.LIFEOS_BROWSER_ARTIFACTS || "/tmp/lifeos-tma-browser-artifacts",
 );
@@ -99,6 +103,160 @@ function workspace() {
   }));
   return { timezone: "Asia/Qyzylorda", courses, records };
 }
+
+function routerFixture(active = false) {
+  const descriptor = (id, provider, model) => ({
+    id,
+    provider,
+    model,
+    label: `Fixture ${provider} balanced`,
+    tiers: ["balanced", "fast"],
+    capabilities: ["text", "json"],
+    billing: "api",
+    inputCostMicrosPer1k: 100,
+    outputCostMicrosPer1k: 200,
+    configured: true,
+    authorized: true,
+    status: "configured",
+    privacy: "external",
+    metadataVerified: true,
+  });
+  const settings = defaultAiRouterSettings();
+  if (active) {
+    settings.allowedTiers.push("balanced");
+    settings.allowedProviders = ["openrouter", "gemini"];
+    settings.privacy.general = ["openrouter", "gemini"];
+    settings.privacy.university = ["openrouter", "gemini"];
+    settings.tierModels.balanced = ["fixture-openrouter", "fixture-gemini"];
+    settings.spending = {
+      paidCallsAuthorized: true,
+      maxRequestCostMicros: 10_000,
+      maxDailyCostMicros: 30_000,
+    };
+    settings.fallback = {
+      enabled: true,
+      maxAttempts: 2,
+      allowProviderChange: true,
+    };
+  }
+  return {
+    settings,
+    revision: 0,
+    models: [
+      descriptor(
+        "fixture-openrouter",
+        "openrouter",
+        "fixture/provider-balanced",
+      ),
+      descriptor("fixture-gemini", "gemini", "gemini-fixture-balanced"),
+    ],
+    providers: [
+      "gemini",
+      "openrouter",
+      "openai",
+      "anthropic",
+      "chatgpt_plan",
+    ].map((id) => ({
+      id,
+      status:
+        id === "chatgpt_plan"
+          ? "permission_required"
+          : ["gemini", "openrouter"].includes(id)
+            ? "configured_unverified"
+            : "not_configured",
+      credentialLabels: ["gemini", "openrouter"].includes(id)
+        ? ["fixture-project"]
+        : [],
+      verified: false,
+    })),
+    operatorLimits: {
+      routerEnabled: true,
+      paidRequestsEnabled: true,
+      maxRequestCostMicros: 1_000_000,
+      maxDailyCostMicros: 5_000_000,
+      maxOutputTokens: 2048,
+    },
+    chatgptPlan: {
+      status: "prepared",
+      identityConnected: false,
+      planUsageAuthorized: false,
+      usesApiCredits: false,
+      manageUsageUrl: "https://chatgpt.com/settings/usage",
+    },
+    recentExecutions: [],
+  };
+}
+
+function todayFixture() {
+  return {
+    plan: {
+      date: "2026-11-03",
+      timezone: "Asia/Almaty",
+      mode: "maintenance",
+      window: {
+        startsAt: "2026-11-03T08:00:00+05:00",
+        endsAt: "2026-11-03T22:00:00+05:00",
+      },
+      availableMinutes: 0,
+      freeSlots: [],
+      conflicts: [],
+      rankedTasks: [],
+      blocks: [],
+      unscheduledTaskIds: [],
+      warnings: [],
+    },
+    events: [],
+    reminders: [],
+    productivity: {
+      startDate: "2026-10-28",
+      endDate: "2026-11-03",
+      timezone: "Asia/Almaty",
+      daily: [],
+      totalCreated: 0,
+      totalCompleted: 0,
+      completionRate: null,
+      truncated: false,
+      warnings: [],
+    },
+    ai: {
+      enabled: true,
+      available: true,
+      reason: null,
+      liveEnabled: false,
+      assistantEnabled: false,
+    },
+  };
+}
+
+function chatFixture(number) {
+  const second = number === 2;
+  return {
+    answer:
+      number === 1
+        ? "First approved fixture answer."
+        : number === 2
+          ? "Second approved fixture answer."
+          : "Fresh approved fixture answer.",
+    suggestions: [],
+    provider: second ? "gemini" : "openrouter",
+    readOnly: true,
+    modelRoute: {
+      version: 1,
+      requestId: `fixture-request-${number}`,
+      modelId: second ? "fixture-gemini" : "fixture-openrouter",
+      provider: second ? "gemini" : "openrouter",
+      model: second ? "gemini-fixture-balanced" : "fixture/provider-balanced",
+      billing: "api",
+      estimatedCostMicros: 10,
+      reportedCostMicros: second ? 6 : 4,
+      costSource: second ? "rate_estimate" : "provider_reported",
+      latencyMs: second ? 234 : 123,
+      fallback: second,
+      reason: second ? "automatic_fallback" : "automatic_tier",
+      privacy: "external",
+    },
+  };
+}
 async function setup(width, options = {}) {
   const context = await browser.newContext({
     viewport: { width, height: 844 },
@@ -108,6 +266,15 @@ async function setup(width, options = {}) {
   });
   const page = await context.newPage();
   const data = workspace();
+  const router = routerFixture(Boolean(options.activeRouterPolicy));
+  let routerReads = 0,
+    routerWrites = 0,
+    failRouterWrite = 0;
+  let routerReadGate = null,
+    releaseRouterRead = () => {};
+  const routerRequests = [],
+    chatRequests = [],
+    externalRequests = [];
   let saves = 0;
   let saveGate = null;
   let releaseSave = () => {};
@@ -115,11 +282,17 @@ async function setup(width, options = {}) {
   page.on("pageerror", (e) => errors.push(e.message));
   await page.route("**/*", async (route) => {
     const url = new URL(route.request().url());
-    if (!url.pathname.startsWith("/api/tma/"))
-      return url.origin === origin ? route.continue() : route.abort();
+    if (!url.pathname.startsWith("/api/tma/")) {
+      if (url.origin === origin) return route.continue();
+      externalRequests.push(url.origin + url.pathname);
+      return route.abort();
+    }
     // The real production artifact may embed its public API origin. Fulfill
     // these calls locally before any network connection can be made.
-    if (url.origin !== origin && url.origin !== apiOrigin) return route.abort();
+    if (url.origin !== origin && url.origin !== apiOrigin) {
+      externalRequests.push(url.origin + url.pathname);
+      return route.abort();
+    }
     const cors = {
       "access-control-allow-origin": origin,
       "access-control-allow-headers": "content-type,x-telegram-init-data",
@@ -188,12 +361,52 @@ async function setup(width, options = {}) {
           unsupportedFeatures: [],
         },
       };
-    else if (url.pathname === "/api/tma/ai/status")
+    else if (options.router && url.pathname === "/api/tma/today")
+      body = { data: todayFixture() };
+    else if (options.router && url.pathname === "/api/tma/ai/router/settings") {
+      if (route.request().method() === "GET") {
+        routerReads++;
+        if (routerReadGate) await routerReadGate;
+        body = { data: router };
+      } else if (route.request().method() === "PUT") {
+        routerWrites++;
+        const input = JSON.parse(route.request().postData());
+        routerRequests.push(input);
+        if (failRouterWrite) {
+          status = failRouterWrite;
+          failRouterWrite = 0;
+          body = {
+            error:
+              status === 409
+                ? "ai_router_settings_conflict"
+                : "ai_router_storage_unavailable",
+            message: "PRIVATE ROUTER DIAGNOSTIC",
+          };
+        } else if (input.expectedRevision !== router.revision) {
+          status = 409;
+          body = {
+            error: "ai_router_settings_conflict",
+            message: "PRIVATE ROUTER REVISION",
+          };
+        } else {
+          router.settings = parseAiRouterSettings(input.settings);
+          router.revision++;
+          body = { data: router };
+        }
+      } else return route.abort();
+    } else if (
+      options.router &&
+      url.pathname === "/api/tma/ai/chat" &&
+      route.request().method() === "POST"
+    ) {
+      chatRequests.push(JSON.parse(route.request().postData()));
+      body = { data: chatFixture(chatRequests.length) };
+    } else if (url.pathname === "/api/tma/ai/status")
       body = {
         data: {
-          enabled: false,
-          available: false,
-          reason: "ai_disabled",
+          enabled: Boolean(options.router),
+          available: Boolean(options.router),
+          reason: options.router ? null : "ai_disabled",
           liveEnabled: false,
           assistantEnabled: false,
         },
@@ -232,6 +445,28 @@ async function setup(width, options = {}) {
     errors,
     data,
     saves: () => saves,
+    router,
+    routerReads: () => routerReads,
+    routerWrites: () => routerWrites,
+    routerRequests,
+    chatRequests,
+    externalRequests,
+    failRouterWrite(status) {
+      failRouterWrite = status;
+    },
+    externalRouterChange(update) {
+      router.settings = parseAiRouterSettings(update(router.settings));
+      router.revision++;
+    },
+    holdRouterRead() {
+      routerReadGate = new Promise((done) => {
+        releaseRouterRead = done;
+      });
+    },
+    releaseRouterRead() {
+      releaseRouterRead();
+      routerReadGate = null;
+    },
     holdNextSave() {
       saveGate = new Promise((done) => {
         releaseSave = done;
@@ -557,6 +792,471 @@ try {
         path: artifact + `/browser/tma-dbms-${width}.png`,
       });
     await t.context.close();
+  }
+  for (const width of [320, 390]) {
+    const t = await setup(width, { router: true });
+    const { page } = t;
+    const panel = () =>
+      page.getByRole("region", {
+        name: "AI Model Router settings",
+        exact: true,
+      });
+    const openSettings = async () => {
+      await page
+        .getByText("Настройки моделей и приватности AI", { exact: true })
+        .click();
+      await panel().getByLabel("Выбор модели", { exact: true }).waitFor();
+    };
+    try {
+      await test(`${width}px router settings load only after opening and persist explicit policy`, async () => {
+        await page.goto(origin + "/tma/?screen=ai");
+        await page.getByLabel("Your question", { exact: true }).waitFor();
+        assert.equal(
+          t.routerReads(),
+          0,
+          "closed settings must not fetch or probe a provider",
+        );
+        assert.equal(t.chatRequests.length, 0);
+        t.holdRouterRead();
+        const requested = page.waitForRequest(
+          (request) =>
+            new URL(request.url()).pathname === "/api/tma/ai/router/settings" &&
+            request.method() === "GET",
+        );
+        await openSettings();
+        await requested;
+        assert.equal(
+          await panel()
+            .getByRole("button", {
+              name: "Сохранить настройки AI",
+              exact: true,
+            })
+            .isDisabled(),
+          true,
+        );
+        t.releaseRouterRead();
+        const settings = panel();
+        await settings
+          .getByLabel("Выбор модели", { exact: true })
+          .selectOption("manual");
+        await settings
+          .getByLabel("Ручная модель", { exact: true })
+          .selectOption("fixture-openrouter");
+        await settings
+          .getByLabel("Выбор модели", { exact: true })
+          .selectOption("auto");
+        await settings
+          .getByLabel("Выбор модели", { exact: true })
+          .selectOption("manual");
+        for (const provider of ["OpenRouter", "Gemini API"])
+          await settings
+            .getByRole("checkbox", { name: provider, exact: true })
+            .check();
+        await settings
+          .getByRole("checkbox", { name: "Повседневные задачи", exact: true })
+          .check();
+        await settings
+          .getByLabel("Добавить модель: balanced", { exact: true })
+          .selectOption("fixture-openrouter");
+        await settings
+          .getByLabel("Добавить модель: balanced", { exact: true })
+          .selectOption("fixture-gemini");
+        await settings
+          .getByRole("button", {
+            name: "Поднять fixture-gemini в balanced",
+            exact: true,
+          })
+          .click();
+        await settings
+          .locator("summary")
+          .filter({ hasText: /^Обычный текст/ })
+          .click();
+        for (const provider of ["OpenRouter", "Gemini API"])
+          await settings
+            .getByRole("checkbox", {
+              name: `Разрешить Обычный текст для ${provider}`,
+              exact: true,
+            })
+            .check();
+        await settings
+          .locator("summary")
+          .filter({ hasText: /^Университет/ })
+          .click();
+        await settings
+          .getByRole("checkbox", {
+            name: "Разрешить Университет для Gemini API",
+            exact: true,
+          })
+          .check();
+        await settings
+          .locator("summary")
+          .filter({ hasText: /^Здоровье/ })
+          .click();
+        const health = settings.getByRole("checkbox", {
+          name: "Разрешить Здоровье для OpenRouter",
+          exact: true,
+        });
+        await health.check();
+        await health.uncheck();
+        await settings
+          .getByRole("checkbox", { name: /^Я разрешаю платные запросы/ })
+          .check();
+        await settings
+          .getByLabel("Максимум на запрос, USD", { exact: true })
+          .fill("0.01");
+        await settings
+          .getByLabel("Максимум за день, USD", { exact: true })
+          .fill("0.03");
+        await settings
+          .getByRole("checkbox", {
+            name: "Разрешить ограниченные запасные попытки",
+            exact: true,
+          })
+          .check();
+        await settings
+          .getByRole("checkbox", {
+            name: "Разрешить смену провайдера в пределах моих разрешений",
+            exact: true,
+          })
+          .check();
+        await settings
+          .getByLabel("Максимум попыток", { exact: true })
+          .selectOption("2");
+        const saved = page.waitForResponse(
+          (response) =>
+            new URL(response.url()).pathname ===
+              "/api/tma/ai/router/settings" &&
+            response.request().method() === "PUT",
+        );
+        await settings
+          .getByRole("button", { name: "Сохранить настройки AI", exact: true })
+          .click();
+        assert.equal((await saved).status(), 200);
+        await settings
+          .getByRole("status")
+          .filter({ hasText: "Настройки сохранены" })
+          .waitFor();
+        assert.equal(t.routerWrites(), 1);
+        assert.equal(t.routerRequests[0].expectedRevision, 0);
+        assert.equal(t.router.settings.mode, "manual");
+        assert.equal(t.router.settings.manualModelId, "fixture-openrouter");
+        assert.deepEqual(t.router.settings.allowedProviders, [
+          "openrouter",
+          "gemini",
+        ]);
+        assert.deepEqual(t.router.settings.tierModels.balanced, [
+          "fixture-gemini",
+          "fixture-openrouter",
+        ]);
+        assert.deepEqual(t.router.settings.privacy.general, [
+          "openrouter",
+          "gemini",
+        ]);
+        assert.deepEqual(t.router.settings.privacy.university, ["gemini"]);
+        assert.deepEqual(t.router.settings.privacy.health, []);
+        assert.deepEqual(t.router.settings.privacy.finance, []);
+        assert.deepEqual(t.router.settings.spending, {
+          paidCallsAuthorized: true,
+          maxRequestCostMicros: 10_000,
+          maxDailyCostMicros: 30_000,
+        });
+        assert.deepEqual(t.router.settings.fallback, {
+          enabled: true,
+          maxAttempts: 2,
+          allowProviderChange: true,
+        });
+        assert.equal(
+          t.chatRequests.length,
+          0,
+          "saving a policy is never an inference request",
+        );
+        await noOverflow(page);
+        await page.reload();
+        await page.getByLabel("Your question", { exact: true }).waitFor();
+        await openSettings();
+        await page.waitForFunction(
+          () =>
+            document.querySelector('[aria-label="Выбор модели"]')?.value ===
+            "manual",
+        );
+        assert.equal(
+          await panel()
+            .getByLabel("Выбор модели", { exact: true })
+            .inputValue(),
+          "manual",
+        );
+        assert.equal(
+          await panel()
+            .getByLabel("Ручная модель", { exact: true })
+            .inputValue(),
+          "fixture-openrouter",
+        );
+        assert.equal(
+          await panel()
+            .getByLabel("Максимум на запрос, USD", { exact: true })
+            .inputValue(),
+          "0.01",
+        );
+        assert.equal(
+          await panel()
+            .getByLabel("Максимум за день, USD", { exact: true })
+            .inputValue(),
+          "0.03",
+        );
+        assert.equal(
+          await panel()
+            .getByLabel("Максимум попыток", { exact: true })
+            .inputValue(),
+          "2",
+        );
+        assert.equal(
+          await panel()
+            .getByRole("checkbox", { name: /^Я разрешаю платные запросы/ })
+            .isChecked(),
+          true,
+        );
+        assert.match(
+          await panel().innerText(),
+          /Разрешение использовать план не получено/,
+        );
+        assert.deepEqual(t.externalRequests, []);
+        assert.deepEqual(t.errors, []);
+      });
+      await test(`${width}px failed and CAS settings saves retain the draft and navigation confirms discard`, async () => {
+        const settings = panel();
+        await settings
+          .getByLabel("Максимум на запрос, USD", { exact: true })
+          .fill("0.02");
+        t.failRouterWrite(503);
+        let response = page.waitForResponse(
+          (response) =>
+            new URL(response.url()).pathname ===
+              "/api/tma/ai/router/settings" &&
+            response.request().method() === "PUT",
+        );
+        await settings
+          .getByRole("button", { name: "Сохранить настройки AI", exact: true })
+          .click();
+        assert.equal((await response).status(), 503);
+        await settings
+          .getByRole("status")
+          .filter({ hasText: "Несохранённые изменения остались" })
+          .waitFor();
+        assert.equal(
+          await settings
+            .getByLabel("Максимум на запрос, USD", { exact: true })
+            .inputValue(),
+          "0.02",
+        );
+        assert.equal(t.router.settings.spending.maxRequestCostMicros, 10_000);
+        t.externalRouterChange((value) => ({
+          ...value,
+          spending: { ...value.spending, maxDailyCostMicros: 50_000 },
+        }));
+        response = page.waitForResponse(
+          (response) =>
+            new URL(response.url()).pathname ===
+              "/api/tma/ai/router/settings" &&
+            response.request().method() === "PUT",
+        );
+        await settings
+          .getByRole("button", { name: "Сохранить настройки AI", exact: true })
+          .click();
+        assert.equal((await response).status(), 409);
+        await settings
+          .getByRole("status")
+          .filter({ hasText: "другой сессии" })
+          .waitFor();
+        assert.equal(
+          await settings
+            .getByLabel("Максимум на запрос, USD", { exact: true })
+            .inputValue(),
+          "0.02",
+        );
+        assert.equal(
+          await settings
+            .getByLabel("Максимум за день, USD", { exact: true })
+            .inputValue(),
+          "0.03",
+        );
+        assert.ok(
+          !(await page.locator("body").innerText()).includes("PRIVATE"),
+        );
+        const study = page
+          .getByRole("navigation")
+          .getByRole("button", { name: "Учёба", exact: true });
+        await Promise.all([
+          page.waitForEvent("dialog").then(async (dialog) => {
+            assert.match(dialog.message(), /несохранённые изменения/);
+            await dialog.dismiss();
+          }),
+          study.click(),
+        ]);
+        assert.equal(new URL(page.url()).searchParams.get("screen"), "ai");
+        assert.equal(
+          await settings
+            .getByLabel("Максимум на запрос, USD", { exact: true })
+            .inputValue(),
+          "0.02",
+        );
+        await Promise.all([
+          page.waitForEvent("dialog").then(async (dialog) => {
+            assert.match(dialog.message(), /несохранённые изменения/);
+            await dialog.accept();
+          }),
+          study.click(),
+        ]);
+        await page
+          .getByRole("heading", { name: "Учёба", exact: true })
+          .waitFor();
+        assert.equal(t.router.settings.spending.maxRequestCostMicros, 10_000);
+        await page
+          .getByRole("navigation")
+          .getByRole("button", { name: "AI", exact: true })
+          .click();
+        await page.getByLabel("Your question", { exact: true }).waitFor();
+        await openSettings();
+        response = page.waitForResponse(
+          (response) =>
+            new URL(response.url()).pathname ===
+              "/api/tma/ai/router/settings" &&
+            response.request().method() === "GET",
+        );
+        await panel()
+          .getByRole("button", { name: "Обновить настройки AI", exact: true })
+          .click();
+        await response;
+        await page.waitForFunction(
+          () =>
+            document.querySelector('[aria-label="Максимум за день, USD"]')
+              ?.value === "0.05",
+        );
+        assert.equal(
+          await panel()
+            .getByLabel("Максимум на запрос, USD", { exact: true })
+            .inputValue(),
+          "0.01",
+        );
+        assert.equal(t.chatRequests.length, 0);
+        assert.deepEqual(t.errors, []);
+        assert.deepEqual(t.externalRequests, []);
+        await noOverflow(page);
+        await mkdir(artifact + "/browser", { recursive: true });
+        await page.screenshot({
+          path: artifact + `/browser/tma-router-settings-${width}.png`,
+          fullPage: true,
+        });
+      });
+    } finally {
+      t.releaseRouterRead();
+      await t.context.close();
+    }
+
+    await test(`${width}px routed chat preserves two model receipts and sends only text plus validated continuity`, async () => {
+      const t = await setup(width, { router: true, activeRouterPolicy: true });
+      const { page } = t;
+      try {
+        await page.goto(origin + "/tma/?screen=ai");
+        await page.getByLabel("Your question", { exact: true }).waitFor();
+        const send = async (text) => {
+          const response = page.waitForResponse(
+            (response) =>
+              new URL(response.url()).pathname === "/api/tma/ai/chat" &&
+              response.request().method() === "POST",
+          );
+          await page.getByLabel("Your question", { exact: true }).fill(text);
+          await page
+            .getByRole("button", { name: "Send question", exact: true })
+            .click();
+          assert.equal((await response).status(), 200);
+        };
+        await send(
+          "Explain ordinary project priorities without private records.",
+        );
+        await page
+          .getByText("First approved fixture answer.", { exact: true })
+          .waitFor();
+        const receipts = page
+          .getByRole("log", { name: "LifeOS AI conversation", exact: true })
+          .locator('[aria-label="AI model usage"]');
+        assert.equal(await receipts.count(), 1);
+        assert.match(
+          await receipts.nth(0).innerText(),
+          /OpenRouter.*fixture\/provider-balanced/,
+        );
+        assert.match(
+          await receipts.nth(0).innerText(),
+          /Provider-reported cost/,
+        );
+        assert.match(
+          await receipts.nth(0).innerText(),
+          /123 ms.*Selected model/s,
+        );
+        assert.equal(t.chatRequests[0].previousModelId, undefined);
+        await send(
+          "Explain the next step using the same approved conversation.",
+        );
+        await page
+          .getByText("Second approved fixture answer.", { exact: true })
+          .waitFor();
+        assert.equal(await receipts.count(), 2);
+        assert.match(
+          await receipts.nth(0).innerText(),
+          /OpenRouter.*fixture\/provider-balanced/,
+        );
+        assert.match(
+          await receipts.nth(0).innerText(),
+          /Provider-reported cost/,
+        );
+        assert.match(
+          await receipts.nth(1).innerText(),
+          /Google Gemini.*gemini-fixture-balanced/,
+        );
+        assert.match(
+          await receipts.nth(1).innerText(),
+          /Rate-based usage estimate/,
+        );
+        assert.match(
+          await receipts.nth(1).innerText(),
+          /234 ms.*Fallback used/s,
+        );
+        assert.equal(t.chatRequests[1].previousModelId, "fixture-openrouter");
+        assert.equal(t.chatRequests[1].messages.length, 3);
+        for (const input of t.chatRequests) {
+          assert.match(input.requestId, /^[0-9a-f-]{36}$/);
+          for (const message of input.messages)
+            assert.deepEqual(Object.keys(message).sort(), ["role", "text"]);
+        }
+        await page
+          .getByRole("button", { name: "Clear conversation", exact: true })
+          .click();
+        assert.equal(await receipts.count(), 0);
+        await send("Start a fresh ordinary planning question.");
+        await page
+          .getByText("Fresh approved fixture answer.", { exact: true })
+          .waitFor();
+        assert.equal(t.chatRequests[2].previousModelId, undefined);
+        assert.equal(t.chatRequests[2].messages.length, 1);
+        assert.deepEqual(Object.keys(t.chatRequests[2].messages[0]).sort(), [
+          "role",
+          "text",
+        ]);
+        assert.equal(
+          t.routerReads(),
+          0,
+          "chat does not open the settings or consent flow",
+        );
+        assert.deepEqual(t.externalRequests, []);
+        assert.deepEqual(t.errors, []);
+        await noOverflow(page);
+        await page.screenshot({
+          path: artifact + `/browser/tma-router-chat-${width}.png`,
+          fullPage: true,
+        });
+      } finally {
+        await t.context.close();
+      }
+    });
   }
   for (const [name, options, expected] of [
     [

@@ -18,7 +18,10 @@ import {
   optionalEnv,
   containsAssistantSensitiveData,
   type EnvSource,
+  type AiModelRouteReceipt,
 } from "@lifeos/core";
+import { AiRouterError, type AiModelRouter } from "./ai-model-router.js";
+import type { RouterProviderMessage } from "./ai-model-router-providers.js";
 
 export interface LifeosAiConfig {
   enabled: boolean;
@@ -109,6 +112,10 @@ export function readLifeosAiConfig(
 }
 
 const errors = {
+  ai_router_blocked: [
+    403,
+    "Model selection is blocked by the saved privacy, spending or provider policy. Review AI settings; deterministic LifeOS remains available.",
+  ],
   ai_budget_unavailable: [
     503,
     "AI calls are paused because durable usage accounting is unavailable.",
@@ -175,7 +182,8 @@ export interface LifeosAiSuggestion {
 export interface LifeosAiReply {
   answer: string;
   suggestions: LifeosAiSuggestion[];
-  provider: "gemini";
+  provider: "gemini" | "openrouter" | "openai" | "anthropic" | "chatgpt_plan";
+  modelRoute?: AiModelRouteReceipt;
 }
 
 /** Injection seam for tests; production always uses the official backend SDK. */
@@ -203,6 +211,8 @@ function isTextModel(model: string): boolean {
 }
 
 function safeProviderError(error: unknown): LifeosAiError {
+  if (error instanceof AiRouterError)
+    return new LifeosAiError("ai_router_blocked");
   if (error instanceof AiGovernorError) {
     if (error.providerCategory)
       return new LifeosAiError(error.providerCategory);
@@ -283,6 +293,7 @@ const systemInstruction = `You are the optional read-only LifeOS assistant. Use 
 
 function parseReply(
   response: Awaited<ReturnType<LifeosAiClient["models"]["generateContent"]>>,
+  modelRoute?: AiModelRouteReceipt,
 ): LifeosAiReply {
   const invalid = () => new LifeosAiError("ai_invalid_response");
   if (
@@ -365,7 +376,12 @@ function parseReply(
   const clockInProse =
     /\b\d{1,2}[:.]\d{2}(?::\d{2})?\b|\b\d{1,2}\s*(?:a\.?m\.?|p\.?m\.?)\b|\b(?:noon|midnight)\b|\b(?:at|from|until|starting)\s+(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b/i;
   if (clockInProse.test(item.answer)) throw invalid();
-  return { answer: item.answer.trim(), suggestions, provider: "gemini" };
+  return {
+    answer: item.answer.trim(),
+    suggestions,
+    provider: modelRoute?.provider ?? "gemini",
+    ...(modelRoute ? { modelRoute } : {}),
+  };
 }
 
 interface Usage {
@@ -382,6 +398,7 @@ export function createLifeosAiService(
     client?: LifeosAiClient;
     now?: () => number;
     governor?: AiGovernor;
+    router?: AiModelRouter;
   } = {},
 ) {
   const config = { ...configInput };
@@ -489,6 +506,29 @@ export function createLifeosAiService(
 
   return {
     status() {
+      if (dependencies.router) {
+        const status = dependencies.router.status();
+        return {
+          enabled: config.enabled && status.enabled,
+          available:
+            config.enabled &&
+            status.available &&
+            Boolean(dependencies.governor) &&
+            !dependencies.governor?.status().killSwitch,
+          reason: !config.enabled
+            ? "ai_disabled"
+            : status.available
+              ? null
+              : "ai_missing_credentials",
+          provider: "router" as const,
+          textModel: "owner-selected",
+          live: {
+            configured: false,
+            model: config.liveModel,
+            available: false as const,
+          },
+        };
+      }
       return {
         enabled: config.enabled,
         available:
@@ -519,6 +559,8 @@ export function createLifeosAiService(
     },
     /** Optional classification shares this service's provider, quotas and timeout. */
     async classify(userId: string, message: string): Promise<unknown> {
+      // The deterministic assistant classifies routing; no paid classifier is added.
+      if (dependencies.router) return null;
       if (!config.enabled) return null;
       if (!config.apiKey || !isTextModel(config.textModel)) return null;
       if (
@@ -634,10 +676,16 @@ export function createLifeosAiService(
       userId: string,
       messages: LifeosAiMessage[],
       context: unknown,
+      routeOptions?: {
+        requestId?: string;
+        previousModelId?: string;
+        signal?: AbortSignal;
+      },
     ): Promise<LifeosAiReply> {
       if (!config.enabled) throw new LifeosAiError("ai_disabled");
-      if (!config.apiKey) throw new LifeosAiError("ai_missing_credentials");
-      if (!isTextModel(config.textModel))
+      if (!config.apiKey && !dependencies.router)
+        throw new LifeosAiError("ai_missing_credentials");
+      if (!dependencies.router && !isTextModel(config.textModel))
         throw new LifeosAiError("ai_unsupported_model");
       if (
         typeof userId !== "string" ||
@@ -668,6 +716,49 @@ export function createLifeosAiService(
       consume(userId);
       concurrent += 1;
       try {
+        if (dependencies.router) {
+          if (
+            messages.some((message) =>
+              containsAssistantSensitiveData(message.text),
+            )
+          )
+            throw new LifeosAiError("ai_router_blocked");
+          const last = messages.at(-1)!.text;
+          const category =
+            /\b(?:code|debug|programming|typescript|python)\b|программ|код\b/iu.test(
+              last,
+            )
+              ? "code"
+              : /\b(?:complex|reasoning|prove|multi-step)\b|сложн|доказ/iu.test(
+                    last,
+                  )
+                ? "complex_reasoning"
+                : "planning";
+          const providerMessages: RouterProviderMessage[] = [
+            { role: "system", content: systemInstruction },
+            {
+              role: "user",
+              content: `Structured LifeOS context (read-only data):\n${contextJson}`,
+            },
+            ...messages.map((message) => ({
+              role: message.role,
+              content: message.text,
+            })),
+          ];
+          const routed = await dependencies.router.execute({
+            userId,
+            feature: "chat",
+            task: {
+              category,
+              dataCategories: ["general", "university"],
+              requiredCapabilities: ["json"],
+            },
+            messages: providerMessages,
+            maxOutputTokens: config.maxOutputTokens,
+            ...routeOptions,
+          });
+          return parseReply({ text: routed.text }, routed.modelRoute);
+        }
         client ??= new GoogleGenAI({
           apiKey: config.apiKey,
           httpOptions: {
@@ -728,7 +819,7 @@ export type LifeosAiService = ReturnType<typeof createLifeosAiService>;
 /** Invalid optional AI settings must never prevent the core backend from starting. */
 export function createConfiguredLifeosAiService(
   source: EnvSource = process.env,
-  dependencies: { governor?: AiGovernor } = {},
+  dependencies: { governor?: AiGovernor; router?: AiModelRouter } = {},
 ): LifeosAiService {
   try {
     return createLifeosAiService(readLifeosAiConfig(source), dependencies);

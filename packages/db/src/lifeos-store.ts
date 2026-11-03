@@ -8429,7 +8429,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     const receipt = await this.uploadReceiptImage(input);
     let ocrText = input.ocrText?.trim() ?? "";
 
-    if (!ocrText && input.ai?.aiEnabled && input.ai.openRouterApiKey) {
+    if (!ocrText && input.ai?.aiEnabled && (input.ai.openRouterApiKey || (input.ai.trustedRouterTransport && input.ai.fetchImpl))) {
       const imageBase64 = Buffer.from(input.bytes).toString("base64");
       ocrText =
         (await extractReceiptOcrText(imageBase64, input.mimeType, input.ai)) ??

@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { DateTime } from "luxon";
-import { validatePlanSuggestions } from "@lifeos/core";
+import { validatePlanSuggestions, isAiRouterModelId } from "@lifeos/core";
 import { randomUUID } from "node:crypto";
 import type { LifeOSStore, TelegramUserRecord } from "@lifeos/db";
 import {
@@ -39,6 +39,7 @@ function parseChat(
   date?: unknown;
   requestId?: string;
   confirmationToken?: string;
+  previousModelId?: string;
 } {
   if (!body || typeof body !== "object" || Array.isArray(body))
     throw new LifeosAiError("ai_invalid_request");
@@ -49,8 +50,14 @@ function parseChat(
       (key) =>
         !(
           assistantEnabled
-            ? ["messages", "date", "requestId", "confirmationToken"]
-            : ["messages", "date", "requestId"]
+            ? [
+                "messages",
+                "date",
+                "requestId",
+                "confirmationToken",
+                "previousModelId",
+              ]
+            : ["messages", "date", "requestId", "previousModelId"]
         ).includes(key),
     )
   )
@@ -62,7 +69,9 @@ function parseChat(
     (input.confirmationToken !== undefined &&
       (typeof input.confirmationToken !== "string" ||
         input.confirmationToken.length > 8000)) ||
-    (input.confirmationToken !== undefined && input.requestId === undefined)
+    (input.confirmationToken !== undefined && input.requestId === undefined) ||
+    (input.previousModelId !== undefined &&
+      !isAiRouterModelId(input.previousModelId))
   )
     throw new LifeosAiError("ai_invalid_request");
   if (
@@ -97,6 +106,7 @@ function parseChat(
     date: input.date,
     requestId: input.requestId as string | undefined,
     confirmationToken: input.confirmationToken as string | undefined,
+    previousModelId: input.previousModelId as string | undefined,
   };
 }
 
@@ -180,6 +190,7 @@ export async function handlePlanningRoute({
       date: requestedDate,
       requestId,
       confirmationToken,
+      previousModelId,
     } = parseChat(await readJsonBody(request, 32_768), assistantEnabled);
     const date = planningDate(user, requestedDate, new Date());
     if (assistantEnabled && assistant) {
@@ -220,7 +231,21 @@ export async function handlePlanningRoute({
       assistantPrivateRequest(providerMessages.at(-1)!.text)
     )
       throw new AssistantError("assistant_sensitive_data");
-    const reply = await ai.ask(user.userId, providerMessages, data.aiContext);
+    const cancelled = new AbortController();
+    const onClose = () => {
+      if (!response.writableEnded) cancelled.abort();
+    };
+    response.once("close", onClose);
+    let reply;
+    try {
+      reply = await ai.ask(user.userId, providerMessages, data.aiContext, {
+        requestId,
+        previousModelId,
+        signal: cancelled.signal,
+      });
+    } finally {
+      response.removeListener("close", onClose);
+    }
     const seen = new Set<string>();
     const validated = [];
     for (const suggestion of reply.suggestions) {

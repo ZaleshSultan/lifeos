@@ -3,6 +3,21 @@ import type {
   AiRouterProviderId,
   AiRouterSettings,
 } from "./ai-model-router.js";
+import type {
+  AiExecutionFeature,
+  AiExecutionState,
+  AiRoutingAccounting,
+} from "./ai-execution.js";
+
+/** Owner-scoped metadata only, with no user/request IDs or prompt text. */
+export interface AiRouterUsageEntry {
+  feature: AiExecutionFeature;
+  state: AiExecutionState | "reserved";
+  createdAt: string;
+  estimatedCostMicros: number | null;
+  reportedCostMicros: number | null;
+  routing: AiRoutingAccounting;
+}
 
 /** Safe authenticated projection. Credentials and provider URLs are never fields. */
 export interface AiRouterProviderStatus {
@@ -23,6 +38,7 @@ export interface AiRouterSettingsSnapshot {
   revision: number;
   providers: AiRouterProviderStatus[];
   models: AiRouterModel[];
+  recentExecutions?: AiRouterUsageEntry[];
   operatorLimits: {
     routerEnabled?: boolean;
     maxRequestCostMicros: number | null;

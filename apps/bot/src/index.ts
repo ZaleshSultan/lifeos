@@ -1,4 +1,5 @@
-import { createAiBudgetStore } from "@lifeos/db";
+import { createAiBudgetStore, createAiRouterSettingsStore } from "@lifeos/db";
+import { createAiModelRouter } from "./ai-model-router.js";
 import { createAiGovernor } from "./ai-governor.js";
 import { loadBotConfig } from "./config.js";
 import { createBotDependencies } from "./dependencies.js";
@@ -17,10 +18,17 @@ const aiGovernor = createAiGovernor({
 const telegram = config.telegramBotToken
   ? new TelegramHttpClient(config.telegramBotToken)
   : undefined;
+const aiRouter = createAiModelRouter({
+  governor: aiGovernor,
+  settings: dependencies.supabase
+    ? createAiRouterSettingsStore(dependencies.supabase)
+    : undefined,
+});
 const server = createBotServer({
   version:
     releaseSha && /^[a-f0-9]{40}$/i.test(releaseSha) ? releaseSha : undefined,
   aiGovernor,
+  aiRouter,
   config,
   store: dependencies.store,
   telegram,

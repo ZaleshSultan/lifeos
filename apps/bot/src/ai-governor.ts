@@ -5,6 +5,7 @@ import {
   type AiBudgetStore,
   type AiExecutionFeature,
   type AiExecutionState,
+  type AiRoutingAccounting,
   type EnvSource,
 } from "@lifeos/core";
 
@@ -141,6 +142,12 @@ export interface AiRunOptions {
   signal?: AbortSignal;
   /** A caller may shorten the shared deadline, never extend it. */
   timeoutMs?: number;
+  /** Trusted server catalog upper bound; cannot reduce a configured estimate. */
+  estimatedCostMicros?: number;
+  /** A per-owner policy may tighten, never raise, the operator's daily ceiling. */
+  maxUserDailyCostMicros?: number;
+  maxRequestCostMicros?: number;
+  routing?: AiRoutingAccounting;
 }
 export interface AiExecutionReceipt {
   requestId: string;
@@ -231,7 +238,18 @@ export class AiGovernor {
       input.maxOutputTokens < 1 ||
       input.maxOutputTokens > config.maxOutputTokens ||
       (input.timeoutMs !== undefined &&
-        (!Number.isSafeInteger(input.timeoutMs) || input.timeoutMs < 1))
+        (!Number.isSafeInteger(input.timeoutMs) || input.timeoutMs < 1)) ||
+      [
+        input.estimatedCostMicros,
+        input.maxUserDailyCostMicros,
+        input.maxRequestCostMicros,
+      ].some(
+        (value) =>
+          value !== undefined &&
+          (!Number.isSafeInteger(value) ||
+            value < 0 ||
+            value > 1_000_000_000_000),
+      )
     )
       throw new AiGovernorError("ai_invalid_execution");
     const reservedTokens = input.estimatedInputTokens + input.maxOutputTokens;
@@ -248,18 +266,38 @@ export class AiGovernor {
     const pricesKnown =
       config.inputCostMicrosPer1k !== null &&
       config.outputCostMicrosPer1k !== null;
-    const estimatedCostMicros = pricesKnown
+    const configuredCostMicros = pricesKnown
       ? Math.ceil(
           (input.estimatedInputTokens * config.inputCostMicrosPer1k!) / 1000 +
             (input.maxOutputTokens * config.outputCostMicrosPer1k!) / 1000,
         )
       : null;
+    const estimatedCostMicros =
+      input.estimatedCostMicros === undefined
+        ? configuredCostMicros
+        : Math.max(configuredCostMicros ?? 0, input.estimatedCostMicros);
+    const limits = {
+      ...config.limits,
+      userCostMicros:
+        input.maxUserDailyCostMicros === undefined
+          ? config.limits.userCostMicros
+          : Math.min(
+              config.limits.userCostMicros ?? input.maxUserDailyCostMicros,
+              input.maxUserDailyCostMicros,
+            ),
+    };
+    if (
+      input.maxRequestCostMicros !== undefined &&
+      (estimatedCostMicros === null ||
+        estimatedCostMicros > input.maxRequestCostMicros)
+    )
+      throw new AiGovernorError("ai_cost_budget_exceeded");
     if (
       estimatedCostMicros === null &&
       [
-        config.limits.userCostMicros,
-        config.limits.featureCostMicros,
-        config.limits.globalCostMicros,
+        limits.userCostMicros,
+        limits.featureCostMicros,
+        limits.globalCostMicros,
       ].some((v) => v !== null)
     )
       throw new AiGovernorError("ai_pricing_unconfigured");
@@ -300,7 +338,8 @@ export class AiGovernor {
             taskId,
             reservedTokens,
             estimatedCostMicros,
-            limits: config.limits,
+            limits,
+            ...(input.routing ? { routing: input.routing } : {}),
           },
           controller.signal,
         ),
@@ -354,6 +393,13 @@ export class AiGovernor {
             requestId,
             state: "completed",
             reportedTokens,
+            ...(input.routing
+              ? {
+                  routing:
+                    (value as { routing?: AiRoutingAccounting })?.routing ??
+                    input.routing,
+                }
+              : {}),
           },
           controller.signal,
         ),
@@ -405,7 +451,13 @@ export class AiGovernor {
         const receiptTimer = setTimeout(() => receiptController.abort(), 2000);
         void this.options.store
           .finish(
-            { userId: input.userId, requestId, state, reportedTokens },
+            {
+              userId: input.userId,
+              requestId,
+              state,
+              reportedTokens,
+              ...(input.routing ? { routing: input.routing } : {}),
+            },
             receiptController.signal,
           )
           .catch(() => {

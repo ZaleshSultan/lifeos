@@ -74,6 +74,65 @@ describe("Ideal Human calendar", () => {
 });
 
 describe("Ideal Human privacy-safe journal input", () => {
+  it("keeps stored meals from each router provider readable after application rollback", () => {
+    for (const analysisSource of [
+      "openrouter",
+      "openai",
+      "anthropic",
+      "chatgpt_plan",
+    ]) {
+      const stored = {
+        ...emptyIdealHumanDay("2026-11-03"),
+        revision: 7,
+        notes: "Preserved private factual record",
+        meals: [
+          {
+            id: "meal-" + analysisSource,
+            label: "Previously saved meal",
+            caloriesKcal: 500,
+            proteinG: 20,
+            fatG: 10,
+            carbsG: 65,
+            mealTime: "12:30",
+            portion: "Recorded portion",
+            estimated: true,
+            corrected: true,
+            analysisSource,
+          },
+        ],
+      };
+      const reopened = parseStoredIdealHumanDay(stored);
+      expect(reopened.revision).toBe(7);
+      expect(reopened.notes).toBe(stored.notes);
+      expect(reopened.meals).toEqual(stored.meals);
+    }
+  });
+  it("preserves legacy manual/Gemini/AGATA and omitted-source records without relabeling", () => {
+    const meals = ["manual", "gemini", "agata"].map((analysisSource) => ({
+      id: "legacy-" + analysisSource,
+      label: "Legacy meal",
+      caloriesKcal: 400,
+      proteinG: 15,
+      estimated: true,
+      analysisSource,
+    }));
+    const reopened = parseStoredIdealHumanDay({
+      ...emptyIdealHumanDay("2026-11-03"),
+      revision: 3,
+      meals: [
+        ...meals,
+        {
+          id: "legacy-no-source",
+          label: "Legacy unlabelled meal",
+          caloriesKcal: 300,
+          proteinG: 10,
+          estimated: false,
+        },
+      ],
+    });
+    expect(reopened.meals.slice(0, 3)).toEqual(meals);
+    expect(Object.hasOwn(reopened.meals[3], "analysisSource")).toBe(false);
+  });
   it("clears only private reflection history and preserves factual records and tomorrow's draft", () => {
     const day = parseIdealHumanDay({
       date: "2026-11-03",

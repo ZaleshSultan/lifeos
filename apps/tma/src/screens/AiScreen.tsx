@@ -4,6 +4,7 @@ import {
   AI_MAX_MESSAGE_CHARS,
   aiUnavailableMessage,
   confirmAiChatRequest,
+  completeAiConversation,
   planningErrorMessage,
   prepareAiChatRequest,
   useAiChatMutation,
@@ -11,15 +12,85 @@ import {
   useTodayQuery,
   type AiChatAnswer,
   type AiChatRequest,
-  type AiMessage,
+  type AiConversationMessage,
 } from "../api/planning";
 import { ErrorPanel, LoadingPanel } from "../components/AsyncState";
 import { cx } from "../lib/styles";
 import { telegram } from "../telegram";
+import { AiRouterSettingsPanel } from "../components/AiRouterSettingsPanel";
 
 interface AiScreenProps {
   date?: string;
   onBack: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
+}
+
+function providerName(provider: AiChatAnswer["provider"] | undefined) {
+  return provider === "lifeos"
+    ? "LifeOS tools"
+    : provider === "gemini"
+      ? "Google Gemini"
+      : provider === "openrouter"
+        ? "OpenRouter"
+        : provider === "openai"
+          ? "OpenAI API"
+          : provider === "anthropic"
+            ? "Anthropic API"
+            : provider === "chatgpt_plan"
+              ? "ChatGPT plan"
+              : "LifeOS AI";
+}
+function AiModelDetails({
+  route,
+}: {
+  route: NonNullable<AiChatAnswer["modelRoute"]>;
+}) {
+  const cost = (micros: number | null) =>
+    typeof micros === "number" && Number.isSafeInteger(micros) && micros >= 0
+      ? new Intl.NumberFormat("en-US", {
+          style: "currency",
+          currency: "USD",
+          maximumFractionDigits: 6,
+        }).format(micros / 1_000_000)
+      : null;
+  return (
+    <div
+      aria-label="AI model usage"
+      className="mt-3 space-y-1 border-t border-white/[0.08] pt-3 text-xs leading-relaxed text-zinc-400"
+    >
+      <p className="break-words text-zinc-300">
+        {providerName(route.provider)} · {route.model}
+        {route.upstreamProvider ? ` · Served by ${route.upstreamProvider}` : ""}
+      </p>
+      <p>
+        {route.billing === "chatgpt_plan"
+          ? "ChatGPT plan allowance · not OpenAI API credits"
+          : route.billing === "free"
+            ? "Free model · provider limits still apply"
+            : "API billing"}
+      </p>
+      {route.billing !== "chatgpt_plan" ? (
+        <p>
+          {cost(route.estimatedCostMicros)
+            ? `Estimated ${cost(route.estimatedCostMicros)}`
+            : "Estimate unavailable"}
+          {cost(route.reportedCostMicros)
+            ? ` · ${route.costSource === "provider_reported" ? "Provider-reported cost" : route.costSource === "rate_estimate" ? "Rate-based usage estimate" : "Usage cost"} ${cost(route.reportedCostMicros)}`
+            : " · Reported cost unavailable"}
+        </p>
+      ) : null}
+      <p>
+        {Number.isFinite(route.latencyMs) && route.latencyMs >= 0
+          ? `${Math.round(route.latencyMs)} ms`
+          : "Latency unavailable"}{" "}
+        · {route.fallback ? "Fallback used" : "Selected model"} · External
+        processing
+      </p>
+      <p className="break-words">
+        Routing: {route.reason.replaceAll("_", " ")}
+      </p>
+    </div>
+  );
 }
 
 export function AiSuggestions({
@@ -92,7 +163,7 @@ export function AiToolResult({
       className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4"
     >
       <h2 className="text-sm font-semibold text-white">
-        {answer.provider === "lifeos" ? "LifeOS tools" : "Google Gemini"}
+        {providerName(answer.provider)}
         {answer.tool
           ? cancelled
             ? " · Confirmation cancelled"
@@ -176,15 +247,15 @@ export function AiActionConfirmation({
 function AiConversation({
   date,
   assistantEnabled,
-  geminiAvailable,
+  modelAvailable,
 }: {
   date?: string;
   assistantEnabled: boolean;
-  geminiAvailable: boolean;
+  modelAvailable: boolean;
 }) {
   const todayQuery = useTodayQuery(date);
   const mutation = useAiChatMutation();
-  const [messages, setMessages] = useState<AiMessage[]>([]);
+  const [messages, setMessages] = useState<AiConversationMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
   const [answer, setAnswer] = useState<AiChatAnswer | null>(null);
@@ -195,6 +266,7 @@ function AiConversation({
   const [confirmationCancelled, setConfirmationCancelled] = useState(false);
   const requestVersion = useRef(0);
   const controller = useRef<AbortController | null>(null);
+  const previousModelId = useRef<string | undefined>(undefined);
   const timezone = todayQuery.data?.plan.timezone ?? "UTC";
 
   useEffect(
@@ -226,10 +298,11 @@ function AiConversation({
         signal: abortController.signal,
       });
       if (requestVersion.current !== version) return;
-      setMessages([
-        ...request.messages,
-        { role: "assistant", text: response.answer },
-      ]);
+      setMessages((previous) =>
+        completeAiConversation(previous, request, response),
+      );
+      if (response.modelRoute)
+        previousModelId.current = response.modelRoute.modelId;
       setAnswer(response);
       setConfirmationRequest(response.confirmation ? request : null);
       setPendingQuestion(null);
@@ -255,7 +328,12 @@ function AiConversation({
       text.length > AI_MAX_MESSAGE_CHARS
     )
       return;
-    const request = prepareAiChatRequest(messages, text, date);
+    const request = prepareAiChatRequest(
+      messages,
+      text,
+      date,
+      previousModelId.current,
+    );
     setDraft("");
     setAnswer(null);
     await sendRequest(request);
@@ -283,6 +361,7 @@ function AiConversation({
     controller.current = null;
     mutation.reset();
     setMessages([]);
+    previousModelId.current = undefined;
     setDraft("");
     setPendingQuestion(null);
     setAnswer(null);
@@ -370,15 +449,14 @@ function AiConversation({
             )}
           >
             <p className="mb-2 text-xs font-semibold text-zinc-400">
-              {message.role === "user"
-                ? "You"
-                : assistantEnabled
-                  ? "LifeOS AI"
-                  : "LifeOS AI · Gemini"}
+              {message.role === "user" ? "You" : providerName(message.provider)}
             </p>
             <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-zinc-200">
               {message.text}
             </p>
+            {message.role === "assistant" && message.modelRoute ? (
+              <AiModelDetails route={message.modelRoute} />
+            ) : null}
           </article>
         ))}
         {pendingQuestion ? (
@@ -464,8 +542,8 @@ function AiConversation({
           className="mt-2 text-xs leading-relaxed text-zinc-400"
         >
           {assistantEnabled
-            ? `LifeOS handles supported tool and memory requests without sending them to an AI provider. ${geminiAvailable ? "Other planning questions may share your current message and a limited snapshot of academic/project tasks, deadlines, commitment times, availability, and task activity with Google Gemini. Anything you type in a planning question may be sent. " : "Gemini planning is currently unavailable. "}Health, finance, and saved memories are excluded from Gemini context. Do not enter passwords or access tokens. Only explicit memory requests save memories.`
-            : "Sending shares your message, recent conversation, and a limited snapshot of named academic/project tasks, deadlines, private commitment times, availability, and task activity with Google Gemini. Other task, reminder, and calendar titles are masked. Health and finance records are excluded. Anything you type is sent."}
+            ? `LifeOS handles supported tool and memory requests without sending them to an AI provider. ${modelAvailable ? "Other planning questions may share your message and a limited snapshot of academic/project tasks, deadlines, commitment times, availability, and task activity with the approved provider selected by your routing settings. Anything you type in a planning question may be sent. " : "Model planning is currently unavailable. "}Health, finance, and saved memories are excluded from planning context. Do not enter passwords or access tokens. Only explicit memory requests save memories. Review model, privacy and spending settings below.`
+            : "Sending shares your message, recent conversation, and a limited snapshot of named academic/project tasks, deadlines, private commitment times, availability, and task activity with your approved configured provider. Other task, reminder, and calendar titles are masked. Health and finance records are excluded from planning context. Anything you type may be sent. Review routing, privacy and spending settings below."}
         </p>
         <button
           type="submit"
@@ -482,7 +560,7 @@ function AiConversation({
   );
 }
 
-export function AiScreen({ date, onBack }: AiScreenProps) {
+export function AiScreen({ date, onBack, onDirtyChange }: AiScreenProps) {
   const statusQuery = useAiStatusQuery();
   return (
     <div className="space-y-4">
@@ -520,14 +598,15 @@ export function AiScreen({ date, onBack }: AiScreenProps) {
         />
       ) : (
         <AiConversation
-          key={statusQuery.data.assistantEnabled ? "assistant" : "gemini"}
+          key={statusQuery.data.assistantEnabled ? "assistant" : "external"}
           date={date}
           assistantEnabled={Boolean(statusQuery.data.assistantEnabled)}
-          geminiAvailable={
+          modelAvailable={
             statusQuery.data.enabled && statusQuery.data.available
           }
         />
       )}
+      <AiRouterSettingsPanel onDirtyChange={onDirtyChange} />
     </div>
   );
 }

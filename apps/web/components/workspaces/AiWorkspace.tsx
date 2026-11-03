@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   WebAiAnswer,
   WebAiMessage,
@@ -14,6 +14,77 @@ import {
   rowClass,
 } from "@/components/WorkspaceUI";
 import { webRequest, webErrorMessage } from "@/lib/web-client";
+
+type ConversationMessage = WebAiMessage & {
+  provider?: string;
+  modelRoute?: WebAiAnswer["modelRoute"];
+};
+function providerName(provider: string | undefined) {
+  return provider === "gemini"
+    ? "Google Gemini"
+    : provider === "openrouter"
+      ? "OpenRouter"
+      : provider === "openai"
+        ? "OpenAI API"
+        : provider === "anthropic"
+          ? "Anthropic API"
+          : provider === "chatgpt_plan"
+            ? "ChatGPT plan"
+            : "LifeOS";
+}
+function ModelDetails({
+  route,
+}: {
+  route: NonNullable<WebAiAnswer["modelRoute"]>;
+}) {
+  const cost = (micros: number | null) =>
+    typeof micros === "number" && Number.isSafeInteger(micros) && micros >= 0
+      ? new Intl.NumberFormat("en-US", {
+          style: "currency",
+          currency: "USD",
+          maximumFractionDigits: 6,
+        }).format(micros / 1_000_000)
+      : null;
+  return (
+    <div
+      aria-label="Использование AI модели"
+      className="mt-3 space-y-1 border-t border-white/[0.08] pt-3 text-xs leading-relaxed text-zinc-400"
+    >
+      <p className="break-words text-zinc-300">
+        {providerName(route.provider)} · {route.model}
+        {route.upstreamProvider ? ` · Обработал ${route.upstreamProvider}` : ""}
+      </p>
+      <p>
+        {route.billing === "chatgpt_plan"
+          ? "Лимит плана ChatGPT · это не API-кредиты OpenAI"
+          : route.billing === "free"
+            ? "Бесплатная модель · ограничения провайдера сохраняются"
+            : "Оплата через API"}
+      </p>
+      {route.billing !== "chatgpt_plan" ? (
+        <p>
+          {cost(route.estimatedCostMicros)
+            ? `Оценка ${cost(route.estimatedCostMicros)}`
+            : "Оценка стоимости неизвестна"}
+          {cost(route.reportedCostMicros)
+            ? ` · ${route.costSource === "provider_reported" ? "Стоимость от провайдера" : route.costSource === "rate_estimate" ? "Оценка по использованным токенам" : "Стоимость использования"} ${cost(route.reportedCostMicros)}`
+            : " · Фактическая стоимость не сообщена"}
+        </p>
+      ) : null}
+      <p>
+        {Number.isFinite(route.latencyMs) && route.latencyMs >= 0
+          ? `${Math.round(route.latencyMs)} мс`
+          : "Время ответа неизвестно"}{" "}
+        ·{" "}
+        {route.fallback ? "Использован резервный маршрут" : "Выбранная модель"}{" "}
+        · Внешняя обработка
+      </p>
+      <p className="break-words">
+        Причина выбора: {route.reason.replaceAll("_", " ")}
+      </p>
+    </div>
+  );
+}
 export function AiWorkspace({
   status,
   date,
@@ -21,7 +92,7 @@ export function AiWorkspace({
   status: WebAiStatus | null;
   date: string;
 }) {
-  const [history, setHistory] = useState<WebAiMessage[]>([]);
+  const [history, setHistory] = useState<ConversationMessage[]>([]);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,6 +102,8 @@ export function AiWorkspace({
   } | null>(null);
   const [retry, setRetry] = useState<WebAiRequest | null>(null);
   const controller = useRef<AbortController | null>(null);
+  const previousModelId = useRef<string | undefined>(undefined);
+  useEffect(() => () => controller.current?.abort(), []);
   const enabled = Boolean(
     status && (status.available || status.assistantEnabled),
   );
@@ -47,7 +120,17 @@ export function AiWorkspace({
         body: JSON.stringify(input),
         signal: control.signal,
       });
-      setHistory((old) => [...old, { role: "assistant", text: answer.answer }]);
+      setHistory((old) => [
+        ...old,
+        {
+          role: "assistant",
+          text: answer.answer,
+          provider: answer.provider,
+          modelRoute: answer.modelRoute,
+        },
+      ]);
+      if (answer.modelRoute)
+        previousModelId.current = answer.modelRoute.modelId;
       setPending(
         answer.confirmation
           ? { input, confirmation: answer.confirmation }
@@ -71,11 +154,21 @@ export function AiWorkspace({
     const messages: WebAiMessage[] = [
       ...history.slice(-10),
       { role: "user" as const, text: value },
-    ].map((message) => ({ ...message, text: message.text.slice(0, 2000) }));
+    ].map((message) => ({
+      role: message.role,
+      text: message.text.slice(0, 2000),
+    }));
     setHistory((old) => [...old, { role: "user", text: value }]);
     setText("");
     setPending(null);
-    await request({ messages, date, requestId: crypto.randomUUID() });
+    await request({
+      messages,
+      date,
+      requestId: crypto.randomUUID(),
+      ...(previousModelId.current
+        ? { previousModelId: previousModelId.current }
+        : {}),
+    });
   }
   return (
     <SectionPanel title="LifeOS AI">
@@ -94,11 +187,14 @@ export function AiWorkspace({
         {history.map((message, i) => (
           <article key={i} className={rowClass}>
             <p className="mb-2 text-xs font-semibold text-cyan-200">
-              {message.role === "user" ? "Ты" : "LifeOS"}
+              {message.role === "user" ? "Ты" : providerName(message.provider)}
             </p>
             <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-zinc-200">
               {message.text}
             </p>
+            {message.role === "assistant" && message.modelRoute ? (
+              <ModelDetails route={message.modelRoute} />
+            ) : null}
           </article>
         ))}
       </div>
@@ -186,6 +282,7 @@ export function AiWorkspace({
               className={buttonClass}
               onClick={() => {
                 setHistory([]);
+                previousModelId.current = undefined;
                 setPending(null);
                 setRetry(null);
                 setError(null);

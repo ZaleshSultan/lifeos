@@ -1,5 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ApiError, request } from "./client";
+import type { AiModelRouteReceipt } from "@lifeos/core";
 
 export interface DailyPlan {
   date: string;
@@ -61,6 +62,12 @@ export interface AiMessage {
   text: string;
 }
 
+/** UI-only provenance. prepareAiMessages/sendAiChat never send it to a provider. */
+export interface AiConversationMessage extends AiMessage {
+  provider?: AiChatAnswer["provider"];
+  modelRoute?: AiModelRouteReceipt;
+}
+
 export interface AiChatAnswer {
   answer: string;
   suggestions: Array<{
@@ -70,7 +77,8 @@ export interface AiChatAnswer {
     title?: string;
     estimated?: boolean;
   }>;
-  provider: "gemini" | "lifeos";
+  provider: AiModelRouteReceipt["provider"] | "lifeos";
+  modelRoute?: AiModelRouteReceipt;
   readOnly: boolean;
   tool?: {
     name: string;
@@ -87,6 +95,7 @@ export interface AiChatRequest {
   date?: string;
   requestId?: string;
   confirmationToken?: string;
+  previousModelId?: string;
 }
 
 export const AI_MAX_MESSAGES = 12;
@@ -108,10 +117,11 @@ export function sendAiChat(input: AiChatRequest & { signal?: AbortSignal }) {
   return request<AiChatAnswer>("/api/tma/ai/chat", {
     method: "POST",
     body: JSON.stringify({
-      messages: input.messages,
+      messages: input.messages.map(({ role, text }) => ({ role, text })),
       date: input.date,
       requestId: input.requestId,
       confirmationToken: input.confirmationToken,
+      previousModelId: input.previousModelId,
     }),
     signal: input.signal,
   });
@@ -158,12 +168,48 @@ export function prepareAiChatRequest(
   history: AiMessage[],
   userText: string,
   date?: string,
+  previousModelId?: string,
 ): AiChatRequest {
   return {
     messages: prepareAiMessages(history, userText),
     date,
     requestId: crypto.randomUUID(),
+    ...(previousModelId ? { previousModelId } : {}),
   };
+}
+
+/** Retain completed UI receipts as the bounded history shifts, including confirmations. */
+export function completeAiConversation(
+  previous: AiConversationMessage[],
+  request: AiChatRequest,
+  response: AiChatAnswer,
+): AiConversationMessage[] {
+  const offset = Math.max(
+    0,
+    previous.length -
+      request.messages.length +
+      (request.confirmationToken ? -1 : 1),
+  );
+  const context = request.messages.map((message, index) => {
+    const old = previous[offset + index];
+    return {
+      role: message.role,
+      text: message.text,
+      ...(old?.role === message.role &&
+      old.text.slice(0, AI_MAX_MESSAGE_CHARS) === message.text
+        ? { provider: old.provider, modelRoute: old.modelRoute }
+        : {}),
+    };
+  });
+  return [
+    ...context,
+    {
+      role: "assistant",
+      text: response.answer,
+      provider: response.provider,
+      modelRoute: response.modelRoute,
+    },
+  ];
 }
 
 // The backend-issued token is the only confirmation authority. Keep the
@@ -211,6 +257,10 @@ export function planningErrorMessage(error: unknown): string {
       return "The configured AI model is unavailable. Your daily plan remains available.";
     if (code === "ai_invalid_response")
       return "AI returned an answer that could not be validated. Please try again.";
+    if (error.status === 403 && code === "ai_router_blocked")
+      return "Model routing is blocked by your provider, privacy or spending settings. Review AI settings; deterministic LifeOS tools remain available.";
+    if (error.status === 403 && code === "ai_router_consent_changed")
+      return "Your routing preferences changed while the request was waiting. Review AI settings before sending a new request.";
     if (code === "assistant_confirmation_invalid")
       return "This confirmation has expired or no longer matches the request. Send the request again to review a fresh confirmation.";
     if (code === "assistant_tool_unavailable")

@@ -183,3 +183,20 @@ Telegram `/web` links expire after 120 seconds and exchange once for a revocable
 opaque browser session. Both the backend and Next.js enforce live session and
 profile checks. See [WEB_SESSIONS.md](WEB_SESSIONS.md) for the verified previous
 vulnerability, threat boundaries, revocation, rollout and remaining limits.
+
+## Unified model routing and optional subscription consent
+
+[Model routing](AI_MODEL_ROUTER.md) reuses the existing auth, permission and durable
+AI execution boundaries. Server environment credentials are explicitly scoped by
+canonical owner, feature and model; another user's saved paid preference cannot
+spend them. No browser key upload, arbitrary provider URL, Claude subscription
+proxy or native Codex/Claude credential import exists. Paid operator and owner
+consent gates default off; provider data permissions are checked for every route.
+New fallback attempts recheck the settings revision and remain on the same billing
+path. API quotas/policy restrictions never trigger key rotation.
+
+The [ChatGPT companion](CHATGPT_PLAN_CONNECTION.md) is an optional official-flow
+preparation, not a production login or proof of eligibility. It requires owner-device
+browser consent, PKCE/state/nonce and verified OIDC identity/scope, encrypts private
+owner/host-bound files, and leaves runtime plan inference disconnected. No token
+belongs in a browser store, chat, URL diagnostic, log or source-control file.

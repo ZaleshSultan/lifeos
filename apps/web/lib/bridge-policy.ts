@@ -30,6 +30,8 @@ const resources: Array<{ pattern: RegExp; methods: readonly string[] }> = [
   { pattern: /^nutrition\/drafts\/[0-9a-f-]{36}$/, methods: ["GET"] },
   { pattern: /^nutrition\/analyze$/, methods: ["POST"] },
   { pattern: /^ai\/chat$/, methods: ["POST"] },
+  { pattern: /^ai\/router\/settings$/, methods: ["GET", "PUT"] },
+  { pattern: /^ai\/router\/preview$/, methods: ["POST"] },
 ];
 export function bridgeResourceAllowed(path: string, method: string) {
   return resources.some(

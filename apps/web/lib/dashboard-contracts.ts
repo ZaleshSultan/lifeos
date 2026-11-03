@@ -1,4 +1,5 @@
 import type { DailyPlan } from "../../../packages/core/src/planner.js";
+import type { AiModelRouteReceipt } from "../../../packages/core/src/ai-execution.js";
 import type {
   CurrentWorkout,
   WorkoutSet,
@@ -33,10 +34,12 @@ export interface WebAiRequest {
   date?: string;
   requestId: string;
   confirmationToken?: string;
+  previousModelId?: string;
 }
 export interface WebAiAnswer {
   answer: string;
   provider: string;
+  modelRoute?: AiModelRouteReceipt;
   readOnly: boolean;
   confirmation?: { token: string; summary: string };
   suggestions: Array<{ title?: string; startsAt: string; endsAt: string }>;

@@ -2409,6 +2409,7 @@ function makeFinanceEntryHandler(
               : undefined,
         aiEnabled: sourceCommand === "finance_ai" && runtime.financeAi?.enabled,
         openRouterApiKey: runtime.financeAi?.openRouterApiKey,
+        trustedRouterTransport: runtime.financeAi?.trustedRouterTransport,
         model: runtime.financeAi?.model,
         fetchImpl: runtime.financeAi?.fetchForUser?.(user!.userId) ?? governedOpenRouterFetch(undefined,user!.userId),
       }),

@@ -157,6 +157,20 @@ export type FinanceReceiptStatus =
 export interface Database {
   public: {
     Tables: {
+      ai_router_settings: TableDefinition<
+        {
+          user_id: string;
+          settings: Json;
+          revision: number;
+          updated_at: string;
+        },
+        {
+          user_id: string;
+          settings: Json;
+          revision?: number;
+          updated_at?: string;
+        }
+      >;
       hydration_entries: TableDefinition<
         { id:string;user_id:string;request_id:string;amount_ml:number;occurred_at:string;local_date:string;source:"telegram"|"tma"|"web";undone_at:string|null },
         { id?:string;user_id:string;request_id:string;amount_ml:number;occurred_at?:string;local_date:string;source:"telegram"|"tma"|"web";undone_at?:string|null }
@@ -2063,6 +2077,14 @@ export interface Database {
       };
     };
     Functions: {
+      save_ai_router_settings: {
+        Args: {
+          p_user_id: string;
+          p_settings: Json;
+          p_expected_revision: number;
+        };
+        Returns: Json;
+      };
       get_hydration_summary: {Args:{p_user_id:string;p_date:string};Returns:Json};
       log_hydration: {Args:{p_user_id:string;p_request_id:string;p_amount_ml:number;p_source:string};Returns:Json};
       undo_hydration: {Args:{p_user_id:string;p_entry_id:string};Returns:Json};

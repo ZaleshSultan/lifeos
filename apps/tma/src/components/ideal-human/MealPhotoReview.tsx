@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import type { IdealHumanMeal } from "../../../../../packages/core/src/ideal-human.js";
+import type { MealPhotoDraft } from "../../../../../packages/core/src/nutrition.js";
 import { buttonClass, inputClass, panelClass } from "./Fields";
 function Notice({
   children,
@@ -32,7 +33,8 @@ interface FoodDraft {
   expiresAt: string;
   items: FoodItem[];
   uncertainty: string[];
-  source: "gemini";
+  source: MealPhotoDraft["source"];
+  modelRoute?: MealPhotoDraft["modelRoute"];
   estimated: true;
   requiresReview: true;
 }
@@ -255,7 +257,7 @@ export function MealPhotoReview({
           fatG: item.fatG,
           carbsG: item.carbsG,
           mealTime: null,
-          analysisSource: "gemini",
+          analysisSource: draft.source,
           corrected,
           estimated: true,
         })),
@@ -316,7 +318,8 @@ export function MealPhotoReview({
                   disabled={disabled || busy}
                   onChange={(e) => setConsent(e.target.checked)}
                 />
-                Разрешаю отправить это фото Gemini (Google) для оценки еды.
+                Разрешаю отправить это фото настроенному провайдеру AI для
+                оценки еды.
               </label>
               <p className="text-xs text-zinc-400">
                 Выбери фото без лиц, документов и приватных экранов. До нажатия
@@ -371,6 +374,11 @@ export function MealPhotoReview({
           <h3 className="text-sm font-semibold text-amber-100">
             Оценка AI: проверь и исправь
           </h3>
+          <p className="break-words text-xs text-zinc-400">
+            {draft.modelRoute
+              ? `${draft.modelRoute.provider} · ${draft.modelRoute.model} · ${draft.modelRoute.latencyMs} мс${draft.modelRoute.fallback ? " · резервная модель" : ""}`
+              : draft.source}
+          </p>
           {draft.date ? (
             <p className="text-sm text-zinc-300">
               Дата исходной записи: {draft.date}. Сохраняй в дневник этой даты.

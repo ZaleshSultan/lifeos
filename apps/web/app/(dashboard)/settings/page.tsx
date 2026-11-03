@@ -1,4 +1,6 @@
 import { LmsStatus } from "@/components/LmsStatus";
+import { AiRouterSettingsPanel } from "@/components/workspaces/AiRouterSettingsPanel";
+import type { AiRouterSettingsSnapshot } from "../../../../../packages/core/src/ai-router-settings-view.js";
 import { dashboardData } from "@/lib/dashboard-data";
 import type { WebLmsConnection } from "@/lib/lms-contracts";
 import { Bot, CalendarDays, CloudSun, ShieldCheck } from "lucide-react";
@@ -19,9 +21,10 @@ export default async function SettingsPage() {
   ]);
   if (!session) redirect("/access");
 
-  const lmsConnection = await dashboardData<WebLmsConnection>(
-    "/api/tma/lms/connection",
-  );
+  const [lmsConnection, routerSettings] = await Promise.all([
+    dashboardData<WebLmsConnection>("/api/tma/lms/connection"),
+    dashboardData<AiRouterSettingsSnapshot>("/api/tma/ai/router/settings"),
+  ]);
   const google = session.integrations.google;
   const googleReady =
     google.connected &&
@@ -83,6 +86,9 @@ export default async function SettingsPage() {
 
       <div className="mt-6">
         <LmsStatus connection={lmsConnection} work={null} />
+      </div>
+      <div className="mt-6">
+        <AiRouterSettingsPanel initial={routerSettings} />
       </div>
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
         <SectionPanel

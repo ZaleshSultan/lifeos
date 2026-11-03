@@ -32,7 +32,7 @@ export const DEFAULT_FINANCE_CATEGORIES = [
 
 export type FinanceCategoryName = (typeof DEFAULT_FINANCE_CATEGORIES)[number];
 export type FinanceEntryType = "expense" | "income";
-export type FinanceParserSource = "rules" | "openrouter";
+export type FinanceParserSource = "rules" | "openrouter" | "model_router";
 
 export interface FinanceParseResult {
   amount: number | null;
@@ -51,6 +51,8 @@ export interface FinanceParseOptions {
   transactionType?: FinanceEntryType;
   aiEnabled?: boolean;
   openRouterApiKey?: string;
+  /** Server-only bridge; a missing custom transport must fail closed. */
+  trustedRouterTransport?: true;
   model?: string;
   fetchImpl?: typeof fetch;
 }
@@ -87,13 +89,24 @@ export interface FinanceAssistantResult {
   risks: string[];
   model: string | null;
   usedAi: boolean;
+  modelRoute?: import("./ai-execution.js").AiModelRouteReceipt;
 }
 
 export interface FinanceAssistantOptions {
   aiEnabled?: boolean;
   openRouterApiKey?: string;
+  /** Server-only bridge; a missing custom transport must fail closed. */
+  trustedRouterTransport?: true;
   model?: string;
   fetchImpl?: typeof fetch;
+}
+
+function aiTransportConfigured(
+  options: FinanceParseOptions | FinanceAssistantOptions,
+): boolean {
+  return options.trustedRouterTransport === true
+    ? Boolean(options.fetchImpl)
+    : Boolean(options.openRouterApiKey);
 }
 
 const CARD_OR_ACCOUNT_PATTERN = /(?<!\d)(?:\d[\s-]?){12,19}(?!\d)/g;
@@ -385,7 +398,7 @@ export async function parseFinanceText(
 
   if (
     !options.aiEnabled ||
-    !options.openRouterApiKey ||
+    !aiTransportConfigured(options) ||
     fallback.amount === null
   ) {
     return fallback;
@@ -399,7 +412,9 @@ export async function parseFinanceText(
       {
         method: "POST",
         headers: {
-          authorization: `Bearer ${options.openRouterApiKey}`,
+          ...(!options.trustedRouterTransport && options.openRouterApiKey
+            ? { authorization: `Bearer ${options.openRouterApiKey}` }
+            : {}),
           "content-type": "application/json",
         },
         body: JSON.stringify({
@@ -473,7 +488,7 @@ export async function parseFinanceText(
       merchant,
       tags,
       confidence: boundedConfidence(parsed?.confidence, fallback.confidence),
-      parser: "openrouter",
+      parser: options.trustedRouterTransport ? "model_router" : "openrouter",
       redactedText: fallback.redactedText,
     };
   } catch {
@@ -594,7 +609,7 @@ async function parseReceiptTextWithAi(
 ): Promise<ReceiptParseResult | null> {
   const redactedText = redactFinanceText(ocrText);
 
-  if (!options.aiEnabled || !options.openRouterApiKey || !redactedText) {
+  if (!options.aiEnabled || !aiTransportConfigured(options) || !redactedText) {
     return null;
   }
 
@@ -606,7 +621,9 @@ async function parseReceiptTextWithAi(
       {
         method: "POST",
         headers: {
-          authorization: `Bearer ${options.openRouterApiKey}`,
+          ...(!options.trustedRouterTransport && options.openRouterApiKey
+            ? { authorization: `Bearer ${options.openRouterApiKey}` }
+            : {}),
           "content-type": "application/json",
         },
         body: JSON.stringify({
@@ -663,7 +680,11 @@ export async function extractReceiptOcrText(
   mimeType: string,
   options: FinanceParseOptions = {},
 ): Promise<string | null> {
-  if (!options.aiEnabled || !options.openRouterApiKey || !imageBase64.trim()) {
+  if (
+    !options.aiEnabled ||
+    !aiTransportConfigured(options) ||
+    !imageBase64.trim()
+  ) {
     return null;
   }
 
@@ -675,7 +696,9 @@ export async function extractReceiptOcrText(
       {
         method: "POST",
         headers: {
-          authorization: `Bearer ${options.openRouterApiKey}`,
+          ...(!options.trustedRouterTransport && options.openRouterApiKey
+            ? { authorization: `Bearer ${options.openRouterApiKey}` }
+            : {}),
           "content-type": "application/json",
         },
         body: JSON.stringify({
@@ -977,7 +1000,7 @@ export async function analyzeFinanceQuestion(
 ): Promise<FinanceAssistantResult> {
   const fallback = deterministicFinanceAnswer(question, context);
 
-  if (!options.aiEnabled || !options.openRouterApiKey) {
+  if (!options.aiEnabled || !aiTransportConfigured(options)) {
     return fallback;
   }
 
@@ -990,7 +1013,9 @@ export async function analyzeFinanceQuestion(
       {
         method: "POST",
         headers: {
-          authorization: `Bearer ${options.openRouterApiKey}`,
+          ...(!options.trustedRouterTransport && options.openRouterApiKey
+            ? { authorization: `Bearer ${options.openRouterApiKey}` }
+            : {}),
           "content-type": "application/json",
         },
         body: JSON.stringify({
@@ -1019,9 +1044,11 @@ export async function analyzeFinanceQuestion(
       return fallback;
     }
 
-    const parsed = parseOpenRouterJson(
-      openRouterContent(await response.json()) ?? "",
-    );
+    const providerReply = (await response.json()) as {
+      model?: string;
+      modelRoute?: import("./ai-execution.js").AiModelRouteReceipt;
+    };
+    const parsed = parseOpenRouterJson(openRouterContent(providerReply) ?? "");
 
     if (!parsed || typeof parsed.answer !== "string") {
       return fallback;
@@ -1039,7 +1066,12 @@ export async function analyzeFinanceQuestion(
             (item): item is string => typeof item === "string",
           )
         : fallback.risks,
-      model,
+      model: options.trustedRouterTransport
+        ? (providerReply.model ?? null)
+        : model,
+      ...(options.trustedRouterTransport && providerReply.modelRoute
+        ? { modelRoute: providerReply.modelRoute }
+        : {}),
       usedAi: true,
     };
   } catch {
