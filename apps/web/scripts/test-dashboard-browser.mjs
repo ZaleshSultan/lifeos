@@ -777,7 +777,9 @@ try {
       await p.goto(`${origin}/web/ideal-human`, { waitUntil: "commit" });
       await firstScript;
       const weight = p.getByLabel("Утренний вес, кг", { exact: true });
-      const dateSelector = p.getByRole("combobox", { name: /^День эксперимента/ });
+      const dateSelector = p.getByRole("combobox", {
+        name: /^День эксперимента/,
+      });
       const save = p.getByRole("button", {
         name: "Сохранить день",
         exact: true,
@@ -841,12 +843,64 @@ try {
       .getByLabel("Название", { exact: true })
       .fill("Fixture study priority");
     await page
+      .getByRole("textbox", { name: "Заметки", exact: true })
+      .fill("Fixture saved task notes");
+    await page
+      .getByLabel("Дедлайн, если известен (Asia/Almaty)", { exact: true })
+      .fill("2026-11-03T17:30");
+    await page
       .getByRole("button", { name: "Добавить задачу", exact: true })
       .click();
     await page
       .getByRole("heading", { name: "Fixture study priority" })
       .waitFor();
     await page.getByText("Изменить задачу", { exact: true }).click();
+    const editTitle = page.getByRole("textbox", {
+      name: "Новое название",
+      exact: true,
+    });
+    const editNotes = page.getByRole("textbox", {
+      name: "Заметки задачи",
+      exact: true,
+    });
+    const editDue = page.getByLabel("Дедлайн задачи (Asia/Almaty)", {
+      exact: true,
+    });
+    const discard = page.getByRole("button", {
+      name: "Отменить правки задачи",
+      exact: true,
+    });
+    assert.equal(await discard.count(), 1);
+    const savedTask = { ...tasks.get("A")[0] };
+    const taskPatchesBeforeDiscard = trace.filter(
+      (request) =>
+        request.method === "PATCH" &&
+        request.path.startsWith("/api/tma/tasks/"),
+    ).length;
+    await editTitle.fill("Unsaved title to discard");
+    await editNotes.fill("Unsaved notes to discard");
+    await editDue.fill("2026-11-04T09:15");
+    assert.equal(await discard.isEnabled(), true);
+    await discard.click();
+    await page.waitForFunction(() =>
+      [...document.querySelectorAll("input")].some(
+        (input) => input.value === "Fixture study priority",
+      ),
+    );
+    assert.equal(await editTitle.inputValue(), "Fixture study priority");
+    assert.equal(await editNotes.inputValue(), "Fixture saved task notes");
+    assert.equal(await editDue.inputValue(), "2026-11-03T17:30");
+    assert.equal(await discard.isDisabled(), true);
+    await page.waitForLoadState("networkidle");
+    assert.equal(
+      trace.filter(
+        (request) =>
+          request.method === "PATCH" &&
+          request.path.startsWith("/api/tma/tasks/"),
+      ).length,
+      taskPatchesBeforeDiscard,
+    );
+    assert.deepEqual(tasks.get("A")[0], savedTask);
     await page
       .getByLabel("Новое название", { exact: true })
       .fill("Fixture edited priority");
