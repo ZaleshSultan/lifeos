@@ -777,7 +777,7 @@ try {
       await p.goto(`${origin}/web/ideal-human`, { waitUntil: "commit" });
       await firstScript;
       const weight = p.getByLabel("Утренний вес, кг", { exact: true });
-      const dateSelector = p.getByLabel("День эксперимента", { exact: true });
+      const dateSelector = p.getByRole("combobox", { name: /^День эксперимента/ });
       const save = p.getByRole("button", {
         name: "Сохранить день",
         exact: true,
