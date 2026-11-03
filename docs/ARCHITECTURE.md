@@ -51,7 +51,7 @@ Google tokens in `public.user_oauth_connections`. TMA status uses only safe
 metadata from that connection; browser apps never receive access or refresh
 tokens.
 
-The Android health bridge reads previous-day data from Health Connect and posts to `POST /health/ingest`. The backend validates `Authorization: Bearer <health-session-token>`, computes recovery and completeness with `packages/core`, upserts health tables, creates a `health_daily` life entity, and enqueues Obsidian sync.
+The Android health bridge reads available Health Connect records for today and the previous six local days, then posts to `POST /health/ingest`. The backend validates `Authorization: Bearer <health-session-token>`, computes recovery and completeness with `packages/core`, upserts health tables, creates a `health_daily` life entity, and enqueues Obsidian sync.
 
 The web dashboard reads through backend APIs. Telegram `/web` links exchange once
 for revocable, opaque sessions; Next.js and the backend check live session and
@@ -109,8 +109,9 @@ of production web authentication and Android builds are historical. The web UI
 uses authenticated backend projections and an allowlisted CSRF-protected bridge;
 credential-changing LMS flows still require Telegram authorization. Building an
 Android artifact does not prove physical-device permissions or background sync.
-The audited host has no JDK, Android SDK or Gradle wrapper available; an APK build
-and actual device ingestion remain blocked/unverified rather than claimed complete.
+The audited host has no JDK, Android SDK or Gradle wrapper available. Hosted CI
+verified the debug APK, JVM tests and lint; actual device ingestion remains
+unverified. See [Android build evidence](ANDROID_HEALTH_BRIDGE.md).
 External institutional/creator grants require genuine authorization and must be
 reported as unavailable when missing. See the [phase 2 report](OVERNIGHT_PHASE2_REPORT.md)
 for actual implementation, deployment evidence and unresolved limitations.

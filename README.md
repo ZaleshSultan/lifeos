@@ -13,7 +13,7 @@ Personal LifeOS monorepo for automation, knowledge workflows, and user-facing in
 - `workers/obsidian-mirror` - Supabase to Obsidian Markdown mirror
 - `workers/reminder-worker` - Supabase reminders to Telegram worker
 - `workers/daily-digest-worker` - daily Telegram briefing with tasks, classes, and deadlines
-- `apps/health-bridge` - Kotlin Health Connect project/scaffold; APK build and phone verification remain unverified
+- `apps/health-bridge` - Kotlin Health Connect app; hosted CI verified the debug APK, JVM tests and lint. Physical-phone behavior remains unverified; see `docs/ANDROID_HEALTH_BRIDGE.md`.
 - `docs` - architecture, contracts, deployment, and operations docs
 - `deploy` - platform deployment assets
 
