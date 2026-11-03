@@ -2,6 +2,12 @@
 
 Base: `main-v2`, commit `c7b1ecd`.
 
+This is a historical September 24 release report. Its branch instructions, test
+counts and remaining-scope statements describe that slice. For the current
+deployment and expanded web/Android scope, use [operations](OPERATIONS.md) and the
+[overnight engineering report](OVERNIGHT_PHASE2_REPORT.md); current external
+assistant capabilities are documented in the [AGATA boundary](AGATA_INTEGRATION.md).
+
 This change closes the Moodle grade ingestion gap described in the August–September handoff. It does not claim that the entire LifeOS roadmap is finished.
 
 ## Delivered
