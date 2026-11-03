@@ -1,3 +1,4 @@
+import { recalculateHealthDailyScores } from "./health-daily-scoring.js";
 import { createDailyLifeStore, type DailyLifeStore } from "./daily-life-store.js";
 import { idealHumanStore } from "./ideal-human-store.js";
 import type { ScholarshipConfig } from "../../core/src/scholarship.js";
@@ -9807,7 +9808,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     normalizedMetricRecords: HealthMetricRecord[] = [],
   ): Promise<HealthIngestResult> {
     const startedAt = new Date().toISOString();
-    const computed = calculateHealthIngestDaily(payload);
+    const incomingComputed = calculateHealthIngestDaily(payload);
     const metrics = payload.metrics;
     const rawPayload = (payload.raw ?? {
       metrics: payload.metrics,
@@ -9989,49 +9990,58 @@ export class SupabaseLifeOSStore implements LifeOSStore {
         fieldSources[column] = payload.source ?? "health_ingest";
     }
 
-    const { data: healthDaily, error: healthDailyError } = await this.client
-      .from("health_daily")
-      .upsert(
-        {
-          user_id: payload.userId,
-          log_date: payload.date,
-          sync_reason: payload.syncReason,
-          recovery_mode: computed.recoveryMode,
-          data_completeness_score: computed.dataCompletenessScore,
-          sleep_minutes: metrics.sleepMinutes,
-          sleep_score: metrics.sleepScore,
-          deep_sleep_minutes: metrics.deepSleepMinutes,
-          rem_sleep_minutes: metrics.remSleepMinutes,
-          awake_minutes: metrics.awakeMinutes,
-          resting_heart_rate: metrics.restingHeartRate,
-          hrv_ms: metrics.hrvMs,
-          spo2_avg: metrics.spo2Avg,
-          steps: metrics.steps,
-          calories_burned: metrics.caloriesBurned,
-          active_energy_kcal: metrics.activeEnergyKcal,
-          workout_minutes: metrics.workoutMinutes,
-          weight_kg: metrics.weightKg,
-          mood_score: metrics.moodScore,
-          energy_score: metrics.energyScore,
-          stress_score: metrics.stressScore,
-          ...dailyCorrections,
-          source: payload.source,
-          timezone: payload.timezone,
-          missing_metrics: missingMetrics,
-          metadata: {
-            ...previousMetadata,
-            fieldSources,
-            syncReason: payload.syncReason,
-            workoutsCount: payload.workouts.length,
-            samplesCount: payload.samples.length,
-            missing: payload.missing,
-          } as Json,
-          raw_payload: rawPayload,
-        },
-        {
-          onConflict: "user_id,log_date",
-        },
-      )
+    const dailyValues = {
+      user_id: payload.userId,
+      log_date: payload.date,
+      sync_reason: payload.syncReason,
+      sleep_minutes: metrics.sleepMinutes,
+      sleep_score: metrics.sleepScore,
+      deep_sleep_minutes: metrics.deepSleepMinutes,
+      rem_sleep_minutes: metrics.remSleepMinutes,
+      awake_minutes: metrics.awakeMinutes,
+      resting_heart_rate: metrics.restingHeartRate,
+      hrv_ms: metrics.hrvMs,
+      spo2_avg: metrics.spo2Avg,
+      steps: metrics.steps,
+      calories_burned: metrics.caloriesBurned,
+      active_energy_kcal: metrics.activeEnergyKcal,
+      workout_minutes: metrics.workoutMinutes,
+      weight_kg: metrics.weightKg,
+      mood_score: metrics.moodScore,
+      energy_score: metrics.energyScore,
+      stress_score: metrics.stressScore,
+      ...dailyCorrections,
+      source: payload.source,
+      timezone: payload.timezone,
+      missing_metrics: missingMetrics,
+      metadata: {
+        ...previousMetadata,
+        fieldSources,
+        syncReason: payload.syncReason,
+        workoutsCount: payload.workouts.length,
+        samplesCount: payload.samples.length,
+        missing: payload.missing,
+      } as Json,
+      raw_payload: rawPayload,
+    };
+    // Existing rows receive only supplied measurements/corrections. Preserve the
+    // previous derived cache until its guarded recomputation succeeds.
+    const dailyWrite = previousDaily
+      ? this.client
+          .from("health_daily")
+          .update(dailyValues)
+          .eq("user_id", payload.userId)
+          .eq("log_date", payload.date)
+          .eq("id", previousDaily.id)
+      : this.client.from("health_daily").upsert(
+          {
+            ...dailyValues,
+            recovery_mode: incomingComputed.recoveryMode,
+            data_completeness_score: incomingComputed.dataCompletenessScore,
+          },
+          { onConflict: "user_id,log_date" },
+        );
+    const { data: healthDaily, error: healthDailyError } = await dailyWrite
       .select("id")
       .single();
 
@@ -10122,6 +10132,14 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       }
     }
 
+    // A partial request does not describe all retained daily measurements or
+    // child rows. Score the actual stored state after source corrections/writes.
+    const computed = await recalculateHealthDailyScores(
+      this.client,
+      payload.userId,
+      payload.date,
+      healthDaily.id,
+    );
     const lifeEntity = await this.upsertHealthDailyLifeEntity({
       userId: payload.userId,
       healthDailyId: healthDaily.id,

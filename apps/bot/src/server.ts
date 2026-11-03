@@ -3548,7 +3548,20 @@ async function handleRequest(
 
       writeJson(response, 200, {
         ok: true,
-        result,
+        result: {
+          date: result.date,
+          source: result.source,
+          created: result.created,
+          updated: result.updated,
+          metrics: result.metrics.map((metric) => ({
+            metricDate: metric.metricDate,
+            metricType: metric.metricType,
+            value: metric.value,
+            unit: metric.unit,
+            source: metric.source,
+            confidence: metric.confidence,
+          })),
+        },
       });
       return;
     }
@@ -3569,7 +3582,13 @@ async function handleRequest(
 
     writeJson(response, 200, {
       ok: true,
-      result,
+      result: {
+        date: result.date,
+        recoveryMode: result.recoveryMode,
+        dataCompletenessScore: result.dataCompletenessScore,
+        workoutsUpserted: result.workoutsUpserted,
+        samplesInserted: result.samplesInserted,
+      },
     });
 
     return;

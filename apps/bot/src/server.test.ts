@@ -2142,7 +2142,12 @@ describe("bot server", () => {
         source: "xiaomi_health_connect",
         device: "Xiaomi Watch 4",
         metrics: [
-          { type: "steps", value: 8200, unit: "steps" },
+          {
+            type: "steps",
+            value: 8200,
+            unit: "steps",
+            raw_json: { privateNote: "fixture-private-health-record" },
+          },
           { type: "sleep_minutes", value: 420, unit: "min" },
         ],
         raw: {},
@@ -2150,7 +2155,8 @@ describe("bot server", () => {
     });
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
+    const responseBody = await response.json();
+    expect(responseBody).toMatchObject({
       ok: true,
       result: {
         created: 2,
@@ -2158,6 +2164,17 @@ describe("bot server", () => {
         source: "xiaomi_health_connect",
       },
     });
+    expect(responseBody.result.metrics[0]).toEqual({
+      metricDate: "2026-06-07",
+      metricType: "steps",
+      value: 8200,
+      unit: "steps",
+      source: "xiaomi_health_connect",
+      confidence: null,
+    });
+    expect(JSON.stringify(responseBody)).not.toMatch(
+      /userId|rawJson|createdAt|updatedAt|metric-1|fixture-private-health-record/,
+    );
     expect(seen.at(0)?.userId).toBe("user-1");
     expect(seen.at(0)?.metrics).toHaveLength(2);
   });
@@ -2256,7 +2273,6 @@ describe("bot server", () => {
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
       result: {
-        healthDailyId: "health-daily-1",
         date: "2026-05-17",
         workoutsUpserted: 1,
         samplesInserted: 1,
@@ -2264,6 +2280,54 @@ describe("bot server", () => {
     });
     expect(seen.at(0)?.syncReason).toBe("nightly_00_01");
     expect(seen.at(0)?.userId).toBe("user-1");
+  });
+
+  it("returns authoritative health scores for a steps-only sync without internal identifiers", async () => {
+    const seen: HealthIngestPayload[] = [];
+    const store = healthIngestStore(seen);
+    const persist = store.ingestHealthPayload;
+    store.ingestHealthPayload = async (payload) => ({
+      ...(await persist(payload)),
+      recoveryMode: "recovery",
+      dataCompletenessScore: 85,
+      rawPayload: { privateNote: "fixture-private-health-record" },
+    });
+    const server = createBotServer({
+      config: { lifeosHealthIngestJwtSecret: "health-secret" },
+      store: store as LifeOSStore,
+    });
+    servers.push(server);
+    const port = await listen(server);
+    const response = await fetch(`http://127.0.0.1:${port}/health/ingest`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${signedHealthIngestToken()}`,
+      },
+      body: JSON.stringify({
+        date: "2026-05-17",
+        sync_reason: "manual",
+        source: "xiaomi_health_connect",
+        metrics: { steps: 6200 },
+      }),
+    });
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toEqual({
+      ok: true,
+      result: {
+        date: "2026-05-17",
+        recoveryMode: "recovery",
+        dataCompletenessScore: 85,
+        workoutsUpserted: 0,
+        samplesInserted: 0,
+      },
+    });
+    expect(JSON.stringify(body)).not.toMatch(
+      /healthDailyId|lifeEntityId|syncRunId|rawPayload|fixture-private-health-record/,
+    );
+    expect(seen[0]?.metrics).toMatchObject({ steps: 6200 });
+    expect(seen[0]?.metrics.sleepMinutes).toBeUndefined();
   });
 
   it("rejects health ingest payloads whose body user_id does not match the signed token", async () => {
