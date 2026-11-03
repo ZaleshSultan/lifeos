@@ -1,6 +1,6 @@
 # Optional AGATA boundary
 
-Issue [#25](https://github.com/ZaleshSultan/lifeos/issues/25) is **PARTIAL**. External AGATA analysis and personal-data access are **BLOCKED** until a real service, account authorization and authenticated transport are verified. Deterministic LifeOS and its existing optional Gemini/OpenRouter workflows remain independent.
+The disabled versioned boundary, documentation and end-to-end mock acceptance for Issue [#25](https://github.com/ZaleshSultan/lifeos/issues/25) are **COMPLETE**. External AGATA analysis and personal-data access remain **BLOCKED** until a real service, account authorization and authenticated transport are verified. Deterministic LifeOS and its existing optional Gemini/OpenRouter workflows remain independent.
 
 ## Audited implementation
 
