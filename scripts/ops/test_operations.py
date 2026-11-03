@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 from backup_crypto import decrypt, encrypt
 from lifeos_backup import MANAGED_BY, PostgresClient, archive_counts, assert_archive_data, predeploy, retention_candidates, run_backup, verify_backup
-from lifeos_monitor import run_monitor, update_incident
+from lifeos_monitor import run_monitor, update_incident, webhook_status
 from ops_common import OpsError, atomic_json, lock
 from restore_drill import assert_isolated
 
@@ -270,6 +270,42 @@ class RestoreGuardTests(unittest.TestCase):
             mutation(changed)
             with self.assertRaises(OpsError):
                 self.check(changed)
+
+
+class WebhookTests(unittest.TestCase):
+    origin = "https://lifeos.example"
+    now = 1800000000
+
+    def payload(self, **values):
+        return {"ok": True, "result": {"url": self.origin + "/telegram/webhook",
+                                     "pending_update_count": 0, **values}}
+
+    def test_historical_error_with_drained_queue_is_not_a_permanent_incident(self):
+        data = self.payload(last_error_message="old failure", last_error_date=self.now - 901)
+        self.assertEqual(webhook_status(200, data, self.origin, self.now),
+                         {"status": "OK", "code": "webhook_available_with_history"})
+        self.assertEqual(data["result"]["last_error_message"], "old failure")
+
+    def test_recent_future_unknown_errors_and_pending_updates_still_fail(self):
+        for values in [
+            {"last_error_date": self.now - 899},
+            {"last_error_date": self.now + 1},
+            {"last_error_date": 0},
+            {"last_error_date": -1},
+            {"last_error_date": True},
+            {"last_error_date": float("nan")},
+            {},
+            {"last_error_date": self.now - 901, "pending_update_count": 1},
+            {"last_error_date": self.now - 901, "last_synchronization_error_date": self.now - 10},
+        ]:
+            with self.subTest(values=values):
+                data = self.payload(last_error_message="failure", **values)
+                self.assertEqual(webhook_status(200, data, self.origin, self.now)["status"], "FAIL")
+
+    def test_wrong_configuration_and_failed_response_never_report_available(self):
+        for status, data in [(503, self.payload()), (200, {"ok": False}),
+                             (200, self.payload(url="https://other.example/telegram/webhook"))]:
+            self.assertEqual(webhook_status(status, data, self.origin, self.now)["status"], "FAIL")
 
 
 class IncidentTests(unittest.TestCase):
