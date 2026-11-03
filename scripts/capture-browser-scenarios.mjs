@@ -61,6 +61,12 @@ export async function captureBrowserScenarios({
     await detail()
       .getByText(/LifeOS не придумывает время занятий/)
       .waitFor();
+    await detail()
+      .getByRole("heading", { name: "Сохранённые факты", exact: true })
+      .waitFor();
+    await detail()
+      .getByText("Fixture: измерение сна не сохранено.", { exact: true })
+      .waitFor();
     assert.equal(fixture.providerCalls, 0);
   });
   await test(`${prefix}: selective confirmation retries an ambiguous outcome without duplicate writes`, async () => {

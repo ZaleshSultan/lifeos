@@ -34,6 +34,18 @@ export function CaptureContextPanel({
             {warning}
           </p>
         ))}
+        {context.facts?.length ? (
+          <section>
+            <h4 className="font-semibold text-zinc-100">Сохранённые факты</h4>
+            <ul className="mt-2 list-disc space-y-2 pl-5">
+              {context.facts.map((fact, index) => (
+                <li key={index} className="break-words">
+                  {fact}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
         {context.preferences?.length ? (
           <section>
             <h4 className="font-semibold text-zinc-100">

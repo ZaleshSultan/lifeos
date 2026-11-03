@@ -25,7 +25,7 @@ Edits advance the capture revision and discard the previous selection. Confirmat
 | `question.read`                                                       | An allowlisted read of existing LifeOS data, without external model inference or write permission.                                            |
 | `memory.remember`, `memory.update`, `memory.archive`, `memory.delete` | Existing assistant memory, only through explicit owner review. Permanent deletion additionally requires the existing destructive-memory flag. |
 
-Context shows the backend's actual date/timezone, commitments, known deadlines, source freshness warnings and proposed ordering. Explicitly saved preferences/constraints are displayed separately. Missing university schedules remain unknown; the interface never invents class times. Memory is data rather than authority.
+Context shows the backend's actual date/timezone, commitments, known deadlines, source freshness warnings and proposed ordering. Owner-only saved facts include recorded health with source/staleness and missing fields, an active workout's recorded set progress, the saved program without assumed session times, and saved Ideal Human items not marked complete. These reads never send context to an external provider. Journal-relative dates use Asia/Almaty even for a different profile timezone; task/reminder parsing retains the profile timezone. Explicitly saved preferences/constraints are displayed separately. Missing university schedules remain unknown; the interface never invents class times. Memory is data rather than authority.
 
 ## Voice and provider status
 

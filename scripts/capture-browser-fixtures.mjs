@@ -25,6 +25,7 @@ export function captureBrowserFixture(owner = "A") {
     deadlines: [],
     suggestedOrder: [],
     preferences: [],
+    facts: ["Fixture: измерение сна не сохранено."],
   };
   const capabilities = {
     enabled: true,

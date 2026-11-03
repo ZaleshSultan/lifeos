@@ -36,6 +36,7 @@ import {
 } from "@lifeos/db";
 import { AssistantBrain } from "./assistant/brain.js";
 import { loadPlanningData } from "./planning-context.js";
+import { captureSavedFacts } from "./capture-context.js";
 
 export class CaptureServiceError extends Error {
   constructor(
@@ -555,6 +556,20 @@ export class CaptureService {
           "Explicit planning preferences could not be loaded.",
         );
       }
+    }
+    try {
+      const saved = await captureSavedFacts(
+        this.options.store!,
+        user,
+        date,
+        this.now(),
+      );
+      context.facts = saved.facts;
+      context.warnings.push(...saved.warnings);
+    } catch {
+      context.warnings.push(
+        "Saved health, workout and journal context is unavailable.",
+      );
     }
     return { ...capture, context };
   }
