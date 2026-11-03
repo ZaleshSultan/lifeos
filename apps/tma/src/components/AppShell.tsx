@@ -5,6 +5,7 @@ import {
   HeartPulse,
   Target,
   House,
+  Inbox,
   GraduationCap,
   LayoutDashboard,
   MoreHorizontal,
@@ -37,6 +38,7 @@ const primaryTabs: NavigationItem[] = [
 ];
 
 const secondaryTabs: NavigationItem[] = [
+  { id: "capture", label: "Входящие", icon: Inbox },
   { id: "daily-life", label: "День и вода", icon: Activity },
   { id: "ideal-human", label: "Ideal Human", icon: Target },
   { id: "health", label: "Здоровье", icon: HeartPulse },
@@ -50,6 +52,7 @@ const secondaryTabs: NavigationItem[] = [
 
 const screenNames: Partial<Record<ScreenId, string>> = {
   home: "Обзор дня",
+  capture: "Входящие · мысли и действия",
   dashboard: "Стипендия",
   study: "Учебный центр",
   lms: "Подключение LMS",

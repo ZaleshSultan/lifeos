@@ -5,6 +5,7 @@ export default {
     "./app/**/*.{ts,tsx}",
     "./components/**/*.{ts,tsx}",
     "../tma/src/components/ideal-human/**/*.{ts,tsx}",
+    "../tma/src/components/capture/**/*.{ts,tsx}",
   ],
   theme: {
     extend: {

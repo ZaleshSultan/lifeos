@@ -15,6 +15,12 @@ const FocusScreen = lazy(() =>
   })),
 );
 
+const CaptureScreen = lazy(() =>
+  import("./screens/CaptureScreen").then((module) => ({
+    default: module.CaptureScreen,
+  })),
+);
+
 const FinanceScreen = lazy(() =>
   import("./screens/FinanceScreen").then((module) => ({
     default: module.FinanceScreen,
@@ -89,6 +95,7 @@ const LmsConnectionScreen = lazy(() =>
 
 const SCREENS: ScreenId[] = [
   "home",
+  "capture",
   "ai",
   "study",
   "dashboard",
@@ -119,12 +126,14 @@ export default function App() {
   const [screen, setRawScreen] = useState<ScreenId>(initialScreen);
   const [idealHumanDirty, setIdealHumanDirty] = useState(false);
   const [aiRouterDirty, setAiRouterDirty] = useState(false);
+  const [captureDirty, setCaptureDirty] = useState(false);
   const setScreen = (next: ScreenId) => {
     if (
       next !== screen &&
       (((screen === "ideal-human" || screen === "daily-life") &&
         idealHumanDirty) ||
-        (screen === "ai" && aiRouterDirty)) &&
+        (screen === "ai" && aiRouterDirty) ||
+        (screen === "capture" && captureDirty)) &&
       !window.confirm(
         "Есть несохранённые изменения. Открыть другой раздел и отменить их?",
       )
@@ -132,6 +141,7 @@ export default function App() {
       return;
     setIdealHumanDirty(false);
     setAiRouterDirty(false);
+    setCaptureDirty(false);
     setRawScreen(next);
   };
   const [aiDate, setAiDate] = useState<string>();
@@ -215,6 +225,7 @@ export default function App() {
           <Suspense fallback={<LoadingPanel title="Загружаем раздел…" />}>
             {screen === "home" ? (
               <HomeScreen
+                onOpenCapture={() => setScreen("capture")}
                 onOpenScholarship={() => setScreen("dashboard")}
                 onOpenWorkout={() => setScreen("workout")}
                 onOpenIdealHuman={() => setScreen("ideal-human")}
@@ -225,6 +236,12 @@ export default function App() {
                   setScreen("ai");
                 }}
                 session={sessionQuery.data}
+              />
+            ) : null}
+            {screen === "capture" ? (
+              <CaptureScreen
+                onDirtyChange={setCaptureDirty}
+                onNavigate={setScreen}
               />
             ) : null}
             {screen === "ai" ? (

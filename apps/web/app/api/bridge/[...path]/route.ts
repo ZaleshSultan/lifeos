@@ -33,7 +33,13 @@ async function handle(
   )
     return json({ error: "invalid_origin" }, 403);
   let body: string | undefined;
-  if (mutation && request.method !== "DELETE") {
+  if (
+    mutation &&
+    (request.method !== "DELETE" ||
+      /^captures\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
+        path,
+      ))
+  ) {
     if (
       !request.headers
         .get("content-type")

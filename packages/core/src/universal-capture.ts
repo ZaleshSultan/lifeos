@@ -144,6 +144,7 @@ export interface CaptureContextView {
   suggestedOrder: string[];
   scheduleKnown: boolean;
   preferences?: string[];
+  facts?: string[];
 }
 export interface CaptureView {
   id: string;
@@ -1300,6 +1301,7 @@ export function parseCaptureView(raw: unknown): CaptureView {
         "suggestedOrder",
         "scheduleKnown",
         "preferences",
+        "facts",
       ],
       [
         "date",
@@ -1354,6 +1356,7 @@ export function parseCaptureView(raw: unknown): CaptureView {
         keys(e, ["title", "dueAt"], ["title", "dueAt"]);
         return { title: text(e.title, 500), dueAt: instant(e.dueAt, true) };
       }),
+      ...(c.facts === undefined ? {} : { facts: strings(c.facts, 1000) }),
       ...(c.preferences === undefined
         ? {}
         : { preferences: strings(c.preferences, 1000) }),

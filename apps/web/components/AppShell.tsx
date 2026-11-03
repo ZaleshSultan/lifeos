@@ -8,6 +8,7 @@ import {
   Video,
   Dumbbell,
   HeartPulse,
+  Inbox,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -89,12 +90,15 @@ const navItems: Array<{ href: string; label: string; icon: LucideIcon }> = [
   { href: "/nutrition", label: "Еда и вода", icon: Utensils },
   { href: "/finance", label: "Финансы", icon: CircleDollarSign },
   { href: "/ai", label: "AI помощник", icon: MessageSquare },
+  { href: "/capture", label: "Входящие", icon: Inbox },
   { href: "/ideal-human", label: "Ideal Human", icon: Clapperboard },
   { href: "/creator", label: "Creator", icon: Video },
   { href: "/notifications", label: "Напоминания", icon: Bell },
   { href: "/settings", label: "Настройки", icon: Settings },
 ];
-const mobileItems = [navItems[0], navItems[1], navItems[3], navItems[9]];
+const mobileItems = navItems.filter((item) =>
+  ["/today", "/planner", "/study", "/ideal-human"].includes(item.href),
+);
 
 export function AppShell({
   children,

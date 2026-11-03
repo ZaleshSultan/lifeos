@@ -38,6 +38,16 @@ export default async function TodayPage() {
       />
 
       <Link
+        href="/capture"
+        className="mb-4 block min-h-14 rounded-xl border border-cyan-300/25 bg-cyan-300/[0.06] p-4"
+      >
+        <p className="font-semibold text-white">Записать мысль</p>
+        <p className="mt-1 text-sm leading-relaxed text-zinc-300">
+          Идеи, ссылки и расшифровки в одном месте. Действия сохраняются только
+          после твоего выбора и подтверждения.
+        </p>
+      </Link>
+      <Link
         href="/ideal-human"
         className="mb-6 block rounded-xl border border-cyan-300/25 bg-cyan-300/[0.05] p-5"
       >

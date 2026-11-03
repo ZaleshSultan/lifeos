@@ -61,6 +61,7 @@ import {
   type WeatherSnapshot,
 } from "../weather.js";
 import { AssistantError } from "../assistant/registry.js";
+import { handleCaptureTelegramUpdate } from "./capture.js";
 import { assistantPrivateRequest } from "../assistant/brain.js";
 import { issueWebLoginToken } from "../web-session.js";
 
@@ -4970,6 +4971,19 @@ export async function handleTelegramUpdate(
     return;
   }
 
+  const menuCommand =
+    message.chat?.type === "private" &&
+    typeof message.text === "string" &&
+    message.voice === undefined &&
+    message.audio === undefined &&
+    message.document === undefined &&
+    message.photo === undefined
+      ? MAIN_MENU_COMMANDS.get(message.text.trim())
+      : undefined;
+  if (!menuCommand && (await handleCaptureTelegramUpdate(update, runtime))) {
+    return;
+  }
+
   // Handle photo uploads (receipt OCR)
   if (message.photo && message.photo.length > 0 && !message.text) {
     const user = await resolveUser(message, runtime);
@@ -4997,10 +5011,6 @@ export async function handleTelegramUpdate(
     return;
   }
 
-  const menuCommand =
-    message.chat.type === "private"
-      ? MAIN_MENU_COMMANDS.get(message.text.trim())
-      : undefined;
   const parsed = menuCommand ?? parseCommand(message.text);
 
   if (
