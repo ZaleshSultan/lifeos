@@ -199,6 +199,14 @@ unnotified brief failure or an initial suppressed warning produces no recovery
 message. Existing reservations from older releases are not treated as proof of
 delivery. Changed degradation codes retain an acknowledged outage until recovery.
 
+Restore health checks both the last successful drill and the latest completed
+attempt. A newer or equal-time failed attempt reports
+`restore_drill_last_attempt_failed`, even if a previous success is recent. A loaded
+restore service with a failed systemd result reports `restore_drill_service_failed`;
+malformed, timezone-naive or future evidence fails closed. A later verified success
+supersedes an older failed attempt. These conditions feed the existing durable
+incident policy; a passing unit test does not prove delivery to a handset.
+
 Recovery is also reserved durably before sending, and ambiguous recovery delivery
 is not retried. Recovery rearms a future incident. This avoids duplicates across
 timer restarts, at the cost of possibly losing an alert if the process dies
