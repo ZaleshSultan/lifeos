@@ -1181,6 +1181,7 @@ try {
       assert.equal(response.status(), 303);
       assert.equal(new URL(response.request().headers().origin).origin, origin);
       await p.getByRole("heading", { name: "Твой LifeOS Web" }).waitFor();
+      await p.waitForLoadState("networkidle");
       assert.equal(sessions.has(sessionA), false);
       assert.equal(
         (await delayed.cookies()).some(
