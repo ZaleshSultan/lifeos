@@ -75,6 +75,9 @@ class PostgresClient:
     def __init__(self, config: dict):
         self.config = config
         self.image = config.get("client_image", "postgres:17")
+        self.dump_timeout = config.get("dump_timeout_seconds", 360)
+        if type(self.dump_timeout) is not int or not 60 <= self.dump_timeout <= 420:
+            raise OpsError("invalid_dump_timeout_seconds")
         # Trusted operator config, but never accept command/volume fragments.
         if not re.fullmatch(r"[a-z0-9./:_-]+", self.image):
             raise OpsError("invalid_client_image")
@@ -82,7 +85,9 @@ class PostgresClient:
     def run(self, executable: str, args: list[str], *, mounts=None, environment=None,
             network="none", timeout=120) -> bytes:
         name = "lifeos-backup-client-" + uuid.uuid4().hex
-        argv = ["docker", "run", "--rm", "--pull=never", "--name", name,
+        # Dump/archive-inspection stdout contains private plaintext. Docker's
+        # default json-file logger must not copy it out of the private RAMfs flow.
+        argv = ["docker", "run", "--rm", "--pull=never", "--log-driver=none", "--name", name,
                 "--label", "lifeos.ops=backup-client-v1", "--network=" + network,
                 "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges",
                 "--pids-limit=32", "--memory=128m", "--user=" + str(os.getuid()) + ":" + str(os.getgid())]
@@ -154,7 +159,7 @@ class PostgresClient:
                 archive = self.run("pg_dump", ["--format=custom", "--compress=6", "--no-password",
                                    "--role=supabase_read_only_user", "--lock-wait-timeout=15000"],
                                    mounts=[(passfile, "/run/pgpass"), (certificate, "/run/database-ca.crt")],
-                                   environment=environment, network="host", timeout=180)
+                                   environment=environment, network="host", timeout=self.dump_timeout)
             except OpsError as error:
                 raise OpsError("pg_dump_" + str(error)) from None
             if not archive.startswith(b"PGDMP") or len(archive) > self.config.get("max_archive_bytes", 128 * 1024 * 1024):

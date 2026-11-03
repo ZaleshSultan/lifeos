@@ -178,12 +178,38 @@ class BackupFailureTests(unittest.TestCase):
             self.assertNotIn("--serializable-deferrable", options.args[1])
             self.assertIn("--lock-wait-timeout=15000", options.args[1])
             self.assertIn("--role=supabase_read_only_user", options.args[1])
-            self.assertEqual(options.kwargs["timeout"], 180)
+            self.assertEqual(options.kwargs["timeout"], 360)
             self.assertEqual(options.kwargs["environment"]["PGSSLMODE"], "verify-full")
             self.assertIn("default_transaction_read_only=on", options.kwargs["environment"]["PGOPTIONS"])
             self.assertIn("statement_timeout=120000", options.kwargs["environment"]["PGOPTIONS"])
             self.assertEqual(probe.call_count, 1)
             self.assertFalse((root / "pgpass").exists())
+
+    def test_dump_timeout_rejects_invalid_types_and_values_without_running_commands(self):
+        with patch("lifeos_backup.command") as command:
+            for value in [None, True, False, "360", 360.0, 0, 59, 421, 10**30]:
+                with self.subTest(value=value), self.assertRaisesRegex(OpsError, "invalid_dump_timeout_seconds"):
+                    PostgresClient({"dump_timeout_seconds": value})
+            command.assert_not_called()
+        self.assertEqual(PostgresClient({}).dump_timeout, 360)
+        self.assertEqual(PostgresClient({"dump_timeout_seconds": 60}).dump_timeout, 60)
+        self.assertEqual(PostgresClient({"dump_timeout_seconds": 420}).dump_timeout, 420)
+
+    def test_backup_clients_disable_docker_plaintext_logs_and_preserve_hardening(self):
+        client = PostgresClient({})
+        with patch("lifeos_backup.command", return_value=b"private fixture stdout") as command, \
+                patch("lifeos_backup.subprocess.run") as cleanup:
+            output = client.run("pg_restore", ["--data-only", "--file=-", "/run/archive"])
+        self.assertEqual(output, b"private fixture stdout")
+        argv = command.call_args.args[0]
+        self.assertIn("--log-driver=none", argv)
+        self.assertIn("--read-only", argv)
+        self.assertIn("--network=none", argv)
+        self.assertIn("--cap-drop=ALL", argv)
+        self.assertIn("--security-opt=no-new-privileges", argv)
+        self.assertEqual(command.call_args.kwargs["timeout"], 120)
+        name = argv[argv.index("--name") + 1]
+        self.assertEqual(cleanup.call_args.args[0], ["docker", "rm", "-f", name])
 
     def test_offsite_quota_failure_preserves_verified_local_success_and_pauses_pruning(self):
         with tempfile.TemporaryDirectory() as temporary:
