@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   defaultIdealHumanPlan,
+  clearIdealHumanReflection,
   emptyIdealHumanDay,
   hasIdealHumanObservation,
+  hasIdealHumanReflection,
   idealHumanAdherence,
   idealHumanDate,
   idealHumanDayNumber,
@@ -11,6 +13,8 @@ import {
   idealHumanStats,
   idealHumanStudyMinutes,
   parseIdealHumanDay,
+  parseIdealHumanReflectionClear,
+  parseStoredIdealHumanDay,
 } from "./ideal-human.js";
 
 describe("Ideal Human calendar", () => {
@@ -70,6 +74,79 @@ describe("Ideal Human calendar", () => {
 });
 
 describe("Ideal Human privacy-safe journal input", () => {
+  it("clears only private reflection history and preserves factual records and tomorrow's draft", () => {
+    const day = parseIdealHumanDay({
+      date: "2026-11-03",
+      revision: 3,
+      energy: 4,
+      mood: 3,
+      whatWorked: "A private reflection",
+      whatDidNotWork: "An obstacle",
+      highlights: "Personal highlight",
+      notes: "Private notes",
+      weightKg: 51.2,
+      scienceMinutes: 20,
+      sleepMinutes: 430,
+      tomorrowPlan: "A draft to approve",
+      workoutNotes: "Recorded workout",
+      storyboard: "Episode idea",
+      footageCaptured: true,
+      meals: [{ id: "meal", label: "Actual meal", estimated: false }],
+    });
+    const next = clearIdealHumanReflection(day);
+    expect(hasIdealHumanReflection(next)).toBe(false);
+    expect(next).toEqual({
+      ...day,
+      energy: null,
+      mood: null,
+      whatWorked: "",
+      whatDidNotWork: "",
+      highlights: "",
+      notes: "",
+    });
+    expect(hasIdealHumanReflection(day)).toBe(true);
+    expect(hasIdealHumanObservation(next)).toBe(true);
+  });
+  it("reads the intentionally cleared last reflection without fabricating check-ins or permitting empty client saves", () => {
+    const cleared = clearIdealHumanReflection(
+      parseIdealHumanDay({
+        date: "2026-11-03",
+        notes: "Last reflection",
+        revision: 1,
+      }),
+    );
+    const stored = parseStoredIdealHumanDay(cleared);
+    expect(hasIdealHumanObservation(stored)).toBe(false);
+    expect(idealHumanStats([stored])).toMatchObject({
+      checkins: 0,
+      journalDays: 0,
+    });
+    expect(() => parseIdealHumanDay(cleared)).toThrow("Record at least");
+    expect(() => parseIdealHumanDay({ ...cleared, revision: 999 })).toThrow(
+      "Record at least",
+    );
+    expect(() => parseStoredIdealHumanDay({ ...cleared, revision: 0 })).toThrow(
+      "stored revision",
+    );
+  });
+  it("requires explicit confirmation, an existing-row revision and a valid experiment day to clear", () => {
+    const valid = { date: "2026-11-03", expectedRevision: 1, confirmed: true };
+    expect(parseIdealHumanReflectionClear(valid)).toEqual(valid);
+    for (const patch of [
+      { confirmed: false },
+      { confirmed: "true" },
+      { confirmed: undefined },
+      { expectedRevision: 0 },
+      { expectedRevision: -1 },
+      { expectedRevision: 1.5 },
+      { expectedRevision: 2_147_483_647 },
+      { date: "2026-11-02" },
+      { userId: "other" },
+    ])
+      expect(() =>
+        parseIdealHumanReflectionClear({ ...valid, ...patch }),
+      ).toThrow();
+  });
   it("accepts partial measurements, preserves explicit zero, leaves unknown data unknown", () => {
     const value = parseIdealHumanDay({
       date: "2026-11-03",

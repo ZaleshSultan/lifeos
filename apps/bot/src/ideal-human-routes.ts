@@ -3,6 +3,7 @@ import {
   IdealHumanConflictError,
   IdealHumanInputError,
   parseIdealHumanDay,
+  parseIdealHumanReflectionClear,
 } from "@lifeos/core";
 import type { LifeOSStore } from "@lifeos/db";
 
@@ -26,22 +27,46 @@ export async function handleIdealHumanRoute({
 }): Promise<boolean> {
   if (!pathname.startsWith("/api/tma/ideal-human/")) return false;
   response.setHeader("Cache-Control", "no-store");
-  if (pathname !== "/api/tma/ideal-human/days") {
+  const clearing = pathname === "/api/tma/ideal-human/reflection/clear";
+  if (pathname !== "/api/tma/ideal-human/days" && !clearing) {
     writeJson(response, 404, { error: "not_found" });
     return true;
   }
-  if (request.method !== "GET" && request.method !== "PUT") {
-    response.setHeader("Allow", "GET, PUT");
+  if (
+    clearing
+      ? request.method !== "POST"
+      : request.method !== "GET" && request.method !== "PUT"
+  ) {
+    response.setHeader("Allow", clearing ? "POST" : "GET, PUT");
     writeJson(response, 405, { error: "method_not_allowed" });
     return true;
   }
-  if (!store.getIdealHumanDays || !store.saveIdealHumanDay) {
+  if (
+    clearing
+      ? !store.clearIdealHumanReflection
+      : !store.getIdealHumanDays || !store.saveIdealHumanDay
+  ) {
     writeJson(response, 503, { error: "ideal_human_unavailable" });
     return true;
   }
   try {
+    if (clearing) {
+      const command = parseIdealHumanReflectionClear(
+        await readJsonBody(request),
+      );
+      writeJson(response, 200, {
+        data: await store.clearIdealHumanReflection!(
+          userId,
+          command.date,
+          command.expectedRevision,
+        ),
+      });
+      return true;
+    }
     if (request.method === "GET") {
-      writeJson(response, 200, { data: await store.getIdealHumanDays(userId) });
+      writeJson(response, 200, {
+        data: await store.getIdealHumanDays!(userId),
+      });
       return true;
     }
     const input = await readJsonBody(request);
@@ -64,7 +89,7 @@ export async function handleIdealHumanRoute({
     if (day.revision !== body.expectedRevision)
       throw new IdealHumanInputError("Saved revision does not match the day");
     writeJson(response, 200, {
-      data: await store.saveIdealHumanDay(userId, day, body.expectedRevision),
+      data: await store.saveIdealHumanDay!(userId, day, body.expectedRevision),
     });
   } catch (error) {
     if (error instanceof IdealHumanInputError) {

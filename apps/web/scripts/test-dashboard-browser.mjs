@@ -8,6 +8,7 @@ import { spawn } from "node:child_process";
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
+  clearIdealHumanReflection,
   emptyIdealHumanDay,
   parseIdealHumanDay,
 } from "../../../packages/core/src/ideal-human.ts";
@@ -48,6 +49,7 @@ let taskVersion = 0,
   waterVersion = 0,
   workout = null;
 let journalPuts = 0,
+  reflectionClears = 0,
   journalFail = false,
   journalDelay = 0,
   analyses = 0;
@@ -249,6 +251,22 @@ const backend = createServer(async (req, res) => {
           ? { ...input, revision: input.revision + 1 }
           : DEFAULT_DAILY_LIFE_PREFERENCES,
       );
+    if (path === "/api/tma/ideal-human/reflection/clear") {
+      reflectionClears++;
+      assert.equal(input.confirmed, true);
+      const old = days.get(owner).find((v) => v.date === input.date);
+      if (!old || old.revision !== input.expectedRevision)
+        return json(res, { error: "ideal_human_conflict" }, 409);
+      const next = {
+        ...clearIdealHumanReflection(old),
+        revision: old.revision + 1,
+      };
+      days.set(owner, [
+        ...days.get(owner).filter((v) => v.date !== next.date),
+        next,
+      ]);
+      return json(res, next);
+    }
     if (path === "/api/tma/ideal-human/days") {
       if (req.method === "GET") return json(res, days.get(owner));
       journalPuts++;
@@ -893,6 +911,51 @@ try {
     );
     assert.equal(response.status(), 403);
     assert.equal(tasks.get("A").length, before);
+  });
+  await test("reflection deletion confirms intent, blocks dirty drafts and preserves other facts", async () => {
+    const original = days.get("A").find((v) => v.date === date);
+    original.notes = "Private reflection to remove";
+    original.tomorrowPlan = "Retain tomorrow's draft";
+    original.revision++;
+    await page.goto(`${origin}/web/ideal-human`);
+    const reflection = page
+      .locator("details")
+      .filter({
+        has: page.locator("summary").filter({ hasText: "Вечерняя рефлексия" }),
+      });
+    await reflection.locator("summary").click();
+    const clear = page.getByRole("button", {
+      name: "Удалить вечернюю рефлексию",
+      exact: true,
+    });
+    await page.getByLabel("Утренний вес, кг", { exact: true }).fill("52");
+    assert.equal(await clear.isDisabled(), true);
+    await page.reload();
+    await reflection.locator("summary").click();
+    const before = reflectionClears;
+    page.off("dialog", acceptDialog);
+    page.once("dialog", (dialog) => dialog.dismiss());
+    await clear.click();
+    page.on("dialog", acceptDialog);
+    assert.equal(reflectionClears, before);
+    await clear.click();
+    await page
+      .getByText(
+        "Вечерняя рефлексия удалена из дневника LifeOS. Остальные записи сохранены.",
+      )
+      .waitFor();
+    assert.equal(reflectionClears, before + 1);
+    const current = days.get("A").find((v) => v.date === date);
+    assert.deepEqual(current, {
+      ...clearIdealHumanReflection(original),
+      revision: original.revision + 1,
+    });
+    await page.reload();
+    assert.equal(
+      await page.getByLabel("Утренний вес, кг", { exact: true }).inputValue(),
+      String(current.weightKg),
+    );
+    assert.equal(current.tomorrowPlan, "Retain tomorrow's draft");
   });
   await test("web sessions isolate users in the rendered journal", async () => {
     const b = await isolatedContext({ viewport: { width: 390, height: 844 } });

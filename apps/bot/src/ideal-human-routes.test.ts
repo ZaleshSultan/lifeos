@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import {
+  clearIdealHumanReflection,
   emptyIdealHumanDay,
   IdealHumanConflictError,
   type IdealHumanDay,
@@ -58,6 +59,19 @@ async function fixture(status = "active") {
       return result;
     },
   );
+  const clearReflection = vi.fn(
+    async (owner: string, date: string, expected: number) => {
+      const current = saved.get(owner)?.get(date);
+      if (!current || current.revision !== expected)
+        throw new IdealHumanConflictError();
+      const result = {
+        ...clearIdealHumanReflection(current),
+        revision: expected + 1,
+      };
+      saved.get(owner)!.set(date, result);
+      return result;
+    },
+  );
   const store = {
     resolveTelegramUser: async (id: number) => ({
       userId: `owner-${id}`,
@@ -68,6 +82,7 @@ async function fixture(status = "active") {
     }),
     getIdealHumanDays,
     saveIdealHumanDay,
+    clearIdealHumanReflection: clearReflection,
   } as unknown as LifeOSStore;
   const server = createBotServer({
     store,
@@ -82,10 +97,91 @@ async function fixture(status = "active") {
       headers: headers(id),
       body: JSON.stringify({ day, expectedRevision }),
     });
-  return { base, put, getIdealHumanDays, saveIdealHumanDay };
+  const clear = (body: unknown, id = 30) =>
+    fetch(`${base}/reflection/clear`, {
+      method: "POST",
+      headers: headers(id),
+      body: JSON.stringify(body),
+    });
+  return {
+    base,
+    put,
+    clear,
+    getIdealHumanDays,
+    saveIdealHumanDay,
+    clearReflection,
+  };
 }
 
 describe("Ideal Human authenticated persistence", () => {
+  it("clears only a confirmed authenticated owner's reflection and preserves other journal facts", async () => {
+    const f = await fixture();
+    await f.put({
+      date: "2026-11-03",
+      notes: "Private",
+      energy: 3,
+      weightKg: 51.2,
+      tomorrowPlan: "Draft only",
+    });
+    const command = {
+      date: "2026-11-03",
+      expectedRevision: 1,
+      confirmed: true,
+    };
+    expect((await f.clear(command, 31)).status).toBe(409);
+    const result = await f.clear(command);
+    expect(result.status).toBe(200);
+    expect(result.headers.get("cache-control")).toBe("no-store");
+    expect(await result.json()).toMatchObject({
+      data: {
+        notes: "",
+        energy: null,
+        weightKg: 51.2,
+        tomorrowPlan: "Draft only",
+        revision: 2,
+      },
+    });
+    expect(f.clearReflection).toHaveBeenCalledWith("owner-30", command.date, 1);
+    expect((await f.clear(command)).status).toBe(409);
+    const reload = await fetch(`${f.base}/days`, { headers: headers() });
+    expect((await reload.json()).data[0].revision).toBe(2);
+  });
+  it("rejects unconfirmed clearing, invalid revisions and owner injection before any store mutation", async () => {
+    const f = await fixture();
+    const command = {
+      date: "2026-11-03",
+      expectedRevision: 1,
+      confirmed: true,
+    };
+    for (const patch of [
+      { confirmed: false },
+      { confirmed: undefined },
+      { expectedRevision: 0 },
+      { expectedRevision: "1" },
+      { userId: "other" },
+      { day: { notes: "injected" } },
+    ])
+      expect((await f.clear({ ...command, ...patch })).status).toBe(400);
+    expect(f.clearReflection).not.toHaveBeenCalled();
+    const wrongMethod = await fetch(`${f.base}/reflection/clear`, {
+      method: "DELETE",
+      headers: headers(),
+    });
+    expect(wrongMethod.status).toBe(405);
+    expect(wrongMethod.headers.get("allow")).toBe("POST");
+    expect(
+      (
+        await fetch(`${f.base}/reflection/clear`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(command),
+        })
+      ).status,
+    ).toBe(401);
+    const blocked = await fixture("blocked");
+    expect((await blocked.clear(command)).status).toBe(403);
+    expect(blocked.clearReflection).not.toHaveBeenCalled();
+  });
   it("requires fresh signed auth and an active profile before any access", async () => {
     const f = await fixture();
     for (const options of [

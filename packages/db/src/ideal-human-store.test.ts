@@ -5,12 +5,14 @@ import { idealHumanStore } from "./ideal-human-store.js";
 type Client = Parameters<typeof idealHumanStore>[0];
 function fixture(rows: unknown[] = [], error: unknown = null) {
   const order = vi.fn(async () => ({ data: rows, error }));
-  const eq = vi.fn(() => ({ order }));
+  const maybeSingle = vi.fn(async () => ({ data: rows[0] ?? null, error }));
+  const query = { order, maybeSingle, eq: vi.fn() };
+  const eq = query.eq.mockImplementation(() => query);
   const select = vi.fn(() => ({ eq }));
   const from = vi.fn(() => ({ select }));
   const rpc = vi.fn();
   const store = idealHumanStore({ from, rpc } as unknown as Client);
-  return { store, from, select, eq, order, rpc };
+  return { store, from, select, eq, order, rpc, maybeSingle };
 }
 function observedDay() {
   return {
@@ -21,6 +23,100 @@ function observedDay() {
 }
 
 describe("Ideal Human scoped persistence", () => {
+  it("loads the owner's stored content before clearing and uses its revision in the atomic RPC", async () => {
+    const day = {
+      ...observedDay(),
+      revision: 4,
+      energy: 3,
+      tomorrowPlan: "Keep this draft",
+    };
+    const f = fixture([{ date: day.date, entry: day, revision: 4 }]);
+    f.rpc.mockImplementation(async (_rpc, input) => ({
+      data: { ...input.p_entry, revision: 5 },
+      error: null,
+    }));
+    const result = await f.store.clearReflection("owner-a", day.date, 4);
+    expect(f.eq.mock.calls).toEqual([
+      ["user_id", "owner-a"],
+      ["date", day.date],
+    ]);
+    expect(f.rpc).toHaveBeenCalledExactlyOnceWith(
+      "save_ideal_human_day",
+      expect.objectContaining({
+        p_user_id: "owner-a",
+        p_date: day.date,
+        p_expected_revision: 4,
+        p_entry: expect.objectContaining({
+          notes: "",
+          energy: null,
+          mood: null,
+          weightKg: 51.2,
+          tomorrowPlan: "Keep this draft",
+        }),
+      }),
+    );
+    expect(result).toMatchObject({ notes: "", weightKg: 51.2, revision: 5 });
+  });
+  it("retains a readable row when its last private reflection is cleared", async () => {
+    const day = {
+      ...emptyIdealHumanDay("2026-11-03"),
+      notes: "Private",
+      revision: 1,
+    };
+    const f = fixture([{ date: day.date, entry: day, revision: 1 }]);
+    f.rpc.mockImplementation(async (_rpc, input) => ({
+      data: { ...input.p_entry, revision: 2 },
+      error: null,
+    }));
+    const result = await f.store.clearReflection("owner-a", day.date, 1);
+    expect(result.notes).toBe("");
+    const reload = fixture([{ date: day.date, entry: result, revision: 2 }]);
+    await expect(reload.store.getDays("owner-a")).resolves.toEqual([result]);
+    await expect(reload.store.saveDay("owner-a", result, 2)).rejects.toThrow(
+      "Record at least",
+    );
+    expect(reload.rpc).not.toHaveBeenCalled();
+  });
+  it("never creates a row from a supplied revision or overwrites a stale/competing update", async () => {
+    const missing = fixture();
+    await expect(
+      missing.store.clearReflection("other-owner", "2026-11-03", 1),
+    ).rejects.toBeInstanceOf(IdealHumanConflictError);
+    expect(missing.rpc).not.toHaveBeenCalled();
+    const f = fixture([
+      { date: "2026-11-03", entry: observedDay(), revision: 3 },
+    ]);
+    await expect(
+      f.store.clearReflection("owner", "2026-11-03", 2),
+    ).rejects.toBeInstanceOf(IdealHumanConflictError);
+    expect(f.rpc).not.toHaveBeenCalled();
+    f.rpc.mockResolvedValue({
+      data: null,
+      error: { message: "ideal_human_conflict" },
+    });
+    await expect(
+      f.store.clearReflection("owner", "2026-11-03", 3),
+    ).rejects.toBeInstanceOf(IdealHumanConflictError);
+  });
+  it("does not mutate corrupt stored content or repeatedly increment an already-cleared revision", async () => {
+    const bad = fixture([
+      {
+        date: "2026-11-03",
+        entry: { notes: "private", weightKg: "bad" },
+        revision: 1,
+      },
+    ]);
+    await expect(
+      bad.store.clearReflection("owner", "2026-11-03", 1),
+    ).rejects.toThrow("needs recovery");
+    expect(bad.rpc).not.toHaveBeenCalled();
+    const empty = { ...emptyIdealHumanDay("2026-11-03"), revision: 2 };
+    const f = fixture([{ date: empty.date, entry: empty, revision: 2 }]);
+    await expect(
+      f.store.clearReflection("owner", empty.date, 2),
+    ).resolves.toEqual(empty);
+    expect(f.rpc).not.toHaveBeenCalled();
+  });
   it("reads only the authenticated owner's dedicated rows without mutating settings", async () => {
     const f = fixture([
       {

@@ -26,7 +26,11 @@ import {
   type IdealHumanDay,
 } from "../../../../packages/core/src/ideal-human.js";
 import { ApiError, apiErrorMessage } from "../api/errors";
-import { useIdealHumanDays, useSaveIdealHumanDay } from "../api/ideal-human";
+import {
+  useClearIdealHumanReflection,
+  useIdealHumanDays,
+  useSaveIdealHumanDay,
+} from "../api/ideal-human";
 import { useWorkoutHistoryQuery, useWorkoutSessionQuery } from "../api/workout";
 import { ErrorPanel, LoadingPanel } from "../components/AsyncState";
 import { UniversityIntegration } from "../components/ideal-human/UniversityIntegration";
@@ -131,7 +135,8 @@ export function IdealHumanScreen({
   const saving = useRef(false);
   const query = useIdealHumanDays();
   const mutation = useSaveIdealHumanDay();
-  const busy = mutation.isPending || reloading;
+  const clearMutation = useClearIdealHumanReflection();
+  const busy = mutation.isPending || clearMutation.isPending || reloading;
   const workoutHistory = useWorkoutHistoryQuery();
   const currentWorkout = useWorkoutSessionQuery();
   const record = query.data?.find((day) => day.date === date);
@@ -224,6 +229,25 @@ export function IdealHumanScreen({
     setConflict(false);
     setValidation(null);
     mutation.reset();
+    clearMutation.reset();
+  }
+  async function clearReflection() {
+    if (saving.current || dirty || conflict || draft.revision < 1) return;
+    saving.current = true;
+    setSaved(false);
+    setValidation(null);
+    mutation.reset();
+    try {
+      const result = await clearMutation.mutateAsync(draft);
+      setDraft(result);
+      setDirty(false);
+      setSaved(true);
+      setConflict(false);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) setConflict(true);
+    } finally {
+      saving.current = false;
+    }
   }
   async function save() {
     if (saving.current) return;
@@ -240,6 +264,7 @@ export function IdealHumanScreen({
     }
     saving.current = true;
     setValidation(null);
+    clearMutation.reset();
     try {
       const result = await mutation.mutateAsync(input);
       setDraft(result);
@@ -289,6 +314,7 @@ export function IdealHumanScreen({
       setConflict(false);
       setValidation(null);
       mutation.reset();
+      clearMutation.reset();
     } finally {
       saving.current = false;
       setReloading(false);
@@ -507,13 +533,15 @@ export function IdealHumanScreen({
           >
             <div className="sticky top-2 z-20 rounded-xl border border-white/15 bg-zinc-950/95 p-3 shadow-panel backdrop-blur-md">
               <p aria-live="polite" className="mb-2 text-xs text-zinc-300">
-                {mutation.isPending
-                  ? "Сохраняем в LifeOS…"
-                  : saved && !dirty
-                    ? "Сохранено в LifeOS. Можно закрыть и открыть снова."
-                    : dirty
-                      ? "Есть несохранённые изменения. Они останутся на экране при ошибке сети."
-                      : "Все поля необязательны. Записывай только реальные данные."}
+                {clearMutation.isPending
+                  ? "Удаляем вечернюю рефлексию…"
+                  : mutation.isPending
+                    ? "Сохраняем в LifeOS…"
+                    : saved && !dirty
+                      ? "Сохранено в LifeOS. Можно закрыть и открыть снова."
+                      : dirty
+                        ? "Есть несохранённые изменения. Они останутся на экране при ошибке сети."
+                        : "Все поля необязательны. Записывай только реальные данные."}
               </p>
               <button
                 type="submit"
@@ -536,6 +564,12 @@ export function IdealHumanScreen({
                 <p role="alert" className="mt-2 text-sm text-rose-200">
                   {apiErrorMessage(mutation.error)} Правки не удалены; повтори
                   сохранение.
+                </p>
+              ) : null}
+              {clearMutation.isError && !conflict ? (
+                <p role="alert" className="mt-2 text-sm text-rose-200">
+                  {apiErrorMessage(clearMutation.error)} Не удалось подтвердить
+                  удаление. Загрузи сохранённую версию и повтори.
                 </p>
               ) : null}
             </div>
@@ -756,7 +790,13 @@ export function IdealHumanScreen({
               <NutritionJournal day={draft} change={change} />
               <LearningJournal day={draft} change={change} />
               <VideoJournal day={draft} change={change} />
-              <ReflectionJournal day={draft} change={change} />
+              <ReflectionJournal
+                day={draft}
+                change={change}
+                onClear={() => void clearReflection()}
+                clearDisabled={busy || conflict}
+                dirty={dirty}
+              />
             </fieldset>
           </form>
 
