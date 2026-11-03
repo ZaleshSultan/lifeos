@@ -556,6 +556,21 @@ describe("workout persistence", () => {
     expect(client.queries.filter((query) => query.action === "update")).toHaveLength(0);
   });
 
+  it("rejects missing or foreign workout completion before any write", async () => {
+    const client = workoutClient();
+    const original = structuredClone(client.workouts);
+    const store = storeWith(client);
+    for (const workoutId of ["workout-b", "missing-workout"]) {
+      await expect(store.completeWorkout({
+        userId: "user-a", workoutId, completedAt: "2026-09-24T11:00:00Z",
+      })).rejects.toMatchObject({ code: "workout_not_found" });
+    }
+    expect(client.workouts).toEqual(original);
+    expect(client.queries.every((query) =>
+      query.action === "select" && query.filters.user_id === "user-a",
+    )).toBe(true);
+  });
+
   it("pages history sets, excludes active and foreign sessions, and scopes exercise names", async () => {
     const client = workoutClient();
     client.workouts[0].ended_at = "2026-09-24T11:00:00Z";
