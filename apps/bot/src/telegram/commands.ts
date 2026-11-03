@@ -61,6 +61,7 @@ import {
   type WeatherSnapshot,
 } from "../weather.js";
 import { AssistantError } from "../assistant/registry.js";
+import { handleCaptureTelegramUpdate } from "./capture.js";
 import { assistantPrivateRequest } from "../assistant/brain.js";
 import { issueWebLoginToken } from "../web-session.js";
 
@@ -4969,6 +4970,8 @@ export async function handleTelegramUpdate(
   if (!message) {
     return;
   }
+
+  if (await handleCaptureTelegramUpdate(update, runtime)) return;
 
   // Handle photo uploads (receipt OCR)
   if (message.photo && message.photo.length > 0 && !message.text) {

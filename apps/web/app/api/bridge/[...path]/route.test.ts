@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
-import { GET, POST, PUT } from "./route";
+import { DELETE, GET, POST, PUT } from "./route";
 const context = (path: string) => ({
   params: Promise.resolve({ path: path.split("/") }),
 });
@@ -219,5 +219,80 @@ describe("private same-origin web bridge", () => {
     expect(response.status).toBe(503);
     expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(true);
     expect(await response.json()).toEqual({ error: "backend_unavailable" });
+  });
+
+  it("forwards explicit bounded capture deletion confirmation while preserving reminder DELETE behavior", async () => {
+    const resource = "captures/00000000-0000-4000-8000-000000000001";
+    const body = JSON.stringify({ expectedRevision: 3, confirmed: true });
+    fetchMock.mockResolvedValueOnce(Response.json({ data: { deleted: true } }));
+    const response = await DELETE(
+      request(resource, "DELETE", { cookie: "owner-A", origin, body }),
+      context(resource),
+    );
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `http://127.0.0.1:9999/api/tma/${resource}`,
+      expect.objectContaining({
+        method: "DELETE",
+        body,
+        redirect: "error",
+        headers: {
+          authorization: "Bearer owner-A",
+          "content-type": "application/json",
+        },
+      }),
+    );
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const reminder = "reminders/reminder-1";
+    expect(
+      (
+        await DELETE(
+          request(reminder, "DELETE", { cookie: "owner-A", origin }),
+          context(reminder),
+        )
+      ).status,
+    ).toBe(204);
+    expect(fetchMock.mock.calls[0][1].body).toBeUndefined();
+  });
+
+  it("rejects capture DELETE CSRF, malformed/oversized bodies and private search queries before forwarding", async () => {
+    const resource = "captures/00000000-0000-4000-8000-000000000001";
+    for (const [body, suppliedOrigin, headers, expected] of [
+      [
+        '{"expectedRevision":3,"confirmed":true}',
+        "https://sibling.fixture.invalid",
+        {},
+        403,
+      ],
+      ["{", origin, {}, 400],
+      ["{}", origin, { "content-type": "text/plain" }, 415],
+      ["x".repeat(1_048_577), origin, {}, 413],
+    ] as const) {
+      const response = await DELETE(
+        request(resource, "DELETE", {
+          cookie: "owner-A",
+          origin: suppliedOrigin,
+          body,
+          headers,
+        }),
+        context(resource),
+      );
+      expect(response.status).toBe(expected);
+    }
+    expect(
+      (
+        await POST(
+          request("captures/search?query=private-thought", "POST", {
+            cookie: "owner-A",
+            origin,
+            body: "{}",
+          }),
+          context("captures/search"),
+        )
+      ).status,
+    ).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

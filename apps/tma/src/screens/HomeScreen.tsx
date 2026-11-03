@@ -32,6 +32,7 @@ import { formatDateTime } from "../lib/format";
 import { integrationCardsForSession } from "../lib/session-status";
 
 interface HomeScreenProps {
+  onOpenCapture?: () => void;
   onOpenScholarship?: () => void;
   onOpenWorkout: () => void;
   onOpenIdealHuman: () => void;
@@ -42,6 +43,7 @@ interface HomeScreenProps {
 }
 
 export function HomeScreen({
+  onOpenCapture,
   onOpenScholarship,
   onOpenWorkout,
   onOpenIdealHuman,
@@ -117,6 +119,27 @@ export function HomeScreen({
         </div>
       </section>
 
+      {onOpenCapture ? (
+        <button
+          type="button"
+          onClick={onOpenCapture}
+          className="flex min-h-14 w-full items-center gap-3 rounded-xl border border-cyan-300/25 bg-cyan-300/[0.06] p-4 text-left active:scale-[0.99]"
+        >
+          <NotebookText
+            className="h-5 w-5 shrink-0 text-cyan-200"
+            aria-hidden="true"
+          />
+          <span className="min-w-0">
+            <span className="block font-semibold text-white">
+              Записать мысль
+            </span>
+            <span className="mt-1 block text-xs leading-relaxed text-zinc-300">
+              Текст, идея или расшифровка. Сначала просмотр, затем только
+              выбранные действия.
+            </span>
+          </span>
+        </button>
+      ) : null}
       <TodayPanel date={home.localDate} onOpenAi={onOpenAi} />
       {onOpenDailyLife ? (
         <button

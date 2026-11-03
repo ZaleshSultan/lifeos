@@ -18,6 +18,8 @@ import {
   defaultAiRouterSettings,
   parseAiRouterSettings,
 } from "../../../packages/core/src/ai-model-router.ts";
+import { captureBrowserFixture } from "../../../scripts/capture-browser-fixtures.mjs";
+import { captureBrowserScenarios } from "../../../scripts/capture-browser-scenarios.mjs";
 const { chromium } = await import(
   process.env.LIFEOS_PLAYWRIGHT_MODULE || "playwright"
 );
@@ -50,6 +52,10 @@ const water = new Map([
   ["B", []],
 ]);
 const receipts = new Map();
+const captureFixtures = new Map([
+  ["A", captureBrowserFixture("A")],
+  ["B", captureBrowserFixture("B")],
+]);
 const routerSettings = new Map([
   ["A", { settings: defaultAiRouterSettings(), revision: 0 }],
   ["B", { settings: defaultAiRouterSettings(), revision: 0 }],
@@ -279,6 +285,13 @@ const backend = createServer(async (req, res) => {
       sessions.delete(auth.replace("Bearer ", ""));
       res.writeHead(204);
       return res.end();
+    }
+    if (path.startsWith("/api/tma/captures")) {
+      const result = await captureFixtures
+        .get(owner)
+        .response(path.slice("/api/tma/".length), req.method, input);
+      res.writeHead(result.status, { "content-type": "application/json" });
+      return res.end(JSON.stringify(result.body));
     }
     if (path === "/api/tma/session")
       return json(res, {
@@ -1605,7 +1618,21 @@ try {
     );
     assert.equal(current.tomorrowPlan, "Retain tomorrow's draft");
   });
-  await test("web sessions isolate users in the rendered journal", async () => {
+  await page.setViewportSize({ width: 320, height: 900 });
+  page.off("dialog", acceptDialog);
+  await captureBrowserScenarios({
+    page,
+    fixture: captureFixtures.get("A"),
+    test,
+    prefix: "Web 320px",
+    open: () => page.goto(`${origin}/web/capture`),
+  });
+  page.on("dialog", acceptDialog);
+  await page.screenshot({
+    path: resolve(artifacts, "web-capture-320.png"),
+    fullPage: true,
+  });
+  await test("web sessions isolate users in the rendered journal and capture inbox", async () => {
     const b = await isolatedContext({ viewport: { width: 390, height: 844 } });
     const p = await b.newPage();
     await p.goto(`${origin}/web/login?token=fixture-login-B`);
@@ -1616,6 +1643,18 @@ try {
       "",
     );
     assert.equal(days.get("B").length, 0);
+    await p.goto(
+      `${origin}/web/capture?captureId=${captureFixtures.get("A").voiceId}`,
+    );
+    await p.getByRole("alert").filter({ hasText: /недоступна|не найдена/ }).waitFor();
+    assert.equal(
+      await p.getByText("filming idea: Library b-roll", { exact: true }).count(),
+      0,
+    );
+    assert.equal(
+      await p.getByRole("region", { name: "Просмотр записи", exact: true }).count(),
+      0,
+    );
     await b.close();
   });
   await test("desktop tablet and 320px routes render without overflow or page errors", async () => {
@@ -1631,6 +1670,7 @@ try {
         "nutrition",
         "finance",
         "ai",
+        "capture",
         "ideal-human",
         "settings",
         "notifications",

@@ -32,6 +32,19 @@ const resources: Array<{ pattern: RegExp; methods: readonly string[] }> = [
   { pattern: /^ai\/chat$/, methods: ["POST"] },
   { pattern: /^ai\/router\/settings$/, methods: ["GET", "PUT"] },
   { pattern: /^ai\/router\/preview$/, methods: ["POST"] },
+  { pattern: /^captures$/, methods: ["GET", "POST"] },
+  { pattern: /^captures\/(capabilities|memories)$/, methods: ["GET"] },
+  { pattern: /^captures\/search$/, methods: ["POST"] },
+  {
+    pattern:
+      /^captures\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    methods: ["GET", "PATCH", "DELETE"],
+  },
+  {
+    pattern:
+      /^captures\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/(process|confirm|cancel|retry|archive)$/,
+    methods: ["POST"],
+  },
 ];
 export function bridgeResourceAllowed(path: string, method: string) {
   return resources.some(

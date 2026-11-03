@@ -5,6 +5,11 @@ import { governedOpenRouterFetch, type AiGovernor } from "./ai-governor.js";
 import { handleAiModelRouterRoute } from "./ai-model-router-routes.js";
 import { routedOpenRouterFetch, routerModeRequested, type AiModelRouter } from "./ai-model-router.js";
 import { handleDailyLifeRoute } from "./daily-life-routes.js";
+import { CaptureService, readCaptureConfig } from "./capture-service.js";
+import { handleCaptureRoute } from "./capture-routes.js";
+import { createCaptureTelegramPort } from "./capture-telegram-adapter.js";
+import { CaptureTelegramIngestError, type CaptureTelegramPort } from "./telegram/capture.js";
+import { isMealPhotoMessage } from "./telegram/meal-photo.js";
 import {
   issueHealthCredential,
   resolveHealthCredential,
@@ -115,6 +120,8 @@ interface TmaSessionStatus {
 }
 
 export interface BotServerOptions {
+  captures?: CaptureService;
+  capture?: CaptureTelegramPort;
   aiGovernor?: AiGovernor;
   aiRouter?: AiModelRouter;
   mealVision?: MealVisionService;
@@ -177,6 +184,8 @@ interface HealthResponse {
 }
 
 interface ResolvedBotServerOptions {
+  captures?: CaptureService;
+  capture?: CaptureTelegramPort;
   aiGovernor?: AiGovernor;
   aiRouter?: AiModelRouter;
   mealVision: MealVisionService;
@@ -1351,6 +1360,23 @@ function telegramUpdateId(update: unknown): number | undefined {
   return typeof update.update_id === "number" ? update.update_id : undefined;
 }
 
+function telegramHasCaptureMedia(update: unknown): boolean {
+  if (!update || typeof update !== "object" || Array.isArray(update)) return false;
+  const message = (update as { message?: unknown }).message;
+  if (!message || typeof message !== "object" || Array.isArray(message)) return false;
+  const media = message as { voice?: unknown; photo?: unknown; audio?: unknown; document?: unknown };
+  return [media.voice, media.audio, media.document].some(value => Boolean(value) && typeof value === "object" && !Array.isArray(value)) ||
+    (Array.isArray(media.photo) && media.photo.length > 0);
+}
+
+function telegramPrivateMediaOwner(update: unknown): boolean {
+  const message = telegramMessageRecord(update);
+  const chat = recordField(message, "chat");
+  const from = recordField(message, "from");
+  return chat?.type === "private" && typeof chat.id === "number" &&
+    Number.isSafeInteger(chat.id) && chat.id > 0 && from?.id === chat.id && from.is_bot !== true;
+}
+
 function telegramMessageText(update: unknown): string | undefined {
   const message = telegramMessageRecord(update);
   return typeof message?.text === "string" && message.text.trim()
@@ -1494,13 +1520,25 @@ async function handleTelegramWebhook(
 
     if (
       context.updateType === "message" &&
-      (!telegramMessageText(update) || !telegramMessageChatId(update))
+      ((!telegramMessageText(update) && !telegramHasCaptureMedia(update)) || !telegramMessageChatId(update))
     ) {
+      telegramOk(response);
+      return;
+    }
+    if (context.updateType === "message" && telegramHasCaptureMedia(update) && !telegramPrivateMediaOwner(update)) {
+      telegramOk(response);
+      return;
+    }
+    const mediaMessage = (update as TelegramUpdate).message;
+    if (mediaMessage?.photo?.length && !options.capture && !isMealPhotoMessage(mediaMessage)) {
+      // Never expose the legacy unbounded generic-receipt downloader merely by
+      // enabling media ingress or disabling the optional capture feature.
       telegramOk(response);
       return;
     }
 
     await handleTelegramUpdate(update as TelegramUpdate, {
+      capture: options.capture,
       assistant: options.assistant,
       mealVision: options.mealVision,
       telegram,
@@ -1527,6 +1565,10 @@ async function handleTelegramWebhook(
 
     telegramOk(response);
   } catch (error) {
+    if (error instanceof CaptureTelegramIngestError) {
+      writeJson(response, 503, { error: "capture_ingest_unavailable" });
+      return;
+    }
     if (error instanceof RequestBodyError && error.statusCode === 413) {
       writeJson(response, 413, { error: "request_body_too_large" });
       return;
@@ -2447,7 +2489,8 @@ async function handleRequest(
 
   if (requestUrl.pathname.startsWith("/api/tma/")) {
     const lmsRoute = requestUrl.pathname.startsWith("/api/tma/lms/");
-    if (lmsRoute) response.setHeader("Cache-Control", "no-store");
+    const captureRoute = requestUrl.pathname === "/api/tma/captures" || requestUrl.pathname.startsWith("/api/tma/captures/");
+    if (lmsRoute || captureRoute) response.setHeader("Cache-Control", "no-store");
     const safeLmsRead = request.method === "GET" && ["/api/tma/lms/work", "/api/tma/lms/connection"].includes(requestUrl.pathname);
     const auth = await resolveTmaUser(request, options, lmsRoute && (!safeLmsRead || request.headers.authorization === undefined));
 
@@ -2467,6 +2510,7 @@ async function handleRequest(
       return;
     }
 
+    if (await handleCaptureRoute({request,response,url:requestUrl,user:auth.user,captures:options.captures,readJsonBody,writeJson})) return;
     if (await handleAiModelRouterRoute({request,response,url:requestUrl,userId:auth.user.userId,router:options.aiRouter,readJsonBody,writeJson})) return;
 
     if (await handleLmsRoute({
@@ -3648,7 +3692,13 @@ export function createBotServer(options: BotServerOptions = {}): Server {
           : undefined,
       })
     : undefined);
+  const captures = options.captures ?? (options.store
+    ? new CaptureService({ store: options.store, config: readCaptureConfig(), assistant }) : undefined);
+  const capture = options.capture ?? (captures?.capabilities().enabled && options.store
+    ? createCaptureTelegramPort(captures, options.store) : undefined);
   const resolvedOptions: ResolvedBotServerOptions = {
+    captures,
+    capture,
     aiGovernor: options.aiGovernor,
     aiRouter: options.aiRouter,
     mealVision: options.mealVision ?? createMealVisionService({governor:options.aiGovernor,router:routerModeRequested(options.aiRouter)?options.aiRouter:undefined}),
@@ -3712,5 +3762,7 @@ export function createBotServer(options: BotServerOptions = {}): Server {
     });
   });
   server.on("close", () => resolvedOptions.lmsSessions.close());
+  server.on("listening", () => captures?.start());
+  server.on("close", () => captures?.stop());
   return server;
 }

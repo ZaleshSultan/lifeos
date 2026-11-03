@@ -1,6 +1,8 @@
 import type { MealVisionService } from "../nutrition-routes.js";
 import type { LifeOSStore } from "@lifeos/db";
 import type { AssistantBrain } from "../assistant/brain.js";
+import type { CaptureTelegramPort } from "./capture.js";
+import type { TelegramVoiceAudio } from "./voice.js";
 
 export interface TelegramPhotoSize {
   file_id: string;
@@ -17,6 +19,14 @@ export interface TelegramUser {
   username?: string;
 }
 
+export interface TelegramVoice {
+  file_id: string;
+  file_unique_id: string;
+  duration: number;
+  mime_type?: string;
+  file_size?: number;
+}
+
 export interface TelegramChat {
   id: number;
   type: "private" | "group" | "supergroup" | "channel" | string;
@@ -30,6 +40,10 @@ export interface TelegramMessage {
   text?: string;
   caption?: string;
   photo?: TelegramPhotoSize[];
+  voice?: TelegramVoice;
+  /** Unsupported attachments are admitted only for safe, no-download guidance. */
+  audio?: unknown;
+  document?: unknown;
   web_app_data?: {
     data: string;
     button_text?: string;
@@ -85,10 +99,15 @@ export interface SendMessageInput {
 export interface TelegramClient {
   sendMessage(input: SendMessageInput): Promise<void>;
   answerCallbackQuery(input: AnswerCallbackQueryInput): Promise<void>;
-  getFileUrl(fileId: string): Promise<string>;
+  getFileUrl(fileId: string, signal?: AbortSignal): Promise<string>;
+  downloadVoice?(
+    fileId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<TelegramVoiceAudio>;
 }
 
 export interface TelegramBotRuntime {
+  capture?: CaptureTelegramPort;
   mealVision?: MealVisionService;
   assistant?: AssistantBrain;
   telegram: TelegramClient;
