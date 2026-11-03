@@ -58,11 +58,18 @@ function SignOutButton({ mobile = false }: { mobile?: boolean }) {
     }
   }
   return (
-    <div className={mobile ? "mt-3" : "mt-3"}>
+    <form
+      action="/web/logout"
+      method="post"
+      className="mt-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void signOut();
+      }}
+    >
       <button
-        type="button"
+        type="submit"
         disabled={busy}
-        onClick={() => void signOut()}
         className="flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-white/15 px-3 text-sm text-zinc-200 disabled:opacity-50"
       >
         <LogOut className="h-4 w-4" />
@@ -73,7 +80,7 @@ function SignOutButton({ mobile = false }: { mobile?: boolean }) {
           Не удалось выйти. Повтори попытку; сессия не считается закрытой.
         </p>
       ) : null}
-    </div>
+    </form>
   );
 }
 

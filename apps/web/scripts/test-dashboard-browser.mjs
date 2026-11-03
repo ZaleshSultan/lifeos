@@ -1143,25 +1143,55 @@ try {
   });
   await test("logout revokes the browser session and protected routes fail closed", async () => {
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto(`${origin}/web/settings`);
-    const [logoutResponse] = await Promise.all([
-      page.waitForResponse(
-        (response) => new URL(response.url()).pathname === "/web/logout",
-      ),
-      page.getByRole("button", { name: "Выйти", exact: true }).click(),
-    ]);
-    if (logoutResponse.status() >= 400)
-      console.log(
-        "Fixture logout rejection",
-        JSON.stringify({
-          status: logoutResponse.status(),
-          body: await logoutResponse.text(),
-          requestOrigin: logoutResponse.request().headers().origin ?? null,
-        }),
-      );
-    assert.ok(logoutResponse.status() < 400, "Logout returned an error");
-    await page.getByRole("heading", { name: "Твой LifeOS Web" }).waitFor();
-    assert.equal(sessions.has(sessionA), false);
+    // Logout must remain usable when the document arrives before client scripts.
+    let releaseScripts;
+    const scriptGate = new Promise((resolve) => {
+      releaseScripts = resolve;
+    });
+    const isNextScript = (request) =>
+      new URL(request.url()).origin === origin &&
+      new URL(request.url()).pathname.startsWith("/web/_next/") &&
+      request.resourceType() === "script";
+    const holdScripts = async (route) => {
+      if (isNextScript(route.request())) await scriptGate;
+      return route.fallback();
+    };
+    await page.route("**/*", holdScripts);
+    const firstScript = page.waitForRequest(isNextScript);
+    await page.goto(`${origin}/web/settings`, { waitUntil: "commit" });
+    await firstScript;
+    const logout = page.getByRole("button", { name: "Выйти", exact: true });
+    await logout.waitFor();
+    assert.equal(await logout.getAttribute("type"), "submit");
+    assert.equal(await logout.locator("..").getAttribute("method"), "post");
+    assert.equal(
+      await logout.locator("..").getAttribute("action"),
+      "/web/logout",
+    );
+    try {
+      const [logoutResponse] = await Promise.all([
+        page.waitForResponse(
+          (response) => new URL(response.url()).pathname === "/web/logout",
+        ),
+        logout.click({ noWaitAfter: true }),
+      ]);
+      if (logoutResponse.status() >= 400)
+        console.log(
+          "Fixture logout rejection",
+          JSON.stringify({
+            status: logoutResponse.status(),
+            body: await logoutResponse.text(),
+            requestOrigin: logoutResponse.request().headers().origin ?? null,
+          }),
+        );
+      assert.ok(logoutResponse.status() < 400, "Logout returned an error");
+      await page.waitForURL(`${origin}/web/access`, { waitUntil: "commit" });
+      await page.getByRole("heading", { name: "Твой LifeOS Web" }).waitFor();
+      assert.equal(sessions.has(sessionA), false);
+    } finally {
+      releaseScripts();
+      await page.unroute("**/*", holdScripts);
+    }
     await page.goto(`${origin}/web/ideal-human`);
     await page.getByRole("heading", { name: "Твой LifeOS Web" }).waitFor();
   });
