@@ -160,6 +160,13 @@ memory. They do not create web sessions, edit a journal or demonstrate a real
 handset session. Web entry health is not a claim that every authenticated web
 screen has been exercised.
 
+Telegram's [`getWebhookInfo`](https://core.telegram.org/bots/api#getwebhookinfo)
+retains the most recent error and its timestamp. A correct webhook with no pending
+updates and no error in the last 15 minutes reports `webhook_available_with_history`;
+recent errors, unknown error timestamps or an undrained error queue still fail.
+This read-only check neither clears Telegram's diagnostics nor proves delivery of
+a new handset message.
+
 An active LMS process alone does not mean synchronization works. The monitor
 checks safe session/freshness metadata and reports disconnected, expired or
 stale LMS data as `WARN`; it never substitutes old grades or a process state

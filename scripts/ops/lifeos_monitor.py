@@ -25,6 +25,30 @@ UNITS = ("lifeos-bot.service", "lifeos-web.service", "lifeos-lms-grades-worker.s
          "lifeos-reminder-worker.service", "lifeos-daily-digest.service", "lifeos-obsidian-mirror.service")
 
 
+def webhook_status(status: int, data: dict, origin: str, now: float) -> dict:
+    """Telegram retains its last error after recovery; do not erase that history."""
+    info = data.get("result", {})
+    valid = (status == 200 and data.get("ok") is True and isinstance(info, dict)
+             and info.get("url") == origin + "/telegram/webhook")
+    if not valid:
+        return {"status": "FAIL", "code": "webhook_error"}
+    errors = [info.get("last_error_date"), info.get("last_synchronization_error_date")]
+    if info.get("last_error_message"):
+        if type(info.get("last_error_date")) is not int:
+            return {"status": "FAIL", "code": "webhook_error"}
+    errors = [value for value in errors if value is not None]
+    if errors:
+        # A recent error or an undrained queue is still an incident. Once the
+        # queue is empty and all errors are at least 15 minutes old, report the
+        # available configuration without claiming a fresh handset delivery.
+        pending = info.get("pending_update_count")
+        if (type(pending) is not int or pending != 0
+                or any(type(value) is not int or value <= 0 or now - value < 900 for value in errors)):
+            return {"status": "FAIL", "code": "webhook_error"}
+        return {"status": "OK", "code": "webhook_available_with_history"}
+    return {"status": "OK", "code": "webhook_available"}
+
+
 def http(url: str, headers=None):
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, **(headers or {})})
     try:
@@ -96,9 +120,7 @@ def collect(config: dict) -> dict:
     def telegram():
         status, raw, _ = http("https://api.telegram.org/bot" + token + "/getWebhookInfo")
         data = json.loads(raw)
-        info = data.get("result", {})
-        valid = status == 200 and data.get("ok") is True and info.get("url") == origin + "/telegram/webhook" and not info.get("last_error_message")
-        return {"status": "OK" if valid else "FAIL", "code": "webhook_available" if valid else "webhook_error"}
+        return webhook_status(status, data, origin, time.time())
     check("telegram_bot", telegram)
     management = Management(config)
 
