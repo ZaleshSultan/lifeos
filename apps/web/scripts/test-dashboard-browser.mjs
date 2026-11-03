@@ -1141,9 +1141,14 @@ try {
     }
     assert.deepEqual(errors, []);
   });
-  await test("logout revokes the browser session and protected routes fail closed", async () => {
-    await page.setViewportSize({ width: 1440, height: 900 });
-    // Logout must remain usable when the document arrives before client scripts.
+  await test("logout waits for client readiness, revokes the session and protected routes fail closed", async () => {
+    const delayed = await isolatedContext({
+      viewport: { width: 1440, height: 900 },
+    });
+    await delayed.addCookies(await context.cookies());
+    const p = await delayed.newPage();
+    const logoutErrors = [];
+    p.on("pageerror", (error) => logoutErrors.push(error.message));
     let releaseScripts;
     const scriptGate = new Promise((resolve) => {
       releaseScripts = resolve;
@@ -1152,45 +1157,41 @@ try {
       new URL(request.url()).origin === origin &&
       new URL(request.url()).pathname.startsWith("/web/_next/") &&
       request.resourceType() === "script";
-    const holdScripts = async (route) => {
+    await p.route("**/*", async (route) => {
       if (isNextScript(route.request())) await scriptGate;
       return route.fallback();
-    };
-    await page.route("**/*", holdScripts);
-    const firstScript = page.waitForRequest(isNextScript);
-    await page.goto(`${origin}/web/settings`, { waitUntil: "commit" });
-    await firstScript;
-    const logout = page.getByRole("button", { name: "Выйти", exact: true });
-    await logout.waitFor();
-    assert.equal(await logout.getAttribute("type"), "submit");
-    assert.equal(await logout.locator("..").getAttribute("method"), "post");
-    assert.equal(
-      await logout.locator("..").getAttribute("action"),
-      "/web/logout",
-    );
+    });
     try {
-      const [logoutResponse] = await Promise.all([
-        page.waitForResponse(
+      const firstScript = p.waitForRequest(isNextScript);
+      await p.goto(`${origin}/web/settings`, { waitUntil: "commit" });
+      await firstScript;
+      const logout = p.getByRole("button", { name: "Выйти", exact: true });
+      await logout.waitFor();
+      assert.equal(await logout.isDisabled(), true);
+      assert.equal(sessions.has(sessionA), true);
+      releaseScripts();
+      await logout.click({ trial: true });
+      assert.equal(await logout.isEnabled(), true);
+      const [response] = await Promise.all([
+        p.waitForResponse(
           (response) => new URL(response.url()).pathname === "/web/logout",
         ),
-        logout.click({ noWaitAfter: true }),
+        logout.click(),
       ]);
-      if (logoutResponse.status() >= 400)
-        console.log(
-          "Fixture logout rejection",
-          JSON.stringify({
-            status: logoutResponse.status(),
-            body: await logoutResponse.text(),
-            requestOrigin: logoutResponse.request().headers().origin ?? null,
-          }),
-        );
-      assert.ok(logoutResponse.status() < 400, "Logout returned an error");
-      await page.waitForURL(`${origin}/web/access`, { waitUntil: "commit" });
-      await page.getByRole("heading", { name: "Твой LifeOS Web" }).waitFor();
+      assert.equal(response.status(), 303);
+      assert.equal(new URL(response.request().headers().origin).origin, origin);
+      await p.getByRole("heading", { name: "Твой LifeOS Web" }).waitFor();
       assert.equal(sessions.has(sessionA), false);
+      assert.equal(
+        (await delayed.cookies()).some(
+          (cookie) => cookie.name === "lifeos_web_session",
+        ),
+        false,
+      );
+      assert.deepEqual(logoutErrors, []);
     } finally {
       releaseScripts();
-      await page.unroute("**/*", holdScripts);
+      await delayed.close();
     }
     await page.goto(`${origin}/web/ideal-human`);
     await page.getByRole("heading", { name: "Твой LifeOS Web" }).waitFor();

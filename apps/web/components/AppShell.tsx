@@ -21,16 +21,18 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cx } from "@/lib/styles";
 import type { SystemStatus } from "@/lib/system-status";
 
 function SignOutButton({ mobile = false }: { mobile?: boolean }) {
+  const [ready, setReady] = useState(false);
+  useEffect(() => setReady(true), []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
   const inFlight = useRef(false);
   async function signOut() {
-    if (inFlight.current) return;
+    if (!ready || inFlight.current) return;
     inFlight.current = true;
     setBusy(true);
     setError(false);
@@ -58,18 +60,11 @@ function SignOutButton({ mobile = false }: { mobile?: boolean }) {
     }
   }
   return (
-    <form
-      action="/web/logout"
-      method="post"
-      className="mt-3"
-      onSubmit={(event) => {
-        event.preventDefault();
-        void signOut();
-      }}
-    >
+    <div className="mt-3" aria-busy={!ready || busy}>
       <button
-        type="submit"
-        disabled={busy}
+        type="button"
+        disabled={!ready || busy}
+        onClick={() => void signOut()}
         className="flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-white/15 px-3 text-sm text-zinc-200 disabled:opacity-50"
       >
         <LogOut className="h-4 w-4" />
@@ -80,7 +75,7 @@ function SignOutButton({ mobile = false }: { mobile?: boolean }) {
           Не удалось выйти. Повтори попытку; сессия не считается закрытой.
         </p>
       ) : null}
-    </form>
+    </div>
   );
 }
 
