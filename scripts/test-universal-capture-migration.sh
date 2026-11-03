@@ -49,7 +49,7 @@ task_pids=()
 for task_attempt in {1..8};do
  (
   if task_psql -c "set role service_role;select public.capture_service('00000000-0000-4000-8000-000000000001','edit',(select (payload->>'id')::uuid from public.capture_test_facts where key='concurrent-edit'),(select (payload->>'revision')::int from public.capture_test_facts where key='concurrent-edit'),'{\"actionId\":\"action-1\",\"action\":{\"kind\":\"note.save\",\"args\":{\"title\":\"Edit $task_attempt\",\"content\":\"Owner review\"}}}')->>'revision';" > "$task_results/edit-$task_attempt" 2> "$task_results/edit-$task_attempt.err";then printf '%s' success > "$task_results/edit-$task_attempt.result";
-  else if ! rg -q capture_conflict "$task_results/edit-$task_attempt.err";then cat "$task_results/edit-$task_attempt.err" >&2;exit 1;fi;printf '%s' conflict > "$task_results/edit-$task_attempt.result";fi
+  else if ! grep -q capture_conflict "$task_results/edit-$task_attempt.err";then cat "$task_results/edit-$task_attempt.err" >&2;exit 1;fi;printf '%s' conflict > "$task_results/edit-$task_attempt.result";fi
  ) & task_pids+=("$!")
 done
 for task_pid in "${task_pids[@]}";do wait "$task_pid";done
