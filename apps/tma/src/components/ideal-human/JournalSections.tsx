@@ -1,5 +1,8 @@
 import { VideoAssets } from "./VideoAssets";
-import type { IdealHumanDay } from "../../../../../packages/core/src/ideal-human.js";
+import {
+  hasIdealHumanReflection,
+  type IdealHumanDay,
+} from "../../../../../packages/core/src/ideal-human.js";
 import {
   ChoiceField,
   Fold,
@@ -646,9 +649,15 @@ export function VideoJournal({
 export function ReflectionJournal({
   day,
   change,
+  onClear,
+  clearDisabled,
+  dirty,
 }: {
   day: IdealHumanDay;
   change: ChangeDay;
+  onClear: () => void;
+  clearDisabled: boolean;
+  dirty: boolean;
 }) {
   return (
     <Fold
@@ -695,6 +704,33 @@ export function ReflectionJournal({
         value={day.notes}
         onChange={(value) => change("notes", value)}
       />
+      {day.revision > 0 && hasIdealHumanReflection(day) ? (
+        <div className="space-y-2 border-t border-white/[0.08] pt-3">
+          <p className="text-xs leading-relaxed text-zinc-400">
+            Можно убрать из сохранённого дневника энергию, настроение, итоги и
+            личные заметки этого дня. План на завтра и остальные записи
+            сохранятся.
+            {dirty
+              ? " Сначала сохрани изменения или загрузи сохранённую версию."
+              : ""}
+          </p>
+          <button
+            type="button"
+            disabled={clearDisabled || dirty}
+            className={`${buttonClass} w-full border-rose-300/25 text-rose-200`}
+            onClick={() => {
+              if (
+                window.confirm(
+                  `Убрать вечернюю рефлексию за ${day.date} из дневника LifeOS? Энергия, настроение, итоги и личные заметки будут очищены. План на завтра, измерения и остальные записи сохранятся.`,
+                )
+              )
+                onClear();
+            }}
+          >
+            Удалить вечернюю рефлексию
+          </button>
+        </div>
+      ) : null}
     </Fold>
   );
 }

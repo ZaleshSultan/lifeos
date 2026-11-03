@@ -3,6 +3,13 @@ import { bridgeQuery, bridgeResourceAllowed } from "./bridge-policy";
 describe("web resource boundary", () => {
   it("allows existing scoped workflows and rejects credential/admin/arbitrary destinations", () => {
     expect(bridgeResourceAllowed("ideal-human/days", "PUT")).toBe(true);
+    expect(bridgeResourceAllowed("ideal-human/reflection/clear", "POST")).toBe(
+      true,
+    );
+    for (const method of ["GET", "PUT", "PATCH", "DELETE"])
+      expect(
+        bridgeResourceAllowed("ideal-human/reflection/clear", method),
+      ).toBe(false);
     expect(bridgeResourceAllowed("lms/work", "GET")).toBe(true);
     expect(bridgeResourceAllowed("hydration/entry-1/undo", "POST")).toBe(true);
     for (const path of [

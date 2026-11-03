@@ -18,16 +18,29 @@ export function useIdealHumanDays() {
   });
 }
 
-export function useSaveIdealHumanDay() {
+function useChangeIdealHumanDay(clearReflection: boolean) {
   const cache = useQueryClient();
   const owner = useContext(DraftOwnerContext);
   const key = [...idealHumanDaysKey, owner];
   return useMutation({
     mutationFn: (day: IdealHumanDay) =>
-      request<IdealHumanDay>("/api/tma/ideal-human/days", {
-        method: "PUT",
-        body: JSON.stringify({ day, expectedRevision: day.revision }),
-      }),
+      request<IdealHumanDay>(
+        clearReflection
+          ? "/api/tma/ideal-human/reflection/clear"
+          : "/api/tma/ideal-human/days",
+        {
+          method: clearReflection ? "POST" : "PUT",
+          body: JSON.stringify(
+            clearReflection
+              ? {
+                  date: day.date,
+                  expectedRevision: day.revision,
+                  confirmed: true,
+                }
+              : { day, expectedRevision: day.revision },
+          ),
+        },
+      ),
     async onMutate() {
       await cache.cancelQueries({ queryKey: key });
     },
@@ -42,4 +55,12 @@ export function useSaveIdealHumanDay() {
       telegram.hapticImpact("light");
     },
   });
+}
+
+export function useSaveIdealHumanDay() {
+  return useChangeIdealHumanDay(false);
+}
+
+export function useClearIdealHumanReflection() {
+  return useChangeIdealHumanDay(true);
 }

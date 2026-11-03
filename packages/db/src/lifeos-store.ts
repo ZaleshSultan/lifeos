@@ -1515,6 +1515,7 @@ export interface LifeOSStore extends LmsSessionStore, WebSessionStore, HealthCre
   }): Promise<CurrentWorkoutSummary | null>;
   getIdealHumanDays?(userId: string): Promise<IdealHumanDay[]>;
   saveIdealHumanDay?(userId: string, day: IdealHumanDay, expectedRevision: number): Promise<IdealHumanDay>;
+  clearIdealHumanReflection?(userId: string, date: string, expectedRevision: number): Promise<IdealHumanDay>;
   getWorkoutProgram(userId: string): Promise<WorkoutProgram | null>;
   saveWorkoutProgram(userId: string, program: WorkoutProgram): Promise<WorkoutProgram>;
   getWorkoutHistory(userId: string): Promise<WorkoutHistorySession[]>;
@@ -4776,6 +4777,10 @@ export class SupabaseLifeOSStore implements LifeOSStore {
 
   async saveIdealHumanDay(userId: string, input: IdealHumanDay, expectedRevision: number): Promise<IdealHumanDay> {
     return idealHumanStore(this.client).saveDay(userId, input, expectedRevision);
+  }
+
+  async clearIdealHumanReflection(userId: string, date: string, expectedRevision: number): Promise<IdealHumanDay> {
+    return idealHumanStore(this.client).clearReflection(userId, date, expectedRevision);
   }
 
   async getWorkoutProgram(userId: string): Promise<WorkoutProgram | null> {

@@ -8,6 +8,7 @@ const resources: Array<{ pattern: RegExp; methods: readonly string[] }> = [
   { pattern: /^lms\/(work|connection)$/, methods: ["GET"] },
   { pattern: /^daily-life\/preferences$/, methods: ["GET", "PUT"] },
   { pattern: /^ideal-human\/days$/, methods: ["GET", "PUT"] },
+  { pattern: /^ideal-human\/reflection\/clear$/, methods: ["POST"] },
   { pattern: /^workout\/(current|history)$/, methods: ["GET"] },
   { pattern: /^workout\/program$/, methods: ["GET", "PUT"] },
   { pattern: /^workout\/start$/, methods: ["POST"] },

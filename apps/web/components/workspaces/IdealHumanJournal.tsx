@@ -150,6 +150,45 @@ export function IdealHumanJournal({
       setBusy(false);
     }
   }
+  async function clearReflection() {
+    if (saving.current || dirty || conflict || day.revision < 1) return;
+    saving.current = true;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const next = await webRequest<IdealHumanDay>(
+        "ideal-human/reflection/clear",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            date,
+            expectedRevision: day.revision,
+            confirmed: true,
+          }),
+        },
+      );
+      setDay(next);
+      data.setData((previous) =>
+        [
+          ...(previous ?? []).filter((record) => record.date !== next.date),
+          next,
+        ].sort((a, b) => a.date.localeCompare(b.date)),
+      );
+      setConflict(false);
+      setMessage(
+        "Вечерняя рефлексия удалена из дневника LifeOS. Остальные записи сохранены.",
+      );
+    } catch (error) {
+      setConflict(error instanceof WebApiError && error.status === 409);
+      setMessage(
+        webErrorMessage(error) +
+          " Удаление не подтверждено. Загрузи сохранённую версию и повтори.",
+      );
+    } finally {
+      saving.current = false;
+      setBusy(false);
+    }
+  }
   return (
     <div className="space-y-5">
       <SectionPanel
@@ -329,7 +368,13 @@ export function IdealHumanJournal({
             <NutritionJournal day={day} change={change} />
             <LearningJournal day={day} change={change} />
             <VideoJournal day={day} change={change} />
-            <ReflectionJournal day={day} change={change} />
+            <ReflectionJournal
+              day={day}
+              change={change}
+              onClear={() => void clearReflection()}
+              clearDisabled={busy || conflict}
+              dirty={dirty}
+            />
           </fieldset>
         </form>
       ) : null}

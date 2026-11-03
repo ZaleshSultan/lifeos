@@ -399,6 +399,20 @@ function planSignature(plan: IdealHumanPlanBlock[]): string {
 
 /** Full-day replacement; missing old fields are defaulted for legacy compatibility. CAS protects edits. */
 export function parseIdealHumanDay(input: unknown): IdealHumanDay {
+  return parseDay(input, false);
+}
+
+/** Trusted persisted rows can be empty after an explicit reflection clear.
+ * Never use this parser for ordinary client day writes. A revision is not
+ * evidence of persistence; callers must first read the owner-scoped row. */
+export function parseStoredIdealHumanDay(input: unknown): IdealHumanDay {
+  const day = parseDay(input, true);
+  if (day.revision < 1)
+    throw new IdealHumanInputError("Invalid stored revision");
+  return day;
+}
+
+function parseDay(input: unknown, allowEmpty: boolean): IdealHumanDay {
   const v = object(
     input,
     [
@@ -671,7 +685,7 @@ export function parseIdealHumanDay(input: unknown): IdealHumanDay {
     day.baselineHeightCm !== null ||
     Boolean(day.storyboard) ||
     planSignature(day.plan) !== planSignature(defaultIdealHumanPlan(day.date));
-  if (!hasIdealHumanObservation(day) && !configured)
+  if (!allowEmpty && !hasIdealHumanObservation(day) && !configured)
     throw new IdealHumanInputError(
       "Record at least one observation, reflection, or plan change",
     );
@@ -680,6 +694,62 @@ export function parseIdealHumanDay(input: unknown): IdealHumanDay {
       "Day entry is too large; shorten notes or export them separately",
     );
   return day;
+}
+
+/** Explicitly scoped evening history; plans and other domain notes are retained. */
+export function hasIdealHumanReflection(day: IdealHumanDay): boolean {
+  return (
+    day.energy !== null ||
+    day.mood !== null ||
+    [day.whatWorked, day.whatDidNotWork, day.highlights, day.notes].some(
+      Boolean,
+    )
+  );
+}
+
+export function clearIdealHumanReflection(day: IdealHumanDay): IdealHumanDay {
+  return {
+    ...day,
+    energy: null,
+    mood: null,
+    whatWorked: "",
+    whatDidNotWork: "",
+    highlights: "",
+    notes: "",
+  };
+}
+
+export function parseIdealHumanReflectionClear(input: unknown): {
+  date: string;
+  expectedRevision: number;
+  confirmed: true;
+} {
+  const value = object(
+    input,
+    ["date", "expectedRevision", "confirmed"],
+    "reflection clear",
+  );
+  if (
+    typeof value.date !== "string" ||
+    idealHumanDayNumber(value.date) === null
+  )
+    throw new IdealHumanInputError("Invalid experiment date");
+  if (
+    typeof value.expectedRevision !== "number" ||
+    !Number.isSafeInteger(value.expectedRevision) ||
+    value.expectedRevision < 1 ||
+    value.expectedRevision >= 2_147_483_647
+  )
+    throw new IdealHumanInputError(
+      "Reload the saved day before clearing reflection",
+    );
+  if (value.confirmed !== true)
+    throw new IdealHumanInputError("Confirm clearing the evening reflection");
+  return {
+    date: value.date,
+    expectedRevision: value.expectedRevision,
+    confirmed: true,
+  };
 }
 
 /** Planning ahead does not create an observed check-in or a completed journal. */

@@ -5,6 +5,7 @@ import { createServer } from "node:http";
 import { readFile, mkdir } from "node:fs/promises";
 import { resolve, extname } from "node:path";
 import {
+  clearIdealHumanReflection,
   emptyIdealHumanDay,
   parseIdealHumanDay,
 } from "../packages/core/src/ideal-human.ts";
@@ -79,6 +80,7 @@ async function fixture(width, options = {}) {
     truncated: false,
   });
   let saves = 0,
+    clears = 0,
     failSave = false,
     failLoad = !!options.failLoad,
     hold = null;
@@ -189,7 +191,25 @@ async function fixture(width, options = {}) {
         reason: "vision_not_configured",
         retainsPhotos: false,
       };
-    else if (url.pathname === "/api/tma/ideal-human/days") {
+    else if (url.pathname === "/api/tma/ideal-human/reflection/clear") {
+      clears++;
+      const input = route.request().postDataJSON();
+      const current = days.get(input.date);
+      if (failSave) {
+        status = 503;
+        error = "database_not_configured";
+      } else if (!current || current.revision !== input.expectedRevision) {
+        status = 409;
+        error = "ideal_human_conflict";
+      } else {
+        assert.equal(input.confirmed, true);
+        data = {
+          ...clearIdealHumanReflection(current),
+          revision: current.revision + 1,
+        };
+        days.set(input.date, data);
+      }
+    } else if (url.pathname === "/api/tma/ideal-human/days") {
       if (route.request().method() === "PUT") {
         saves++;
         const input = JSON.parse(route.request().postData());
@@ -339,6 +359,7 @@ async function fixture(width, options = {}) {
     days,
     errors,
     saves: () => saves,
+    clears: () => clears,
     failSave: (v) => (failSave = v),
     failLoad: (v) => (failLoad = v),
     hold: (p) => (hold = p),
@@ -681,6 +702,109 @@ try {
     assert.deepEqual(f.errors, []);
     await f.context.close();
   }
+  const reflection = await fixture(320);
+  const reflectionDate = "2026-11-03";
+  reflection.days.set(
+    reflectionDate,
+    parseIdealHumanDay({
+      date: reflectionDate,
+      revision: 1,
+      notes: "Private reflection",
+      weightKg: 51.2,
+      tomorrowPlan: "Keep draft",
+      footageCaptured: true,
+    }),
+  );
+  await scenario(
+    "reflection deletion requires confirmation and protects unsaved unrelated edits",
+    async () => {
+      const { page } = reflection;
+      await page.goto(origin + "/tma/?screen=ideal-human");
+      await page.getByLabel("Утренний вес, кг", { exact: true }).fill("52");
+      await openDetails(page, "Вечерняя рефлексия");
+      const clear = page.getByRole("button", {
+        name: "Удалить вечернюю рефлексию",
+        exact: true,
+      });
+      assert.equal(await clear.isDisabled(), true);
+      page.once("dialog", (dialog) => dialog.accept());
+      await page
+        .getByLabel("День эксперимента", { exact: true })
+        .selectOption("2026-11-04");
+      await page
+        .getByLabel("День эксперимента", { exact: true })
+        .selectOption(reflectionDate);
+      await openDetails(page, "Вечерняя рефлексия");
+      await clear.waitFor();
+      page.once("dialog", (dialog) => dialog.dismiss());
+      await clear.click();
+      assert.equal(reflection.clears(), 0);
+      assert.equal(
+        reflection.days.get(reflectionDate).notes,
+        "Private reflection",
+      );
+      page.once("dialog", (dialog) => dialog.accept());
+      const response = page.waitForResponse((r) =>
+        r.url().endsWith("/ideal-human/reflection/clear"),
+      );
+      await clear.click();
+      assert.equal((await response).status(), 200);
+      await clear.waitFor({ state: "hidden" });
+      await page.reload();
+      assert.equal(
+        await page.getByLabel("Утренний вес, кг", { exact: true }).inputValue(),
+        "51.2",
+      );
+      assert.equal(
+        reflection.days.get(reflectionDate).tomorrowPlan,
+        "Keep draft",
+      );
+      assert.equal(reflection.days.get(reflectionDate).footageCaptured, true);
+      assert.equal(reflection.days.get(reflectionDate).notes, "");
+      assert.equal(reflection.saves(), 0);
+      await noOverflow(page);
+    },
+  );
+  await scenario(
+    "clearing the final reflection stays readable and removes false check-in progress",
+    async () => {
+      const { page } = reflection;
+      reflection.days.set(
+        reflectionDate,
+        parseIdealHumanDay({
+          date: reflectionDate,
+          revision: 3,
+          notes: "Only reflection",
+        }),
+      );
+      await page.reload();
+      await page.getByLabel("Утренний вес, кг", { exact: true }).waitFor();
+      await openDetails(page, "Вечерняя рефлексия");
+      page.once("dialog", (dialog) => dialog.accept());
+      await page
+        .getByRole("button", {
+          name: "Удалить вечернюю рефлексию",
+          exact: true,
+        })
+        .click();
+      await page
+        .getByRole("button", {
+          name: "Удалить вечернюю рефлексию",
+          exact: true,
+        })
+        .waitFor({ state: "hidden" });
+      await page.reload();
+      assert.equal(
+        await page
+          .getByRole("progressbar", { name: "Дни с наблюдениями" })
+          .getAttribute("aria-valuenow"),
+        "0",
+      );
+      assert.equal(reflection.days.get(reflectionDate).revision, 4);
+      assert.deepEqual(reflection.errors, []);
+    },
+  );
+  await reflection.context.close();
   const failure = await fixture(320, { failLoad: true });
   await scenario(
     "load failure has safe retry and no fake journal",
