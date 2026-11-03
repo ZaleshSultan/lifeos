@@ -16,6 +16,20 @@ export type CaptureLifecycle =
   | "cancel"
   | "archive"
   | "restore";
+export interface CaptureCorrectionInput {
+  expectedRevision: number;
+  instruction: string;
+}
+export interface CaptureRejectInput {
+  expectedRevision: number;
+  actionId: string;
+}
+export interface CaptureExternalInput {
+  expectedRevision: number;
+  requestId: string;
+  mode: "model" | "transcription";
+  confirmed: true;
+}
 export interface CaptureTransport {
   capabilities(signal?: AbortSignal): Promise<CaptureCapabilities>;
   search(
@@ -31,6 +45,9 @@ export interface CaptureTransport {
     expectedRevision: number,
   ): Promise<CaptureView>;
   confirm(id: string, input: CaptureConfirmRequest): Promise<CaptureView>;
+  correct(id: string, input: CaptureCorrectionInput): Promise<CaptureView>;
+  reject(id: string, input: CaptureRejectInput): Promise<CaptureView>;
+  external(id: string, input: CaptureExternalInput): Promise<CaptureView>;
   remove(id: string, expectedRevision: number): Promise<unknown>;
   memories(signal?: AbortSignal): Promise<CaptureMemoryView[]>;
   tasks(signal?: AbortSignal): Promise<TaskWorkspace>;
@@ -93,6 +110,21 @@ export function captureTransport(
     confirm: (captureId, input) =>
       bounded<CaptureView>(
         `captures/${id(captureId)}/confirm`,
+        body("POST", input),
+      ),
+    correct: (captureId, input) =>
+      bounded<CaptureView>(
+        `captures/${id(captureId)}/correct`,
+        body("POST", input),
+      ),
+    reject: (captureId, input) =>
+      bounded<CaptureView>(
+        `captures/${id(captureId)}/reject`,
+        body("POST", input),
+      ),
+    external: (captureId, input) =>
+      bounded<CaptureView>(
+        `captures/${id(captureId)}/external`,
         body("POST", input),
       ),
     remove: (captureId, expectedRevision) =>

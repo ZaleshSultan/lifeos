@@ -1618,20 +1618,20 @@ try {
     );
     assert.equal(current.tomorrowPlan, "Retain tomorrow's draft");
   });
-  await page.setViewportSize({ width: 320, height: 900 });
   page.off("dialog", acceptDialog);
-  await captureBrowserScenarios({
-    page,
-    fixture: captureFixtures.get("A"),
-    test,
-    prefix: "Web 320px",
-    open: () => page.goto(`${origin}/web/capture`),
-  });
+  for (const width of [320, 390, 768, 1440]) {
+    captureFixtures.set("A", captureBrowserFixture("A"));
+    await page.setViewportSize({ width, height: 900 });
+    await captureBrowserScenarios({
+      page,
+      fixture: captureFixtures.get("A"),
+      test,
+      prefix: `Web ${width}px`,
+      open: () => page.goto(`${origin}/web/capture`),
+    });
+    await page.screenshot({ path: resolve(artifacts, `web-capture-${width}.png`), fullPage: true });
+  }
   page.on("dialog", acceptDialog);
-  await page.screenshot({
-    path: resolve(artifacts, "web-capture-320.png"),
-    fullPage: true,
-  });
   await test("web sessions isolate users in the rendered journal and capture inbox", async () => {
     const b = await isolatedContext({ viewport: { width: 390, height: 844 } });
     const p = await b.newPage();

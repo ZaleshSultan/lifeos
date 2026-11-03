@@ -55,4 +55,41 @@ describe("capture authenticated transport contracts", () => {
       { expectedRevision: 6, archived: false },
     ]);
   });
+  it("binds private corrections, one-action rejection and explicit external consent to the reviewed revision", async () => {
+    const request = vi.fn().mockResolvedValue({});
+    const api = captureTransport(request);
+    const id = "00000000-0000-4000-8000-000000000001";
+    await api.correct(id, {
+      expectedRevision: 4,
+      instruction: "DBMS не завтра, а в пятницу",
+    });
+    await api.reject(id, { expectedRevision: 5, actionId: "action-2" });
+    await api.external(id, {
+      expectedRevision: 6,
+      requestId: "stable-external-request",
+      mode: "model",
+      confirmed: true,
+    });
+    expect(request.mock.calls.map((call) => call[0])).toEqual([
+      `captures/${id}/correct`,
+      `captures/${id}/reject`,
+      `captures/${id}/external`,
+    ]);
+    expect(JSON.parse(request.mock.calls[0][1].body)).toEqual({
+      expectedRevision: 4,
+      instruction: "DBMS не завтра, а в пятницу",
+    });
+    expect(JSON.parse(request.mock.calls[1][1].body)).toEqual({
+      expectedRevision: 5,
+      actionId: "action-2",
+    });
+    expect(JSON.parse(request.mock.calls[2][1].body)).toEqual({
+      expectedRevision: 6,
+      requestId: "stable-external-request",
+      mode: "model",
+      confirmed: true,
+    });
+    for (const [, options] of request.mock.calls)
+      expect(options.method).toBe("POST");
+  });
 });

@@ -9,13 +9,17 @@ import {
   assistantToolPermission,
   applyCaptureJournalAction,
   captureRecordId,
+  captureExpectedRevision,
   emptyIdealHumanDay,
+  IDEAL_HUMAN_TIMEZONE,
   extractCaptureActions,
   isCaptureJournalAction,
   parseCaptureConfirmRequest,
   parseCaptureEditRequest,
   parseCaptureIngestRequest,
   parseCaptureSearchInput,
+  parseCaptureCorrectionRequest,
+  planCaptureCorrection,
   type CaptureActionView,
   type CaptureActionPayload,
   type CaptureCapabilities,
@@ -37,6 +41,13 @@ import {
 import { AssistantBrain } from "./assistant/brain.js";
 import { loadPlanningData } from "./planning-context.js";
 import { captureSavedFacts } from "./capture-context.js";
+import { AiModelRouter } from "./ai-model-router.js";
+import type { AiGovernor } from "./ai-governor.js";
+import type { TelegramVoiceAudio } from "./telegram/voice.js";
+import {
+  CaptureExternalError,
+  processCaptureExternal,
+} from "./capture-external-processing.js";
 
 export class CaptureServiceError extends Error {
   constructor(
@@ -52,6 +63,8 @@ export interface CaptureConfig {
   enabled: boolean;
   workerEnabled: boolean;
   memoryDeleteEnabled: boolean;
+  aiExtractionEnabled?: boolean;
+  transcriptionEnabled?: boolean;
 }
 
 export function readCaptureConfig(
@@ -65,6 +78,8 @@ export function readCaptureConfig(
     enabled: flag("LIFEOS_CAPTURE_ENABLED", true),
     workerEnabled: flag("LIFEOS_CAPTURE_WORKER_ENABLED", true),
     memoryDeleteEnabled: flag("LIFEOS_ASSISTANT_MEMORY_DELETE_ENABLED", false),
+    aiExtractionEnabled: flag("LIFEOS_CAPTURE_AI_EXTRACTION_ENABLED", false),
+    transcriptionEnabled: flag("LIFEOS_CAPTURE_TRANSCRIPTION_ENABLED", false),
   };
 }
 
@@ -74,6 +89,7 @@ export class CaptureService {
   private working = false;
   private stopping = false;
   private processing = 0;
+  private readonly externalWork = new Map<string, AbortController>();
   private readonly usage = new Map<string, { minute: number; count: number }>();
   constructor(
     private readonly options: {
@@ -81,6 +97,12 @@ export class CaptureService {
       config: CaptureConfig;
       assistant?: AssistantBrain;
       now?: () => Date;
+      router?: AiModelRouter;
+      governor?: AiGovernor;
+      voiceDownload?: (
+        reference: CaptureVoiceReference,
+        signal: AbortSignal,
+      ) => Promise<TelegramVoiceAudio>;
     },
   ) {}
 
@@ -94,12 +116,89 @@ export class CaptureService {
       transcription: "unavailable",
       transcriptionRequiresConsent: true,
       aiExtraction: false,
+      externalModel: "unavailable",
       maxTextLength: CAPTURE_MAX_TEXT,
       maxVoiceBytes: CAPTURE_MAX_VOICE_BYTES,
       maxVoiceSeconds: CAPTURE_MAX_VOICE_SECONDS,
       memoryDeleteEnabled: enabled && this.options.config.memoryDeleteEnabled,
       actionKinds: [...CAPTURE_ACTION_KINDS],
     };
+  }
+  /** Read-only owner policy preview. It never reserves, downloads or contacts AI. */
+  async ownerCapabilities(
+    user: TelegramUserRecord,
+  ): Promise<CaptureCapabilities> {
+    if (!user.userId || user.status !== "active")
+      throw new CaptureServiceError("capture_permission_denied", 403);
+    const result = this.capabilities();
+    const router = this.options.router;
+    if (!result.enabled || !router?.status().enabled) return result;
+    try {
+      const catalog = router.catalog(user.userId, "classification");
+      if (this.options.config.aiExtractionEnabled === true) {
+        const decision = await router.preview(
+          user.userId,
+          {
+            category: "document_extraction",
+            dataCategories: ["general", "university", "health", "finance"],
+            requiredCapabilities: ["text", "json"],
+          },
+          4000,
+          Math.min(router.config.maxOutputTokens, 4096),
+          undefined,
+          "classification",
+        );
+        if (
+          decision.kind === "selected" &&
+          catalog.some(
+            (model) =>
+              model.id === decision.candidates[0]?.modelId &&
+              model.configured &&
+              model.authorized &&
+              model.metadataVerified,
+          )
+        ) {
+          result.aiExtraction = true;
+          result.externalModel = "configured_unverified";
+        }
+      }
+      if (
+        this.options.config.transcriptionEnabled === true &&
+        this.options.governor &&
+        this.options.voiceDownload
+      ) {
+        const decision = await router.preview(
+          user.userId,
+          {
+            category: "voice",
+            dataCategories: ["general", "university", "health", "finance"],
+          },
+          3000,
+          Math.min(router.config.maxOutputTokens, 8192),
+          undefined,
+          "classification",
+        );
+        if (
+          decision.kind === "selected" &&
+          catalog.some(
+            (model) =>
+              model.id === decision.candidates[0]?.modelId &&
+              model.provider === "openai" &&
+              model.model === "gpt-transcribe" &&
+              model.configured &&
+              model.authorized &&
+              model.metadataVerified &&
+              (model.audioCostMicrosPerMinute ?? 0) >= 4500 &&
+              router.config.models.find((row) => row.model.id === model.id)
+                ?.providerOnly.length === 0,
+          )
+        )
+          result.transcription = "configured_unverified";
+      }
+    } catch {
+      /* Missing owner settings or stale policy remains unavailable. */
+    }
+    return result;
   }
   private now(): Date {
     return this.options.now?.() ?? new Date();
@@ -181,6 +280,8 @@ export class CaptureService {
       captureRecordId(id),
       parseCaptureEditRequest(raw),
     );
+    // A successful owner edit supersedes the leased draft, including audio work.
+    this.abortExternal(user.userId, id);
     if (result.state === "queued") return this.process(user, id);
     return this.withContext(user, result);
   }
@@ -253,15 +354,157 @@ export class CaptureService {
     );
     return this.process(user, id);
   }
-  async cancel(user: TelegramUserRecord, id: string, revision: number) {
+  async correct(
+    user: TelegramUserRecord,
+    id: string,
+    raw: unknown,
+  ): Promise<CaptureView> {
+    const persistence = this.persistence(user);
+    const request = parseCaptureCorrectionRequest(raw);
+    const capture = await this.get(user, captureRecordId(id));
+    if (capture.revision !== request.expectedRevision)
+      throw new CaptureServiceError("capture_conflict", 409);
+    if (!persistence.revise)
+      throw new CaptureServiceError("capture_correction_unavailable");
+    const changes = planCaptureCorrection(request.instruction, capture, {
+      now: this.now(),
+      timezone: user.timezone,
+    });
+    if (
+      changes.warnings.length ||
+      (!changes.updates.length && !changes.cancelActionIds.length)
+    )
+      throw new CaptureServiceError("capture_correction_unclear", 400);
     return this.withContext(
       user,
-      await this.persistence(user).cancel(
-        user.userId,
-        captureRecordId(id),
-        revision,
-      ),
+      await persistence.revise(user.userId, id, request.expectedRevision, {
+        updates: changes.updates,
+        cancelActionIds: changes.cancelActionIds,
+      }),
     );
+  }
+  async reject(
+    user: TelegramUserRecord,
+    id: string,
+    revision: number,
+    actionId: string,
+  ): Promise<CaptureView> {
+    const persistence = this.persistence(user);
+    if (!/^action-(?:[1-9]|1[0-6])$/.test(actionId))
+      throw new CaptureInputError();
+    if (!persistence.revise)
+      throw new CaptureServiceError("capture_correction_unavailable");
+    return this.withContext(
+      user,
+      await persistence.revise(user.userId, captureRecordId(id), revision, {
+        updates: [],
+        cancelActionIds: [actionId],
+      }),
+    );
+  }
+  async external(
+    user: TelegramUserRecord,
+    id: string,
+    raw: unknown,
+  ): Promise<CaptureView> {
+    const persistence = this.persistence(user);
+    if (this.stopping)
+      throw new CaptureServiceError("capture_external_unavailable");
+    if (!raw || typeof raw !== "object" || Array.isArray(raw))
+      throw new CaptureInputError();
+    const value = raw as Record<string, unknown>;
+    if (
+      Object.keys(value).some(
+        (key) =>
+          !["expectedRevision", "requestId", "mode", "confirmed"].includes(key),
+      ) ||
+      value.confirmed !== true ||
+      typeof value.requestId !== "string" ||
+      !/^[A-Za-z0-9:_-]{8,120}$/.test(value.requestId) ||
+      !["model", "transcription"].includes(String(value.mode))
+    )
+      throw new CaptureInputError();
+    const request = {
+      expectedRevision: captureExpectedRevision(value.expectedRevision),
+      requestId: value.requestId,
+      mode: value.mode as "model" | "transcription",
+      confirmed: true as const,
+    };
+    if (
+      !this.options.router ||
+      !this.options.store ||
+      (request.mode === "model"
+        ? this.options.config.aiExtractionEnabled !== true
+        : this.options.config.transcriptionEnabled !== true)
+    )
+      throw new CaptureServiceError("capture_external_unavailable");
+    if (this.processing >= 2)
+      throw new CaptureServiceError("capture_processing_busy", 429);
+    const key = this.externalKey(user.userId, captureRecordId(id));
+    if (this.externalWork.has(key))
+      throw new CaptureServiceError("capture_conflict", 409);
+    const control = new AbortController();
+    this.externalWork.set(key, control);
+    this.processing++;
+    let started = false;
+    try {
+      const capture = await this.get(user, id);
+      let claimed!: (capture: CaptureView) => void;
+      const ready = new Promise<{ capture: CaptureView }>((resolve) => {
+        claimed = (next) => resolve({ capture: next });
+      });
+      // The same bounded executor continues only this explicitly consented job.
+      // A restart leaves its durable external marker; the worker never replays it.
+      const work = processCaptureExternal({
+        user,
+        capture,
+        request,
+        store: this.options.store,
+        persistence,
+        router: this.options.router,
+        governor: this.options.governor,
+        download: this.options.voiceDownload,
+        signal: control.signal,
+        now: () => this.now(),
+        onClaim: claimed,
+      })
+        .then(
+          (next) => ({ capture: next }),
+          (error: unknown) => ({ error }),
+        )
+        .finally(() => {
+          this.processing--;
+          this.externalWork.delete(key);
+        });
+      started = true;
+      const next = await Promise.race([ready, work]);
+      if ("error" in next) throw next.error;
+      return this.withContext(user, next.capture);
+    } catch (error) {
+      if (error instanceof CaptureExternalError)
+        throw new CaptureServiceError(error.code, error.statusCode);
+      throw error;
+    } finally {
+      if (!started) {
+        this.processing--;
+        this.externalWork.delete(key);
+      }
+    }
+  }
+  private abortExternal(userId: string, id: string): void {
+    this.externalWork.get(this.externalKey(userId, id))?.abort();
+  }
+  private externalKey(userId: string, id: string): string {
+    return userId.toLowerCase() + ":" + id.toLowerCase();
+  }
+  async cancel(user: TelegramUserRecord, id: string, revision: number) {
+    const capture = await this.persistence(user).cancel(
+      user.userId,
+      captureRecordId(id),
+      revision,
+    );
+    this.abortExternal(user.userId, id);
+    return this.withContext(user, capture);
   }
   async archive(
     user: TelegramUserRecord,
@@ -269,15 +512,14 @@ export class CaptureService {
     revision: number,
     archived: boolean,
   ) {
-    return this.withContext(
-      user,
-      await this.persistence(user).archive(
-        user.userId,
-        captureRecordId(id),
-        revision,
-        archived,
-      ),
+    const capture = await this.persistence(user).archive(
+      user.userId,
+      captureRecordId(id),
+      revision,
+      archived,
     );
+    if (archived) this.abortExternal(user.userId, id);
+    return this.withContext(user, capture);
   }
   async delete(user: TelegramUserRecord, id: string, revision: number) {
     await this.persistence(user).delete(
@@ -285,6 +527,7 @@ export class CaptureService {
       captureRecordId(id),
       revision,
     );
+    this.abortExternal(user.userId, id);
   }
   async memories(user: TelegramUserRecord) {
     this.persistence(user);
@@ -426,20 +669,37 @@ export class CaptureService {
     user: TelegramUserRecord,
     capture: CaptureView,
   ): Promise<CaptureView> {
-    const reference = DateTime.fromISO(capture.createdAt, {
-      zone: user.timezone,
-    });
-    const dated = capture.actions.find((action) => "date" in action.args);
+    const pending = capture.actions.filter(
+      (action) =>
+        action.status !== "succeeded" && action.status !== "cancelled",
+    );
+    const actions = pending.length ? pending : capture.actions;
+    const preferred =
+      actions.find(
+        (action) =>
+          action.presentation?.dateBasis === "profile" &&
+          action.presentation.suggestedDate,
+      ) ?? actions.find((action) => action.presentation?.suggestedDate);
+    const dated = actions.find((action) => "date" in action.args);
+    const timezone =
+      preferred?.presentation?.timezone ??
+      (dated && isCaptureJournalAction(dated)
+        ? IDEAL_HUMAN_TIMEZONE
+        : user.timezone);
+    const contextUser =
+      timezone === user.timezone ? user : { ...user, timezone };
+    const reference = DateTime.fromISO(capture.createdAt, { zone: timezone });
     const tomorrow = /\btomorrow\b|завтра/iu.test(
       capture.transcript ?? capture.text,
     );
     const date =
-      dated && "date" in dated.args
+      preferred?.presentation?.suggestedDate ??
+      (dated && "date" in dated.args
         ? dated.args.date
-        : reference.plus({ days: tomorrow ? 1 : 0 }).toISODate()!;
+        : reference.plus({ days: tomorrow ? 1 : 0 }).toISODate()!);
     const context: CaptureContextView = {
       date,
-      timezone: user.timezone,
+      timezone,
       warnings: [],
       commitments: [],
       deadlines: [],
@@ -449,7 +709,7 @@ export class CaptureService {
     try {
       const data = await loadPlanningData(
         this.options.store!,
-        user,
+        contextUser,
         date,
         this.now(),
       );
@@ -458,7 +718,9 @@ export class CaptureService {
       context.scheduleKnown =
         data.events.length > 0 &&
         !data.plan.warnings.some((value) =>
-          /incomplete|unverified|invalid|safety limit/iu.test(value),
+          /incomplete|unverified|invalid|safety limit|stale|expired|reconnect|freshness|outdated|устар|переподключ/iu.test(
+            value,
+          ),
         );
       context.deadlines = data.plan.rankedTasks
         .filter((task) => task.dueAt)
@@ -471,7 +733,7 @@ export class CaptureService {
               (task) =>
                 task.dueAt &&
                 Date.parse(task.dueAt) <=
-                  DateTime.fromISO(date, { zone: user.timezone })
+                  DateTime.fromISO(date, { zone: timezone })
                     .endOf("day")
                     .toMillis(),
             )
@@ -560,7 +822,7 @@ export class CaptureService {
     try {
       const saved = await captureSavedFacts(
         this.options.store!,
-        user,
+        contextUser,
         date,
         this.now(),
       );
@@ -569,6 +831,23 @@ export class CaptureService {
     } catch {
       context.warnings.push(
         "Saved health, workout and journal context is unavailable.",
+      );
+    }
+    if (
+      new Set(
+        actions.flatMap((action) =>
+          action.presentation?.suggestedDate
+            ? [
+                action.presentation.suggestedDate +
+                  "@" +
+                  action.presentation.timezone,
+              ]
+            : [],
+        ),
+      ).size > 1
+    ) {
+      context.warnings.push(
+        "Предложения относятся к разным датам или часовым поясам. Здесь показан контекст выбранной даты; проверь дату каждой карточки.",
       );
     }
     return { ...capture, context };
@@ -588,6 +867,7 @@ export class CaptureService {
   }
   stop(): void {
     this.stopping = true;
+    for (const control of this.externalWork.values()) control.abort();
     if (this.worker) clearInterval(this.worker);
     this.worker = undefined;
   }

@@ -6,6 +6,7 @@ import { handleAiModelRouterRoute } from "./ai-model-router-routes.js";
 import { routedOpenRouterFetch, routerModeRequested, type AiModelRouter } from "./ai-model-router.js";
 import { handleDailyLifeRoute } from "./daily-life-routes.js";
 import { CaptureService, readCaptureConfig } from "./capture-service.js";
+import { TelegramHttpClient } from "./telegram/client.js";
 import { handleCaptureRoute } from "./capture-routes.js";
 import { createCaptureTelegramPort } from "./capture-telegram-adapter.js";
 import { CaptureTelegramIngestError, type CaptureTelegramPort } from "./telegram/capture.js";
@@ -3693,7 +3694,9 @@ export function createBotServer(options: BotServerOptions = {}): Server {
       })
     : undefined);
   const captures = options.captures ?? (options.store
-    ? new CaptureService({ store: options.store, config: readCaptureConfig(), assistant }) : undefined);
+    ? new CaptureService({ store: options.store, config: readCaptureConfig(), assistant, router: options.aiRouter, governor: options.aiGovernor,
+        voiceDownload: options.config?.telegramBotToken ? (reference, signal) => new TelegramHttpClient(options.config!.telegramBotToken!).downloadVoice(reference.fileId, { signal }) : undefined,
+      }) : undefined);
   const capture = options.capture ?? (captures?.capabilities().enabled && options.store
     ? createCaptureTelegramPort(captures, options.store) : undefined);
   const resolvedOptions: ResolvedBotServerOptions = {

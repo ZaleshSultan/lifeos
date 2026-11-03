@@ -85,6 +85,9 @@ export function useCaptureInbox() {
       lifecycle: (id, action, revision) =>
         changed(raw.lifecycle(id, action, revision)),
       confirm: (id, input) => changed(raw.confirm(id, input)),
+      correct: (id, input) => changed(raw.correct(id, input)),
+      reject: (id, input) => changed(raw.reject(id, input)),
+      external: (id, input) => changed(raw.external(id, input)),
       remove: (id, revision) => changed(raw.remove(id, revision)),
     };
   }, [owner, cache]);

@@ -13,17 +13,21 @@ import {
   captureInputClass,
 } from "./ActionEditor";
 import { CaptureContextPanel } from "./ContextPanel";
+import { CaptureProposalDetails } from "./ProposalDetails";
+import { CaptureExternalControls } from "./ExternalControls";
+import { captureErrorMessage } from "./errors";
 import {
   canApproveCaptureAction,
   captureActionLabels,
   captureDateTime,
-  captureOriginLabels,
-  captureStateLabels,
+  captureProposalTitle,
+  captureProvenanceLabel,
+  captureStatusLabel,
   localInstantInput,
   operationIdentity,
   reviewExpired,
 } from "./model";
-import type { CaptureLifecycle } from "./transport";
+import type { CaptureLifecycle, CaptureExternalInput } from "./transport";
 
 const missingLabels: Record<string, string> = {
   title: "название",
@@ -51,6 +55,9 @@ export function CaptureDetail({
   onLifecycle,
   onConfirm,
   onDelete,
+  onCorrect,
+  onReject,
+  onExternal,
   onDirtyChange,
 }: {
   capture: CaptureView;
@@ -67,11 +74,17 @@ export function CaptureDetail({
   onLifecycle: (action: CaptureLifecycle) => void;
   onConfirm: (input: CaptureConfirmRequest) => void;
   onDelete: () => void;
+  onCorrect?: (instruction: string) => Promise<void>;
+  onReject?: (actionId: string) => void;
+  onExternal?: (input: CaptureExternalInput) => Promise<void>;
   onDirtyChange: (dirty: boolean) => void;
 }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [editing, setEditing] = useState<string | null>(null);
   const [editDirty, setEditDirty] = useState(false);
+  const [instruction, setInstruction] = useState("");
+  const [externalDirty, setExternalDirty] = useState(false);
+  const [consentGeneration, setConsentGeneration] = useState(0);
   const [transcript, setTranscript] = useState(capture.transcript ?? "");
   const [transcriptOpen, setTranscriptOpen] = useState(
     capture.state === "awaiting_transcript",
@@ -81,13 +94,15 @@ export function CaptureDetail({
     null,
   );
   const transcriptDirty = transcript !== (capture.transcript ?? "");
+  const correctionDirty = Boolean(instruction.trim());
+  const reviewDirty = transcriptDirty || correctionDirty || externalDirty;
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 15_000);
     return () => clearInterval(timer);
   }, []);
   useEffect(() => {
-    onDirtyChange(editDirty || transcriptDirty);
-  }, [editDirty, transcriptDirty, onDirtyChange]);
+    onDirtyChange(editDirty || reviewDirty);
+  }, [editDirty, reviewDirty, onDirtyChange]);
   const timezone = capture.context?.timezone ?? "Asia/Almaty";
   const date =
     capture.context?.date ??
@@ -109,12 +124,16 @@ export function CaptureDetail({
     (action) => selected.includes(action.id) && eligible(action),
   );
   function discardDrafts() {
-    return (
-      !(editDirty || transcriptDirty) ||
-      window.confirm(
-        "Есть несохранённые изменения предложения или расшифровки. Отменить их?",
-      )
-    );
+    if (!(editDirty || reviewDirty)) return true;
+    if (!window.confirm("Есть несохранённые изменения. Отменить их?"))
+      return false;
+    setTranscript(capture.transcript ?? "");
+    setInstruction("");
+    setEditing(null);
+    setEditDirty(false);
+    setExternalDirty(false);
+    setConsentGeneration((value) => value + 1);
+    return true;
   }
   return (
     <section
@@ -124,7 +143,7 @@ export function CaptureDetail({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="font-semibold text-white">
-            {captureStateLabels[capture.state]}
+            {captureStatusLabel(capture)}
           </h2>
           <p className="mt-1 text-xs text-zinc-400">
             {capture.sourceLabel} ·{" "}
@@ -168,11 +187,12 @@ export function CaptureDetail({
           role="alert"
           className="rounded-lg border border-rose-300/20 bg-rose-300/[0.04] p-3 text-sm text-rose-100"
         >
-          {capture.state === "awaiting_transcript"
-            ? "Автоматическая расшифровка недоступна. Добавь текст вручную, чтобы подготовить предложения."
-            : capture.state === "failed"
-              ? "Обработка не завершилась. Исходная запись сохранена; можно повторить безопасно."
-              : "Не все действия удалось завершить. Проверь текущие записи и уточни предложения."}
+          {captureErrorMessage(capture.errorCode) ??
+            (capture.state === "awaiting_transcript"
+              ? "Автоматическая расшифровка недоступна. Добавь текст вручную, чтобы подготовить предложения."
+              : capture.state === "failed"
+                ? "Обработка не завершилась. Исходная запись сохранена; можно повторить безопасно."
+                : "Не все действия удалось завершить. Проверь текущие записи и уточни предложения.")}
         </p>
       ) : null}
       {capture.inputType === "voice" || capture.transcript !== null ? (
@@ -191,9 +211,18 @@ export function CaptureDetail({
             </button>
           </div>
           {capture.transcript ? (
-            <p className="whitespace-pre-wrap break-words text-sm text-zinc-300">
-              {capture.transcript}
-            </p>
+            <div className="space-y-2">
+              <p className="text-xs text-zinc-400">
+                {capture.transcriptSource === "provider"
+                  ? "Расшифровка провайдера — проверь текст"
+                  : capture.transcriptSource === "manual"
+                    ? "Текст добавлен вручную"
+                    : "Сохранённый текст расшифровки"}
+              </p>
+              <p className="whitespace-pre-wrap break-words text-sm text-zinc-300">
+                {capture.transcript}
+              </p>
+            </div>
           ) : (
             <p className="text-sm text-zinc-400">
               Расшифровки пока нет. LifeOS не заявляет, что речь распознана.
@@ -214,7 +243,7 @@ export function CaptureDetail({
                   rows={5}
                   maxLength={capabilities.maxTextLength}
                   className={captureInputClass}
-                  disabled={busy || frozen}
+                  disabled={busy || frozen || correctionDirty || externalDirty}
                   value={transcript}
                   onChange={(event) => setTranscript(event.target.value)}
                 />
@@ -227,7 +256,12 @@ export function CaptureDetail({
                 type="submit"
                 className={captureButtonClass}
                 disabled={
-                  busy || frozen || !transcriptDirty || !transcript.trim()
+                  busy ||
+                  frozen ||
+                  correctionDirty ||
+                  externalDirty ||
+                  !transcriptDirty ||
+                  !transcript.trim()
                 }
               >
                 Сохранить расшифровку
@@ -237,6 +271,18 @@ export function CaptureDetail({
         </div>
       ) : null}
       <CaptureContextPanel context={capture.context} />
+      {onExternal ? (
+        <CaptureExternalControls
+          key={consentGeneration}
+          capture={capture}
+          capabilities={capabilities}
+          disabled={
+            busy || frozen || editDirty || transcriptDirty || correctionDirty
+          }
+          onRun={onExternal}
+          onDirtyChange={setExternalDirty}
+        />
+      ) : null}
       {capture.state === "queued" ||
       capture.state === "awaiting_transcript" ||
       capture.state === "failed" ||
@@ -266,13 +312,31 @@ export function CaptureDetail({
         </div>
       ) : null}
       {capture.state === "processing" ? (
-        <p
+        <div
           role="status"
           className="rounded-lg border border-cyan-300/20 p-3 text-sm text-cyan-100"
         >
-          Идёт ограниченная обработка. Можно уйти и вернуться: состояние
-          хранится в LifeOS.
-        </p>
+          <p>
+            {capture.processingStage === "transcribing"
+              ? "Расшифровка запущена. Текст ещё не готов; исходная запись сохранена."
+              : capture.processingStage === "extracting"
+                ? "Готовим отдельные предложения из текста. Действия ещё не выполняются."
+                : "Идёт ограниченная обработка. Можно уйти и вернуться: состояние хранится в LifeOS."}
+          </p>
+          <button
+            type="button"
+            className={`${captureButtonClass} mt-3`}
+            disabled={busy}
+            onClick={() => {
+              if (discardDrafts()) onLifecycle("cancel");
+            }}
+          >
+            Отменить обработку
+          </button>
+          <p className="mt-2 text-xs text-zinc-400">
+            Исходная запись и уже сохранённые данные LifeOS останутся.
+          </p>
+        </div>
       ) : null}
       {capture.actions.length ? (
         <div className="space-y-3">
@@ -290,6 +354,7 @@ export function CaptureDetail({
           {capture.actions.map((action, index) => (
             <article
               key={action.id}
+              aria-label={`Предложение ${index + 1}: ${captureProposalTitle(action)}`}
               className="min-w-0 rounded-lg border border-white/10 p-3"
             >
               <label className="flex min-h-11 items-start gap-3">
@@ -303,7 +368,7 @@ export function CaptureDetail({
                     expired ||
                     !eligible(action) ||
                     editing !== null ||
-                    transcriptDirty
+                    reviewDirty
                   }
                   onChange={(event) => {
                     setSelected((old) =>
@@ -316,16 +381,16 @@ export function CaptureDetail({
                   aria-label={`Выбрать действие ${index + 1}: ${captureActionLabels[action.kind]}`}
                 />
                 <span className="min-w-0">
-                  <span className="block text-sm font-semibold text-zinc-100">
+                  <span className="block text-xs text-cyan-100">
                     {captureActionLabels[action.kind]}
                   </span>
-                  <span className="mt-1 block whitespace-pre-wrap break-words text-sm leading-relaxed text-zinc-300">
-                    {action.summary}
+                  <span className="mt-1 block whitespace-pre-wrap break-words text-base font-semibold leading-relaxed text-zinc-100">
+                    {captureProposalTitle(action)}
                   </span>
                 </span>
               </label>
               <p className="mt-2 text-xs text-zinc-400">
-                {captureOriginLabels[action.origin]} ·{" "}
+                {captureProvenanceLabel(action)} ·{" "}
                 {action.status === "succeeded"
                   ? "Сохранено"
                   : action.status === "cancelled"
@@ -336,6 +401,7 @@ export function CaptureDetail({
                         ? "Нужно уточнение"
                         : "Ещё не выполнено"}
               </p>
+              <CaptureProposalDetails action={action} timezone={timezone} />
               {action.missingFields.length ? (
                 <p className="mt-2 break-words text-xs text-amber-100">
                   Уточни:{" "}
@@ -369,6 +435,8 @@ export function CaptureDetail({
                   disabled={
                     busy ||
                     frozen ||
+                    correctionDirty ||
+                    externalDirty ||
                     (editing !== null && editing !== action.id)
                   }
                   onClick={() => {
@@ -382,11 +450,25 @@ export function CaptureDetail({
                   Уточнить предложение {index + 1}
                 </button>
               ) : null}
+              {onReject &&
+              action.status !== "succeeded" &&
+              action.status !== "cancelled" ? (
+                <button
+                  type="button"
+                  className={`${captureButtonClass} mt-3 ml-0 sm:ml-2`}
+                  disabled={busy || frozen}
+                  onClick={() => {
+                    if (discardDrafts()) onReject(action.id);
+                  }}
+                >
+                  Отклонить предложение {index + 1}
+                </button>
+              ) : null}
               {editing === action.id ? (
                 <CaptureActionEditor
                   action={action}
-                  date={date}
-                  timezone={timezone}
+                  date={action.presentation?.suggestedDate ?? date}
+                  timezone={action.presentation?.timezone ?? timezone}
                   tasks={tasks}
                   kinds={capabilities.actionKinds.filter(
                     (kind) =>
@@ -423,7 +505,7 @@ export function CaptureDetail({
             <button
               type="button"
               className={captureButtonClass}
-              disabled={busy || frozen || editDirty || transcriptDirty}
+              disabled={busy || frozen || editDirty || reviewDirty}
               onClick={() => onLifecycle("retry")}
             >
               Обновить истёкший просмотр
@@ -448,7 +530,7 @@ export function CaptureDetail({
                   expired ||
                   selectedActions.length === 0 ||
                   editing !== null ||
-                  transcriptDirty
+                  reviewDirty
                 }
                 onClick={() => {
                   if (
@@ -482,6 +564,72 @@ export function CaptureDetail({
         <p className="text-sm text-zinc-400">
           Предложений нет. Исходная запись сохранена.
         </p>
+      ) : null}
+      {onCorrect && pending.length > 0 && !capture.archivedAt ? (
+        <section
+          aria-label="Уточнить намерения"
+          className="space-y-3 rounded-xl border border-white/10 p-3"
+        >
+          <h3 className="text-sm font-semibold text-zinc-100">
+            Исправить предложения одним сообщением
+          </h3>
+          <form
+            className="space-y-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (instruction.trim())
+                void onCorrect(instruction.trim()).catch(() => {});
+            }}
+          >
+            <label className="block text-sm text-zinc-300">
+              Уточнение
+              <textarea
+                aria-label="Уточнение предложений"
+                className={captureInputClass}
+                rows={3}
+                maxLength={1000}
+                value={instruction}
+                disabled={
+                  busy ||
+                  frozen ||
+                  editDirty ||
+                  transcriptDirty ||
+                  externalDirty
+                }
+                onChange={(event) => setInstruction(event.target.value)}
+                placeholder="DBMS не завтра, а в пятницу. Тренировку убери."
+              />
+            </label>
+            <p className="text-xs leading-relaxed text-zinc-400">
+              Уточнение меняет только предложения. Уже сохранённые записи
+              останутся; новый просмотр снова потребует твоего выбора.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="submit"
+                className={captureButtonClass}
+                disabled={
+                  busy ||
+                  frozen ||
+                  editDirty ||
+                  transcriptDirty ||
+                  externalDirty ||
+                  !correctionDirty
+                }
+              >
+                Применить уточнение
+              </button>
+              <button
+                type="button"
+                className={captureButtonClass}
+                disabled={busy || !correctionDirty}
+                onClick={() => setInstruction("")}
+              >
+                Очистить уточнение
+              </button>
+            </div>
+          </form>
+        </section>
       ) : null}
       <div className="flex flex-wrap gap-2 border-t border-white/10 pt-4">
         {capture.archivedAt ? (
