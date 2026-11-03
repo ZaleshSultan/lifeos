@@ -421,7 +421,8 @@ export class CaptureService {
       value.confirmed !== true ||
       typeof value.requestId !== "string" ||
       !/^[A-Za-z0-9:_-]{8,120}$/.test(value.requestId) ||
-      !["model", "transcription"].includes(String(value.mode))
+      typeof value.mode !== "string" ||
+      !["model", "transcription"].includes(value.mode)
     )
       throw new CaptureInputError();
     const request = {

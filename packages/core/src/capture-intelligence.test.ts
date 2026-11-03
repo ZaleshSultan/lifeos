@@ -185,6 +185,18 @@ describe("multilingual deterministic capture intelligence", () => {
       }),
     ).toThrow();
   });
+  it.each(["language", "evidence", "dateBasis"] as const)(
+    "rejects array values for presentation enum %s",
+    (field) => {
+      const presentation = reviewed()[0].presentation!;
+      expect(() =>
+        parseCapturePresentation({
+          ...presentation,
+          [field]: [presentation[field]],
+        }),
+      ).toThrow();
+    },
+  );
   it("rebuilds edited metadata from current arguments without an old suggested date", () => {
     expect(
       buildCapturePresentation(

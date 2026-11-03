@@ -811,6 +811,27 @@ try {
     });
     return ctx;
   }
+  async function selectFixtureDay(p) {
+    const selector = p.getByRole("combobox", {
+      name: /^День эксперимента/,
+    });
+    await selector.waitFor();
+    // selectOption waits for the real enabled, hydrated control; do not fake Date.
+    await selector.selectOption(date);
+    assert.equal(await selector.isEnabled(), true);
+    assert.equal(await selector.inputValue(), date);
+    await p
+      .getByRole("heading", { name: "Ideal Human — Day 1/30", exact: true })
+      .waitFor();
+    assert.equal(
+      await p.getByLabel("Утренний вес, кг", { exact: true }).isEnabled(),
+      true,
+    );
+  }
+  async function openFixtureJournal(p) {
+    await p.goto(`${origin}/web/ideal-human`);
+    await selectFixtureDay(p);
+  }
   const context = await isolatedContext({
     viewport: { width: 1440, height: 1000 },
     timezoneId: "UTC",
@@ -861,10 +882,7 @@ try {
     }
   });
   await test("Ideal Human saves once and persists after reloading", async () => {
-    await page.goto(`${origin}/web/ideal-human`);
-    await page
-      .getByRole("heading", { name: "Ideal Human — Day 1/30" })
-      .waitFor();
+    await openFixtureJournal(page);
     await page.getByLabel("Утренний вес, кг", { exact: true }).fill("51.7");
     await page.getByLabel("Сон, часов", { exact: true }).fill("7.5");
     journalDelay = 150;
@@ -883,6 +901,7 @@ try {
     assert.equal(journalPuts, before + 1);
     journalDelay = 0;
     await page.reload();
+    await selectFixtureDay(page);
     assert.equal(
       await page.getByLabel("Утренний вес, кг", { exact: true }).inputValue(),
       "51.7",
@@ -964,10 +983,22 @@ try {
       assert.equal(await dateSelector.isDisabled(), true);
       assert.equal(await save.isDisabled(), true);
       assert.equal(await clear.isDisabled(), true);
+      const journalControls = p
+        .locator("form")
+        .filter({ has: weight })
+        .locator("input, select, textarea, button");
+      assert.ok((await journalControls.count()) > 0);
+      for (const control of await journalControls.all())
+        assert.equal(await control.isDisabled(), true);
       await p.getByText("Подготавливаем дневник…", { exact: true }).waitFor();
+      const initialSelectedDate = await dateSelector.inputValue();
+      assert.match(initialSelectedDate, /^\d{4}-\d{2}-\d{2}$/);
+      const initialRecord = days
+        .get("A")
+        .find((record) => record.date === initialSelectedDate);
       assert.equal(
         await weight.inputValue(),
-        String(days.get("A")[0].weightKg),
+        initialRecord?.weightKg == null ? "" : String(initialRecord.weightKg),
       );
       releaseScripts();
       await p
@@ -975,6 +1006,7 @@ try {
         .waitFor({ state: "hidden" });
       assert.equal(await weight.isEnabled(), true);
       assert.equal(await dateSelector.isEnabled(), true);
+      await selectFixtureDay(p);
       await p
         .locator("summary")
         .filter({ hasText: "Вечерняя рефлексия" })
@@ -996,10 +1028,7 @@ try {
         .waitFor();
       assert.equal(days.get("A")[0].weightKg, 51.8);
       await p.reload();
-      await weight.waitFor();
-      await p
-        .getByText("Подготавливаем дневник…", { exact: true })
-        .waitFor({ state: "hidden" });
+      await selectFixtureDay(p);
       assert.equal(await weight.inputValue(), "51.8");
       assert.deepEqual(delayedErrors, []);
     } finally {
@@ -1580,7 +1609,7 @@ try {
     original.notes = "Private reflection to remove";
     original.tomorrowPlan = "Retain tomorrow's draft";
     original.revision++;
-    await page.goto(`${origin}/web/ideal-human`);
+    await openFixtureJournal(page);
     const reflection = page.locator("details").filter({
       has: page.locator("summary").filter({ hasText: "Вечерняя рефлексия" }),
     });
@@ -1592,6 +1621,7 @@ try {
     await page.getByLabel("Утренний вес, кг", { exact: true }).fill("52");
     assert.equal(await clear.isDisabled(), true);
     await page.reload();
+    await selectFixtureDay(page);
     await reflection.locator("summary").click();
     const before = reflectionClears;
     page.off("dialog", acceptDialog);
@@ -1612,6 +1642,7 @@ try {
       revision: original.revision + 1,
     });
     await page.reload();
+    await selectFixtureDay(page);
     assert.equal(
       await page.getByLabel("Утренний вес, кг", { exact: true }).inputValue(),
       String(current.weightKg),
@@ -1629,15 +1660,17 @@ try {
       prefix: `Web ${width}px`,
       open: () => page.goto(`${origin}/web/capture`),
     });
-    await page.screenshot({ path: resolve(artifacts, `web-capture-${width}.png`), fullPage: true });
+    await page.screenshot({
+      path: resolve(artifacts, `web-capture-${width}.png`),
+      fullPage: true,
+    });
   }
   page.on("dialog", acceptDialog);
   await test("web sessions isolate users in the rendered journal and capture inbox", async () => {
     const b = await isolatedContext({ viewport: { width: 390, height: 844 } });
     const p = await b.newPage();
     await p.goto(`${origin}/web/login?token=fixture-login-B`);
-    await p.goto(`${origin}/web/ideal-human`);
-    await p.getByLabel("Утренний вес, кг", { exact: true }).waitFor();
+    await openFixtureJournal(p);
     assert.equal(
       await p.getByLabel("Утренний вес, кг", { exact: true }).inputValue(),
       "",
@@ -1646,13 +1679,20 @@ try {
     await p.goto(
       `${origin}/web/capture?captureId=${captureFixtures.get("A").voiceId}`,
     );
-    await p.getByRole("alert").filter({ hasText: /недоступна|не найдена/ }).waitFor();
+    await p
+      .getByRole("alert")
+      .filter({ hasText: /недоступна|не найдена/ })
+      .waitFor();
     assert.equal(
-      await p.getByText("filming idea: Library b-roll", { exact: true }).count(),
+      await p
+        .getByText("filming idea: Library b-roll", { exact: true })
+        .count(),
       0,
     );
     assert.equal(
-      await p.getByRole("region", { name: "Просмотр записи", exact: true }).count(),
+      await p
+        .getByRole("region", { name: "Просмотр записи", exact: true })
+        .count(),
       0,
     );
     await b.close();

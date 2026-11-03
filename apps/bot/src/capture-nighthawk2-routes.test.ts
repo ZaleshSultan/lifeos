@@ -526,6 +526,20 @@ describe("Nighthawk2 actual HTTP review and external-operation boundary", () => 
       noProviders(f);
     },
   );
+  it("rejects an array external mode before claiming or preparing any provider work", async () => {
+    const f = await fixture(true);
+    const before = structuredClone(f.rows.get(RECORD)?.capture);
+    await error(
+      await f.request(`/${RECORD}/external`, {
+        method: "POST",
+        json: { ...payloads.external, mode: ["model"] },
+      }),
+      400,
+      "capture_invalid_input",
+    );
+    expect(f.rows.get(RECORD)?.capture).toEqual(before);
+    noProviders(f);
+  });
   it("keeps external model and speech unavailable with flags off even after explicit per-record consent", async () => {
     const f = await fixture();
     const caps = await f.request("/capabilities");

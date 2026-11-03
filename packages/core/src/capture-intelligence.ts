@@ -111,9 +111,12 @@ export function parseCapturePresentation(
     "dateBasis",
   ]);
   if (
-    !LANGUAGES.includes(String(v.language)) ||
-    !["user_statement", "recommendation"].includes(String(v.evidence)) ||
-    !["profile", "ideal_human"].includes(String(v.dateBasis)) ||
+    typeof v.language !== "string" ||
+    !LANGUAGES.includes(v.language) ||
+    typeof v.evidence !== "string" ||
+    !["user_statement", "recommendation"].includes(v.evidence) ||
+    typeof v.dateBasis !== "string" ||
+    !["profile", "ideal_human"].includes(v.dateBasis) ||
     !Array.isArray(v.warnings) ||
     v.warnings.length > 8 ||
     (v.suggestedDate !== null &&
