@@ -212,6 +212,7 @@ export function readAiModelRouterConfig(
               "billing",
               "inputCostMicrosPer1k",
               "outputCostMicrosPer1k",
+              "audioCostMicrosPerMinute",
               "verifiedAt",
               "source",
               "credentialIds",
@@ -307,6 +308,9 @@ export function readAiModelRouterConfig(
         billing: v.billing as AiRouterModel["billing"],
         inputCostMicrosPer1k: price(v.inputCostMicrosPer1k),
         outputCostMicrosPer1k: price(v.outputCostMicrosPer1k),
+        ...(v.audioCostMicrosPerMinute === undefined
+          ? {}
+          : { audioCostMicrosPerMinute: price(v.audioCostMicrosPerMinute) }),
         configured: false,
         authorized: false,
         status: enabled ? "disconnected" : "disabled",

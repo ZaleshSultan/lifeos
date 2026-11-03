@@ -6,6 +6,7 @@ import {
   classifyAiRouterTask,
   defaultAiRouterSettings,
   estimateAiRouterCost,
+  estimateAiRouterSpeechCost,
   parseAiRouterSettings,
   projectAiRouterModel,
   selectAiModelRoute,
@@ -13,6 +14,98 @@ import {
   type AiRouterSelectionInput,
   type AiRouterSettings,
 } from "./ai-model-router.js";
+
+describe("native audio routing is duration-priced and explicit", () => {
+  const speech = () =>
+    model({
+      id: "primary",
+      provider: "openai",
+      model: "gpt-transcribe",
+      tiers: ["voice"],
+      capabilities: ["audio"],
+      inputCostMicrosPer1k: null,
+      outputCostMicrosPer1k: null,
+      audioCostMicrosPerMinute: 4500,
+    });
+  const request = () => {
+    const policy = settings();
+    policy.spending.maxRequestCostMicros = 10000;
+    policy.spending.maxDailyCostMicros = 20000;
+    for (const category of [
+      "general",
+      "health",
+      "finance",
+      "university",
+    ] as const)
+      policy.privacy[category] = ["openai"];
+    return input({
+      settings: policy,
+      models: [speech()],
+      task: {
+        category: "voice",
+        dataCategories: ["general", "health", "finance", "university"],
+      },
+    });
+  };
+  it("routes audio-only native models without requiring JSON/text and reserves the whole120 seconds", () => {
+    expect(classifyAiRouterTask("voice").capabilities).toEqual(["audio"]);
+    expect(estimateAiRouterSpeechCost(speech())).toBe(9000);
+    expect(selectAiModelRoute(request())).toMatchObject({
+      kind: "selected",
+      tier: "voice",
+      candidates: [{ modelId: "primary", estimatedCostMicros: 9000 }],
+    });
+    expect(projectAiRouterModel(speech()).audioCostMicrosPerMinute).toBe(4500);
+  });
+  it.each([undefined, null, -1, 0, 1.2, NaN, Infinity])(
+    "requires a verified positive integer native audio rate: %s",
+    (rate) => {
+      expect(
+        estimateAiRouterSpeechCost({
+          ...speech(),
+          audioCostMicrosPerMinute: rate,
+        }),
+      ).toBeNull();
+      expect(
+        selectAiModelRoute({
+          ...request(),
+          models: [{ ...speech(), audioCostMicrosPerMinute: rate }],
+        }).kind,
+      ).toBe("unavailable");
+    },
+  );
+  it("never treats free/plan speech as duration-priced API credits", () => {
+    expect(
+      estimateAiRouterSpeechCost({ ...speech(), billing: "chatgpt_plan" }),
+    ).toBeNull();
+    expect(
+      estimateAiRouterSpeechCost({ ...speech(), billing: "free" }),
+    ).toBeNull();
+    const value = request();
+    value.settings.spending.maxRequestCostMicros = 8999;
+    expect(selectAiModelRoute(value)).toMatchObject({
+      kind: "unavailable",
+      reason: "cost_limit",
+    });
+  });
+  it("requires the voice tier and voice shortlist even for a manually selected multi-tier model", () => {
+    const value = request();
+    value.settings.mode = "manual";
+    value.settings.manualModelId = "primary";
+    value.models = [{ ...speech(), tiers: ["balanced", "voice"] }];
+    value.settings.allowedTiers = ["balanced"];
+    expect(selectAiModelRoute(value)).toMatchObject({
+      kind: "unavailable",
+      reason: "tier_not_allowed",
+    });
+    value.settings.allowedTiers = ["balanced", "voice"];
+    value.settings.tierModels.voice = [];
+    expect(selectAiModelRoute(value)).toMatchObject({
+      kind: "unavailable",
+      reason: "model_not_allowlisted",
+    });
+  });
+});
 
 // These are fictitious unit fixtures, not assertions about provider model availability.
 function model(overrides: Partial<AiRouterModel> = {}): AiRouterModel {
