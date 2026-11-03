@@ -10,6 +10,7 @@
   "state_dir": "/home/operator/.local/state/lifeos-ops",
   "runtime_dir": "/run/user/1000/lifeos-ops",
   "client_image": "postgres:17",
+  "dump_timeout_seconds": 360,
   "restore_image": "supabase/postgres:17.6.1.173",
   "minimum_rows": {
     "auth_users": 1,

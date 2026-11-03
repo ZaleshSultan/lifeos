@@ -26,16 +26,25 @@ another operator's later login.
 The dump uses PostgreSQL's normal consistent repeatable-read snapshot. It does
 not request `--serializable-deferrable`, whose safe-snapshot wait can stall a
 backup on a busy database. A 15-second table-lock wait, 120-second statement
-timeout and 180-second whole-dump timeout keep failures bounded; the existing
+timeout and 360-second whole-dump timeout keep failures bounded; the existing
 backup remains intact if any limit is reached. TLS verification and the
 read-only role remain mandatory. These are ordinary
 [PostgreSQL 17 pg_dump guarantees and options](https://www.postgresql.org/docs/17/app-pgdump.html),
 not a claim that every network or provider outage can be repaired automatically.
+`dump_timeout_seconds` accepts only an integer from 60 through 420, default 360.
+The installed service retains its ten-minute whole-job limit, covering export,
+validation and optional off-site work. Password expiry limits new authentication;
+it does not serve as the deadline for an already authenticated export session.
+See PostgreSQL's [password expiration semantics](https://www.postgresql.org/docs/17/sql-createrole.html).
 
 The host's PostgreSQL 15 client cannot dump PostgreSQL 17. A bounded, temporary
 `postgres:17` client container supplies the compatible tool. It publishes no
 ports, runs without capabilities, mounts its password/CA files read-only and
-is removed after the command. The existing image must already be installed;
+is removed after the command. Every backup client uses `--log-driver=none`, so
+Docker does not persist private archive/data stdout in its default container logs;
+the caller still captures it for verification and encryption. See
+[Docker logging configuration](https://docs.docker.com/engine/logging/configure/).
+The existing image must already be installed;
 jobs do not pull new images automatically. Supabase's database CA bundle is
 held privately and verified against the pooler hostname. The inspected official
 CLI templates provide the [2021](https://github.com/supabase/cli/blob/develop/apps/cli/src/commands/gen/types/templates/prod-ca-2021.ts)
