@@ -751,6 +751,90 @@ try {
       "51.7",
     );
   });
+  await test("server-rendered journal rejects edits until its handlers hydrate, then saves and reloads", async () => {
+    const delayed = await isolatedContext({
+      viewport: { width: 320, height: 844 },
+      timezoneId: "UTC",
+    });
+    await delayed.addCookies(await context.cookies());
+    const p = await delayed.newPage();
+    const delayedErrors = [];
+    p.on("pageerror", (error) => delayedErrors.push(error.message));
+    let releaseScripts;
+    const scriptGate = new Promise((resolve) => {
+      releaseScripts = resolve;
+    });
+    const isNextScript = (request) =>
+      new URL(request.url()).origin === origin &&
+      new URL(request.url()).pathname.startsWith("/web/_next/") &&
+      request.resourceType() === "script";
+    await p.route("**/*", async (route) => {
+      if (isNextScript(route.request())) await scriptGate;
+      return route.fallback();
+    });
+    try {
+      const firstScript = p.waitForRequest(isNextScript, { timeout: 30000 });
+      await p.goto(`${origin}/web/ideal-human`, { waitUntil: "commit" });
+      await firstScript;
+      const weight = p.getByLabel("Утренний вес, кг", { exact: true });
+      const dateSelector = p.getByLabel("День эксперимента", { exact: true });
+      const save = p.getByRole("button", {
+        name: "Сохранить день",
+        exact: true,
+      });
+      const clear = p.getByRole("button", {
+        name: "Удалить вечернюю рефлексию",
+        exact: true,
+        includeHidden: true,
+      });
+      await weight.waitFor({ state: "attached" });
+      assert.equal(await weight.isDisabled(), true);
+      assert.equal(await dateSelector.isDisabled(), true);
+      assert.equal(await save.isDisabled(), true);
+      assert.equal(await clear.isDisabled(), true);
+      await p.getByText("Подготавливаем дневник…", { exact: true }).waitFor();
+      assert.equal(
+        await weight.inputValue(),
+        String(days.get("A")[0].weightKg),
+      );
+      releaseScripts();
+      await p
+        .getByText("Подготавливаем дневник…", { exact: true })
+        .waitFor({ state: "hidden" });
+      assert.equal(await weight.isEnabled(), true);
+      assert.equal(await dateSelector.isEnabled(), true);
+      await p
+        .locator("summary")
+        .filter({ hasText: "Вечерняя рефлексия" })
+        .click();
+      assert.equal(await clear.isEnabled(), true);
+      await weight.fill("51.8");
+      const saved = p.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname ===
+            "/web/api/bridge/ideal-human/days" &&
+          response.request().method() === "PUT",
+      );
+      await save.click();
+      assert.equal((await saved).status(), 200);
+      await p
+        .getByText(
+          "Сохранено в LifeOS. Запись доступна в Telegram и после повторного входа.",
+        )
+        .waitFor();
+      assert.equal(days.get("A")[0].weightKg, 51.8);
+      await p.reload();
+      await weight.waitFor();
+      await p
+        .getByText("Подготавливаем дневник…", { exact: true })
+        .waitFor({ state: "hidden" });
+      assert.equal(await weight.inputValue(), "51.8");
+      assert.deepEqual(delayedErrors, []);
+    } finally {
+      releaseScripts();
+      await delayed.close();
+    }
+  });
   await test("task creation, editing and completion use actual shared endpoints", async () => {
     await page.goto(`${origin}/web/planner`);
     await page
@@ -918,11 +1002,9 @@ try {
     original.tomorrowPlan = "Retain tomorrow's draft";
     original.revision++;
     await page.goto(`${origin}/web/ideal-human`);
-    const reflection = page
-      .locator("details")
-      .filter({
-        has: page.locator("summary").filter({ hasText: "Вечерняя рефлексия" }),
-      });
+    const reflection = page.locator("details").filter({
+      has: page.locator("summary").filter({ hasText: "Вечерняя рефлексия" }),
+    });
     await reflection.locator("summary").click();
     const clear = page.getByRole("button", {
       name: "Удалить вечернюю рефлексию",
