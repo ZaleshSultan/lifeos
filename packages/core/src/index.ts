@@ -28,3 +28,5 @@ export * from "./daily-life.js";
 
 export * from "./ai-execution.js";
 export * from "./nutrition.js";
+export * from "./ai-model-router.js";
+export * from "./ai-router-settings-view.js";
