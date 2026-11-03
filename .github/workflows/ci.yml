@@ -23,6 +23,7 @@ jobs:
       - run: bash scripts/test-ideal-human-migration.sh
       - run: bash scripts/test-ai-budget-migration.sh
       - run: bash scripts/test-ai-router-migrations.sh
+      - run: bash scripts/test-universal-capture-migration.sh
       - run: bash scripts/test-daily-life-migration.sh
       - run: pnpm --filter @lifeos/tma build
       - run: pnpm --filter @lifeos/web build

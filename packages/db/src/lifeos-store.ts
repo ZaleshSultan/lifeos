@@ -1,5 +1,6 @@
 import { recalculateHealthDailyScores } from "./health-daily-scoring.js";
 import { createDailyLifeStore, type DailyLifeStore } from "./daily-life-store.js";
+import { createCaptureStore } from "./capture-store.js";
 import { idealHumanStore } from "./ideal-human-store.js";
 import type { ScholarshipConfig } from "../../core/src/scholarship.js";
 import { healthCredentialStore, type HealthCredentialStore } from "./health-credential-store.js";
@@ -1392,6 +1393,7 @@ export interface TmaStudySummary {
 }
 
 export interface LifeOSStore extends LmsSessionStore, WebSessionStore, HealthCredentialStore {
+  captureInbox?: import("./capture-store.js").CaptureServiceStore;
   dailyLife?: DailyLifeStore;
   assistant?: AssistantStore;
   getPlanningSnapshot(
@@ -3468,6 +3470,7 @@ export interface SupabaseLifeOSStoreOptions {
 }
 
 export class SupabaseLifeOSStore implements LifeOSStore {
+  readonly captureInbox: import("./capture-store.js").CaptureServiceStore;
   readonly assistant: AssistantStore;
   readonly dailyLife: DailyLifeStore;
   issueHealthIngestCredential(input: Parameters<HealthCredentialStore["issueHealthIngestCredential"]>[0]) {
@@ -3517,6 +3520,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     private readonly client: LifeOSSupabaseClient,
     options: SupabaseLifeOSStoreOptions = {},
   ) {
+    this.captureInbox = createCaptureStore(client);
     this.assistant = new SupabaseAssistantStore(client);
     this.dailyLife = createDailyLifeStore(client);
     this.adminTelegramUserIds = new Set(options.adminTelegramUserIds ?? []);
