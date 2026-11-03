@@ -1016,6 +1016,65 @@ try {
     assert.equal(days.get("A")[0].meals[0].caloriesKcal, 650);
     assert.equal(days.get("A")[0].meals[0].corrected, true);
   });
+  await test("manual meal creation preserves provenance without photo analysis", async () => {
+    await page.goto(`${origin}/web/nutrition`);
+    await page.waitForLoadState("networkidle");
+    const previous = structuredClone(days.get("A")[0]);
+    const previousAnalyses = analyses;
+    const mealIndex = previous.meals.length + 1;
+    await page
+      .locator("summary")
+      .filter({ hasText: /^Питание/ })
+      .click();
+    await page
+      .getByRole("button", { name: "Добавить приём пищи", exact: true })
+      .click();
+    await page
+      .getByRole("textbox", {
+        name: `Приём пищи ${mealIndex}: что ел`,
+        exact: true,
+      })
+      .fill("Fixture manually logged meal");
+    await page
+      .getByLabel(`Блюдо ${mealIndex}, ккал`, { exact: true })
+      .fill("250");
+    await page
+      .getByRole("button", { name: "Сохранить питание", exact: true })
+      .click();
+    await page
+      .getByText("Питание сохранено в том же дневнике Ideal Human.", {
+        exact: true,
+      })
+      .waitFor();
+    const saved = days.get("A")[0];
+    assert.equal(saved.meals.length, previous.meals.length + 1);
+    assert.deepEqual(
+      saved.meals.slice(0, previous.meals.length),
+      previous.meals,
+    );
+    const manual = saved.meals.at(-1);
+    assert.equal(manual.label, "Fixture manually logged meal");
+    assert.equal(manual.caloriesKcal, 250);
+    assert.equal(manual.analysisSource, "manual");
+    assert.equal(manual.corrected, false);
+    assert.equal(analyses, previousAnalyses);
+    await page.reload();
+    await page.waitForLoadState("networkidle");
+    await page
+      .locator("summary")
+      .filter({ hasText: /^Питание/ })
+      .click();
+    assert.equal(
+      await page
+        .getByRole("textbox", {
+          name: `Приём пищи ${mealIndex}: что ел`,
+          exact: true,
+        })
+        .inputValue(),
+      "Fixture manually logged meal",
+    );
+    assert.equal(analyses, previousAnalyses);
+  });
   await test("workout starts only on action, logs sets and completes into existing history", async () => {
     await page.goto(`${origin}/web/workouts`);
     await page

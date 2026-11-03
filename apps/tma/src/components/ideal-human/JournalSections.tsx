@@ -376,6 +376,8 @@ export function NutritionJournal({
               caloriesKcal: null,
               proteinG: null,
               estimated: true,
+              analysisSource: "manual",
+              corrected: false,
             },
           ])
         }
