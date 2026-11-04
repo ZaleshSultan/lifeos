@@ -10,6 +10,9 @@ import { resolve } from "node:path";
 import {
   clearIdealHumanReflection,
   emptyIdealHumanDay,
+  hasIdealHumanReflection,
+  idealHumanDate,
+  idealHumanLocalDate,
   parseIdealHumanDay,
 } from "../../../packages/core/src/ideal-human.ts";
 import { DEFAULT_DAILY_LIFE_PREFERENCES } from "../../../packages/core/src/daily-life.ts";
@@ -961,7 +964,32 @@ try {
       if (isNextScript(route.request())) await scriptGate;
       return route.fallback();
     });
+    let seededDate = null;
     try {
+      const today = idealHumanLocalDate(new Date());
+      const initialDate =
+        today < idealHumanDate(1)
+          ? idealHumanDate(1)
+          : today > idealHumanDate(30)
+            ? idealHumanDate(30)
+            : today;
+      if (initialDate !== date) {
+        const fixtureDay = days.get("A").find((record) => record.date === date);
+        assert.ok(fixtureDay && fixtureDay.revision > 0);
+        assert.equal(hasIdealHumanReflection(fixtureDay), true);
+        assert.equal(
+          days.get("A").some((record) => record.date === initialDate),
+          false,
+        );
+        // SSR opens today's clamped experiment day; keep its reflection controls
+        // present while JavaScript is held, then exercise the real Nov 3 selector.
+        const temporaryDay = parseIdealHumanDay({
+          ...structuredClone(fixtureDay),
+          date: initialDate,
+        });
+        days.set("A", [...days.get("A"), temporaryDay]);
+        seededDate = initialDate;
+      }
       const firstScript = p.waitForRequest(isNextScript, { timeout: 30000 });
       await p.goto(`${origin}/web/ideal-human`, { waitUntil: "commit" });
       await firstScript;
@@ -992,6 +1020,7 @@ try {
         assert.equal(await control.isDisabled(), true);
       await p.getByText("Подготавливаем дневник…", { exact: true }).waitFor();
       const initialSelectedDate = await dateSelector.inputValue();
+      assert.equal(initialSelectedDate, initialDate);
       assert.match(initialSelectedDate, /^\d{4}-\d{2}-\d{2}$/);
       const initialRecord = days
         .get("A")
@@ -1026,14 +1055,25 @@ try {
           "Сохранено в LifeOS. Запись доступна в Telegram и после повторного входа.",
         )
         .waitFor();
-      assert.equal(days.get("A")[0].weightKg, 51.8);
+      assert.equal(
+        days.get("A").find((record) => record.date === date).weightKg,
+        51.8,
+      );
       await p.reload();
       await selectFixtureDay(p);
       assert.equal(await weight.inputValue(), "51.8");
       assert.deepEqual(delayedErrors, []);
     } finally {
       releaseScripts();
-      await delayed.close();
+      try {
+        await delayed.close();
+      } finally {
+        if (seededDate)
+          days.set(
+            "A",
+            days.get("A").filter((record) => record.date !== seededDate),
+          );
+      }
     }
   });
   await test("task creation, editing and completion use actual shared endpoints", async () => {
