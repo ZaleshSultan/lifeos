@@ -748,6 +748,9 @@ export function createLifeosAiService(
           const routed = await dependencies.router.execute({
             userId,
             feature: "chat",
+            ...(dependencies.router.config.freeProfileEnabled
+              ? { schemaKey: "lifeos_reply_v1" as const }
+              : {}),
             task: {
               category,
               dataCategories: ["general", "university"],

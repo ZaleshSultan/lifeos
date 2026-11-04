@@ -1,4 +1,5 @@
 import { INITIAL_AI_MODEL_CATALOG } from "./ai-model-router-catalog.js";
+import { INITIAL_FREE_AI_MODEL_CATALOG } from "./ai-model-router-free-catalog.js";
 import {
   AI_EXECUTION_FEATURES,
   AI_ROUTER_PROVIDERS,
@@ -9,6 +10,7 @@ import {
   type AiRouterProviderId,
   type AiExecutionFeature,
   type EnvSource,
+  type AiProviderQuotaLimits,
 } from "@lifeos/core";
 
 export interface RouterCredential {
@@ -17,6 +19,11 @@ export interface RouterCredential {
   ownerUserId: string;
   features: AiExecutionFeature[];
   secret: string;
+  quota?: { domain: string; limits: AiProviderQuotaLimits };
+  freeTier?: {
+    verifiedAtMs: number;
+    dataPolicy: "public_only" | "no_training_zdr";
+  };
 }
 export interface RouterModelConfiguration {
   model: AiRouterModel;
@@ -25,6 +32,11 @@ export interface RouterModelConfiguration {
   providerOnly: string[];
   sort: "price" | "latency" | "throughput";
   requireZdr: boolean;
+  freeCosts?: {
+    request: number | null;
+    image: number | null;
+    audio: number | null;
+  };
 }
 export interface AiModelRouterConfig {
   enabled: boolean;
@@ -35,6 +47,8 @@ export interface AiModelRouterConfig {
   maxOutputTokens: number;
   credentials: RouterCredential[];
   models: RouterModelConfiguration[];
+  /** Separate opt-in profile; existing approved paid routes keep their semantics. */
+  freeProfileEnabled?: boolean;
 }
 const uuid =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -111,9 +125,14 @@ export function readAiModelRouterConfig(
     maxOutputTokens: 2048,
     credentials: [],
     models: [],
+    freeProfileEnabled: false,
   };
   try {
     const enabled = flag(source, "LIFEOS_AI_ROUTER_ENABLED");
+    const freeProfileEnabled = flag(
+      source,
+      "LIFEOS_AI_ROUTER_FREE_PROFILE_ENABLED",
+    );
     const paidRequestsEnabled = flag(
       source,
       "LIFEOS_AI_ROUTER_PAID_REQUESTS_ENABLED",
@@ -126,7 +145,15 @@ export function readAiModelRouterConfig(
       if (
         Object.keys(v).some(
           (k) =>
-            !["id", "provider", "ownerUserId", "features", "env"].includes(k),
+            ![
+              "id",
+              "provider",
+              "ownerUserId",
+              "features",
+              "env",
+              "quota",
+              "freeTier",
+            ].includes(k),
         )
       )
         throw new Error("invalid_router_configuration");
@@ -158,15 +185,114 @@ export function readAiModelRouterConfig(
           (provider === "openai" && !secret.startsWith("sk-")))
       )
         throw new Error("invalid_router_configuration");
+      let quota: RouterCredential["quota"];
+      if (v.quota !== undefined) {
+        const q = object(v.quota);
+        if (
+          Object.keys(q).length !== 5 ||
+          typeof q.domain !== "string" ||
+          !label.test(q.domain)
+        )
+          throw new Error("invalid_router_configuration");
+        quota = {
+          domain: q.domain,
+          limits: {
+            requestsPerMinute: bounded(q.requestsPerMinute, 1, 100000),
+            requestsPerDay: bounded(q.requestsPerDay, 1, 10000000),
+            tokensPerMinute: bounded(q.tokensPerMinute, 1, 1000000000),
+            tokensPerDay: bounded(q.tokensPerDay, 1, 1000000000),
+          },
+        };
+        if (
+          Object.keys(q).some(
+            (key) =>
+              ![
+                "domain",
+                "requestsPerMinute",
+                "requestsPerDay",
+                "tokensPerMinute",
+                "tokensPerDay",
+              ].includes(key),
+          )
+        )
+          throw new Error("invalid_router_configuration");
+      }
+      let freeTier: RouterCredential["freeTier"];
+      if (v.freeTier !== undefined) {
+        const f = object(v.freeTier);
+        if (
+          Object.keys(f).length !== 4 ||
+          f.eligibility !== "verified_free" ||
+          !["public_only", "no_training_zdr"].includes(String(f.dataPolicy)) ||
+          !["eligibility", "dataPolicy", "verifiedAt", "source"].every((key) =>
+            Object.hasOwn(f, key),
+          )
+        )
+          throw new Error("invalid_router_configuration");
+        const source = new URL(String(f.source));
+        if (
+          source.protocol !== "https:" ||
+          source.username ||
+          source.password ||
+          source.search ||
+          source.hash ||
+          !["aistudio.google.com", "ai.google.dev", "openrouter.ai"].includes(
+            source.hostname,
+          )
+        )
+          throw new Error("invalid_router_configuration");
+        if (
+          (provider === "gemini" &&
+            !["aistudio.google.com", "ai.google.dev"].includes(
+              source.hostname,
+            )) ||
+          (provider === "openrouter" && source.hostname !== "openrouter.ai")
+        )
+          throw new Error("invalid_router_configuration");
+        const verifiedAtMs = Date.parse(String(f.verifiedAt));
+        if (!Number.isFinite(verifiedAtMs))
+          throw new Error("invalid_router_configuration");
+        freeTier = {
+          verifiedAtMs,
+          dataPolicy: f.dataPolicy as "public_only" | "no_training_zdr",
+        };
+      }
       return {
         id: v.id,
         provider,
         ownerUserId: v.ownerUserId,
         features: array(v.features, AI_EXECUTION_FEATURES, 8),
         secret,
+        ...(quota ? { quota } : {}),
+        ...(freeTier ? { freeTier } : {}),
       };
     });
     if (new Set(credentials.map((c) => c.id)).size !== credentials.length)
+      throw new Error("invalid_router_configuration");
+    // One workload cannot gain capacity by cycling to another project/account.
+    if (
+      freeProfileEnabled &&
+      credentials.some(
+        (a) =>
+          a.quota &&
+          credentials.some(
+            (b) =>
+              b.quota &&
+              a.ownerUserId === b.ownerUserId &&
+              a.provider === b.provider &&
+              a.features.some((feature) => b.features.includes(feature)) &&
+              a.quota!.domain !== b.quota!.domain,
+          ),
+      )
+    )
+      throw new Error("invalid_router_configuration");
+    if (
+      credentials.some(
+        (key) =>
+          key.secret.length >= 12 &&
+          credentials.some((other) => other.quota?.domain.includes(key.secret)),
+      )
+    )
       throw new Error("invalid_router_configuration");
     if (
       credentials.some(
@@ -185,7 +311,11 @@ export function readAiModelRouterConfig(
         ...source,
         LIFEOS_AI_ROUTER_MODELS_JSON:
           source.LIFEOS_AI_ROUTER_MODELS_JSON ??
-          JSON.stringify(INITIAL_AI_MODEL_CATALOG),
+          JSON.stringify(
+            freeProfileEnabled
+              ? INITIAL_FREE_AI_MODEL_CATALOG
+              : INITIAL_AI_MODEL_CATALOG,
+          ),
       },
       "LIFEOS_AI_ROUTER_MODELS_JSON",
     );
@@ -221,6 +351,7 @@ export function readAiModelRouterConfig(
               "requireZdr",
               "reliabilityScore",
               "latencyMs",
+              "freeCosts",
             ].includes(k),
         )
       )
@@ -259,6 +390,16 @@ export function readAiModelRouterConfig(
           "platform.claude.com",
           "docs.anthropic.com",
         ].includes(evidence.hostname)
+      )
+        throw new Error("invalid_router_configuration");
+      if (
+        freeProfileEnabled &&
+        v.billing === "free" &&
+        ((provider === "gemini" &&
+          !["aistudio.google.com", "ai.google.dev"].includes(
+            evidence.hostname,
+          )) ||
+          (provider === "openrouter" && evidence.hostname !== "openrouter.ai"))
       )
         throw new Error("invalid_router_configuration");
       const stamp = Date.parse(String(v.verifiedAt));
@@ -324,6 +465,20 @@ export function readAiModelRouterConfig(
           ? { latencyMs: bounded(v.latencyMs, 0, 3600000) }
           : {}),
       };
+      let freeCosts: RouterModelConfiguration["freeCosts"];
+      if (v.freeCosts !== undefined) {
+        const c = object(v.freeCosts);
+        if (
+          Object.keys(c).length !== 3 ||
+          !["request", "image", "audio"].every((key) => Object.hasOwn(c, key))
+        )
+          throw new Error("invalid_router_configuration");
+        freeCosts = {
+          request: price(c.request),
+          image: price(c.image),
+          audio: price(c.audio),
+        };
+      }
       // Optional openrouter/auto is not a priceable model; no unrestricted auto routing.
       if (model.model.startsWith("openrouter/")) model.metadataVerified = false;
       const only = v.providerOnly ?? [];
@@ -348,6 +503,7 @@ export function readAiModelRouterConfig(
         providerOnly: [...only],
         sort: sort as RouterModelConfiguration["sort"],
         requireZdr: v.requireZdr !== false,
+        ...(freeCosts ? { freeCosts } : {}),
       };
     });
     if (new Set(models.map((m) => m.model.id)).size !== models.length)
@@ -358,6 +514,7 @@ export function readAiModelRouterConfig(
       configurationInvalid: false,
       credentials,
       models,
+      freeProfileEnabled,
       maxRequestCostMicros: integer(
         source,
         "LIFEOS_AI_ROUTER_MAX_REQUEST_COST_MICROS",

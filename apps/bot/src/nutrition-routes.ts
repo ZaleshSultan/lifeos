@@ -164,6 +164,9 @@ export function createMealVisionService(
             value: await options.router.execute({
               userId,
               feature: "meal_photo",
+              ...(options.router.config.freeProfileEnabled
+                ? { schemaKey: "meal_estimate_v1" as const }
+                : {}),
               requestId,
               signal,
               task: {
