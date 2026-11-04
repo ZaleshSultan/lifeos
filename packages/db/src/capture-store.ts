@@ -12,12 +12,14 @@ import {
   parseCaptureIngestRequest,
   parseCaptureSearchInput,
   parseCaptureView,
+  parseCapturePresentation,
   parseIdealHumanDay,
   type CaptureActionPayload,
   type CaptureConfirmRequest,
   type CaptureEditRequest,
   type CaptureIngestRequest,
   type CaptureProposal,
+  type CaptureProposalPresentation,
   type CaptureSearchInput,
   type CaptureSearchResult,
   type CaptureSource,
@@ -76,6 +78,27 @@ export interface CaptureConfirmOptions {
   journalEntries?: PreparedCaptureJournalEntry[];
   readResults?: PreparedCaptureReadResult[];
 }
+export interface CaptureExternalClaimInput {
+  expectedRevision: number;
+  mode: "model" | "transcription";
+  requestId: string;
+  leaseToken: string;
+  consentExpiresAt: string;
+  policy: {
+    settingsRevision: number;
+    modelId: string;
+    provider: "gemini" | "openrouter" | "openai" | "anthropic";
+    maxRequestCostMicros: number;
+  };
+}
+export interface CaptureRevisionChanges {
+  updates: Array<{
+    actionId: string;
+    action: CaptureActionPayload;
+    presentation: CaptureProposalPresentation;
+  }>;
+  cancelActionIds: string[];
+}
 export interface CaptureServiceStore {
   search(
     userId: string,
@@ -104,6 +127,18 @@ export interface CaptureServiceStore {
   claimNext(
     leaseToken: string,
   ): Promise<{ userId: string; job: CaptureProcessingJob } | null>;
+  /** Explicit per-record consent only; the automatic worker never uses this. */
+  claimExternal?(
+    userId: string,
+    captureId: string,
+    input: CaptureExternalClaimInput,
+  ): Promise<CaptureProcessingJob | null>;
+  revise?(
+    userId: string,
+    captureId: string,
+    expectedRevision: number,
+    changes: CaptureRevisionChanges,
+  ): Promise<CaptureView>;
   markExternalAttempt(
     userId: string,
     captureId: string,
@@ -119,6 +154,8 @@ export interface CaptureServiceStore {
       transcript?: string;
       errorCode?: string;
       ambiguousProvider?: boolean;
+      fallbackCode?: "capture_model_fallback";
+      transcriptSource?: "manual" | "provider";
     },
   ): Promise<CaptureView>;
   confirm(
@@ -165,6 +202,16 @@ type CaptureDatabase = {
   public: Omit<Database["public"], "Functions"> & {
     Functions: Database["public"]["Functions"] & {
       capture_service: {
+        Args: {
+          p_user_id: string;
+          p_operation: string;
+          p_capture_id: string | null;
+          p_expected_revision: number | null;
+          p_input: Json;
+        };
+        Returns: Json;
+      };
+      capture_service_v2: {
         Args: {
           p_user_id: string;
           p_operation: string;
@@ -287,7 +334,7 @@ export class SupabaseCaptureStore implements CaptureServiceStore {
   ): Promise<unknown> {
     captureRecordId(userId);
     if (captureId !== null) captureRecordId(captureId);
-    const { data, error } = await this.db.rpc("capture_service", {
+    const { data, error } = await this.db.rpc("capture_service_v2", {
       p_user_id: userId,
       p_operation: operation,
       p_capture_id: captureId,
@@ -439,6 +486,110 @@ export class SupabaseCaptureStore implements CaptureServiceStore {
     if (!job) throw new CaptureStoreError("capture_storage_unavailable");
     return { userId, job };
   }
+  async claimExternal(
+    userId: string,
+    captureId: string,
+    input: CaptureExternalClaimInput,
+  ): Promise<CaptureProcessingJob | null> {
+    const { expectedRevision, policy, ...body } = input;
+    if (
+      Object.keys(input).some(
+        (key) =>
+          ![
+            "expectedRevision",
+            "mode",
+            "requestId",
+            "leaseToken",
+            "consentExpiresAt",
+            "policy",
+          ].includes(key),
+      ) ||
+      !["model", "transcription"].includes(body.mode) ||
+      !REQUEST.test(body.requestId) ||
+      !REQUEST.test(body.leaseToken) ||
+      !Number.isFinite(Date.parse(body.consentExpiresAt)) ||
+      !policy ||
+      Object.keys(policy).some(
+        (key) =>
+          ![
+            "settingsRevision",
+            "modelId",
+            "provider",
+            "maxRequestCostMicros",
+          ].includes(key),
+      ) ||
+      !Number.isSafeInteger(policy.settingsRevision) ||
+      policy.settingsRevision < 0 ||
+      !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$/.test(policy.modelId) ||
+      !["gemini", "openrouter", "openai", "anthropic"].includes(
+        policy.provider,
+      ) ||
+      !Number.isSafeInteger(policy.maxRequestCostMicros) ||
+      policy.maxRequestCostMicros < 0 ||
+      policy.maxRequestCostMicros > 1_000_000_000_000
+    )
+      throw new CaptureStoreError("capture_invalid_input");
+    return this.job(
+      await this.call(
+        userId,
+        "claim_external",
+        captureId,
+        { ...body, policy },
+        captureExpectedRevision(expectedRevision),
+      ),
+    );
+  }
+  async revise(
+    userId: string,
+    captureId: string,
+    expectedRevision: number,
+    changes: CaptureRevisionChanges,
+  ): Promise<CaptureView> {
+    if (
+      !changes ||
+      Object.keys(changes).some(
+        (key) => !["updates", "cancelActionIds"].includes(key),
+      ) ||
+      !Array.isArray(changes.updates) ||
+      !Array.isArray(changes.cancelActionIds) ||
+      changes.updates.length + changes.cancelActionIds.length < 1 ||
+      changes.updates.length + changes.cancelActionIds.length > 16
+    )
+      throw new CaptureStoreError("capture_invalid_input");
+    const ids = [
+      ...changes.updates.map((update) => update.actionId),
+      ...changes.cancelActionIds,
+    ];
+    if (
+      ids.some(
+        (id) => typeof id !== "string" || !/^action-(?:[1-9]|1[0-6])$/.test(id),
+      ) ||
+      new Set(ids).size !== ids.length
+    )
+      throw new CaptureStoreError("capture_invalid_input");
+    const updates = changes.updates.map((update) => {
+      if (
+        Object.keys(update).some(
+          (key) => !["actionId", "action", "presentation"].includes(key),
+        )
+      )
+        throw new CaptureStoreError("capture_invalid_input");
+      return {
+        actionId: update.actionId,
+        action: parseCaptureActionPayload(update.action),
+        presentation: parseCapturePresentation(update.presentation),
+      };
+    });
+    return parseCaptureView(
+      await this.call(
+        userId,
+        "revise",
+        captureId,
+        { updates, cancelActionIds: [...changes.cancelActionIds] },
+        captureExpectedRevision(expectedRevision),
+      ),
+    );
+  }
   async markExternalAttempt(
     userId: string,
     captureId: string,
@@ -474,6 +625,8 @@ export class SupabaseCaptureStore implements CaptureServiceStore {
       transcript?: string;
       errorCode?: string;
       ambiguousProvider?: boolean;
+      fallbackCode?: "capture_model_fallback";
+      transcriptSource?: "manual" | "provider";
     },
   ): Promise<CaptureView> {
     if (
@@ -485,6 +638,8 @@ export class SupabaseCaptureStore implements CaptureServiceStore {
             "transcript",
             "errorCode",
             "ambiguousProvider",
+            "fallbackCode",
+            "transcriptSource",
           ].includes(k),
       )
     )
@@ -516,6 +671,23 @@ export class SupabaseCaptureStore implements CaptureServiceStore {
       typeof input.ambiguousProvider !== "boolean"
     )
       throw new CaptureStoreError("capture_invalid_input");
+    if (
+      (input.fallbackCode !== undefined &&
+        (input.fallbackCode !== "capture_model_fallback" ||
+          !input.proposals ||
+          input.errorCode)) ||
+      (input.transcriptSource !== undefined &&
+        (!input.transcript ||
+          !["manual", "provider"].includes(input.transcriptSource)))
+    )
+      throw new CaptureStoreError("capture_invalid_input");
+    const presentations = Object.fromEntries(
+      (input.proposals ?? []).flatMap((proposal) =>
+        proposal.presentation
+          ? [[proposal.id, parseCapturePresentation(proposal.presentation)]]
+          : [],
+      ),
+    );
     const proposals = input.proposals?.map((p) => {
       const payload = parseCaptureActionPayload({ kind: p.kind, args: p.args });
       return {
@@ -531,6 +703,7 @@ export class SupabaseCaptureStore implements CaptureServiceStore {
         leaseToken,
         ...input,
         ...(proposals ? { proposals } : {}),
+        ...(Object.keys(presentations).length ? { presentations } : {}),
       }),
     );
   }

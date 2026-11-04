@@ -49,13 +49,13 @@ try {
     timeout: 180000,
     args: ["--no-sandbox", "--renderer-process-limit=1"],
   });
-  for (const width of [320, 390]) {
+  for (const width of [320, 390, 768, 1440]) {
     const fixture = captureBrowserFixture();
     const context = await browser.newContext({
       viewport: { width, height: 900 },
       timezoneId: "Asia/Almaty",
-      isMobile: true,
-      hasTouch: true,
+      isMobile: width < 1440,
+      hasTouch: width < 1440,
     });
     const page = await context.newPage();
     page.setDefaultTimeout(30000);
@@ -126,6 +126,17 @@ try {
         console.log("PASS " + name);
       } catch (error) {
         failures.push({ name, error: error.message });
+        await page
+          .screenshot({
+            path: resolve(artifacts, `failure-${width}.png`),
+            fullPage: true,
+          })
+          .catch(() => {});
+        await writeFile(
+          resolve(artifacts, `failure-${width}.html`),
+          await page.content(),
+          { mode: 0o600 },
+        ).catch(() => {});
         throw error;
       }
     };

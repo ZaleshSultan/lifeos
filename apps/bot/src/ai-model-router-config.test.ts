@@ -57,6 +57,55 @@ function fixture() {
   };
 }
 describe("server-only model router configuration", () => {
+  it("accepts reviewed native audio rates without inventing zero token prices", () => {
+    const f = fixture();
+    const source = {
+      ...f.source,
+      OPENAI_API_KEY: "sk-synthetic-native-audio-only",
+      LIFEOS_AI_ROUTER_CREDENTIALS_JSON: JSON.stringify([
+        {
+          id: "speech-key",
+          provider: "openai",
+          ownerUserId: OWNER,
+          features: ["classification"],
+          env: "OPENAI_API_KEY",
+        },
+      ]),
+      LIFEOS_AI_ROUTER_MODELS_JSON: JSON.stringify([
+        {
+          ...f.models[0],
+          provider: "openai",
+          model: "gpt-transcribe",
+          tiers: ["voice"],
+          capabilities: ["audio"],
+          inputCostMicrosPer1k: null,
+          outputCostMicrosPer1k: null,
+          audioCostMicrosPerMinute: 4500,
+          credentialIds: ["speech-key"],
+          providerOnly: [],
+          source:
+            "https://developers.openai.com/api/docs/models/gpt-transcribe",
+        },
+      ]),
+    };
+    const config = readAiModelRouterConfig(source, NOW);
+    expect(config.configurationInvalid).toBe(false);
+    expect(config.models[0].model).toMatchObject({
+      audioCostMicrosPerMinute: 4500,
+      inputCostMicrosPer1k: null,
+      outputCostMicrosPer1k: null,
+    });
+    for (const rate of [-1, 1.2, "4500"]) {
+      const rows = JSON.parse(source.LIFEOS_AI_ROUTER_MODELS_JSON);
+      rows[0].audioCostMicrosPerMinute = rate;
+      expect(
+        readAiModelRouterConfig(
+          { ...source, LIFEOS_AI_ROUTER_MODELS_JSON: JSON.stringify(rows) },
+          NOW,
+        ).configurationInvalid,
+      ).toBe(true);
+    }
+  });
   it("defaults to disabled without implicitly consuming existing provider keys", () => {
     const config = readAiModelRouterConfig(
       { OPENROUTER_API_KEY: KEY, GEMINI_API_KEY: "synthetic-gemini-key" },

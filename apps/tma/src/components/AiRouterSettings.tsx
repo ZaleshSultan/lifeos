@@ -597,7 +597,12 @@ export function AiRouterSettings({
                         {model.capabilities.join(", ")} ·{" "}
                         {model.billing === "chatgpt_plan"
                           ? "Лимиты плана ChatGPT; не API-биллинг"
-                          : `USD за 1000 токенов: вход ${usd(model.inputCostMicrosPer1k)}, выход ${usd(model.outputCostMicrosPer1k)}`}
+                          : model.tiers.includes("voice") &&
+                              model.capabilities.includes("audio")
+                            ? typeof model.audioCostMicrosPerMinute === "number"
+                              ? `Аудио: ${usd(model.audioCostMicrosPerMinute)} за минуту; оценочный резерв за 120 секунд: ${usd(model.audioCostMicrosPerMinute * 2)}. Системный резерв может быть выше.`
+                              : "Цена аудио не указана; выполнение ограничено"
+                            : `USD за 1000 токенов: вход ${usd(model.inputCostMicrosPer1k)}, выход ${usd(model.outputCostMicrosPer1k)}`}
                       </p>
                       <p className="mt-1">
                         {model.metadataVerified

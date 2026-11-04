@@ -36,10 +36,108 @@ function fixture(data: unknown = view, error: unknown = null) {
   };
 }
 describe("capture database trust boundary", () => {
+  it("keeps multilingual review metadata separate from executable SQL payloads", async () => {
+    const { store, rpc } = fixture();
+    const proposals = extractCaptureActions(
+      "Завтра после университета нужно потренироваться, закончить DBMS и снять пару кадров для Ideal Human.",
+      { now: new Date("2026-11-03T19:10:00Z"), timezone: "Asia/Almaty" },
+    );
+    expect(proposals).toHaveLength(3);
+    const original = structuredClone(proposals);
+    await store.finish(owner, id, "synthetic-lease-1", { proposals });
+    const args = rpc.mock.calls[0][1];
+    expect(args.p_user_id).toBe(owner);
+    expect(args.p_operation).toBe("finish");
+    const input = args.p_input as {
+      proposals: Array<Record<string, unknown>>;
+      presentations: Record<string, { title: string }>;
+    };
+    expect(
+      input.proposals.every(
+        (proposal) => !Object.hasOwn(proposal, "presentation"),
+      ),
+    ).toBe(true);
+    expect(Object.keys(input.presentations)).toEqual([
+      "action-1",
+      "action-2",
+      "action-3",
+    ]);
+    expect(
+      Object.values(input.presentations)
+        .map((p) => p.title)
+        .join(" "),
+    ).toContain("DBMS");
+    expect(proposals).toEqual(original);
+  });
+  it("binds an external claim to the owner, reviewed revision and fixed safe policy", async () => {
+    const { store, rpc } = fixture(null);
+    expect(
+      await store.claimExternal(owner, id, {
+        expectedRevision: 7,
+        mode: "transcription",
+        requestId: "voice-request-1",
+        leaseToken: "voice-lease-1",
+        consentExpiresAt: "2026-11-04T00:12:00Z",
+        policy: {
+          settingsRevision: 2,
+          modelId: "approved-voice",
+          provider: "openai",
+          maxRequestCostMicros: 9000,
+        },
+      }),
+    ).toBeNull();
+    expect(rpc).toHaveBeenCalledExactlyOnceWith("capture_service_v2", {
+      p_user_id: owner,
+      p_operation: "claim_external",
+      p_capture_id: id,
+      p_expected_revision: 7,
+      p_input: {
+        mode: "transcription",
+        requestId: "voice-request-1",
+        leaseToken: "voice-lease-1",
+        consentExpiresAt: "2026-11-04T00:12:00Z",
+        policy: {
+          settingsRevision: 2,
+          modelId: "approved-voice",
+          provider: "openai",
+          maxRequestCostMicros: 9000,
+        },
+      },
+    });
+  });
+  it("rejects unbounded or caller-expanded external policy before database work", async () => {
+    const { store, rpc } = fixture(null);
+    await expect(
+      store.claimExternal(owner, id, {
+        expectedRevision: 7,
+        mode: "transcription",
+        requestId: "voice-request-1",
+        leaseToken: "voice-lease-1",
+        consentExpiresAt: "2026-11-04T00:12:00Z",
+        policy: {
+          settingsRevision: 2,
+          modelId: "approved-voice",
+          provider: "openai",
+          maxRequestCostMicros: -1,
+        },
+      }),
+    ).rejects.toMatchObject({ code: "capture_invalid_input" });
+    expect(rpc).not.toHaveBeenCalled();
+  });
+  it("rejects duplicate patch/rejection IDs instead of silently revising the same action twice", async () => {
+    const { store, rpc } = fixture();
+    await expect(
+      store.revise(owner, id, 3, {
+        updates: [],
+        cancelActionIds: ["action-1", "action-1"],
+      }),
+    ).rejects.toMatchObject({ code: "capture_invalid_input" });
+    expect(rpc).not.toHaveBeenCalled();
+  });
   it("scopes every capture lookup to authenticated owner and exact selector", async () => {
     const { store, rpc } = fixture();
     expect(await store.get(owner, id)).toMatchObject(view);
-    expect(rpc).toHaveBeenCalledExactlyOnceWith("capture_service", {
+    expect(rpc).toHaveBeenCalledExactlyOnceWith("capture_service_v2", {
       p_user_id: owner,
       p_operation: "get",
       p_capture_id: id,
@@ -128,7 +226,7 @@ describe("capture database trust boundary", () => {
       { allowMemoryDelete: false },
     );
     expect(rpc.mock.calls[0]).toEqual([
-      "capture_service",
+      "capture_service_v2",
       {
         p_user_id: owner,
         p_operation: "confirm",

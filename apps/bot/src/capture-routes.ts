@@ -54,7 +54,7 @@ export async function handleCaptureRoute(options: {
     "/memories": ["GET"],
   };
   const match =
-    /^\/([a-f0-9-]{36})(?:\/(process|confirm|cancel|retry|archive))?$/i.exec(
+    /^\/([a-f0-9-]{36})(?:\/(process|confirm|cancel|retry|archive|correct|reject|external))?$/i.exec(
       relative,
     );
   const methods =
@@ -81,7 +81,8 @@ export async function handleCaptureRoute(options: {
   const send = (value: unknown, status = 200) =>
     writeJson(response, status, { data: value });
   try {
-    if (relative === "/capabilities") send(captures.capabilities());
+    if (relative === "/capabilities")
+      send(await captures.ownerCapabilities(user));
     else if (relative === "/memories") send(await captures.memories(user));
     else if (
       relative === "/search" ||
@@ -112,7 +113,22 @@ export async function handleCaptureRoute(options: {
         send({ deleted: true });
       } else if (action === "confirm")
         send(await captures.confirm(user, id, raw));
-      else if (action === "archive") {
+      else if (action === "correct")
+        send(await captures.correct(user, id, raw));
+      else if (action === "external")
+        send(await captures.external(user, id, raw));
+      else if (action === "reject") {
+        const body = bodyRecord(raw, ["expectedRevision", "actionId"]);
+        if (typeof body.actionId !== "string") throw new CaptureInputError();
+        send(
+          await captures.reject(
+            user,
+            id,
+            captureExpectedRevision(body.expectedRevision),
+            body.actionId,
+          ),
+        );
+      } else if (action === "archive") {
         const body = bodyRecord(raw, ["expectedRevision", "archived"]);
         if (typeof body.archived !== "boolean") throw new CaptureInputError();
         send(

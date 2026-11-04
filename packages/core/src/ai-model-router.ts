@@ -62,6 +62,8 @@ export interface AiRouterModel {
   billing: AiRouterBilling;
   inputCostMicrosPer1k: number | null;
   outputCostMicrosPer1k: number | null;
+  /** Reviewed native transcription rate; absent on text-only legacy catalogs. */
+  audioCostMicrosPerMinute?: number | null;
   configured: boolean;
   authorized: boolean;
   status:
@@ -359,7 +361,7 @@ export function classifyAiRouterTask(category: AiRouterTaskCategory): {
     case "nutrition_photo":
       return { tier: "vision", capabilities: ["text", "vision"] };
     case "voice":
-      return { tier: "voice", capabilities: ["text", "audio"] };
+      return { tier: "voice", capabilities: ["audio"] };
   }
 }
 function validModel(m: AiRouterModel): boolean {
@@ -388,6 +390,8 @@ function validModel(m: AiRouterModel): boolean {
     ["api", "chatgpt_plan", "free"].includes(m.billing) &&
     price(m.inputCostMicrosPer1k) &&
     price(m.outputCostMicrosPer1k) &&
+    (m.audioCostMicrosPerMinute === undefined ||
+      price(m.audioCostMicrosPerMinute)) &&
     typeof m.configured === "boolean" &&
     typeof m.authorized === "boolean" &&
     [
@@ -452,6 +456,23 @@ export function estimateAiRouterCost(
     (BigInt(outputTokens) * BigInt(model.outputCostMicrosPer1k) + 999n) / 1000n;
   return amount > BigInt(Number.MAX_SAFE_INTEGER) ? null : Number(amount);
 }
+/** A voice route reserves the entire LifeOS 120-second cap, never sender duration. */
+export function estimateAiRouterSpeechCost(
+  model: AiRouterModel,
+): number | null {
+  const rate = model.audioCostMicrosPerMinute;
+  if (
+    model.billing !== "api" ||
+    typeof rate !== "number" ||
+    !Number.isSafeInteger(rate) ||
+    rate <= 0 ||
+    rate > MAX_MICROS ||
+    !model.capabilities.includes("audio")
+  )
+    return null;
+  const amount = BigInt(rate) * 2n;
+  return amount > BigInt(Number.MAX_SAFE_INTEGER) ? null : Number(amount);
+}
 /** Explicit projection; accidental extra credential/config fields are never spread into DTOs. */
 export function projectAiRouterModel(model: AiRouterModel): AiRouterModel {
   return {
@@ -464,6 +485,9 @@ export function projectAiRouterModel(model: AiRouterModel): AiRouterModel {
     billing: model.billing,
     inputCostMicrosPer1k: model.inputCostMicrosPer1k,
     outputCostMicrosPer1k: model.outputCostMicrosPer1k,
+    ...(model.audioCostMicrosPerMinute === undefined
+      ? {}
+      : { audioCostMicrosPerMinute: model.audioCostMicrosPerMinute }),
     configured: model.configured,
     authorized: model.authorized,
     status: model.status,
@@ -596,17 +620,21 @@ export function selectAiModelRoute(
     ]),
   ];
   const byId = new Map(input.models.map((m) => [m.id, m]));
+  const estimate = (model: AiRouterModel) =>
+    task.category === "voice"
+      ? estimateAiRouterSpeechCost(model)
+      : estimateAiRouterCost(
+          model,
+          input.estimatedInputTokens,
+          input.maxOutputTokens,
+        );
   const candidate = (model: AiRouterModel): AiRouterCandidate => ({
     modelId: model.id,
     label: model.label,
     provider: model.provider,
     model: model.model,
     billing: model.billing,
-    estimatedCostMicros: estimateAiRouterCost(
-      model,
-      input.estimatedInputTokens,
-      input.maxOutputTokens,
-    ),
+    estimatedCostMicros: estimate(model),
     privacy: model.privacy,
   });
   const failure = (
@@ -641,11 +669,7 @@ export function selectAiModelRoute(
       return model.planScopeGranted === true
         ? null
         : "plan_permission_required";
-    const cost = estimateAiRouterCost(
-      model,
-      input.estimatedInputTokens,
-      input.maxOutputTokens,
-    );
+    const cost = estimate(model);
     if (
       cost === null ||
       (model.billing === "free" &&
@@ -666,6 +690,8 @@ export function selectAiModelRoute(
     return null;
   };
   if (settings.mode === "manual") {
+    if (tier === "voice" && !settings.allowedTiers.includes("voice"))
+      return unavailable("tier_not_allowed", tier);
     if (!settings.manualModelId)
       return unavailable("manual_model_required", tier);
     if (
@@ -674,6 +700,11 @@ export function selectAiModelRoute(
           settings.allowedTiers.includes(t) &&
           settings.tierModels[t].includes(settings.manualModelId!),
       )
+    )
+      return unavailable("model_not_allowlisted", tier);
+    if (
+      tier === "voice" &&
+      !settings.tierModels.voice.includes(settings.manualModelId)
     )
       return unavailable("model_not_allowlisted", tier);
     const model = byId.get(settings.manualModelId);

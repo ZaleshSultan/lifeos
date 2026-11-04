@@ -378,4 +378,294 @@ export async function captureBrowserScenarios({
       gate.release();
     }
   });
+  const original =
+    "Завтра после университета нужно потренироваться, закончить DBMS и снять пару кадров для Ideal Human.";
+  const finalObjective =
+    "Завтра после универа хочу в зал, потом закрыть DBMS и вечером снять видос для Ideal Human.";
+  let mixedId;
+  await test(`${prefix}: multilingual mixed intentions have independent unchecked review cards`, async () => {
+    for (const [text, count] of [
+      [original, 3],
+      [
+        "Завтра после университета нужно потренироваться, законч DBMS и снять пару кадров для Ideal Human.",
+        3,
+      ],
+      ["Tomorrow finish DBMS, go to the gym and film my vlog.", 3],
+      [
+        "Ертең сабақтан кейін залға барамын, сосын DBMS тапсырмасын бітіру керек.",
+        2,
+      ],
+      ["После пар зал потом DBMS вечером влог снять", 3],
+      [finalObjective, 3],
+    ]) {
+      await composer().fill(text);
+      await saveCapture().click();
+      // A previous review can also have zero selected actions while ingest is
+      // pending. Wait for this input's accepted view before reading its proposals.
+      await detail().getByText(text, { exact: true }).waitFor();
+      await detail()
+        .getByText("Выбрано действий: 0", { exact: true })
+        .waitFor();
+      const current = [...fixture.captures.values()]
+        .filter((item) => item.text === text)
+        .at(-1);
+      assert.equal(current.actions.length, count);
+      for (const checkbox of await detail()
+        .locator('article input[type="checkbox"]')
+        .all())
+        assert.equal(await checkbox.isChecked(), false);
+      for (const action of current.actions)
+        await detail()
+          .getByText(action.presentation.title, { exact: true })
+          .waitFor();
+      assert.equal(
+        fixture.domainWrites.filter((item) => item.captureId === current.id)
+          .length,
+        0,
+      );
+      if (text === original || text === finalObjective) {
+        if (text === original) mixedId = current.id;
+        const task = current.actions.find(
+          (action) => action.kind === "task.create",
+        );
+        const workout = current.actions.find(
+          (action) => action.kind === "planning.suggest",
+        );
+        const filming = current.actions.find(
+          (action) => action.kind === "filming.idea",
+        );
+        assert.ok(task && workout && filming);
+        assert.match(task.presentation.title, /DBMS/);
+        assert.doesNotMatch(task.presentation.title, /снять|кадр|потренир/iu);
+        assert.doesNotMatch(filming.args.content, /DBMS|потренир/iu);
+        assert.equal(task.args.dueAt, null);
+        assert.equal(workout.args.time, null);
+        await detail()
+          .getByText(/Точное время не назначено/)
+          .first()
+          .waitFor();
+        if (text === finalObjective) {
+          assert.equal(workout.presentation.relation, "после универа");
+          assert.equal(filming.presentation.timeHint, "вечером");
+          assert.ok(
+            current.actions.every(
+              (action) => action.presentation.suggestedDate === "2026-11-04",
+            ),
+          );
+          await detail()
+            .getByText(/Пожелание по времени: вечером/)
+            .waitFor();
+        }
+      }
+    }
+    assert.equal(fixture.providerCalls, 0);
+  });
+  await test(`${prefix}: corrections and one-action rejection preserve partial receipts without implicit approval`, async () => {
+    await page
+      .getByRole("region", { name: "История входящих", exact: true })
+      .getByText(original, { exact: true })
+      .click();
+    await detail().getByText(original, { exact: true }).waitFor();
+    const instruction = detail().getByLabel("Уточнение предложений", {
+      exact: true,
+    });
+    const originalRevision = fixture.captures.get(mixedId).revision;
+    await instruction.fill("Остальные задачи сохрани");
+    await detail()
+      .getByRole("button", { name: "Применить уточнение", exact: true })
+      .click();
+    await page
+      .getByRole("alert")
+      .filter({ hasText: /Не удалось однозначно понять уточнение/ })
+      .waitFor();
+    assert.equal(await instruction.inputValue(), "Остальные задачи сохрани");
+    assert.equal(fixture.captures.get(mixedId).revision, originalRevision);
+    await instruction.fill("Нет, DBMS не завтра, а в пятницу.");
+    fixture.failCorrectionOnce = true;
+    await detail()
+      .getByRole("button", { name: "Применить уточнение", exact: true })
+      .click();
+    await page
+      .getByRole("alert")
+      .filter({ hasText: /недоступны|недоступна/ })
+      .waitFor();
+    assert.equal(
+      await instruction.inputValue(),
+      "Нет, DBMS не завтра, а в пятницу.",
+    );
+    await detail()
+      .getByRole("button", { name: "Применить уточнение", exact: true })
+      .click();
+    await detail().getByText("Выбрано действий: 0", { exact: true }).waitFor();
+    await detail()
+      .getByText(/6 ноября 2026/)
+      .waitFor();
+    const current = fixture.captures.get(mixedId),
+      task = current.actions.find((action) => action.kind === "task.create");
+    const index = current.actions.indexOf(task) + 1;
+    await detail()
+      .getByLabel(`Выбрать действие ${index}: Создать задачу`)
+      .check();
+    const before = fixture.confirmRequests.length;
+    fixture.failConfirmAfterCommitOnce = true;
+    await confirm().click();
+    await page
+      .getByRole("alert")
+      .filter({ hasText: /недоступны|недоступна/ })
+      .waitFor();
+    await confirm().click();
+    await detail()
+      .getByText(/Сохранено ровно один раз: task\.create/)
+      .waitFor();
+    assert.equal(fixture.confirmRequests.length, before + 2);
+    assert.equal(
+      fixture.confirmRequests[before].requestId,
+      fixture.confirmRequests[before + 1].requestId,
+    );
+    assert.deepEqual(fixture.confirmRequests[before].actionIds, [task.id]);
+    const receipt = structuredClone(
+      fixture.captures
+        .get(mixedId)
+        .actions.find((action) => action.id === task.id),
+    );
+    await instruction.fill("Тренировку убери, остальные задачи сохрани.");
+    await detail()
+      .getByRole("button", { name: "Применить уточнение", exact: true })
+      .click();
+    await page
+      .getByRole("status")
+      .filter({ hasText: "Предложения уточнены" })
+      .waitFor();
+    const after = fixture.captures.get(mixedId);
+    assert.deepEqual(
+      after.actions.find((action) => action.id === task.id),
+      receipt,
+    );
+    assert.equal(
+      after.actions.find((action) => action.kind === "planning.suggest").status,
+      "cancelled",
+    );
+    assert.equal(
+      after.actions.find((action) => action.kind === "filming.idea").status,
+      "pending",
+    );
+    assert.equal(
+      fixture.domainWrites.filter((item) => item.captureId === mixedId).length,
+      1,
+    );
+    const filmingIndex =
+      after.actions.findIndex((action) => action.kind === "filming.idea") + 1;
+    await detail()
+      .getByRole("button", {
+        name: `Отклонить предложение ${filmingIndex}`,
+        exact: true,
+      })
+      .click();
+    await page
+      .getByRole("status")
+      .filter({ hasText: "Предложение отклонено" })
+      .waitFor();
+    assert.equal(
+      fixture.captures
+        .get(mixedId)
+        .actions.find((action) => action.kind === "filming.idea").status,
+      "cancelled",
+    );
+    assert.deepEqual(
+      fixture.captures
+        .get(mixedId)
+        .actions.find((action) => action.id === task.id),
+      receipt,
+    );
+    assert.equal(
+      fixture.domainWrites.filter((item) => item.captureId === mixedId).length,
+      1,
+    );
+  });
+  await test(`${prefix}: external consent is separate and mocked voice stages retain manual fallback`, async () => {
+    const voice = fixture.addVoiceCapture();
+    fixture.capabilities.transcription = "configured_unverified";
+    try {
+      await page.reload();
+      await page.getByRole("button", { name: /^Голосовое сообщение/ }).click();
+      const external = detail().getByRole("region", {
+        name: "Отдельное согласие на внешнюю обработку",
+        exact: true,
+      });
+      const run = external.getByRole("button", {
+        name: "Запросить расшифровку с моим согласием",
+        exact: true,
+      });
+      assert.equal(await run.isDisabled(), true);
+      assert.equal(fixture.externalRequests.length, 0);
+      await detail()
+        .getByLabel("Ручная расшифровка", { exact: true })
+        .waitFor();
+      await external
+        .getByRole("checkbox", { name: /Разрешаю передать аудио этой записи/ })
+        .check();
+      fixture.failExternalOnce = "voice_quota_exceeded";
+      await run.click();
+      await page
+        .getByRole("alert")
+        .filter({ hasText: /Достигнут лимит внешней обработки/ })
+        .waitFor();
+      assert.equal(fixture.captures.has(voice), true);
+      await run.click();
+      await detail()
+        .getByRole("heading", { name: "Расшифровываем голос", exact: true })
+        .waitFor();
+      assert.equal(fixture.externalRequests.length, 2);
+      assert.equal(
+        fixture.externalRequests[0].requestId,
+        fixture.externalRequests[1].requestId,
+      );
+      assert.equal(fixture.externalRequests[1].confirmed, true);
+      fixture.completeExternal(voice, original);
+      await detail()
+        .getByText("Расшифровка провайдера — проверь текст", { exact: true })
+        .waitFor();
+      await detail()
+        .getByText("Выбрано действий: 0", { exact: true })
+        .waitFor();
+      assert.equal(fixture.captures.get(voice).actions.length, 3);
+      assert.equal(
+        fixture.domainWrites.filter((item) => item.captureId === voice).length,
+        0,
+      );
+      assert.equal(fixture.mockExternalCompletions, 1);
+      assert.equal(fixture.providerCalls, 0);
+      assert.equal(await page.locator("audio").count(), 0);
+      const cancelled = fixture.addVoiceCapture();
+      await page.reload();
+      await page.getByRole("button", { name: /^Голосовое сообщение/ }).click();
+      const next = detail().getByRole("region", {
+        name: "Отдельное согласие на внешнюю обработку",
+        exact: true,
+      });
+      await next
+        .getByRole("checkbox", { name: /Разрешаю передать аудио этой записи/ })
+        .check();
+      await next
+        .getByRole("button", {
+          name: "Запросить расшифровку с моим согласием",
+          exact: true,
+        })
+        .click();
+      await detail()
+        .getByRole("heading", { name: "Расшифровываем голос", exact: true })
+        .waitFor();
+      await detail()
+        .getByRole("button", { name: "Отменить обработку", exact: true })
+        .click();
+      await detail()
+        .getByRole("heading", { name: "Отменено", exact: true })
+        .waitFor();
+      assert.equal(fixture.completeExternal(cancelled, original), false);
+      assert.equal(fixture.captures.get(cancelled).state, "cancelled");
+      assert.equal(fixture.captures.has(cancelled), true);
+    } finally {
+      fixture.capabilities.transcription = "unavailable";
+    }
+  });
 }

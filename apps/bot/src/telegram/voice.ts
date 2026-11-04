@@ -3,6 +3,7 @@ import {
   CAPTURE_MAX_VOICE_BYTES,
   CAPTURE_MAX_VOICE_SECONDS,
 } from "@lifeos/core";
+import type { AiRoutingAccounting } from "@lifeos/core";
 import {
   AiGovernorError,
   type AiGovernor,
@@ -195,6 +196,139 @@ export function validateOggOpus(bytes: Uint8Array): void {
     throw new VoiceCaptureError("voice_unsupported");
 }
 
+/** Strict single-stream profile for paid dispatch; metadata/granules alone cannot prove duration. */
+export function validateBoundedOggOpus(bytes: Uint8Array): number {
+  validateOggOpus(bytes);
+  const view = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const reject = (): never => {
+    throw new VoiceCaptureError("voice_unsupported");
+  };
+  let position = 0,
+    sequence = 0,
+    serial: number | undefined;
+  let pending: number[] = [],
+    packets = 0,
+    samples = 0,
+    preSkip = 0;
+  let ended = false,
+    previousGranule = 0n;
+  while (position < bytes.length) {
+    if (
+      ended ||
+      position + 27 > bytes.length ||
+      view.toString("ascii", position, position + 4) !== "OggS" ||
+      bytes[position + 4] !== 0
+    )
+      reject();
+    const flags = bytes[position + 5],
+      segments = bytes[position + 26];
+    if (
+      flags > 7 ||
+      !segments ||
+      Boolean(flags & 1) !== Boolean(pending.length) ||
+      Boolean(flags & 2) !== (sequence === 0)
+    )
+      reject();
+    const endHeader = position + 27 + segments;
+    if (endHeader > bytes.length) reject();
+    let endPage = endHeader;
+    for (let n = position + 27; n < endHeader; n++) endPage += bytes[n];
+    if (endPage > bytes.length) reject();
+    const pageSerial = view.readUInt32LE(position + 14);
+    if (serial === undefined) serial = pageSerial;
+    if (
+      pageSerial !== serial ||
+      view.readUInt32LE(position + 18) !== sequence++
+    )
+      reject();
+    // Ogg's CRC excludes the four checksum bytes. A corrupt page never reaches a provider.
+    let crc = 0;
+    for (let n = position; n < endPage; n++) {
+      crc =
+        (crc ^
+          ((n >= position + 22 && n < position + 26 ? 0 : bytes[n]) << 24)) >>>
+        0;
+      for (let bit = 0; bit < 8; bit++)
+        crc = ((crc << 1) ^ (crc & 0x80000000 ? 0x04c11db7 : 0)) >>> 0;
+    }
+    if (crc !== view.readUInt32LE(position + 22)) reject();
+    let payload = endHeader;
+    for (let n = position + 27; n < endHeader; n++) {
+      const length = bytes[n];
+      if (pending.length + length > 65_536) reject();
+      for (let k = 0; k < length; k++) pending.push(bytes[payload++]);
+      if (length === 255) continue;
+      if (packets === 0) {
+        if (
+          pending.length !== 19 ||
+          Buffer.from(pending.slice(0, 8)).toString("ascii") !== "OpusHead" ||
+          pending[8] !== 1 ||
+          ![1, 2].includes(pending[9]) ||
+          pending[18] !== 0 ||
+          n !== endHeader - 1 ||
+          sequence !== 1
+        )
+          reject();
+        preSkip = pending[10] | (pending[11] << 8);
+      } else if (packets === 1) {
+        const tag = Buffer.from(pending);
+        if (tag.length < 16 || tag.toString("ascii", 0, 8) !== "OpusTags")
+          reject();
+        let cursor = 12 + tag.readUInt32LE(8);
+        if (cursor + 4 > tag.length) reject();
+        const count = tag.readUInt32LE(cursor);
+        cursor += 4;
+        if (count > tag.length / 4) reject();
+        for (let k = 0; k < count; k++) {
+          if (cursor + 4 > tag.length) reject();
+          const size = tag.readUInt32LE(cursor);
+          cursor += 4 + size;
+          if (cursor > tag.length) reject();
+        }
+      } else {
+        if (!pending.length || pending.length > 61_440) reject();
+        const config = pending[0] >> 3,
+          code = pending[0] & 3;
+        const frameSamples =
+          config < 12
+            ? [480, 960, 1920, 2880][config & 3]
+            : config < 16
+              ? [480, 960][config & 1]
+              : [120, 240, 480, 960][config & 3];
+        const frames = code === 0 ? 1 : code === 3 ? (pending[1] ?? 0) & 63 : 2;
+        const packetSamples = frameSamples * frames;
+        if (
+          !frames ||
+          packetSamples > 5760 ||
+          (code === 3 && pending.length < 2)
+        )
+          reject();
+        samples += packetSamples;
+        if (samples > CAPTURE_MAX_VOICE_SECONDS * 48_000)
+          throw new VoiceCaptureError("voice_too_large");
+      }
+      packets++;
+      pending = [];
+    }
+    const granule = view.readBigUInt64LE(position + 6);
+    if (granule !== 0xffffffffffffffffn) {
+      if (granule < previousGranule || granule > BigInt(samples)) reject();
+      previousGranule = granule;
+    }
+    ended = Boolean(flags & 4);
+    if (
+      ended &&
+      (pending.length ||
+        granule === 0xffffffffffffffffn ||
+        granule < BigInt(preSkip))
+    )
+      reject();
+    position = endPage;
+  }
+  if (!ended || pending.length || packets < 3 || !samples) reject();
+  return samples / 48_000;
+}
+
 export async function downloadTelegramVoice(
   url: string,
   options: {
@@ -306,7 +440,12 @@ export interface GovernedCaptureSpeechAdapter {
   transcribe(input: {
     audio: TelegramVoiceAudio;
     signal: AbortSignal;
-  }): Promise<{ text: string }>;
+  }): Promise<{
+    text: string;
+    languages?: string[];
+    usage?: { total_tokens: number; completion_tokens: number };
+    routing?: AiRoutingAccounting;
+  }>;
 }
 
 /** Shared-governor port, deliberately not wired to an external provider in production. */
@@ -336,7 +475,7 @@ export async function transcribeCaptureVoice(
     ) => Promise<TelegramVoiceAudio>;
     now?: () => Date;
   },
-): Promise<{ transcript: string }> {
+): Promise<{ transcript: string; languages?: string[] }> {
   const adapter = dependencies.adapter;
   if (
     !dependencies.governor ||
@@ -403,7 +542,7 @@ export async function transcribeCaptureVoice(
             !(await dependencies.authorize("before_transcription"))
           )
             throw new VoiceCaptureError("voice_consent_required");
-          validateOggOpus(audio.bytes);
+          validateBoundedOggOpus(audio.bytes);
           const output = await adapter.transcribe({ audio, signal });
           if (signal.aborted) throw new VoiceCaptureError("voice_cancelled");
           if (
@@ -413,10 +552,26 @@ export async function transcribeCaptureVoice(
             output.text.trim().length > CAPTURE_MAX_TEXT ||
             Buffer.byteLength(output.text.trim(), "utf8") >
               adapter.reservation.maxOutputTokens ||
-            /\u0000/.test(output.text)
+            /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(
+              output.text,
+            ) ||
+            (output.languages !== undefined &&
+              (!Array.isArray(output.languages) ||
+                output.languages.length > 8 ||
+                new Set(output.languages).size !== output.languages.length ||
+                output.languages.some(
+                  (code) =>
+                    typeof code !== "string" ||
+                    !/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}$/.test(code),
+                )))
           )
             throw new VoiceCaptureError("voice_transcription_failed");
-          return { transcript: output.text.trim() };
+          return {
+            transcript: output.text.trim(),
+            ...(output.languages ? { languages: output.languages } : {}),
+            ...(output.usage ? { usage: output.usage } : {}),
+            ...(output.routing ? { routing: output.routing } : {}),
+          };
         } catch (error) {
           if (error instanceof VoiceCaptureError) {
             safeFailure = error;
@@ -431,7 +586,10 @@ export async function transcribeCaptureVoice(
         }
       },
     );
-    return result.value;
+    return {
+      transcript: result.value.transcript,
+      ...(result.value.languages ? { languages: result.value.languages } : {}),
+    };
   } catch (error) {
     if (
       safeFailure &&

@@ -18,6 +18,7 @@ import { captureButtonClass, captureInputClass } from "./ActionEditor";
 import {
   captureDateTime,
   captureStateLabels,
+  captureStatusLabel,
   operationIdentity,
 } from "./model";
 import type {
@@ -743,7 +744,7 @@ export function CaptureInbox({
             </form>
             <p className="text-xs leading-relaxed text-zinc-400">
               {capabilities?.aiExtraction
-                ? "Дополнительная обработка AI доступна только в пределах разрешений и бюджета сервера."
+                ? "Внешний AI-разбор запускается только с отдельным согласием внутри записи. Настройки расходов при этом не меняются."
                 : "Поддерживаемые команды разбираются правилами LifeOS без обращения к AI. Неясные детали остаются на уточнение."}{" "}
               Ссылки сохраняются как данные; их содержимое не загружается и не
               получает полномочий.
@@ -881,7 +882,7 @@ export function CaptureInbox({
                     ).slice(0, 180)}
                   </span>
                   <span className="mt-2 block text-xs text-zinc-400">
-                    {captureStateLabels[item.state]}
+                    {captureStatusLabel(item)}
                     {item.archivedAt ? " · архив" : ""} ·{" "}
                     {captureDateTime(item.createdAt, item.context?.timezone)}
                   </span>
@@ -932,6 +933,36 @@ export function CaptureInbox({
                   }, "Предложение сохранено. Предыдущий выбор сброшен — проверь текущий просмотр.");
                 }}
                 onLifecycle={(action) => void lifecycle(action).catch(() => {})}
+                onCorrect={async (instruction) => {
+                  const current = selected;
+                  await mutation(async () => {
+                    accept(
+                      await transport.correct(current.id, {
+                        expectedRevision: current.revision,
+                        instruction,
+                      }),
+                    );
+                  }, "Предложения уточнены. Проверь новый просмотр и заново выбери действия.");
+                }}
+                onReject={(actionId) => {
+                  const current = selected;
+                  void mutation(async () => {
+                    accept(
+                      await transport.reject(current.id, {
+                        expectedRevision: current.revision,
+                        actionId,
+                      }),
+                    );
+                  }, "Предложение отклонено. Другие действия не выполнялись.").catch(
+                    () => {},
+                  );
+                }}
+                onExternal={async (input) => {
+                  const current = selected;
+                  await mutation(async () => {
+                    accept(await transport.external(current.id, input));
+                  }, "Ответ на запрос обработки получен. Проверь состояние и текст; действия не подтверждались.");
+                }}
                 onConfirm={(input) => {
                   const current = selected;
                   void mutation(async () => {

@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import {
   AI_ROUTER_PROVIDERS,
+  AI_ROUTER_DATA_CATEGORIES,
   estimateAiRouterCost,
+  estimateAiRouterSpeechCost,
   parseAiRouterSettings,
   projectAiRouterModel,
   selectAiModelRoute,
@@ -33,6 +35,12 @@ import {
   type RouterProviderMessage,
   type RouterProviderResult,
 } from "./ai-model-router-providers.js";
+import {
+  callCaptureSpeechProvider,
+  CAPTURE_SPEECH_MIN_MICROS_PER_MINUTE,
+  CAPTURE_SPEECH_MODEL,
+} from "./capture-speech-provider.js";
+import type { GovernedCaptureSpeechAdapter } from "./telegram/voice.js";
 
 export class AiRouterError extends Error {
   constructor(
@@ -53,6 +61,30 @@ export interface AiRouterExecutionInput {
   taskId?: string;
   previousModelId?: string;
   signal?: AbortSignal;
+  /** Trusted operation deadline; the governor can only shorten its configured maximum. */
+  timeoutMs?: number;
+  /** A capture owner reviewed this exact saved policy revision. */
+  expectedSettingsRevision?: number;
+}
+export interface AiRouterSpeechInput {
+  userId: string;
+  captureId: string;
+  requestId: string;
+  consentExpiresAt: string;
+  expectedSettingsRevision?: number;
+  signal?: AbortSignal;
+}
+export interface AiRouterPreparedSpeech {
+  adapter: GovernedCaptureSpeechAdapter;
+  authorize: (
+    stage: "before_download" | "before_transcription",
+  ) => Promise<boolean>;
+  policy: {
+    settingsRevision: number;
+    modelId: string;
+    provider: "openai";
+    maxRequestCostMicros: number;
+  };
 }
 export class AiModelRouter {
   private readonly unavailableUntil = new Map<string, number>();
@@ -219,16 +251,173 @@ export class AiModelRouter {
     estimatedInputTokens: number,
     maxOutputTokens: number,
     previousModelId?: string,
+    feature?: AiExecutionFeature,
   ): Promise<AiRouterDecision> {
     const { settings } = await this.saved(userId);
     return selectAiModelRoute({
       task,
       settings: this.effective(settings),
-      models: this.catalog(userId),
+      models: this.catalog(userId, feature),
       estimatedInputTokens,
       maxOutputTokens,
       previousModelId,
     });
+  }
+  /** Prepare one native audio call. transcribeCaptureVoice owns the sole durable reservation. */
+  async prepareSpeech(
+    input: AiRouterSpeechInput,
+  ): Promise<AiRouterPreparedSpeech> {
+    const expiry = Date.parse(input.consentExpiresAt);
+    if (!this.config.enabled) throw new AiRouterError("ai_router_disabled");
+    if (!this.dependencies.governor)
+      throw new AiRouterError("ai_budget_unavailable");
+    if (input.signal?.aborted) throw new AiRouterError("ai_cancelled", 408);
+    if (
+      typeof input.userId !== "string" ||
+      !input.userId ||
+      input.userId.length > 200 ||
+      !/^[A-Za-z0-9:_-]{1,128}$/.test(input.captureId) ||
+      !/^[A-Za-z0-9:_-]{1,128}$/.test(input.requestId) ||
+      !Number.isFinite(expiry) ||
+      expiry <= this.now() ||
+      expiry > this.now() + 300_000 ||
+      (input.expectedSettingsRevision !== undefined &&
+        (!Number.isSafeInteger(input.expectedSettingsRevision) ||
+          input.expectedSettingsRevision < 0))
+    )
+      throw new AiRouterError("ai_router_invalid_request", 400);
+    const saved = await this.saved(input.userId);
+    if (
+      input.expectedSettingsRevision !== undefined &&
+      input.expectedSettingsRevision !== saved.revision
+    )
+      throw new AiRouterError("ai_router_consent_changed", 403);
+    const settings = this.effective(saved.settings);
+    const maxOutputTokens = Math.min(this.config.maxOutputTokens, 8192);
+    const select = (settings: AiRouterSettings) =>
+      selectAiModelRoute({
+        task: {
+          category: "voice",
+          dataCategories: [...AI_ROUTER_DATA_CATEGORIES],
+        },
+        settings: this.effective(settings),
+        models: this.catalog(input.userId, "classification"),
+        estimatedInputTokens: 3000,
+        maxOutputTokens,
+      });
+    const decision = select(settings);
+    if (decision.kind !== "selected")
+      throw new AiRouterError("ai_router_" + decision.reason);
+    const chosen = decision.candidates[0];
+    const row = this.config.models.find((m) => m.model.id === chosen?.modelId);
+    if (
+      !row ||
+      row.model.provider !== "openai" ||
+      row.model.model !== CAPTURE_SPEECH_MODEL ||
+      row.providerOnly.length ||
+      !row.model.tiers.includes("voice") ||
+      (row.model.audioCostMicrosPerMinute ?? 0) <
+        CAPTURE_SPEECH_MIN_MICROS_PER_MINUTE
+    )
+      throw new AiRouterError("ai_router_audio_transport_unavailable");
+    const key = this.credentials(input.userId, row, "classification")[0];
+    const cost = estimateAiRouterSpeechCost(row.model);
+    if (!key || cost === null)
+      throw new AiRouterError("ai_router_pricing_unavailable");
+    const keySecret = key.secret;
+    const reviewed = JSON.stringify(row);
+    const routing: AiRoutingAccounting = {
+      version: 1,
+      provider: "openai",
+      model: row.model.model,
+      selectedModelId: row.model.id,
+      credentialLabel: key.id,
+      billing: "api",
+      attempts: 0,
+      fallback: false,
+      inputTokens: null,
+      outputTokens: null,
+      reportedCostMicros: null,
+      costSource: "unknown",
+    };
+    const authorize: AiRouterPreparedSpeech["authorize"] = async () => {
+      if (
+        input.signal?.aborted ||
+        this.now() >= expiry ||
+        !this.config.enabled ||
+        !this.config.paidRequestsEnabled
+      )
+        return false;
+      try {
+        const current = await this.saved(input.userId);
+        if (
+          input.signal?.aborted ||
+          current.revision !== saved.revision ||
+          this.now() >= expiry
+        )
+          return false;
+        const next = select(current.settings);
+        const currentRow = this.config.models.find(
+          (v) => v.model.id === row.model.id,
+        );
+        const currentKey =
+          currentRow &&
+          this.credentials(input.userId, currentRow, "classification")[0];
+        return (
+          next.kind === "selected" &&
+          next.candidates[0]?.modelId === row.model.id &&
+          JSON.stringify(currentRow) === reviewed &&
+          currentKey?.id === key.id &&
+          currentKey?.secret === keySecret
+        );
+      } catch {
+        return false;
+      }
+    };
+    let dispatched = false;
+    return {
+      policy: {
+        settingsRevision: saved.revision,
+        modelId: row.model.id,
+        provider: "openai",
+        maxRequestCostMicros: cost,
+      },
+      authorize,
+      adapter: {
+        available: true,
+        audioPricingVerified: true,
+        reservation: {
+          feature: "classification",
+          estimatedInputTokens: 3000,
+          maxOutputTokens,
+          estimatedCostMicros: cost,
+          maxRequestCostMicros: settings.spending.maxRequestCostMicros,
+          maxUserDailyCostMicros: settings.spending.maxDailyCostMicros,
+          timeoutMs: 20_000,
+          routing,
+        },
+        transcribe: async ({ audio, signal }) => {
+          if (!(await authorize("before_transcription")))
+            throw new AiRouterError("ai_router_consent_changed", 403);
+          if (signal.aborted) throw new AiGovernorError("ai_cancelled");
+          if (dispatched) throw new AiGovernorError("ai_duplicate_request");
+          dispatched = true;
+          routing.attempts = 1;
+          return callCaptureSpeechProvider(
+            {
+              audio,
+              signal,
+              apiKey: keySecret,
+              model: row.model.model,
+              audioCostMicrosPerMinute: row.model.audioCostMicrosPerMinute!,
+              maxOutputTokens,
+              routing,
+            },
+            this.dependencies.fetchImpl,
+          );
+        },
+      },
+    };
   }
   async execute(input: AiRouterExecutionInput): Promise<{
     text: string;
@@ -236,6 +425,8 @@ export class AiModelRouter {
     usage?: RouterProviderResult["usage"];
   }> {
     if (!this.config.enabled) throw new AiRouterError("ai_router_disabled");
+    if (input.task.category === "voice")
+      throw new AiRouterError("ai_router_audio_transport_required", 400);
     if (!this.dependencies.governor)
       throw new AiRouterError("ai_budget_unavailable");
     if (input.signal?.aborted) throw new AiRouterError("ai_cancelled", 408);
@@ -273,6 +464,13 @@ export class AiModelRouter {
       estimateAiInputTokens(metered) + images * 80000;
     if (images > 1) throw new AiRouterError("ai_router_invalid_request", 400);
     const saved = await this.saved(input.userId);
+    if (
+      input.expectedSettingsRevision !== undefined &&
+      (!Number.isSafeInteger(input.expectedSettingsRevision) ||
+        input.expectedSettingsRevision < 0 ||
+        input.expectedSettingsRevision !== saved.revision)
+    )
+      throw new AiRouterError("ai_router_consent_changed", 403);
     const settings = this.effective(saved.settings);
     const catalog = this.catalog(input.userId, input.feature);
     const task = ["deterministic", "tagging"].includes(input.task.category)
@@ -406,6 +604,9 @@ export class AiModelRouter {
         maxUserDailyCostMicros: settings.spending.maxDailyCostMicros,
         maxRequestCostMicros: settings.spending.maxRequestCostMicros,
         routing,
+        ...(input.timeoutMs !== undefined
+          ? { timeoutMs: input.timeoutMs }
+          : {}),
       },
       async (signal) => {
         let attempts = 0;

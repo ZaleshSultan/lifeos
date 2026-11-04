@@ -228,6 +228,60 @@ function fixture(
 }
 afterEach(() => vi.useRealTimers());
 describe("unified router with the existing durable governor", () => {
+  it("scopes trusted previews by execution feature while preserving the default preview API", async () => {
+    const f = fixture({ modelCount: 2, keyCount: 2 });
+    f.config.models[0].credentialIds = ["key-0"];
+    f.config.models[1].credentialIds = ["key-1"];
+    f.config.credentials[1].features = ["classification"];
+    f.change((settings) => {
+      settings.fallback.enabled = true;
+      settings.fallback.maxAttempts = 2;
+    });
+    const general = await f.router.preview(OWNER, INPUT.task, 10, 10);
+    expect(general.kind).toBe("selected");
+    expect(general.candidates[0]?.modelId).toBe("model-a");
+    const scoped = await f.router.preview(
+      OWNER,
+      INPUT.task,
+      10,
+      10,
+      undefined,
+      "classification",
+    );
+    expect(scoped).toMatchObject({
+      kind: "selected",
+      candidates: [{ modelId: "model-b" }],
+    });
+    expect(f.budget.reserve).not.toHaveBeenCalled();
+    expect(f.fetcher).not.toHaveBeenCalled();
+  });
+  it("lets a trusted capture deadline shorten but never extend the shared governor timeout", async () => {
+    for (const [configured, requested] of [
+      [100, 5],
+      [5, 20_000],
+    ]) {
+      const f = fixture({ governor: { timeoutMs: configured } });
+      f.fetcher.mockImplementation(async () => new Promise<Response>(() => {}));
+      await expect(
+        f.router.execute({ ...INPUT, timeoutMs: requested }),
+      ).rejects.toMatchObject({ code: "ai_timeout" });
+      expect(f.fetcher).toHaveBeenCalledOnce();
+      expect(f.fetcher.mock.calls[0][1]?.signal?.aborted).toBe(true);
+      expect(f.finishes).toHaveLength(1);
+      expect(f.finishes[0].state).toBe("timed_out");
+    }
+  });
+  it("requires the owner-reviewed settings revision before any reservation or provider request", async () => {
+    const f = fixture();
+    await expect(
+      f.router.execute({ ...INPUT, expectedSettingsRevision: 0 }),
+    ).rejects.toMatchObject({ code: "ai_router_consent_changed" });
+    expect(f.budget.reserve).not.toHaveBeenCalled();
+    expect(f.fetcher).not.toHaveBeenCalled();
+    await expect(
+      f.router.execute({ ...INPUT, expectedSettingsRevision: 1 }),
+    ).resolves.toMatchObject({ text: "Completed mock answer" });
+  });
   it("dispatches a configured authorized model and records one safe durable receipt", async () => {
     const f = fixture();
     const result = await f.router.execute(INPUT);

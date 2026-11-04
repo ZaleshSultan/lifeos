@@ -26,8 +26,10 @@ for task_sql in \
  supabase/migrations/20261102120000_ideal_human_days.sql \
  supabase/migrations/20261103010000_daily_life_logs.sql \
  supabase/migrations/20261103060000_universal_capture.sql \
+ supabase/migrations/20261104010000_capture_intelligence.sql \
  scripts/universal-capture-test-fixtures/helpers.sql \
- scripts/universal-capture-test-fixtures/assertions.sql;do
+ scripts/universal-capture-test-fixtures/assertions.sql \
+ scripts/universal-capture-test-fixtures/intelligence.sql;do
  task_psql < "$task_root/$task_sql" > "$task_results/sql-output"
 done
 # Eight independent transport retries must resolve one durable capture.
@@ -74,4 +76,31 @@ assert edits.count('success')==1 and edits.count('conflict')==7,edits
 claims=values('claim')
 assert claims.count('none')==7 and len([x for x in claims if x!='none'])==1,claims
 print('PASS: capture migration, legacy preservation, grants/RLS, owner isolation, idempotence, atomic selective confirmation/rollback, domain CAS, expiry/replay, memory opt-out, lease fencing/ambiguity/recovery, content deletion/retention, and four 8-request concurrency checks')
+PY
+# A consented external request has one durable claim even when HTTP is retried
+# concurrently. These are synthetic database calls, with no provider attached.
+task_psql -c "insert into public.capture_test_facts(key,payload)values('v2-concurrent-external',public.capture_service_v2('00000000-0000-4000-8000-000000000001','ingest',null,null,public.capture_test_input('v2-concurrent-external'))->'capture'),('v2-concurrent-reject',public.capture_test_ready('v2-concurrent-reject','[{\"kind\":\"note.save\",\"args\":{\"title\":\"Pending review\",\"content\":\"No automatic writes\"}}]'));" >/dev/null
+task_pids=()
+for task_attempt in {1..8};do
+ task_psql -c "set role service_role;select public.capture_service_v2('00000000-0000-4000-8000-000000000001','claim_external',(select(payload->>'id')::uuid from public.capture_test_facts where key='v2-concurrent-external'),(select(payload->>'revision')::int from public.capture_test_facts where key='v2-concurrent-external'),jsonb_build_object('mode','model','requestId','same-v2-external-request','leaseToken','v2-concurrent-lease-$task_attempt','consentExpiresAt',clock_timestamp()+interval'3 minutes','policy',jsonb_build_object('settingsRevision',1,'provider','openai','modelId','approved-model','maxRequestCostMicros',10000)))is not null;" > "$task_results/v2-external-$task_attempt" &
+ task_pids+=("$!")
+done
+for task_pid in "${task_pids[@]}";do wait "$task_pid";done
+task_pids=()
+for task_attempt in {1..8};do
+ (
+  if task_psql -c "set role service_role;select public.capture_service_v2('00000000-0000-4000-8000-000000000001','revise',(select(payload->>'id')::uuid from public.capture_test_facts where key='v2-concurrent-reject'),(select(payload->>'revision')::int from public.capture_test_facts where key='v2-concurrent-reject'),'{\"updates\":[],\"cancelActionIds\":[\"action-1\"]}')->>'revision';" > "$task_results/v2-reject-$task_attempt" 2> "$task_results/v2-reject-$task_attempt.err";then printf '%s' success > "$task_results/v2-reject-$task_attempt.result";
+  else if ! grep -q capture_conflict "$task_results/v2-reject-$task_attempt.err";then cat "$task_results/v2-reject-$task_attempt.err" >&2;exit 1;fi;printf '%s' conflict > "$task_results/v2-reject-$task_attempt.result";fi
+ ) & task_pids+=("$!")
+done
+for task_pid in "${task_pids[@]}";do wait "$task_pid";done
+python3 - "$task_results" <<'PY'
+from pathlib import Path
+import sys
+root=Path(sys.argv[1])
+claims=[(root/f'v2-external-{i}').read_text().strip()for i in range(1,9)]
+assert claims.count('t')==1 and claims.count('f')==7,claims
+rejections=[(root/f'v2-reject-{i}.result').read_text()for i in range(1,9)]
+assert rejections.count('success')==1 and rejections.count('conflict')==7,rejections
+print('PASS: v2 grants/rollback projection, independent presentations, selective approval/replay, atomic correction/rejection/receipt preservation, consent/expiry/ambiguity/manual fallback, plus two further 8-request concurrency groups')
 PY

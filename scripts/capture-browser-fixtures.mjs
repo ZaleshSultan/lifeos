@@ -10,6 +10,10 @@ import {
   parseCaptureIngestRequest,
   parseCaptureSearchInput,
 } from "../packages/core/src/universal-capture.ts";
+import {
+  parseCaptureCorrectionRequest,
+  planCaptureCorrection,
+} from "../packages/core/src/capture-intelligence.ts";
 
 export function captureBrowserFixture(owner = "A") {
   const prefix =
@@ -34,6 +38,7 @@ export function captureBrowserFixture(owner = "A") {
     transcription: "unavailable",
     transcriptionRequiresConsent: true,
     aiExtraction: false,
+    externalModel: "unavailable",
     maxTextLength: 8000,
     maxVoiceBytes: 5 * 1024 * 1024,
     maxVoiceSeconds: 120,
@@ -89,6 +94,47 @@ export function captureBrowserFixture(owner = "A") {
     failConfirmAfterCommitOnce: false,
     failEditOnce: false,
     providerCalls: 0,
+    correctionRequests: [],
+    rejectRequests: [],
+    externalRequests: [],
+    mockExternalCompletions: 0,
+    failCorrectionOnce: false,
+    failExternalOnce: null,
+  };
+  state.addVoiceCapture = () => {
+    const id = uuid(sequence++);
+    captures.set(id, {
+      ...structuredClone(captures.get(voiceId)),
+      id,
+      text: "",
+      transcript: null,
+      state: "awaiting_transcript",
+      revision: 1,
+      actions: [],
+      createdAt: stamp(),
+      updatedAt: stamp(),
+      archivedAt: null,
+      reviewExpiresAt: null,
+      errorCode: "transcription_unavailable",
+      processingStage: null,
+      transcriptSource: null,
+    });
+    return id;
+  };
+  state.completeExternal = (id, transcript) => {
+    const capture = captures.get(id);
+    if (
+      !capture ||
+      capture.state !== "processing" ||
+      capture.processingStage !== "transcribing"
+    )
+      return false;
+    capture.transcript = transcript;
+    capture.transcriptSource = "provider";
+    capture.processingStage = null;
+    state.mockExternalCompletions++;
+    process(capture);
+    return true;
   };
   const success = (data) => ({
     status: 200,
@@ -166,6 +212,7 @@ export function captureBrowserFixture(owner = "A") {
               status: action.missingFields.length ? "needs_input" : "pending",
               resultSummary: null,
               completedAt: null,
+              extractionOrigin: "deterministic",
             },
       );
       capture.state = capture.actions.some(
@@ -244,7 +291,7 @@ export function captureBrowserFixture(owner = "A") {
         return success(capture);
       }
       const match = resource.match(
-        /^captures\/([0-9a-f-]{36})(?:\/(process|retry|cancel|archive|confirm))?$/,
+        /^captures\/([0-9a-f-]{36})(?:\/(process|retry|cancel|archive|confirm|correct|reject|external))?$/,
       );
       if (!match) return failure(404, "capture_not_found");
       const capture = captures.get(match[1]);
@@ -342,6 +389,98 @@ export function captureBrowserFixture(owner = "A") {
       }
       if (input.expectedRevision !== capture.revision)
         return failure(409, "capture_conflict");
+      if (match[2] === "correct" && method === "POST") {
+        const value = parseCaptureCorrectionRequest(input);
+        state.correctionRequests.push(structuredClone(value));
+        if (state.failCorrectionOnce) {
+          state.failCorrectionOnce = false;
+          return failure(503, "capture_unavailable");
+        }
+        const plan = planCaptureCorrection(value.instruction, capture, {
+          now: new Date("2026-11-03T10:00:00Z"),
+          timezone: context.timezone,
+          date: context.date,
+        });
+        if (
+          plan.warnings.length ||
+          (!plan.updates.length && !plan.cancelActionIds.length)
+        )
+          return failure(400, "capture_correction_unclear");
+        capture.actions = capture.actions.map((action) => {
+          if (action.status === "succeeded") return action;
+          if (plan.cancelActionIds.includes(action.id))
+            return { ...action, status: "cancelled" };
+          const update = plan.updates.find(
+            (update) => update.actionId === action.id,
+          );
+          if (!update) return action;
+          const missingFields = captureActionMissingFields(update.action);
+          return {
+            ...action,
+            ...update.action,
+            presentation: update.presentation,
+            origin: "edited",
+            summary: captureActionSummary(update.action),
+            missingFields,
+            status: missingFields.length ? "needs_input" : "pending",
+          };
+        });
+        capture.context = {
+          ...capture.context,
+          warnings: [...context.warnings, ...plan.warnings],
+        };
+        capture.state = capture.actions.some((action) =>
+          ["pending", "needs_input", "conflict"].includes(action.status),
+        )
+          ? "needs_review"
+          : "completed";
+        capture.reviewExpiresAt = new Date(Date.now() + 600000).toISOString();
+        return success(changed(capture));
+      }
+      if (match[2] === "reject" && method === "POST") {
+        if (Object.keys(input).sort().join(",") !== "actionId,expectedRevision")
+          return failure(400, "capture_invalid_input");
+        const action = capture.actions.find(
+          (action) => action.id === input.actionId,
+        );
+        if (
+          !action ||
+          !["pending", "needs_input", "conflict"].includes(action.status)
+        )
+          return failure(409, "capture_action_conflict");
+        state.rejectRequests.push(structuredClone(input));
+        action.status = "cancelled";
+        capture.state = capture.actions.some((action) =>
+          ["pending", "needs_input", "conflict"].includes(action.status),
+        )
+          ? "needs_review"
+          : "completed";
+        return success(changed(capture));
+      }
+      if (match[2] === "external" && method === "POST") {
+        state.externalRequests.push(structuredClone(input));
+        if (
+          Object.keys(input).sort().join(",") !==
+            "confirmed,expectedRevision,mode,requestId" ||
+          input.confirmed !== true ||
+          typeof input.requestId !== "string"
+        )
+          return failure(400, "capture_invalid_input");
+        if (state.failExternalOnce) {
+          const code = state.failExternalOnce;
+          state.failExternalOnce = null;
+          return failure(429, code);
+        }
+        if (
+          input.mode !== "transcription" ||
+          capabilities.transcription !== "configured_unverified"
+        )
+          return failure(503, "voice_transcription_unavailable");
+        capture.state = "processing";
+        capture.processingStage = "transcribing";
+        capture.errorCode = null;
+        return success(changed(capture));
+      }
       if (!match[2] && method === "PATCH") {
         const value = parseCaptureEditRequest(input);
         state.editRequests.push(structuredClone(value));
@@ -351,6 +490,7 @@ export function captureBrowserFixture(owner = "A") {
         }
         if (value.transcript !== undefined) {
           capture.transcript = value.transcript;
+          capture.transcriptSource = "manual";
           capture.state = "queued";
           capture.actions = [];
           capture.reviewExpiresAt = null;
@@ -371,6 +511,13 @@ export function captureBrowserFixture(owner = "A") {
               : "pending",
             resultSummary: null,
             completedAt: null,
+            extractionOrigin:
+              capture.actions[index].extractionOrigin ??
+              (capture.actions[index].origin === "model"
+                ? "model"
+                : capture.actions[index].origin === "deterministic"
+                  ? "deterministic"
+                  : null),
           };
           capture.state = "needs_review";
           capture.reviewExpiresAt = new Date(
@@ -395,6 +542,7 @@ export function captureBrowserFixture(owner = "A") {
         return success(changed(capture));
       }
       if (method === "POST" && match[2] === "cancel") {
+        capture.processingStage = null;
         capture.actions = capture.actions.map((action) =>
           action.status === "succeeded"
             ? action

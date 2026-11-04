@@ -4,6 +4,7 @@ import type {
   CaptureActionPayload,
   CaptureActionView,
   CaptureState,
+  CaptureView,
 } from "../../../../../packages/core/src/universal-capture.js";
 
 export const captureStateLabels: Record<CaptureState, string> = {
@@ -40,6 +41,59 @@ export const captureOriginLabels = {
   model: "Предложение AI — проверь детали",
   edited: "Отредактировано тобой",
 } as const;
+
+export function captureStatusLabel(capture: CaptureView) {
+  if (capture.state === "processing") {
+    if (capture.processingStage === "transcribing")
+      return "Расшифровываем голос";
+    if (capture.processingStage === "extracting") return "Готовим предложения";
+  }
+  return captureStateLabels[capture.state];
+}
+
+export function captureProposalTitle(action: CaptureActionView) {
+  if (action.presentation?.title) return action.presentation.title;
+  const args = action.args as unknown as Record<string, unknown>;
+  const text =
+    args.title ??
+    args.topic ??
+    args.label ??
+    args.content ??
+    args.text ??
+    args.key;
+  if (typeof text === "string" && text.trim())
+    return text.trim().split("\n")[0].slice(0, 160);
+  if (action.kind === "water.log" && action.args.amountMl !== null)
+    return `${action.args.amountMl} мл воды`;
+  return (
+    action.summary
+      .replace(new RegExp(`^${action.kind.replace(".", "\\.")}:\\s*`), "")
+      .slice(0, 160) || captureActionLabels[action.kind]
+  );
+}
+export function captureProvenanceLabel(action: CaptureActionView) {
+  if (action.origin !== "edited") return captureOriginLabels[action.origin];
+  if (action.extractionOrigin === "model")
+    return "Первичный разбор: AI · Отредактировано тобой";
+  if (action.extractionOrigin === "deterministic")
+    return "Первичный разбор: правила LifeOS · Отредактировано тобой";
+  return "Отредактировано тобой · Способ первого разбора неизвестен";
+}
+
+/** Date-only suggestions are calendar labels, never synthesized deadline instants. */
+export function captureCalendarDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  try {
+    return new Intl.DateTimeFormat("ru-RU", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+      timeZone: "UTC",
+    }).format(new Date(`${value}T12:00:00Z`));
+  } catch {
+    return value;
+  }
+}
 
 export function captureDateTime(
   value: string | null,

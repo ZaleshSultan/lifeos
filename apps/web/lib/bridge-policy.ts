@@ -42,7 +42,7 @@ const resources: Array<{ pattern: RegExp; methods: readonly string[] }> = [
   },
   {
     pattern:
-      /^captures\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/(process|confirm|cancel|retry|archive)$/,
+      /^captures\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/(process|confirm|cancel|retry|archive|correct|reject|external)$/,
     methods: ["POST"],
   },
 ];

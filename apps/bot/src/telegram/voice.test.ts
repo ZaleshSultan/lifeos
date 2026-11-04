@@ -14,10 +14,12 @@ import {
   downloadTelegramVoice,
   transcribeCaptureVoice,
   validateOggOpus,
+  validateBoundedOggOpus,
   validateTelegramVoice,
   VoiceCaptureError,
   type GovernedCaptureSpeechAdapter,
 } from "./voice.js";
+import { speechOgg } from "../capture-speech-provider.test-fixtures.js";
 
 const now = new Date("2026-11-03T18:00:00Z");
 const sentAt = now.getTime() / 1000;
@@ -31,15 +33,7 @@ const metadata = {
 const destination =
   "https://api.telegram.org/file/bot123:synthetic/voice/file_1.oga";
 function ogg() {
-  const bytes = new Uint8Array(47);
-  bytes.set(Buffer.from("OggS"));
-  bytes[5] = 2;
-  bytes[26] = 1;
-  bytes[27] = 19;
-  bytes.set(Buffer.from("OpusHead"), 28);
-  bytes[36] = 1;
-  bytes[37] = 1;
-  return bytes;
+  return speechOgg();
 }
 const response = (
   bytes = ogg(),
@@ -143,12 +137,12 @@ describe("bounded memory-only Telegram audio download", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
   it("enforces actual streamed bytes even when content length is absent", async () => {
-    const bytes = new Uint8Array(48);
+    const bytes = new Uint8Array(ogg().length + 1);
     bytes.set(ogg());
     await expect(
       downloadTelegramVoice(destination, {
         fetcher: async () => response(bytes),
-        maxBytes: 47,
+        maxBytes: ogg().length,
       }),
     ).rejects.toMatchObject({ code: "voice_too_large" });
   });
@@ -225,6 +219,30 @@ describe("bounded memory-only Telegram audio download", () => {
         },
       }),
     ).rejects.toMatchObject({ message: "voice_download_failed" });
+  });
+});
+
+describe("strict bounded Ogg/Opus before paid dispatch", () => {
+  it("counts encoded packet duration and accepts the exact120-second cap", () => {
+    expect(validateBoundedOggOpus(ogg())).toBe(0.02);
+    expect(validateBoundedOggOpus(speechOgg(6000))).toBe(120);
+    expect(() => validateBoundedOggOpus(speechOgg(6001))).toThrowError(
+      "voice_too_large",
+    );
+  });
+  it("rejects corrupt checksums, missing EOS, truncated/chained streams and header-only data", () => {
+    const corrupt = ogg();
+    corrupt[corrupt.length - 1] ^= 1;
+    for (const bytes of [
+      corrupt,
+      ogg().subarray(0, 47),
+      ogg().subarray(0, ogg().length - 1),
+      new Uint8Array(Buffer.concat([ogg(), ogg()])),
+    ]) {
+      expect(() => validateBoundedOggOpus(bytes)).toThrowError(
+        "voice_unsupported",
+      );
+    }
   });
 });
 
