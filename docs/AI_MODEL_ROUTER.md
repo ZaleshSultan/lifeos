@@ -2,7 +2,7 @@
 
 Issue [#31](https://github.com/ZaleshSultan/lifeos/issues/31), implemented incrementally from November 3, 2026. Capture extensions are tracked by [Issue #54](https://github.com/ZaleshSultan/lifeos/issues/54).
 
-**November 4 candidate status:** production still runs application **`7ca304bf07b835a57cda004fc0dead2638dba607`**. The Nighthawk 2 native-speech/extraction lifecycle is source implementation with mock/focused coverage, **not deployed or live-provider verified**. Full source QA, exact file/artifact manifest, fresh recovery evidence, promotion and deployed smoke results are **PENDING**. Initial focused results (85 core, 194 baseline speech/router, 21 shared UI tests and an initial isolated SQL check) do not establish full release readiness. Historical deployment evidence remains in [Universal Capture Assistant](UNIVERSAL_CAPTURE_ASSISTANT.md#historical-v1-verified-release--november-3-2026) and the release report.
+**November 4 deployed status:** application **`a01a697fdfd40b0c5dd868c551177b7050f6130f`**, promoted 03:09:46 UTC with local/public health and delivered TMA hashes verified, runs tested source `98dd805f6e2fabc300339e8875e12d185d2b2ab8` from [PR #55](https://github.com/ZaleshSultan/lifeos/pull/55). All 12 source release stages, 2,021 units and 140 fixture-browser scenarios passed; schema 56 recovery/compatibility evidence is in [Universal Capture Assistant](UNIVERSAL_CAPTURE_ASSISTANT.md#nighthawk-2-release-evidence--november-4-2026). The completed actual API attempt passed 15 groups/128 HTTP requests with guarded cleanup; a later actual browser child passed 87 checks at all eight target viewports. Its parent ended before the final receipt/cleanup; reviewed reconciliation completed at 04:18:23 UTC, verified all 66 owner tables/Auth empty, full original facts/settings preserved, zero synthetic AI reservations/outbound jobs and no active manifest. The final read-only audit at **04:29:09–04:29:11 UTC** verified exact local/public application SHA, stable bot/web services, Telegram webhook identity/host/path with queue 0, capture/worker enabled and all nine external/unsafe flags OFF. **System-journal review is BLOCKED by OS permissions**; the runtime result is partial, not an overall pass. No clean-log claim is made. These are independently bounded passing stages; neither the earlier failed combined run nor interrupted parent is relabelled successful. Native speech and model extraction are deployed dormant code, **mock-tested/default OFF**, with real inference and voice accuracy unverified. Historical v1 evidence does not replace current acceptance.
 
 The router extends LifeOS's existing durable AI governor. Deterministic planning,
 manual journals, finance rules and the assistant's allowlisted tools remain usable
@@ -19,8 +19,8 @@ SQL, run a shell, or approve a proposed change.
 | Direct OpenAI API        | Fixed official API endpoint and API-key billing                                                                             | Unconfigured unless an operator explicitly supplies a scoped API key                                        |
 | Direct Anthropic API     | Fixed official Messages endpoint, Console API keys only                                                                     | Optional and unconfigured; subscription OAuth tokens are rejected                                           |
 | ChatGPT plan usage       | Official local OAuth companion, encrypted owner/host-bound transfer, refresh/revoke and strict Responses completion helpers | Prepared helpers; runtime adapter/catalog wiring, owner consent and eligibility verification remain pending |
-| Capture voice            | Candidate native OpenAI `gpt-transcribe`, duration pricing and shared-governor execution                                    | Mock tested; production transcription/router/paid gates off; real STT unverified                            |
-| Capture model extraction | Candidate constrained proposals through existing router, with separate per-record consent                                   | Mock tested, default disabled; no live model request verified                                               |
+| Capture voice            | Native OpenAI `gpt-transcribe`, duration pricing and shared-governor execution                                              | Mock tested; production transcription/router/paid gates off; real STT unverified                            |
+| Capture model extraction | Constrained proposals through existing router, with separate per-record consent                                             | Mock tested, default disabled; no live model request verified                                               |
 | Gemini/OpenRouter speech | Official-documentation research for future adapters                                                                         | Prepared research only; no implemented speech transport or real quality test                                |
 | `openrouter/auto`        | Documented optional future path                                                                                             | Blocked: its variable-price catalog entry is not a priced approved model                                    |
 
@@ -192,7 +192,7 @@ until their model, privacy and price bounds can be enforced.
 
 This section describes preparation and the remaining activation sequence. It is
 not authorization to enable a flag, spend money, use an existing Gemini key for
-voice, or reuse a subscription token. The candidate native adapter accepts only
+voice, or reuse a subscription token. The deployed dormant native adapter accepts only
 OpenAI **`gpt-transcribe`** at the fixed
 `https://api.openai.com/v1/audio/transcriptions` endpoint. ChatGPT plan allowance,
 ordinary API billing and legitimate native Claude Code development use remain
@@ -311,7 +311,7 @@ Telegram download; no second agent framework or automatic worker dispatch exists
 The existing governor keeps token/cost/user/feature/global limits, idempotency,
 concurrency, timeout, circuit and cancellation protections.
 
-The candidate validates the complete bounded Ogg/Opus stream, including
+The deployed dormant adapter validates the complete bounded Ogg/Opus stream, including
 single-stream sequence, headers, CRC and packet-derived duration, before provider
 dispatch. The limit is 5 MiB/120 seconds; sender duration alone is insufficient.
 No media executable is launched. Audio stays in memory and server-only Telegram
@@ -363,18 +363,15 @@ deterministic baseline with `capture_model_fallback`; it never silently retries
 another paid provider. Safe failure and manual-transcript review remain usable.
 
 Optional action presentation/provenance fields are stored separately from
-executable arguments. The additive candidate v2 projection supplies them without
-changing the old v1 public RPC shape. Full candidate migration/rollback and
-production evidence remain pending; additive compatibility is not permission to
-skip a matching backup/isolated restore.
+executable arguments. The additive schema 56 v2 projection supplies them without changing the old v1 public RPC shape. Actual migration, matching encrypted backup/installed restore and old-reader recovery checks passed. Actual API and browser stages passed independently on the same loaded application. Reviewed reconciliation verified current synthetic-owner cleanup and original-fact/settings preservation. The final read-only audit at **04:29:09–04:29:11 UTC** verified exact local/public application SHA, stable bot/web services, Telegram webhook identity/host/path with queue 0, capture/worker enabled and all nine external/unsafe flags OFF. **System-journal review is BLOCKED by OS permissions**; the runtime result is partial, not an overall pass. No clean-log claim is made. See the release report for the composite evidence boundary.
 
 ## Speech alternatives and existing nutrition review
 
-| Option                          | Preparation                                                                                                                         | Implemented/live status                                     |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| Native OpenAI `gpt-transcribe`  | Fixed native multipart transport; duration metadata; governor/consent/cancel tests                                                  | Candidate mock tested, disabled; no real owner audio result |
-| Gemini `gemini-3.5-transcribe`  | Official documentation covers multilingual audio; future inline adapter must force `store:false` and avoid persistent Files/history | Research only; no adapter or quality test                   |
-| OpenRouter native transcription | Official endpoint research; privacy/routing/timeout differences require a dedicated review                                          | Research only; no adapter/model-price/quality verification  |
+| Option                          | Preparation                                                                                                                         | Implemented/live status                                             |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Native OpenAI `gpt-transcribe`  | Fixed native multipart transport; duration metadata; governor/consent/cancel tests                                                  | Deployed code, mock tested and disabled; no real owner audio result |
+| Gemini `gemini-3.5-transcribe`  | Official documentation covers multilingual audio; future inline adapter must force `store:false` and avoid persistent Files/history | Research only; no adapter or quality test                           |
+| OpenRouter native transcription | Official endpoint research; privacy/routing/timeout differences require a dedicated review                                          | Research only; no adapter/model-price/quality verification          |
 
 Primary references are [Gemini transcription](https://aistudio.google.com/docs/transcribe),
 [Interactions lifecycle](https://aistudio.google.com/docs/interactions-overview)
@@ -387,8 +384,7 @@ chat-shaped workaround is presented as a working STT integration.
 The existing web/TMA meal-photo workflow remains separate: capability check,
 local image preparation, explicit per-photo external-analysis consent, estimated
 editable draft and separate explicit confirmation through existing nutrition
-storage. Unknown macros stay unknown and an estimate is not a measurement. No new
-photo inbox, vision request or meal write was performed by this candidate work.
+storage. Unknown macros stay unknown and an estimate is not a measurement. This release adds no new photo inbox or authorized live vision request; fixture/API meal writes are separate from actual owner activity.
 
 Read the [capture guide](UNIVERSAL_CAPTURE_ASSISTANT.md#owner-activation-and-the-outstanding-real-test)
 for the outstanding genuine Telegram/owner-consent/three-card/DBMS-only/replay,
