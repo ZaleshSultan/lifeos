@@ -249,7 +249,7 @@ function cleanClause(text: string): string {
       "",
     )
     .replace(
-      /^(?:(?:мне\s+)?(?:нужно|надо|хочу|планирую)|i\s+(?:want\s+to|need\s+to|should|plan\s+to))\s+/iu,
+      /^(?:(?:мне\s+)?(?:нужно|надо|хочу|планирую)|i\s+(?:want\s+to|need\s+to|should|plan\s+to)(?:\s+also)?)\s+/iu,
       "",
     )
     .replace(/\s+керек$/iu, "")
@@ -308,9 +308,19 @@ function clauses(text: string): string[] {
     );
   const expanded: string[] = [];
   for (const part of result) {
+    // An explicit reminder owns its body, including task/filming verbs. Only
+    // the explicit clause boundaries above can start another action here.
+    if (
+      /^(?:remind\s+me|create\s+(?:a\s+)?reminder|напомни|создай\s+напоминание)(?=$|[\s:])/iu.test(
+        part.trim(),
+      )
+    ) {
+      expanded.push(restore(part.trim()));
+      continue;
+    }
     let start = 0;
     const implicit =
-      /\s+(?=(?:go\s+(?:to\s+)?(?:the\s+)?gym\b|film\b|finish\b|законч(?:ить)?\s+|снять\s+|потренироваться(?=$|\s)|залға\s+|влог\s+түсіру))/giu;
+      /\s+(?=(?:go\s+(?:to\s+)?(?:the\s+)?gym\b|film\b|finish\b|законч(?:ить)?\s+|снять\s+|потренироваться(?=$|\s)|залға\s+|(?:(?:вечером|утром|дн[её]м|кешке|таңертең)\s+)?влог\s+(?:снять|түсіру)(?=$|\s)))/giu;
     for (const match of part.matchAll(implicit)) {
       const before = part.slice(start, match.index);
       if (canStart(before) && hasObject(before)) {

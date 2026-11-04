@@ -380,6 +380,8 @@ export async function captureBrowserScenarios({
   });
   const original =
     "Завтра после университета нужно потренироваться, закончить DBMS и снять пару кадров для Ideal Human.";
+  const finalObjective =
+    "Завтра после универа хочу в зал, потом закрыть DBMS и вечером снять видос для Ideal Human.";
   let mixedId;
   await test(`${prefix}: multilingual mixed intentions have independent unchecked review cards`, async () => {
     for (const [text, count] of [
@@ -394,9 +396,13 @@ export async function captureBrowserScenarios({
         2,
       ],
       ["После пар зал потом DBMS вечером влог снять", 3],
+      [finalObjective, 3],
     ]) {
       await composer().fill(text);
       await saveCapture().click();
+      // A previous review can also have zero selected actions while ingest is
+      // pending. Wait for this input's accepted view before reading its proposals.
+      await detail().getByText(text, { exact: true }).waitFor();
       await detail()
         .getByText("Выбрано действий: 0", { exact: true })
         .waitFor();
@@ -417,8 +423,8 @@ export async function captureBrowserScenarios({
           .length,
         0,
       );
-      if (text === original) {
-        mixedId = current.id;
+      if (text === original || text === finalObjective) {
+        if (text === original) mixedId = current.id;
         const task = current.actions.find(
           (action) => action.kind === "task.create",
         );
@@ -438,14 +444,28 @@ export async function captureBrowserScenarios({
           .getByText(/Точное время не назначено/)
           .first()
           .waitFor();
+        if (text === finalObjective) {
+          assert.equal(workout.presentation.relation, "после универа");
+          assert.equal(filming.presentation.timeHint, "вечером");
+          assert.ok(
+            current.actions.every(
+              (action) => action.presentation.suggestedDate === "2026-11-04",
+            ),
+          );
+          await detail()
+            .getByText(/Пожелание по времени: вечером/)
+            .waitFor();
+        }
       }
     }
     assert.equal(fixture.providerCalls, 0);
   });
   await test(`${prefix}: corrections and one-action rejection preserve partial receipts without implicit approval`, async () => {
     await page
-      .getByRole("button", { name: new RegExp("^" + original.slice(0, 40)) })
+      .getByRole("region", { name: "История входящих", exact: true })
+      .getByText(original, { exact: true })
       .click();
+    await detail().getByText(original, { exact: true }).waitFor();
     const instruction = detail().getByLabel("Уточнение предложений", {
       exact: true,
     });

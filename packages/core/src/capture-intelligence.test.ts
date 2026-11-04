@@ -96,6 +96,139 @@ describe("multilingual deterministic capture intelligence", () => {
       ),
     ).toBe(true);
   });
+  it("keeps the explicit task, water and incomplete reminder as exactly three proposals", () => {
+    const actions = extractCaptureActions(
+      "task: Capture fixture task; water 250 ml; remind me finish DBMS",
+      context,
+    );
+    expect(actions.map((action) => action.kind)).toEqual([
+      "task.create",
+      "water.log",
+      "reminder.create",
+    ]);
+    expect(actions.map((action) => action.id)).toEqual([
+      "action-1",
+      "action-2",
+      "action-3",
+    ]);
+    expect(actions[0].args).toMatchObject({ title: "Capture fixture task" });
+    expect(actions[1].args).toEqual({ amountMl: 250 });
+    expect(actions[2].args).toEqual({ title: "finish DBMS", remindAt: null });
+    expect(actions[2].missingFields).toEqual(["remindAt"]);
+  });
+  it.each([
+    ["remind me finish DBMS", "finish DBMS"],
+    ["remind me to finish DBMS", "finish DBMS"],
+    ["remind me finish DBMS film my vlog", "finish DBMS film my vlog"],
+    ["create a reminder: finish DBMS", "finish DBMS"],
+    ["напомни закончить DBMS", "закончить DBMS"],
+    ["напомни закончить DBMS снять влог", "закончить DBMS снять влог"],
+    ["создай напоминание закончить DBMS", "закончить DBMS"],
+  ])(
+    "keeps task verbs inside the explicit reminder body: %s",
+    (input, title) => {
+      const actions = extractCaptureActions(input, context);
+      expect(actions).toHaveLength(1);
+      expect(actions[0]).toMatchObject({
+        kind: "reminder.create",
+        args: { title, remindAt: null },
+        missingFields: ["remindAt"],
+        origin: "deterministic",
+      });
+    },
+  );
+  it.each([
+    "remind me finish DBMS; water 250 ml; film my vlog",
+    "remind me finish DBMS and log water 250 ml and film my vlog",
+  ])(
+    "still separates explicitly introduced actions after a reminder: %s",
+    (input) => {
+      const actions = extractCaptureActions(input, context);
+      expect(actions.map((action) => action.kind)).toEqual([
+        "reminder.create",
+        "water.log",
+        "filming.idea",
+      ]);
+      expect(actions[0].args).toEqual({ title: "finish DBMS", remindAt: null });
+      expect(actions[0].missingFields).toEqual(["remindAt"]);
+    },
+  );
+  it("keeps the informal purchase reminder separate without inventing a time or a water log", () => {
+    const actions = extractCaptureActions(
+      "Брат, напомни купить воду, сделать домашку и записать идею для видоса.",
+      context,
+    );
+    expect(actions.map((action) => action.kind)).toEqual([
+      "reminder.create",
+      "task.create",
+      "note.save",
+    ]);
+    expect(actions[0].args).toEqual({ title: "купить воду", remindAt: null });
+    expect(actions[0].missingFields).toEqual(["remindAt"]);
+    expect(actions[1].args).toMatchObject({
+      title: "Сделать домашку",
+      dueAt: null,
+    });
+    expect(actions[2].args).toMatchObject({
+      content: "записать идею для видоса",
+    });
+  });
+  it("separates the punctuation-free DBMS and vlog intents while keeping evening with filming", () => {
+    const actions = extractCaptureActions(
+      "После пар зал потом DBMS вечером влог снять",
+      context,
+    );
+    expect(actions.map((action) => action.kind)).toEqual([
+      "planning.suggest",
+      "task.create",
+      "filming.idea",
+    ]);
+    expect(actions[0].args).toMatchObject({ time: null });
+    expect(actions[1].args).toMatchObject({ title: "DBMS", dueAt: null });
+    expect(actions[1].presentation?.suggestedDate).toBeNull();
+    expect(actions[2].args).toMatchObject({ content: "Влог снять" });
+    expect(actions[2].presentation).toMatchObject({
+      timeHint: "вечером",
+      description: "вечером влог снять",
+      evidence: "user_statement",
+    });
+    expect(actions[2].args).not.toHaveProperty("time");
+    expect(actions.every((action) => action.origin === "deterministic")).toBe(
+      true,
+    );
+  });
+  it("preserves all three exact final mission intents with tomorrow and literal schedule hints", () => {
+    const actions = extractCaptureActions(
+      "Завтра после универа хочу в зал, потом закрыть DBMS и вечером снять видос для Ideal Human.",
+      context,
+    );
+    expect(actions.map((action) => action.kind)).toEqual([
+      "planning.suggest",
+      "task.create",
+      "filming.idea",
+    ]);
+    expect(actions[0].args).toMatchObject({
+      title: "В зал после универа",
+      date: "2026-11-05",
+      time: null,
+    });
+    expect(actions[0].presentation?.relation).toBe("после универа");
+    expect(actions[1].args).toMatchObject({
+      title: "Закончить DBMS",
+      dueAt: null,
+    });
+    expect(actions[2].args).toMatchObject({
+      content: "Снять видос для Ideal Human",
+      date: "2026-11-05",
+    });
+    expect(actions[2].presentation?.timeHint).toBe("вечером");
+    expect(actions[2].args).not.toHaveProperty("time");
+    for (const action of actions) {
+      expect(action.origin).toBe("deterministic");
+      expect(action.presentation?.suggestedDate).toBe("2026-11-05");
+      expect(action.presentation?.evidence).toBe("user_statement");
+    }
+  });
   it("preserves objects and explicit memory punctuation instead of splitting noun lists", () => {
     expect(
       extractCaptureActions("Напомни купить молоко, хлеб и воду", context),
