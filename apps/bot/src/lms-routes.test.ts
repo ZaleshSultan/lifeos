@@ -280,8 +280,10 @@ describe("LMS HTTP authentication boundary", () => {
   );
 
   it("rejects expired, future-dated, forged and unlinked Telegram identities", async () => {
-    const f = await fixture({ unlinked: [25] });
     const now = Math.floor(Date.now() / 1000);
+    // Preserve the exact +301 rejection across the real HTTP round trip.
+    vi.spyOn(Date, "now").mockReturnValue(now * 1000);
+    const f = await fixture({ unlinked: [25] });
     for (const signed of [
       headers(20, now - 86401),
       headers(20, now + 301),

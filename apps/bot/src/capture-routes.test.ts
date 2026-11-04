@@ -297,6 +297,10 @@ describe("capture HTTP authentication and owner boundary", () => {
   it.each(["missing", "invalid", "expired", "future"])(
     "rejects %s Telegram authentication before parsing private input",
     async (kind) => {
+      // Keep the auth boundary exact while real HTTP timers continue running.
+      // Crossing a wall-clock second must not turn +301 into allowed +300.
+      const fixedSeconds = Math.floor(Date.now() / 1000);
+      vi.spyOn(Date, "now").mockReturnValue(fixedSeconds * 1000);
       const f = await fixture();
       const headers: Record<string, string> =
         kind === "missing"
@@ -305,8 +309,7 @@ describe("capture HTTP authentication and owner boundary", () => {
             ? { "x-telegram-init-data": "auth_date=1&hash=forged" }
             : telegramHeaders(
                 20,
-                Math.floor(Date.now() / 1000) +
-                  (kind === "expired" ? -86_401 : 301),
+                fixedSeconds + (kind === "expired" ? -86_401 : 301),
               );
       await expectError(
         await f.request("", {
@@ -321,6 +324,25 @@ describe("capture HTTP authentication and owner boundary", () => {
       expect(f.ports.ingest).not.toHaveBeenCalled();
     },
   );
+
+  it("keeps the exact 300-second future allowance and rejects 301 with a fixed auth clock", async () => {
+    const fixedSeconds = Math.floor(Date.now() / 1000);
+    vi.spyOn(Date, "now").mockReturnValue(fixedSeconds * 1000);
+    const f = await fixture();
+    const allowed = await f.request("/capabilities", {
+      headers: telegramHeaders(20, fixedSeconds + 300),
+    });
+    expect(allowed.status).toBe(200);
+    await expectError(
+      await f.request("/capabilities", {
+        headers: telegramHeaders(20, fixedSeconds + 301),
+      }),
+      401,
+      "invalid_telegram_init_data",
+    );
+    expect(f.resolveTelegramUser).toHaveBeenCalledTimes(1);
+    expect(f.ports.ingest).not.toHaveBeenCalled();
+  });
 
   it.each(["pending", "blocked"] as const)(
     "rejects %s linked owners before capture reads",

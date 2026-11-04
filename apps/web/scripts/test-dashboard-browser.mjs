@@ -12,6 +12,7 @@ import {
   emptyIdealHumanDay,
   hasIdealHumanReflection,
   idealHumanDate,
+  idealHumanDayNumber,
   idealHumanLocalDate,
   parseIdealHumanDay,
 } from "../../../packages/core/src/ideal-human.ts";
@@ -172,20 +173,26 @@ const json = (res, data, status = 200) => {
   res.writeHead(status, { "content-type": "application/json" });
   res.end(JSON.stringify(status >= 400 ? data : { data }));
 };
-const hydration = (owner) => ({
-  date,
-  timezone: "Asia/Almaty",
-  totalMl: water
+const hydration = (owner, targetDate = date) => {
+  const entries = water
     .get(owner)
-    .filter((v) => !v.undoneAt)
-    .reduce((s, v) => s + v.amountMl, 0),
-  entries: water.get(owner),
-  truncated: false,
-});
-const summary = (owner) => ({
-  date,
+    .filter(
+      (entry) => idealHumanLocalDate(new Date(entry.occurredAt)) === targetDate,
+    );
+  return {
+    date: targetDate,
+    timezone: "Asia/Almaty",
+    totalMl: entries
+      .filter((entry) => !entry.undoneAt)
+      .reduce((total, entry) => total + entry.amountMl, 0),
+    entries,
+    truncated: false,
+  };
+};
+const summary = (owner, targetDate = date) => ({
+  date: targetDate,
   timezone: "Asia/Almaty",
-  dayNumber: 1,
+  dayNumber: idealHumanDayNumber(targetDate),
   health: {
     sleepMinutes: null,
     weightKg: null,
@@ -197,9 +204,11 @@ const summary = (owner) => ({
     devicePermissions: "not_reported",
     warnings: [],
   },
-  hydration: hydration(owner),
+  hydration: hydration(owner, targetDate),
   nutrition: {
-    mealCount: days.get(owner).find((v) => v.date === date)?.meals.length ?? 0,
+    mealCount:
+      days.get(owner).find((record) => record.date === targetDate)?.meals
+        .length ?? 0,
     caloriesKcal: null,
     proteinG: null,
     fatG: null,
@@ -348,7 +357,7 @@ const backend = createServer(async (req, res) => {
         },
       });
     if (path === "/api/tma/daily-life/summary")
-      return json(res, summary(owner));
+      return json(res, summary(owner, url.searchParams.get("date") ?? date));
     if (path === "/api/tma/daily-life/preferences")
       return json(
         res,
@@ -431,14 +440,26 @@ const backend = createServer(async (req, res) => {
         });
         receipts.set(owner + input.requestId, true);
       }
-      return json(res, hydration(owner));
+      return json(
+        res,
+        hydration(
+          owner,
+          url.searchParams.get("date") ?? idealHumanLocalDate(new Date()),
+        ),
+      );
     }
     if (/^\/api\/tma\/hydration\/[^/]+\/undo$/.test(path)) {
       const entry = water
         .get(owner)
         .find((v) => v.id === path.split("/").at(-2));
       if (entry) entry.undoneAt ??= new Date().toISOString();
-      return json(res, hydration(owner));
+      return json(
+        res,
+        hydration(
+          owner,
+          url.searchParams.get("date") ?? idealHumanLocalDate(new Date()),
+        ),
+      );
     }
     if (path === "/api/tma/nutrition/capabilities")
       return json(res, {
@@ -835,6 +856,16 @@ try {
     await p.goto(`${origin}/web/ideal-human`);
     await selectFixtureDay(p);
   }
+  async function shownNutritionDate(p) {
+    assert.equal(new URL(p.url()).pathname, "/web/nutrition");
+    const label = p.getByText(/^\d{4}-\d{2}-\d{2}\s*·\s*Asia\/Almaty\./);
+    await label.waitFor();
+    const match = /^(\d{4}-\d{2}-\d{2})\s*·\s*Asia\/Almaty\./.exec(
+      await label.innerText(),
+    );
+    assert.ok(match);
+    return match[1];
+  }
   const context = await isolatedContext({
     viewport: { width: 1440, height: 1000 },
     timezoneId: "UTC",
@@ -909,7 +940,10 @@ try {
       await page.getByLabel("Утренний вес, кг", { exact: true }).inputValue(),
       "51.7",
     );
-    assert.equal(days.get("A")[0].sleepMinutes, 450);
+    assert.equal(
+      days.get("A").find((record) => record.date === date)?.sleepMinutes,
+      450,
+    );
   });
   await test("network failure retains edits and stale writes preserve remote version", async () => {
     await page.getByLabel("Утренний вес, кг", { exact: true }).fill("52");
@@ -923,15 +957,20 @@ try {
       "52",
     );
     journalFail = false;
-    days.get("A")[0].revision++;
-    days.get("A")[0].notes = "Fixture remote edit";
+    const remoteDay = days.get("A").find((record) => record.date === date);
+    assert.ok(remoteDay);
+    remoteDay.revision++;
+    remoteDay.notes = "Fixture remote edit";
     await page
       .getByRole("button", { name: "Сохранить день", exact: true })
       .click();
     await page
       .getByRole("button", { name: "Загрузить сохранённую версию" })
       .waitFor();
-    assert.equal(days.get("A")[0].weightKg, 51.7);
+    assert.equal(
+      days.get("A").find((record) => record.date === date)?.weightKg,
+      51.7,
+    );
     await page
       .getByRole("button", { name: "Загрузить сохранённую версию" })
       .click();
@@ -1157,16 +1196,26 @@ try {
   });
   await test("hydration quick logging and undo are explicit and shared", async () => {
     await page.goto(`${origin}/web/nutrition`);
+    const shownDate = await shownNutritionDate(page);
     await page.getByRole("button", { name: "+250 мл", exact: true }).click();
     await page.getByText("250 мл", { exact: true }).first().waitFor();
-    assert.equal(hydration("A").totalMl, 250);
+    assert.equal(hydration("A", shownDate).date, shownDate);
+    assert.equal(hydration("A", shownDate).totalMl, 250);
     await page
       .getByRole("button", { name: "Отменить последнюю запись", exact: true })
       .click();
     await page.getByText("Последняя запись воды отменена.").waitFor();
-    assert.equal(hydration("A").totalMl, 0);
+    assert.equal(hydration("A", shownDate).totalMl, 0);
   });
   await test("meal photo is local until consent, draft remains unsaved, confirmation writes reviewed estimate", async () => {
+    const shownDate = await shownNutritionDate(page);
+    const beforeDays = structuredClone(days.get("A"));
+    const previous = structuredClone(
+      beforeDays.find((record) => record.date === shownDate) ??
+        emptyIdealHumanDay(shownDate),
+    );
+    const otherDays = beforeDays.filter((record) => record.date !== shownDate);
+    const putsBefore = journalPuts;
     assert.equal(analyses, 0);
     const png = Buffer.from(
       await page.evaluate(() => {
@@ -1199,7 +1248,8 @@ try {
     await page
       .getByText("Оценка AI: проверь и исправь", { exact: true })
       .waitFor();
-    assert.equal(days.get("A")[0].meals.length, 0);
+    assert.deepEqual(days.get("A"), beforeDays);
+    assert.equal(journalPuts, putsBefore);
     await page.getByLabel("Ккал", { exact: true }).fill("650");
     page.off("dialog", acceptDialog);
     const guard = page.waitForEvent("dialog").then(async (dialog) => {
@@ -1234,7 +1284,7 @@ try {
         { exact: true },
       )
       .waitFor();
-    assert.equal(days.get("A")[0].meals.length, 0);
+    assert.deepEqual(days.get("A"), beforeDays);
     assert.equal(
       await page.getByLabel("Ккал", { exact: true }).inputValue(),
       "650",
@@ -1252,13 +1302,51 @@ try {
       })
       .waitFor();
     assert.equal(analyses, 1);
-    assert.equal(days.get("A")[0].meals[0].caloriesKcal, 650);
-    assert.equal(days.get("A")[0].meals[0].corrected, true);
+    const saved = days.get("A").find((record) => record.date === shownDate);
+    assert.ok(saved);
+    assert.equal(saved.date, shownDate);
+    assert.equal(saved.revision, previous.revision + 1);
+    assert.equal(saved.meals.length, previous.meals.length + 1);
+    assert.deepEqual(
+      saved.meals.slice(0, previous.meals.length),
+      previous.meals,
+    );
+    const estimate = saved.meals.at(-1);
+    assert.equal(estimate.caloriesKcal, 650);
+    assert.equal(estimate.corrected, true);
+    assert.equal(estimate.analysisSource, "gemini");
+    assert.equal(estimate.estimated, true);
+    assert.deepEqual(
+      { ...saved, meals: previous.meals, revision: previous.revision },
+      previous,
+    );
+    assert.deepEqual(
+      days.get("A").filter((record) => record.date !== shownDate),
+      otherDays,
+    );
+    await page.reload();
+    assert.equal(await shownNutritionDate(page), shownDate);
+    assert.deepEqual(
+      JSON.parse(
+        await page.getByLabel("Питание JSON", { exact: true }).inputValue(),
+      ),
+      saved.meals,
+    );
+    assert.deepEqual(
+      days.get("A").filter((record) => record.date !== shownDate),
+      otherDays,
+    );
   });
   await test("manual meal creation preserves provenance without photo analysis", async () => {
     await page.goto(`${origin}/web/nutrition`);
     await page.waitForLoadState("networkidle");
-    const previous = structuredClone(days.get("A")[0]);
+    const shownDate = await shownNutritionDate(page);
+    const beforeDays = structuredClone(days.get("A"));
+    const previous = structuredClone(
+      beforeDays.find((record) => record.date === shownDate) ??
+        emptyIdealHumanDay(shownDate),
+    );
+    const otherDays = beforeDays.filter((record) => record.date !== shownDate);
     const previousAnalyses = analyses;
     const mealIndex = previous.meals.length + 1;
     await page
@@ -1277,6 +1365,8 @@ try {
     await page
       .getByLabel(`Блюдо ${mealIndex}, ккал`, { exact: true })
       .fill("250");
+    assert.deepEqual(days.get("A"), beforeDays);
+    assert.equal(analyses, previousAnalyses);
     await page
       .getByRole("button", { name: "Сохранить питание", exact: true })
       .click();
@@ -1285,7 +1375,10 @@ try {
         exact: true,
       })
       .waitFor();
-    const saved = days.get("A")[0];
+    const saved = days.get("A").find((record) => record.date === shownDate);
+    assert.ok(saved);
+    assert.equal(saved.date, shownDate);
+    assert.equal(saved.revision, previous.revision + 1);
     assert.equal(saved.meals.length, previous.meals.length + 1);
     assert.deepEqual(
       saved.meals.slice(0, previous.meals.length),
@@ -1296,9 +1389,28 @@ try {
     assert.equal(manual.caloriesKcal, 250);
     assert.equal(manual.analysisSource, "manual");
     assert.equal(manual.corrected, false);
+    assert.deepEqual(
+      { ...saved, meals: previous.meals, revision: previous.revision },
+      previous,
+    );
+    assert.deepEqual(
+      days.get("A").filter((record) => record.date !== shownDate),
+      otherDays,
+    );
     assert.equal(analyses, previousAnalyses);
     await page.reload();
     await page.waitForLoadState("networkidle");
+    assert.equal(await shownNutritionDate(page), shownDate);
+    assert.deepEqual(
+      JSON.parse(
+        await page.getByLabel("Питание JSON", { exact: true }).inputValue(),
+      ),
+      saved.meals,
+    );
+    assert.deepEqual(
+      days.get("A").filter((record) => record.date !== shownDate),
+      otherDays,
+    );
     await page
       .locator("summary")
       .filter({ hasText: /^Питание/ })
