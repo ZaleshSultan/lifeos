@@ -32,3 +32,4 @@ export * from "./ai-model-router.js";
 export * from "./ai-router-settings-view.js";
 export * from "./universal-capture.js";
 export * from "./capture-intelligence.js";
+export * from "./ai-provider-quota.js";
