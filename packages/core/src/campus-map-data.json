@@ -1,0 +1,3665 @@
+{
+  "version": 1,
+  "upstream": "https://github.com/Yuujiso/aitumap",
+  "interactiveUrl": "https://yuujiso.github.io/aitumap/",
+  "sourceCommit": "028869ba9f6b03627d7bef64511491101adf2ace",
+  "license": "MIT Copyright (c) 2023 Yuujiso",
+  "aliases": {
+    "C1.3.319": "C1.3.319P"
+  },
+  "floors": {
+    "C1_1_1": {
+      "block": "C1.1",
+      "floor": 1,
+      "svgFile": "C1_1_1.svg",
+      "sourcePath": "src/shared/ui/separate/C1_1_1.jsx",
+      "sourceSha256": "cc2cd0009ccebaad7e153b7c9d427c13fa1eb7e77ead3b5fe819f6fc85f36cc2",
+      "svgSha256": "3334c6b7025872a457e0607db6dd051245ae449e51aeaa129a0f39161e290df4",
+      "viewBox": "0 0 347.52 354.54"
+    },
+    "C1_1_2": {
+      "block": "C1.1",
+      "floor": 2,
+      "svgFile": "C1_1_2.svg",
+      "sourcePath": "src/shared/ui/separate/C1_1_2.jsx",
+      "sourceSha256": "7220e661ceea9864c9c08e6d9bddc262de472adfbc7adfcb58b0331998c24bc4",
+      "svgSha256": "acdf670fc851253f27349f324dcb3b4ee8383ec299b39442eff16d68f7ee644f",
+      "viewBox": "0 0 347.52 354.54"
+    },
+    "C1_1_3": {
+      "block": "C1.1",
+      "floor": 3,
+      "svgFile": "C1_1_3.svg",
+      "sourcePath": "src/shared/ui/separate/C1_1_3.jsx",
+      "sourceSha256": "a1e6d984242696f8b53d5357c0a331396a49d6015279672efb49c6dd199f13e5",
+      "svgSha256": "7fc4a716657b0918b51595e59bd32b99388a0c5a1e6181dc87506ee79865a26f",
+      "viewBox": "0 0 347.52 354.54"
+    },
+    "C1_2_1": {
+      "block": "C1.2",
+      "floor": 1,
+      "svgFile": "C1_2_1.svg",
+      "sourcePath": "src/shared/ui/separate/C1_2_1.jsx",
+      "sourceSha256": "eadc023a5a020a6e394411c10e7d698722f13bd8cd5193558ce7881ed60e0344",
+      "svgSha256": "fa29d28e7cba231b8792b962f9f97f4c99820a4293977475fdc327808e08b4a0",
+      "viewBox": "0 0 328.03 329.11"
+    },
+    "C1_2_2": {
+      "block": "C1.2",
+      "floor": 2,
+      "svgFile": "C1_2_2.svg",
+      "sourcePath": "src/shared/ui/separate/C1_2_2.jsx",
+      "sourceSha256": "fa9787bf54d1f150a47fe7fbf82a90d5ee2f3a264e0c5ef020083d1f414dd31b",
+      "svgSha256": "01451b0c57ca5c9fdbf0e34574995ae256648605d991a768f706f06237c22053",
+      "viewBox": "0 0 328.03 329.11"
+    },
+    "C1_2_3": {
+      "block": "C1.2",
+      "floor": 3,
+      "svgFile": "C1_2_3.svg",
+      "sourcePath": "src/shared/ui/separate/C1_2_3.jsx",
+      "sourceSha256": "9648ee38b0d19c604e533fdb9c15032eed9f674ce1c8ae4b58b2b9b274e922a3",
+      "svgSha256": "819f07cf0e86e72a4a90fcdaa3ec6b28c56df1a0bae0b3ac161af968f7b54f12",
+      "viewBox": "0 0 328.03 329.11"
+    },
+    "C1_3_1": {
+      "block": "C1.3",
+      "floor": 1,
+      "svgFile": "C1_3_1.svg",
+      "sourcePath": "src/shared/ui/separate/C1_3_1.jsx",
+      "sourceSha256": "11e845c514a7df816d52d077e77ad60aba0835b5530c4f6802c7deff43a34700",
+      "svgSha256": "2f58b6c1e94fe80d5e3d5614bb82af5019794a88d8cd8d92ecd59bb98a43bd43",
+      "viewBox": "0 0 347.52 354.54"
+    },
+    "C1_3_2": {
+      "block": "C1.3",
+      "floor": 2,
+      "svgFile": "C1_3_2.svg",
+      "sourcePath": "src/shared/ui/separate/C1_3_2.jsx",
+      "sourceSha256": "65fd172ecad179e84ebf6a8d1fd3ad052c9759a2848c8e638f50cb3067822e7d",
+      "svgSha256": "323c9219a65f87b6c11dd250170f2c1486f21a35817398b99e61503b8ad9fa70",
+      "viewBox": "0 0 347.52 354.54"
+    },
+    "C1_3_3": {
+      "block": "C1.3",
+      "floor": 3,
+      "svgFile": "C1_3_3.svg",
+      "sourcePath": "src/shared/ui/separate/C1_3_3.jsx",
+      "sourceSha256": "88e8d1d0fe7089b0f34e3ea00b734f2d7ca5b28c5a30662900500dd548459fef",
+      "svgSha256": "471c1655266d577f72fd231436e12a2705a90068bf2beceda69676e6147fecb8",
+      "viewBox": "0 0 347.52 354.54"
+    }
+  },
+  "rooms": {
+    "C1.1.139": {
+      "block": "C1.1",
+      "floor": 1,
+      "floorId": "C1_1_1",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.139.png",
+      "sha256": "23101def86dd83761709b0351b0271223d333406d3c575f78a7df448185ee653",
+      "bytes": 116122,
+      "geometry": {
+        "x": 261.7900085449219,
+        "y": 25.6200008392334,
+        "width": 23.149993896484375,
+        "height": 30.149999618530273
+      }
+    },
+    "C1.1.140": {
+      "block": "C1.1",
+      "floor": 1,
+      "floorId": "C1_1_1",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.140.png",
+      "sha256": "64e7e5b9733b64c015c7c1dfbc50a89c4f9af7cdeece8a64b79c418dbd393e90",
+      "bytes": 115810,
+      "geometry": {
+        "x": 280.29998779296875,
+        "y": 23.34000015258789,
+        "width": 18.920013427734375,
+        "height": 29.40999984741211
+      }
+    },
+    "C1.1.141": {
+      "block": "C1.1",
+      "floor": 1,
+      "floorId": "C1_1_1",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.141.png",
+      "sha256": "c38cd3741c9f86958e03b5ace68b244afb846e79640652a21c217fbae75d13d6",
+      "bytes": 115406,
+      "geometry": {
+        "x": 269.1499938964844,
+        "y": 60.84000015258789,
+        "width": 36.410003662109375,
+        "height": 37.689998626708984
+      }
+    },
+    "C1.1.142": {
+      "block": "C1.1",
+      "floor": 1,
+      "floorId": "C1_1_1",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.142.png",
+      "sha256": "60ac035e29e73a2ac9df8d67e519dc6ea41e749d77c3e40462dda32d4f865679",
+      "bytes": 116092,
+      "geometry": {
+        "x": 275.3299865722656,
+        "y": 93.18000030517578,
+        "width": 36.3900146484375,
+        "height": 47.06000518798828
+      }
+    },
+    "C1.1.143": {
+      "block": "C1.1",
+      "floor": 1,
+      "floorId": "C1_1_1",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.143.png",
+      "sha256": "b462f17d23e75ade3a4c6f2b906a55fff808000a336e8f85833fd379401c5333",
+      "bytes": 115865,
+      "geometry": {
+        "x": 221.19000244140625,
+        "y": 69.0199966430664,
+        "width": 41.3800048828125,
+        "height": 39.480003356933594
+      }
+    },
+    "C1.1.155": {
+      "block": "C1.1",
+      "floor": 1,
+      "floorId": "C1_1_1",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.155.png",
+      "sha256": "72dac96dd1a2dd0bc857acbf919c08e86eea199d0d19131c9a0995b927a6d3e0",
+      "bytes": 115621,
+      "geometry": {
+        "x": 293.3900146484375,
+        "y": 252.6199951171875,
+        "width": 41.319976806640625,
+        "height": 42.82000732421875
+      }
+    },
+    "C1.1.156": {
+      "block": "C1.1",
+      "floor": 1,
+      "floorId": "C1_1_1",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.156.png",
+      "sha256": "cc056b0cbbda670955ff9fc042a4e0770eae92dc4a92f4968e3d6004cce8d9fd",
+      "bytes": 116296,
+      "geometry": {
+        "x": 286.3800048828125,
+        "y": 217.66000366210938,
+        "width": 17.910003662109375,
+        "height": 41.010009765625
+      }
+    },
+    "C1.1.163": {
+      "block": "C1.1",
+      "floor": 1,
+      "floorId": "C1_1_1",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.163.png",
+      "sha256": "0564784d4a506aef35cc8068a63369c3054f555857c3a7bd870f18103b85f7f0",
+      "bytes": 115910,
+      "geometry": {
+        "x": 308.1000061035156,
+        "y": 235.5500030517578,
+        "width": 21.089996337890625,
+        "height": 20.110000610351562
+      }
+    },
+    "C1.1.164": {
+      "block": "C1.1",
+      "floor": 1,
+      "floorId": "C1_1_1",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.164.png",
+      "sha256": "5aaa771c09a5eed1391697efe107d34f2ca97c888204c1117a98c155173270ba",
+      "bytes": 115907,
+      "geometry": {
+        "x": 304.1199951171875,
+        "y": 212.88999938964844,
+        "width": 22.540008544921875,
+        "height": 25.330001831054688
+      }
+    },
+    "C1.1.165": {
+      "block": "C1.1",
+      "floor": 1,
+      "floorId": "C1_1_1",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.165.png",
+      "sha256": "0f0da47f37a4f17c253671d32ded045ca707a13f78b04c41e0dd7a7dbb288e38",
+      "bytes": 116112,
+      "geometry": {
+        "x": 247.5800018310547,
+        "y": 213.22999572753906,
+        "width": 33.02000427246094,
+        "height": 36.25
+      }
+    },
+    "C1.1.168": {
+      "block": "C1.1",
+      "floor": 1,
+      "floorId": "C1_1_1",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.168.png",
+      "sha256": "d9080341da30b41b317e69aa3af67c09d67d257b7d75cba69d98e1df03e2c0bc",
+      "bytes": 116425,
+      "geometry": {
+        "x": 236.82000732421875,
+        "y": 160.50999450683594,
+        "width": 70.8800048828125,
+        "height": 44.910003662109375
+      }
+    },
+    "C1.1.221P": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.221P.png",
+      "sha256": "fface5d346823712956d596eb038b1d1925b902c162f99defd2f7085d7e1a64c",
+      "bytes": 168024,
+      "geometry": {
+        "x": 1.0399999618530273,
+        "y": 92.95999908447266,
+        "width": 53.87999725341797,
+        "height": 58.780006408691406
+      }
+    },
+    "C1.1.222P": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.222P.png",
+      "sha256": "c96665bec6180f68085a53d3d23510e126c15bf9f69b0ec1cbe7cf44cfa965d0",
+      "bytes": 168249,
+      "geometry": {
+        "x": 38.400001525878906,
+        "y": 88.22000122070312,
+        "width": 32.56999969482422,
+        "height": 43.850006103515625
+      }
+    },
+    "C1.1.223P": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.223P.png",
+      "sha256": "82e8b7273b1c4a0810b5a3a44412f36378d4a7f85438e8fdb0ac48f87b34741b",
+      "bytes": 168334,
+      "geometry": {
+        "x": 51.290000915527344,
+        "y": 78.05999755859375,
+        "width": 41.94999694824219,
+        "height": 47.840003967285156
+      }
+    },
+    "C1.1.224P": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.224P.png",
+      "sha256": "c3d22c51f42d71f33f0cdc2a0e8836e3454b6c985bbb25960115bf177edf5c86",
+      "bytes": 168066,
+      "geometry": {
+        "x": 80.12000274658203,
+        "y": 68.26000213623047,
+        "width": 43.29999542236328,
+        "height": 49.55999755859375
+      }
+    },
+    "C1.1.225P": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.225P.png",
+      "sha256": "60e587acad0a14acbf9809cace301ab4925f19b37f86953219b298ef0871ea5a",
+      "bytes": 168209,
+      "geometry": {
+        "x": 109.79000091552734,
+        "y": 60.66999816894531,
+        "width": 36.730003356933594,
+        "height": 46.81000518798828
+      }
+    },
+    "C1.1.226P": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.226P.png",
+      "sha256": "143a7509b7f1989f63312aeb2d99daa61528256a85fafe016be5d8cb0b50dcf7",
+      "bytes": 168327,
+      "geometry": {
+        "x": 134.32000732421875,
+        "y": 53.61000061035156,
+        "width": 35.47999572753906,
+        "height": 46.839996337890625
+      }
+    },
+    "C1.1.227P": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.227P.png",
+      "sha256": "294df186d8983f24a506a2f9d95e2e9817c9613c55a1c307b2470795974135b1",
+      "bytes": 167912,
+      "geometry": {
+        "x": 158.57000732421875,
+        "y": 47.04999923706055,
+        "width": 34.56999206542969,
+        "height": 46.71999740600586
+      }
+    },
+    "C1.1.228P": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.228P.png",
+      "sha256": "59f468b4c6aec0bdb30f84a326e0bfc7805fab1bc57fa7fe776ff2a775984d1c",
+      "bytes": 168023,
+      "geometry": {
+        "x": 182.6699981689453,
+        "y": 40.7599983215332,
+        "width": 34.27000427246094,
+        "height": 46.77000045776367
+      }
+    },
+    "C1.1.229P": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.229P.png",
+      "sha256": "1c31393c5cd03956b5ec093dc70da568060f46c060e80be9b34f7a14d15af7e7",
+      "bytes": 167601,
+      "geometry": {
+        "x": 212.27999877929688,
+        "y": 57.41999816894531,
+        "width": 22.710006713867188,
+        "height": 24.45000457763672
+      }
+    },
+    "C1.1.230P": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.230P.png",
+      "sha256": "94118700d1966774404a37e99ad9834439bbacc90e6d1ea48956d5240c5c1d89",
+      "bytes": 167983,
+      "geometry": {
+        "x": 207.58999633789062,
+        "y": 36.380001068115234,
+        "width": 23.080001831054688,
+        "height": 24.979999542236328
+      }
+    },
+    "C1.1.231P": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.231P.png",
+      "sha256": "ddc489888df6fbe0d7d4234cc99c335d3c514708e7138e6db7e847ef184b397e",
+      "bytes": 167912,
+      "geometry": {
+        "x": 226.2899932861328,
+        "y": 31.209999084472656,
+        "width": 32.47001647949219,
+        "height": 46.98999786376953
+      }
+    },
+    "C1.1.232P": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.232P.png",
+      "sha256": "484a9db691fbcb6ec337862cbdef4926182a2c221b50eeba98b2c6d7c25f58c6",
+      "bytes": 167735,
+      "geometry": {
+        "x": 250.30999755859375,
+        "y": 23.34000015258789,
+        "width": 51.260009765625,
+        "height": 50.14999771118164
+      }
+    },
+    "C1.1.233P": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.233P.png",
+      "sha256": "d47ccd240283174f4466b1b4d309214ff8f55fd25416866cc1272f5bfa0d3317",
+      "bytes": 167847,
+      "geometry": {
+        "x": 260.0299987792969,
+        "y": 78.58999633789062,
+        "width": 47.20001220703125,
+        "height": 32.49000549316406
+      }
+    },
+    "C1.1.234P": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.234P.png",
+      "sha256": "1f76e5652103ac3e599122d7ede0c3f6cf9b357140a19dc680f850920546910e",
+      "bytes": 168215,
+      "geometry": {
+        "x": 226.13999938964844,
+        "y": 88.22000122070312,
+        "width": 31.710006713867188,
+        "height": 59.3800048828125
+      }
+    },
+    "C1.1.235P": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.235P.png",
+      "sha256": "4649d1cf39917a40ef046f0f851a376832e3e9ab5caeef21b014b793370614a1",
+      "bytes": 168328,
+      "geometry": {
+        "x": 264.6400146484375,
+        "y": 104.44000244140625,
+        "width": 47.029998779296875,
+        "height": 37.05999755859375
+      }
+    },
+    "C1.1.238K": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.238K.png",
+      "sha256": "b222c01d513c772aa2a4093a1ab63ca7cb18bc18b402eaea8f6331e580d19475",
+      "bytes": 168275,
+      "geometry": {
+        "x": 238.99000549316406,
+        "y": 167.41000366210938,
+        "width": 29.589981079101562,
+        "height": 42.779998779296875
+      }
+    },
+    "C1.1.239K": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.239K.png",
+      "sha256": "1989d816f2a128cacc17e3778c36ebef7a5883b2ab8942955542741eca2acd7d",
+      "bytes": 168121,
+      "geometry": {
+        "x": 274.30999755859375,
+        "y": 158.58999633789062,
+        "width": 44.5,
+        "height": 30.3800048828125
+      }
+    },
+    "C1.1.240K": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.240K.png",
+      "sha256": "8fda2cef5b06a61b8fdb045fa1073807ad2386222b2c760e1726d3ec5a8f9d83",
+      "bytes": 168050,
+      "geometry": {
+        "x": 247.1199951171875,
+        "y": 205.4199981689453,
+        "width": 28.100006103515625,
+        "height": 40.82000732421875
+      }
+    },
+    "C1.1.241K": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.241K.png",
+      "sha256": "1a5f0c663f73091e232027d19a7f6c0ba0de746cb25e8cd826ec1a926f49c21a",
+      "bytes": 167658,
+      "geometry": {
+        "x": 278.4800109863281,
+        "y": 182.52000427246094,
+        "width": 43.8599853515625,
+        "height": 31.089996337890625
+      }
+    },
+    "C1.1.242K": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.242K.png",
+      "sha256": "f2db0b2289b457ee86a1d137ea1fc7a05157395cefd448b48d711e66b40e01fb",
+      "bytes": 168019,
+      "geometry": {
+        "x": 282.9599914550781,
+        "y": 206.4199981689453,
+        "width": 43.33001708984375,
+        "height": 32.839996337890625
+      }
+    },
+    "C1.1.244K": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.244K.png",
+      "sha256": "87a7bba05d3be75789a8dad141b3deaa4d035e5198114f072a2a9c0ac336b567",
+      "bytes": 167843,
+      "geometry": {
+        "x": 274.4700012207031,
+        "y": 249.9600067138672,
+        "width": 32.70001220703125,
+        "height": 49.18998718261719
+      }
+    },
+    "C1.1.245K": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.245K.png",
+      "sha256": "d41b2b289a06a3d571ee93d4dd68a4c0d6dcfb5451def1fa833fa08fc441cdfb",
+      "bytes": 167853,
+      "geometry": {
+        "x": 299.5899963378906,
+        "y": 245.66000366210938,
+        "width": 35.1199951171875,
+        "height": 48.470001220703125
+      }
+    },
+    "C1.1.246": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.246.png",
+      "sha256": "cd0e94daabab329d63e46c3dd59ceee1814c537477703b56c09a3bfc3f5618ac",
+      "bytes": 167471,
+      "geometry": {
+        "x": 220.83999633789062,
+        "y": 162.88999938964844,
+        "width": 22.589996337890625,
+        "height": 13.419998168945312
+      }
+    },
+    "C1.1.248": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.248.png",
+      "sha256": "4b007c1f64b9beb99b50b2689b6010d0159c537a3fbf38505667d7bc761ffaa9",
+      "bytes": 167548,
+      "geometry": {
+        "x": 173.07000732421875,
+        "y": 169.8300018310547,
+        "width": 41.22999572753906,
+        "height": 19.220001220703125
+      }
+    },
+    "C1.1.250": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.250.png",
+      "sha256": "047313e4efb301ca45c3e77adf5154ea1d071900f45b69ba5a50101e00319407",
+      "bytes": 167501,
+      "geometry": {
+        "x": 143.8000030517578,
+        "y": 183.9199981689453,
+        "width": 22.94000244140625,
+        "height": 13.759994506835938
+      }
+    },
+    "C1.1.251L": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.251L.png",
+      "sha256": "230cabe65e7b04f4c989739b7a09def349f2ad3131790525dd216b62acf63690",
+      "bytes": 168304,
+      "geometry": {
+        "x": 90.22000122070312,
+        "y": 121.83999633789062,
+        "width": 48.089996337890625,
+        "height": 64.10000610351562
+      }
+    },
+    "C1.1.252L": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.252L.png",
+      "sha256": "513fc3833c79dccf014bc391fbe0783998e9c73f22449ca16e90897cc2e6eedb",
+      "bytes": 168487,
+      "geometry": {
+        "x": 60.790000915527344,
+        "y": 132.08999633789062,
+        "width": 48.98999786376953,
+        "height": 64
+      }
+    },
+    "C1.1.253L": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.253L.png",
+      "sha256": "3243b5ef7e62927b864a6823a340a71301e0c4601457bd1822f2cb267f405098",
+      "bytes": 168019,
+      "geometry": {
+        "x": 125.30000305175781,
+        "y": 195.7899932861328,
+        "width": 37.25,
+        "height": 39.78001403808594
+      }
+    },
+    "C1.1.254L": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.254L.png",
+      "sha256": "580214f4f9f06cab0dedb72e0eb7629dab6ac209b1e2012c51c61a98b05d81d6",
+      "bytes": 167975,
+      "geometry": {
+        "x": 97.31999969482422,
+        "y": 204.6300048828125,
+        "width": 39.090003967285156,
+        "height": 40.59999084472656
+      }
+    },
+    "C1.1.255P": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.255P.png",
+      "sha256": "ed47a94453b1007a42f2a6853a4b7d6f8ec32b3e5231179fb385f7cb79b05ca5",
+      "bytes": 168392,
+      "geometry": {
+        "x": 136.41000366210938,
+        "y": 226.58999633789062,
+        "width": 39.94000244140625,
+        "height": 50.269989013671875
+      }
+    },
+    "C1.1.256P": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.256P.png",
+      "sha256": "d039927c1cf33f45dedc19b2e5c5750028118cb4c4457d24bce0217b68500422",
+      "bytes": 168745,
+      "geometry": {
+        "x": 110.5199966430664,
+        "y": 235.57000732421875,
+        "width": 40.650001525878906,
+        "height": 50.3800048828125
+      }
+    },
+    "C1.1.260P": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.260P.png",
+      "sha256": "b33030d55a6f1851faf4f42ebffc877588e4e57b1704c4539bd026da763dff46",
+      "bytes": 168570,
+      "geometry": {
+        "x": 132.27999877929688,
+        "y": 286.3599853515625,
+        "width": 45.05999755859375,
+        "height": 54.490020751953125
+      }
+    },
+    "C1.1.261": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.261.png",
+      "sha256": "3563b123a149d6ea5d001e63a53b32d4ecfc2b2b3e18c831c156c24ca305c6f3",
+      "bytes": 167590,
+      "geometry": {
+        "x": 107.27999877929688,
+        "y": 315.9100036621094,
+        "width": 41.149993896484375,
+        "height": 37.350006103515625
+      }
+    },
+    "C1.1.262": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.262.png",
+      "sha256": "44b974c19bde780f241b9bf41305f9c4b072af1dfaab3f3b4414c362e22733ae",
+      "bytes": 167833,
+      "geometry": {
+        "x": 101.44000244140625,
+        "y": 309.1700134277344,
+        "width": 28.789993286132812,
+        "height": 22.069976806640625
+      }
+    },
+    "C1.1.263": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.263.png",
+      "sha256": "22d6ca58a477a1ba1a925d2e0e4520aa140ced00e9cabf6fecbd929b13b16323",
+      "bytes": 167977,
+      "geometry": {
+        "x": 93.83000183105469,
+        "y": 295.4100036621094,
+        "width": 30.860000610351562,
+        "height": 25.30999755859375
+      }
+    },
+    "C1.1.264": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.264.png",
+      "sha256": "350f216c12b0b2617af6875f5a2fc23b093d0f3d24ca04f211dc121a3306502e",
+      "bytes": 167850,
+      "geometry": {
+        "x": 85.55999755859375,
+        "y": 279.4599914550781,
+        "width": 32.350006103515625,
+        "height": 27.670013427734375
+      }
+    },
+    "C1.1.265": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.265.png",
+      "sha256": "8a02379e554a99ad1a4e215f3712cc25693f325a0954d30232454417e6351223",
+      "bytes": 167839,
+      "geometry": {
+        "x": 77.47000122070312,
+        "y": 265.3500061035156,
+        "width": 32.61000061035156,
+        "height": 26.769989013671875
+      }
+    },
+    "C1.1.266": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.266.png",
+      "sha256": "4c5944092f84e2b72aac18e92f791bcfeb848611af98cd4e6806231e712a8777",
+      "bytes": 167878,
+      "geometry": {
+        "x": 69.72000122070312,
+        "y": 250.8699951171875,
+        "width": 33.41999816894531,
+        "height": 26.760009765625
+      }
+    },
+    "C1.1.267": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.267.png",
+      "sha256": "744cf489559141735ca95e5ff3c839271f3e814cdda0e60faf8194c1e29be529",
+      "bytes": 167874,
+      "geometry": {
+        "x": 61.34000015258789,
+        "y": 235.32000732421875,
+        "width": 34.679996490478516,
+        "height": 28.3800048828125
+      }
+    },
+    "C1.1.268": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.268.png",
+      "sha256": "940284cf7882b641c02eeb634fab9b5da6d9cd02009bda667de83dfb0942170b",
+      "bytes": 167958,
+      "geometry": {
+        "x": 53.59000015258789,
+        "y": 221.47999572753906,
+        "width": 34.78000259399414,
+        "height": 27.010009765625
+      }
+    },
+    "C1.1.269": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.269.png",
+      "sha256": "5ae3aa76fb04b21eaeeda93486719c5455d7c479cf007eb3a0696f825c2d4f95",
+      "bytes": 168121,
+      "geometry": {
+        "x": 45.20000076293945,
+        "y": 205.49000549316406,
+        "width": 36.369998931884766,
+        "height": 29.04998779296875
+      }
+    },
+    "C1.1.270": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.270.png",
+      "sha256": "ba2380038f7c20ce89540a55fd23d11f44a60fbb633399c3f51c302f92d7c70f",
+      "bytes": 167840,
+      "geometry": {
+        "x": 37.33000183105469,
+        "y": 191.49000549316406,
+        "width": 36.37999725341797,
+        "height": 27.92999267578125
+      }
+    },
+    "C1.1.271": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.271.png",
+      "sha256": "666ce2023cfef565251f8cca90b066f167e33ebbd561f69f5f047726c6d9afd3",
+      "bytes": 167549,
+      "geometry": {
+        "x": 29.280000686645508,
+        "y": 176.1199951171875,
+        "width": 37.540000915527344,
+        "height": 29.1300048828125
+      }
+    },
+    "C1.1.272": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.272.png",
+      "sha256": "03a0847230ba269944e393563d4e1a83cafebded4d9a172fdf5eaadc0db9608a",
+      "bytes": 167842,
+      "geometry": {
+        "x": 20.969999313354492,
+        "y": 161.7100067138672,
+        "width": 38.290000915527344,
+        "height": 29.039993286132812
+      }
+    },
+    "C1.1.273": {
+      "block": "C1.1",
+      "floor": 2,
+      "floorId": "C1_1_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.273.png",
+      "sha256": "05b0d4f018c165927f84718b0f050efa5c0af9261f61edb14b4dda5df127f660",
+      "bytes": 168050,
+      "geometry": {
+        "x": 7.619999885559082,
+        "y": 138.25999450683594,
+        "width": 44.560001373291016,
+        "height": 37.529998779296875
+      }
+    },
+    "C1.1.318K": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.318K.png",
+      "sha256": "a9a212f747f5247e5eca09fd35f81df2d9b94365c7f092ce1bf98ffa70c1abf7",
+      "bytes": 159041,
+      "geometry": {
+        "x": 137.5,
+        "y": 299.2099914550781,
+        "width": 39.92999267578125,
+        "height": 40.860015869140625
+      }
+    },
+    "C1.1.320": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.320.png",
+      "sha256": "1713842e6eb7692c7b752bbf36aedc8d72c656c06fd38d313e153af74078a9cf",
+      "bytes": 158671,
+      "geometry": {
+        "x": 107.27999877929688,
+        "y": 316.07000732421875,
+        "width": 43.220001220703125,
+        "height": 37.19000244140625
+      }
+    },
+    "C1.1.321": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.321.png",
+      "sha256": "814ba340ef10e58b39472337737c186218bea438c9cf870c199d0cf278f1fef8",
+      "bytes": 158337,
+      "geometry": {
+        "x": 101.44000244140625,
+        "y": 309.1700134277344,
+        "width": 28.789993286132812,
+        "height": 22.069976806640625
+      }
+    },
+    "C1.1.322": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.322.png",
+      "sha256": "c4d7475c48685f55565b37b41e255ca93722c3b412af6a39cbb1416042824442",
+      "bytes": 158635,
+      "geometry": {
+        "x": 93.9000015258789,
+        "y": 295.4100036621094,
+        "width": 30.790000915527344,
+        "height": 25.30999755859375
+      }
+    },
+    "C1.1.323": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.323.png",
+      "sha256": "f32a6131265a7bbc590efc0f3568297b901caaeb83dcc780138b0a185214b6f8",
+      "bytes": 158882,
+      "geometry": {
+        "x": 85.55999755859375,
+        "y": 279.4599914550781,
+        "width": 32.350006103515625,
+        "height": 27.670013427734375
+      }
+    },
+    "C1.1.324L": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.324L.png",
+      "sha256": "5f1e497633373385a72a8ec748ee5c8f3af704c15d000c6efbefc24d18614652",
+      "bytes": 158811,
+      "geometry": {
+        "x": 116.41999816894531,
+        "y": 247.58999633789062,
+        "width": 54.15000915527344,
+        "height": 38.95001220703125
+      }
+    },
+    "C1.1.325": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.325.png",
+      "sha256": "1d9eb2038a9c7366f3d32fffadef5964d420fd1331a2ab23cf075146ca86d61a",
+      "bytes": 158635,
+      "geometry": {
+        "x": 77.5199966430664,
+        "y": 265.3500061035156,
+        "width": 32.480003356933594,
+        "height": 26.769989013671875
+      }
+    },
+    "C1.1.326L": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.326L.png",
+      "sha256": "7d7e3ca0d2426a7c55a0fb6578ff2644ea3f5cdf9de818781124707b9c555456",
+      "bytes": 159115,
+      "geometry": {
+        "x": 107.86000061035156,
+        "y": 228.7899932861328,
+        "width": 54.97999572753906,
+        "height": 36.25999450683594
+      }
+    },
+    "C1.1.327": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.327.png",
+      "sha256": "339b878a11c8d396962536bda5b56c9e693977040d29238fbe2e759742948e76",
+      "bytes": 159144,
+      "geometry": {
+        "x": 61.34000015258789,
+        "y": 235.32000732421875,
+        "width": 41.79999923706055,
+        "height": 42.30999755859375
+      }
+    },
+    "C1.1.328L": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.328L.png",
+      "sha256": "4b8e700376c0a2fbc20f660d59f4cfb7a9a267b113d506078aa27be689f2ce32",
+      "bytes": 159568,
+      "geometry": {
+        "x": 94.29000091552734,
+        "y": 198.05999755859375,
+        "width": 62.10999298095703,
+        "height": 48.1300048828125
+      }
+    },
+    "C1.1.329": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.329.png",
+      "sha256": "b70f56de650b465f132ca48e43676587fa9d3152b51952a6fc6f1d6f789d1672",
+      "bytes": 158708,
+      "geometry": {
+        "x": 53.59000015258789,
+        "y": 221.47999572753906,
+        "width": 34.78000259399414,
+        "height": 27.010009765625
+      }
+    },
+    "C1.1.330": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.330.png",
+      "sha256": "6ab64ec48a664f77bb087075c12eee3fe4394c7012266cb288e0d5043f52f160",
+      "bytes": 158523,
+      "geometry": {
+        "x": 45.20000076293945,
+        "y": 205.49000549316406,
+        "width": 36.369998931884766,
+        "height": 29.04998779296875
+      }
+    },
+    "C1.1.332": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.332.png",
+      "sha256": "4a90712b93c7eb96404ad39e0b9a536f7f4155eb4ce661bdc8d191cc054c3403",
+      "bytes": 158363,
+      "geometry": {
+        "x": 37.33000183105469,
+        "y": 191.4499969482422,
+        "width": 36.37999725341797,
+        "height": 27.970001220703125
+      }
+    },
+    "C1.1.333": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.333.png",
+      "sha256": "45bffb77c671e73a964db4a4a2509f19d8f6056f8df847cd914a3585c74d3543",
+      "bytes": 158438,
+      "geometry": {
+        "x": 29.280000686645508,
+        "y": 176.1199951171875,
+        "width": 37.52000427246094,
+        "height": 29.1300048828125
+      }
+    },
+    "C1.1.334L": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.334L.png",
+      "sha256": "0c6297b6e1fe1876f97e59909417fddc43aec47d375168ce01984f6060e17be7",
+      "bytes": 159412,
+      "geometry": {
+        "x": 61.15999984741211,
+        "y": 121.83999633789062,
+        "width": 77.14999389648438,
+        "height": 73.65000915527344
+      }
+    },
+    "C1.1.335": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.335.png",
+      "sha256": "81ba8ed0fb36aaf87aae383a292d016afbda164348947747b964d764b81a35db",
+      "bytes": 158467,
+      "geometry": {
+        "x": 20.969999313354492,
+        "y": 161.7100067138672,
+        "width": 38.290000915527344,
+        "height": 29.039993286132812
+      }
+    },
+    "C1.1.336": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.336.png",
+      "sha256": "07598e505021b30189bc6b9d72ff60a2586f64bb8b2b8d6dd1d20eecb96199d2",
+      "bytes": 158614,
+      "geometry": {
+        "x": 12.5600004196167,
+        "y": 145.5399932861328,
+        "width": 39.619998931884766,
+        "height": 30.25
+      }
+    },
+    "C1.1.337": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.337.png",
+      "sha256": "82cd3253049f48a8363dfa495854e35947f84762ce8dea8863cf020a79e22e43",
+      "bytes": 158369,
+      "geometry": {
+        "x": 5.329999923706055,
+        "y": 131.5500030517578,
+        "width": 38.91999816894531,
+        "height": 28.970001220703125
+      }
+    },
+    "C1.1.338": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.338.png",
+      "sha256": "9afd035f130ea4fab58acb24f8e2a1271188ebb47633455e5b0a48c9a2b38d9e",
+      "bytes": 159394,
+      "geometry": {
+        "x": 1.0399999618530273,
+        "y": 86.68000030517578,
+        "width": 69.93000030517578,
+        "height": 59.909996032714844
+      }
+    },
+    "C1.1.341P": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.341P.png",
+      "sha256": "bfdaadf0fa5de6551b9659859c35c499bb60c5096722f66cadae418f37fbf957",
+      "bytes": 159158,
+      "geometry": {
+        "x": 55.529998779296875,
+        "y": 78.05999755859375,
+        "width": 37.709999084472656,
+        "height": 47.840003967285156
+      }
+    },
+    "C1.1.342P": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.342P.png",
+      "sha256": "63ba3e0f8980a3f22753f0b4135847e7366f3dfaff7982b353f0a87d5f93f5b4",
+      "bytes": 159339,
+      "geometry": {
+        "x": 80.12000274658203,
+        "y": 68.26000213623047,
+        "width": 43.29999542236328,
+        "height": 49.55999755859375
+      }
+    },
+    "C1.1.343P": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.343P.png",
+      "sha256": "9af50d7985d67c96ae31fa360b3b6d364137870c13d41fc10e79425b6084c992",
+      "bytes": 159326,
+      "geometry": {
+        "x": 109.79000091552734,
+        "y": 60.66999816894531,
+        "width": 36.730003356933594,
+        "height": 46.81000518798828
+      }
+    },
+    "C1.1.344P": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.344P.png",
+      "sha256": "1ded49639d796ddbcad72f2b6995decb27d4f6e3e7fa93ee5330a2f83cdb8f46",
+      "bytes": 159053,
+      "geometry": {
+        "x": 134.32000732421875,
+        "y": 53.61000061035156,
+        "width": 35.47999572753906,
+        "height": 46.839996337890625
+      }
+    },
+    "C1.1.346P": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.346P.png",
+      "sha256": "5253e80c695e00f344dc427ee206f502eaef6aab5fa407ad0b4bd752f78fdf90",
+      "bytes": 159292,
+      "geometry": {
+        "x": 158.57000732421875,
+        "y": 47.04999923706055,
+        "width": 34.649993896484375,
+        "height": 46.71999740600586
+      }
+    },
+    "C1.1.347P": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.347P.png",
+      "sha256": "5c34571e1af869ff63811fd1eb2eee28fe4bc07c225eea65a24142349d739193",
+      "bytes": 158831,
+      "geometry": {
+        "x": 182.6699981689453,
+        "y": 40.7599983215332,
+        "width": 34.27000427246094,
+        "height": 46.77000045776367
+      }
+    },
+    "C1.1.348K": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.348K.png",
+      "sha256": "0398baecfa775bc8521644fbfe2509554c2321716bc41ee5058e4d3be2566330",
+      "bytes": 159368,
+      "geometry": {
+        "x": 207.58999633789062,
+        "y": 36.380001068115234,
+        "width": 27.400009155273438,
+        "height": 45.4900016784668
+      }
+    },
+    "C1.1.349P": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.349P.png",
+      "sha256": "309c786dd6b213be6c2608933a23199d4e02f50f0865a08a293f14afd6995c86",
+      "bytes": 158916,
+      "geometry": {
+        "x": 226.2899932861328,
+        "y": 31.209999084472656,
+        "width": 32.47001647949219,
+        "height": 46.98999786376953
+      }
+    },
+    "C1.1.350P": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.350P.png",
+      "sha256": "960d77ab885e7626b2773e722404a64842ffdf323dda31765f10930a0c407d57",
+      "bytes": 158726,
+      "geometry": {
+        "x": 250.30999755859375,
+        "y": 23.34000015258789,
+        "width": 51.260009765625,
+        "height": 50.14999771118164
+      }
+    },
+    "C1.1.352K": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.352K.png",
+      "sha256": "ca9be73215b1c47eec0e159d3cfbb51b6d9b445625b9dcf231c840818d932e55",
+      "bytes": 158997,
+      "geometry": {
+        "x": 226.13999938964844,
+        "y": 85.69000244140625,
+        "width": 39.56001281738281,
+        "height": 34.44999694824219
+      }
+    },
+    "C1.1.353P": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.353P.png",
+      "sha256": "7de86f0d66384ce5a5831d50f006f15117d7707abb4376ce63d09b4e6011e1dd",
+      "bytes": 159246,
+      "geometry": {
+        "x": 226.13999938964844,
+        "y": 85.69000244140625,
+        "width": 44.53999328613281,
+        "height": 61.910003662109375
+      }
+    },
+    "C1.1.354K": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.354K.png",
+      "sha256": "04775bddc9d3a62474d1ff8a07aea552066a76f5afef4582559e95887bf10c06",
+      "bytes": 158680,
+      "geometry": {
+        "x": 272.9200134277344,
+        "y": 78.58999633789062,
+        "width": 34.8499755859375,
+        "height": 34.040000915527344
+      }
+    },
+    "C1.1.355P": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.355P.png",
+      "sha256": "a7963f511a3cda5fa8f0a5f6cf60b0e3102dd0f3ca530d3e371857ba3aba8631",
+      "bytes": 158935,
+      "geometry": {
+        "x": 278.239990234375,
+        "y": 108.12000274658203,
+        "width": 33.430023193359375,
+        "height": 31.16999053955078
+      }
+    },
+    "C1.1.357K": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.357K.png",
+      "sha256": "d20aebeb53eb184fa99d1067d565bbde32106fe9cf2745476cb5222a1bf431a8",
+      "bytes": 158869,
+      "geometry": {
+        "x": 243.92999267578125,
+        "y": 165.2100067138672,
+        "width": 36.57000732421875,
+        "height": 37.519989013671875
+      }
+    },
+    "C1.1.358K": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.358K.png",
+      "sha256": "cab70de4d75ab293688714c06d16df237225850ab35f073fc54c7429e1694a5e",
+      "bytes": 159498,
+      "geometry": {
+        "x": 250.72999572753906,
+        "y": 196.60000610351562,
+        "width": 37.37998962402344,
+        "height": 48.519989013671875
+      }
+    },
+    "C1.1.360K": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.360K.png",
+      "sha256": "ae549bb8f95a0d4afb0787cb5c07f3c56db37d1e86593cafc49626867cda8011",
+      "bytes": 158863,
+      "geometry": {
+        "x": 287.510009765625,
+        "y": 158.58999633789062,
+        "width": 32.449981689453125,
+        "height": 35.94000244140625
+      }
+    },
+    "C1.1.361K": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.361K.png",
+      "sha256": "fda6bd4aa6be9b01a738ef4c078e6acf7701ed36d00b6261524d66eb6f280cc9",
+      "bytes": 158883,
+      "geometry": {
+        "x": 293.2699890136719,
+        "y": 190.3300018310547,
+        "width": 33.02001953125,
+        "height": 46.94000244140625
+      }
+    },
+    "C1.1.365P": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.365P.png",
+      "sha256": "34af16591f0eaa42d9c0dabc773518541c466a54d1e9dafc273a2f196e16ca61",
+      "bytes": 159016,
+      "geometry": {
+        "x": 274.4700012207031,
+        "y": 249.9600067138672,
+        "width": 32.70001220703125,
+        "height": 49.18998718261719
+      }
+    },
+    "C1.1.366P": {
+      "block": "C1.1",
+      "floor": 3,
+      "floorId": "C1_1_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.1.366P.png",
+      "sha256": "688383ebc697b172d851c0c540230171e28cdfcafe3891997382ccecb585dd7b",
+      "bytes": 158957,
+      "geometry": {
+        "x": 299.5899963378906,
+        "y": 245.66000366210938,
+        "width": 35.1199951171875,
+        "height": 48.470001220703125
+      }
+    },
+    "C1.2.121K": {
+      "block": "C1.2",
+      "floor": 1,
+      "floorId": "C1_2_1",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.121K.png",
+      "sha256": "ef1c5703bd0e6f8fbd94543ce2b789c11eb6aea068d60dbbebf611e26722b211",
+      "bytes": 102098,
+      "geometry": {
+        "x": 51.5099983215332,
+        "y": 288.45001220703125,
+        "width": 41.54999923706055,
+        "height": 39.509979248046875
+      }
+    },
+    "C1.2.122K": {
+      "block": "C1.2",
+      "floor": 1,
+      "floorId": "C1_2_1",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.122K.png",
+      "sha256": "feda7c14019234dff2c8fa7dc8fa5ca593e84694904d6082ad1f9066fe16c7af",
+      "bytes": 102408,
+      "geometry": {
+        "x": 46.58000183105469,
+        "y": 255.27000427246094,
+        "width": 43.75,
+        "height": 38.02000427246094
+      }
+    },
+    "C1.2.123K": {
+      "block": "C1.2",
+      "floor": 1,
+      "floorId": "C1_2_1",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.123K.png",
+      "sha256": "975de358a588fe6028080e11d9471071d642b9d2463a1e3e03b8fdd15ad47d61",
+      "bytes": 102402,
+      "geometry": {
+        "x": 41.689998626708984,
+        "y": 222.19000244140625,
+        "width": 45.97999954223633,
+        "height": 37.80999755859375
+      }
+    },
+    "C1.2.124K": {
+      "block": "C1.2",
+      "floor": 1,
+      "floorId": "C1_2_1",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.124K.png",
+      "sha256": "3ddad263f11e386f706aad3f0f9b16f1c0c42d180af67414720b6f3ea36f5fc4",
+      "bytes": 102377,
+      "geometry": {
+        "x": 36.7400016784668,
+        "y": 188.6699981689453,
+        "width": 48.28999710083008,
+        "height": 38.40000915527344
+      }
+    },
+    "C1.2.129": {
+      "block": "C1.2",
+      "floor": 1,
+      "floorId": "C1_2_1",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.129.png",
+      "sha256": "c65b1a8e1b8b8b28bbe1a7094285cbc1eb584c727aa964934f022ecde06baaf0",
+      "bytes": 102654,
+      "geometry": {
+        "x": 102.18000030517578,
+        "y": 185.13999938964844,
+        "width": 29.18000030517578,
+        "height": 102.69999694824219
+      }
+    },
+    "C1.2.133": {
+      "block": "C1.2",
+      "floor": 1,
+      "floorId": "C1_2_1",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.133.png",
+      "sha256": "03e50e547f732c4f1bcca0e4ccf99cf3dc2261ffac6bcf516c9c04022f69f4fe",
+      "bytes": 102182,
+      "geometry": {
+        "x": 196.74000549316406,
+        "y": 263.79998779296875,
+        "width": 23.970001220703125,
+        "height": 21.8900146484375
+      }
+    },
+    "C1.2.135": {
+      "block": "C1.2",
+      "floor": 1,
+      "floorId": "C1_2_1",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.135.png",
+      "sha256": "18e8682094efe02483abb9b4a846ca8aff4342ea8699162863978bab84a84808",
+      "bytes": 101965,
+      "geometry": {
+        "x": 234.9600067138672,
+        "y": 303.55999755859375,
+        "width": 39.28999328613281,
+        "height": 24.399993896484375
+      }
+    },
+    "C1.2.136": {
+      "block": "C1.2",
+      "floor": 1,
+      "floorId": "C1_2_1",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.136.png",
+      "sha256": "cc373aa654c1c6344af2f423394d97b3216a31f630829b682d467c7ed3dac758",
+      "bytes": 102163,
+      "geometry": {
+        "x": 236.49000549316406,
+        "y": 285.69000244140625,
+        "width": 40.44999694824219,
+        "height": 22.910003662109375
+      }
+    },
+    "C1.2.221P": {
+      "block": "C1.2",
+      "floor": 2,
+      "floorId": "C1_2_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.221P.png",
+      "sha256": "fee28f686dd46ab6edfe285cd649a5d10210c5be2900080aed929c6b3df51b58",
+      "bytes": 122058,
+      "geometry": {
+        "x": 17.149999618530273,
+        "y": 57.95000076293945,
+        "width": 28.3700008392334,
+        "height": 46.60000228881836
+      }
+    },
+    "C1.2.222P": {
+      "block": "C1.2",
+      "floor": 2,
+      "floorId": "C1_2_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.222P.png",
+      "sha256": "49af6a39a1fdb7efd0885d29c209f091c762d9717926791b9bbb8d1e4cc95a76",
+      "bytes": 122462,
+      "geometry": {
+        "x": 40.29999923706055,
+        "y": 54.650001525878906,
+        "width": 30.820003509521484,
+        "height": 46.659996032714844
+      }
+    },
+    "C1.2.223K": {
+      "block": "C1.2",
+      "floor": 2,
+      "floorId": "C1_2_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.223K.png",
+      "sha256": "9cec400f445121d4c41bb0282ab89ee46694e12017b00b8f8daa8588d88c2c63",
+      "bytes": 122659,
+      "geometry": {
+        "x": 66.30999755859375,
+        "y": 52.630001068115234,
+        "width": 23.160003662109375,
+        "height": 45.57999801635742
+      }
+    },
+    "C1.2.224P": {
+      "block": "C1.2",
+      "floor": 2,
+      "floorId": "C1_2_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.224P.png",
+      "sha256": "b763a9b2cea4901621b93aaac82d6ce5cda51eaffbc9f1a2da28248a77cef669",
+      "bytes": 122321,
+      "geometry": {
+        "x": 86.12999725341797,
+        "y": 50.630001068115234,
+        "width": 29.050003051757812,
+        "height": 45.78999710083008
+      }
+    },
+    "C1.2.225P": {
+      "block": "C1.2",
+      "floor": 2,
+      "floorId": "C1_2_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.225P.png",
+      "sha256": "daf3dcbf3361352e9f7db0d25703d7182ef8806b3acb799f254e39ca6c66fc2b",
+      "bytes": 122415,
+      "geometry": {
+        "x": 112.52999877929688,
+        "y": 49.45000076293945,
+        "width": 27.800003051757812,
+        "height": 45.1099967956543
+      }
+    },
+    "C1.2.226P": {
+      "block": "C1.2",
+      "floor": 2,
+      "floorId": "C1_2_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.226P.png",
+      "sha256": "ec5af5939171750688071b6f494e026b55f24dd41ffa28b1417ae591a305ccd6",
+      "bytes": 122415,
+      "geometry": {
+        "x": 138.42999267578125,
+        "y": 49.06999969482422,
+        "width": 27.360000610351562,
+        "height": 44.41999816894531
+      }
+    },
+    "C1.2.227P": {
+      "block": "C1.2",
+      "floor": 2,
+      "floorId": "C1_2_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.227P.png",
+      "sha256": "f33762a9887a197b611b9afa50163cda17889daef108c4af1cf7ea463a6888e4",
+      "bytes": 122220,
+      "geometry": {
+        "x": 164.47999572753906,
+        "y": 49.06999969482422,
+        "width": 25.910003662109375,
+        "height": 44.480003356933594
+      }
+    },
+    "C1.2.228P": {
+      "block": "C1.2",
+      "floor": 2,
+      "floorId": "C1_2_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.228P.png",
+      "sha256": "89dd8a976398b74f0b8a31cd27de97978be621f06510d1bfb63ebe67e8506dae",
+      "bytes": 122344,
+      "geometry": {
+        "x": 189.80999755859375,
+        "y": 49.47999954223633,
+        "width": 26.669998168945312,
+        "height": 45.189998626708984
+      }
+    },
+    "C1.2.229P": {
+      "block": "C1.2",
+      "floor": 2,
+      "floorId": "C1_2_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.229P.png",
+      "sha256": "b5653ffa3b004a1e9014ec17d673d642654ca7551269899ca4fe85542103e66a",
+      "bytes": 122389,
+      "geometry": {
+        "x": 214.57000732421875,
+        "y": 50.689998626708984,
+        "width": 27.75,
+        "height": 45.86000442504883
+      }
+    },
+    "C1.2.230P": {
+      "block": "C1.2",
+      "floor": 2,
+      "floorId": "C1_2_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.230P.png",
+      "sha256": "2887fdc2bd36d182127b18b182c38d0b88fa3c001ff27a868553aa244ac26818",
+      "bytes": 122849,
+      "geometry": {
+        "x": 239.8300018310547,
+        "y": 52.66999816894531,
+        "width": 22.419998168945312,
+        "height": 45.709999084472656
+      }
+    },
+    "C1.2.231K": {
+      "block": "C1.2",
+      "floor": 2,
+      "floorId": "C1_2_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.231K.png",
+      "sha256": "877bd63302cebc1e0db4e2cef3a213828bd8a494aa6aed20e8b5129d83d53bbd",
+      "bytes": 122803,
+      "geometry": {
+        "x": 258.4100036621094,
+        "y": 54.709999084472656,
+        "width": 28.639984130859375,
+        "height": 46.63999938964844
+      }
+    },
+    "C1.2.232P": {
+      "block": "C1.2",
+      "floor": 2,
+      "floorId": "C1_2_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.232P.png",
+      "sha256": "3748209f43e101d177b96b990e6dfc78d7bcbd65860b992eda1d16931bd0a52e",
+      "bytes": 122745,
+      "geometry": {
+        "x": 282.6600036621094,
+        "y": 57.849998474121094,
+        "width": 28.220001220703125,
+        "height": 46.70000457763672
+      }
+    },
+    "C1.2.233L": {
+      "block": "C1.2",
+      "floor": 2,
+      "floorId": "C1_2_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.233L.png",
+      "sha256": "88fdd017028fe9cf947b85c2f72a73ede454ce5b1c06c3d6cc215308d8fc9652",
+      "bytes": 122192,
+      "geometry": {
+        "x": 227.74000549316406,
+        "y": 110.5199966430664,
+        "width": 41.11000061035156,
+        "height": 59.56000518798828
+      }
+    },
+    "C1.2.234K": {
+      "block": "C1.2",
+      "floor": 2,
+      "floorId": "C1_2_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.234K.png",
+      "sha256": "2f8884ac4078545688880fc8339b0c80b884fd0f09fc575b96aae80c6acb45bc",
+      "bytes": 122565,
+      "geometry": {
+        "x": 263.0299987792969,
+        "y": 113.87999725341797,
+        "width": 39.6400146484375,
+        "height": 58.79999542236328
+      }
+    },
+    "C1.2.237L": {
+      "block": "C1.2",
+      "floor": 2,
+      "floorId": "C1_2_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.237L.png",
+      "sha256": "7ef0ec9b1898d8f3b84baeacd8e3c719ea6048b0a560a23ddf6940abeed2647f",
+      "bytes": 121961,
+      "geometry": {
+        "x": 25.360000610351562,
+        "y": 110.52999877929688,
+        "width": 74.93000030517578,
+        "height": 62.13999938964844
+      }
+    },
+    "C1.2.239K": {
+      "block": "C1.2",
+      "floor": 2,
+      "floorId": "C1_2_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.239K.png",
+      "sha256": "4280df20051011478452feb56cf43a9d22993dedd723aa30e2eef8b10af27f3e",
+      "bytes": 122717,
+      "geometry": {
+        "x": 37.16999816894531,
+        "y": 193.3300018310547,
+        "width": 35.8800048828125,
+        "height": 42.220001220703125
+      }
+    },
+    "C1.2.240K": {
+      "block": "C1.2",
+      "floor": 2,
+      "floorId": "C1_2_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.240K.png",
+      "sha256": "f30733a5beb616f6173e842b5d6b7c5443e51293c7835840a2b79e7ed3a81c85",
+      "bytes": 122431,
+      "geometry": {
+        "x": 83.77999877929688,
+        "y": 190.3800048828125,
+        "width": 45.19000244140625,
+        "height": 27.209991455078125
+      }
+    },
+    "C1.2.241K": {
+      "block": "C1.2",
+      "floor": 2,
+      "floorId": "C1_2_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.241K.png",
+      "sha256": "0f054e8478a27c5200d69fcfa2e22bb8f61dd1c991f7ff3c7ce664298658ca1d",
+      "bytes": 122302,
+      "geometry": {
+        "x": 42.95000076293945,
+        "y": 231.88999938964844,
+        "width": 33.369998931884766,
+        "height": 39.59001159667969
+      }
+    },
+    "C1.2.242K": {
+      "block": "C1.2",
+      "floor": 2,
+      "floorId": "C1_2_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.242K.png",
+      "sha256": "045c9d73a88712dfc790f2bd9cc6f0869cd909ddd3ec48d063f6ef3c51c44fb1",
+      "bytes": 122507,
+      "geometry": {
+        "x": 86.19999694824219,
+        "y": 215.36000061035156,
+        "width": 43.62001037597656,
+        "height": 28.160003662109375
+      }
+    },
+    "C1.2.243K": {
+      "block": "C1.2",
+      "floor": 2,
+      "floorId": "C1_2_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.243K.png",
+      "sha256": "89f5d26c802a4637afcef913d8c2b7895a80ac3ae9684dc5c90194aa3e01b2cc",
+      "bytes": 122673,
+      "geometry": {
+        "x": 88.63999938964844,
+        "y": 240.6699981689453,
+        "width": 42.00999450683594,
+        "height": 26.449996948242188
+      }
+    },
+    "C1.2.245": {
+      "block": "C1.2",
+      "floor": 2,
+      "floorId": "C1_2_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.245.png",
+      "sha256": "0c27e08b0d2764682c197e571ca456c36183a00fa3f9ea041b593862637db940",
+      "bytes": 122253,
+      "geometry": {
+        "x": 71.37999725341797,
+        "y": 278.489990234375,
+        "width": 43.1300048828125,
+        "height": 46.410003662109375
+      }
+    },
+    "C1.2.246": {
+      "block": "C1.2",
+      "floor": 2,
+      "floorId": "C1_2_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.246.png",
+      "sha256": "4accccd6d32d2abb631b52916ab2871b1a3f078d57e2a04767d5e90fb2522577",
+      "bytes": 122336,
+      "geometry": {
+        "x": 50.11000061035156,
+        "y": 281.4700012207031,
+        "width": 26.330001831054688,
+        "height": 46.489990234375
+      }
+    },
+    "C1.2.248L": {
+      "block": "C1.2",
+      "floor": 2,
+      "floorId": "C1_2_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.248L.png",
+      "sha256": "1fb9f0242190d4e2c91094929b27a813de662d8cade4ac6f766918ea82c743b5",
+      "bytes": 122234,
+      "geometry": {
+        "x": 199.1300048828125,
+        "y": 190.3800048828125,
+        "width": 45.1199951171875,
+        "height": 25.479995727539062
+      }
+    },
+    "C1.2.249L": {
+      "block": "C1.2",
+      "floor": 2,
+      "floorId": "C1_2_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.249L.png",
+      "sha256": "f8fedbab6191367296f057a32a0556c4f2392a0f46ccc67622ad8027281731b7",
+      "bytes": 122203,
+      "geometry": {
+        "x": 255.1699981689453,
+        "y": 193.35000610351562,
+        "width": 35.68998718261719,
+        "height": 40.209991455078125
+      }
+    },
+    "C1.2.250L": {
+      "block": "C1.2",
+      "floor": 2,
+      "floorId": "C1_2_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.250L.png",
+      "sha256": "944d7bd91e86a30070b54f7e7853a6c3cd1ba1d47b206e1c1cd235f424ff2c3b",
+      "bytes": 122291,
+      "geometry": {
+        "x": 198.27999877929688,
+        "y": 213.2100067138672,
+        "width": 43.71000671386719,
+        "height": 27.879989624023438
+      }
+    },
+    "C1.2.251L": {
+      "block": "C1.2",
+      "floor": 2,
+      "floorId": "C1_2_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.251L.png",
+      "sha256": "1a4f9af3ce2b69f7349ff2e7355ebd25ba5a1a214f58b3063dd3e6cffc0cb561",
+      "bytes": 122235,
+      "geometry": {
+        "x": 251.55999755859375,
+        "y": 229.92999267578125,
+        "width": 33.80999755859375,
+        "height": 41.550018310546875
+      }
+    },
+    "C1.2.252K": {
+      "block": "C1.2",
+      "floor": 2,
+      "floorId": "C1_2_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.252K.png",
+      "sha256": "27fc63d8ba7d2fbd80706b5d029a7f04669b556041cabc9d495c83fe1915f901",
+      "bytes": 122671,
+      "geometry": {
+        "x": 197.39999389648438,
+        "y": 238.5399932861328,
+        "width": 42.220001220703125,
+        "height": 28.500015258789062
+      }
+    },
+    "C1.2.254": {
+      "block": "C1.2",
+      "floor": 2,
+      "floorId": "C1_2_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.254.png",
+      "sha256": "340afa06bd4e4b49862240b816e6176ec62fac86c0ae8a6bcff972a133965733",
+      "bytes": 122154,
+      "geometry": {
+        "x": 213.72999572753906,
+        "y": 278.489990234375,
+        "width": 36.62001037597656,
+        "height": 45.680023193359375
+      }
+    },
+    "C1.2.255": {
+      "block": "C1.2",
+      "floor": 2,
+      "floorId": "C1_2_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.255.png",
+      "sha256": "a37412c3ae15b39b79bfeff4fdf1df388b2d39a1f6fba7c113c8683c318825bf",
+      "bytes": 122496,
+      "geometry": {
+        "x": 246.2899932861328,
+        "y": 281.0199890136719,
+        "width": 31.650009155273438,
+        "height": 46.94000244140625
+      }
+    },
+    "C1.2.319": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.319.png",
+      "sha256": "48480dfd9738f047d3f08676b035a0c3d6605dc85f2ed9b88fe1ad74fa567252",
+      "bytes": 133812,
+      "geometry": {
+        "x": 92.69000244140625,
+        "y": 278.489990234375,
+        "width": 21.81999969482422,
+        "height": 43.8699951171875
+      }
+    },
+    "C1.2.320": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.320.png",
+      "sha256": "35169810d10101a71a6fb73451675095ee7d8fc4e80e06f643cb1ec92fa1ff6e",
+      "bytes": 133924,
+      "geometry": {
+        "x": 77.1500015258789,
+        "y": 288.3599853515625,
+        "width": 19.73999786376953,
+        "height": 36.060028076171875
+      }
+    },
+    "C1.2.321": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.321.png",
+      "sha256": "4713be43617676c4cf3b2a124731840af8e0d409a25edf07b89cbb8b97384acf",
+      "bytes": 133726,
+      "geometry": {
+        "x": 50.11000061035156,
+        "y": 280.9200134277344,
+        "width": 30.419998168945312,
+        "height": 47.03997802734375
+      }
+    },
+    "C1.2.323": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.323.png",
+      "sha256": "c26d5f4430f362ce51cd78c30e151fe903b3423314011b6cd5f1162b6f4460f3",
+      "bytes": 133701,
+      "geometry": {
+        "x": 45.9900016784668,
+        "y": 252.8300018310547,
+        "width": 29.069995880126953,
+        "height": 18.669998168945312
+      }
+    },
+    "C1.2.324": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.324.png",
+      "sha256": "dbc9ddec57c5b17ffd0f6539c3ff09a0a061e40974fa8ee90e28562a28f45fcd",
+      "bytes": 133556,
+      "geometry": {
+        "x": 89.93000030517578,
+        "y": 249.85000610351562,
+        "width": 28.959999084472656,
+        "height": 17.269989013671875
+      }
+    },
+    "C1.2.325": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.325.png",
+      "sha256": "10b278adbf91cd2df96b32bb4c7298d2e59f324404c592cfbacadbde7b8e939b",
+      "bytes": 133910,
+      "geometry": {
+        "x": 43.7400016784668,
+        "y": 237.6999969482422,
+        "width": 29.810001373291016,
+        "height": 18.270004272460938
+      }
+    },
+    "C1.2.326": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.326.png",
+      "sha256": "5000c158817d68582dd3bd2eb6beefbeb26faa66e48e6117a9c63fe4dbd4cd2f",
+      "bytes": 133893,
+      "geometry": {
+        "x": 88.5,
+        "y": 235.55999755859375,
+        "width": 29.540000915527344,
+        "height": 16.1199951171875
+      }
+    },
+    "C1.2.327": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.327.png",
+      "sha256": "4d4efc0422eb4014f016e9f93a5887251f5f145b8b6bbfa6d558c654ed2d5692",
+      "bytes": 133777,
+      "geometry": {
+        "x": 41.58000183105469,
+        "y": 222.9199981689453,
+        "width": 30.48999786376953,
+        "height": 18.169998168945312
+      }
+    },
+    "C1.2.328": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.328.png",
+      "sha256": "de29552da3dedf5fc9505d8c6bb918b272a8212a8d9c3b7cec848981755267c5",
+      "bytes": 133989,
+      "geometry": {
+        "x": 86.97000122070312,
+        "y": 219.72000122070312,
+        "width": 30.29999542236328,
+        "height": 17.229995727539062
+      }
+    },
+    "C1.2.329": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.329.png",
+      "sha256": "707501c09905a14dd11d8da25ee588d3dc092db1ffb6f0ce9aaa4e71a82a1ecc",
+      "bytes": 133970,
+      "geometry": {
+        "x": 39.41999816894531,
+        "y": 208.1699981689453,
+        "width": 31.209999084472656,
+        "height": 18.150009155273438
+      }
+    },
+    "C1.2.330": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.330.png",
+      "sha256": "523c4922706719c9a5ad8ae135355463ebbc8d18b9604ef1b12e0f8501a2fa01",
+      "bytes": 133573,
+      "geometry": {
+        "x": 85.58000183105469,
+        "y": 205.4199981689453,
+        "width": 30.839996337890625,
+        "height": 15.919998168945312
+      }
+    },
+    "C1.2.331": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.331.png",
+      "sha256": "151673acbb6ca00dc85fc895e7f71c234db46f8d8afc9bbca29c01e07cc434fa",
+      "bytes": 133393,
+      "geometry": {
+        "x": 37.18000030517578,
+        "y": 193.5,
+        "width": 32.01000213623047,
+        "height": 18.32000732421875
+      }
+    },
+    "C1.2.332": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.332.png",
+      "sha256": "d6d353e69fd4647a55d7b6d81704504bc451d11328ab312606402994eb8fdadb",
+      "bytes": 133499,
+      "geometry": {
+        "x": 84.1500015258789,
+        "y": 190.63999938964844,
+        "width": 31.51000213623047,
+        "height": 16.449996948242188
+      }
+    },
+    "C1.2.334": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.334.png",
+      "sha256": "986308fd656ecfe7738484eaf0ffb764e480d3c33f75a5bdc9a7d1035a27adeb",
+      "bytes": 133320,
+      "geometry": {
+        "x": 80.43000030517578,
+        "y": 152.32000732421875,
+        "width": 32.470001220703125,
+        "height": 16.3599853515625
+      }
+    },
+    "C1.2.335": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.335.png",
+      "sha256": "949f4bd8f7f1170206c97d7dd7d45123e5f44719d39c58f6c104bdc205a37e5b",
+      "bytes": 133662,
+      "geometry": {
+        "x": 77.3499984741211,
+        "y": 120.91999816894531,
+        "width": 34.61000061035156,
+        "height": 33.33000183105469
+      }
+    },
+    "C1.2.336": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.336.png",
+      "sha256": "9da18a4cc3a866fc7306349eb2be0adfb8a88f236c9c2961a19149a1f45c52fe",
+      "bytes": 133411,
+      "geometry": {
+        "x": 30.360000610351562,
+        "y": 147.5800018310547,
+        "width": 35.11000061035156,
+        "height": 25.089996337890625
+      }
+    },
+    "C1.2.337": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.337.png",
+      "sha256": "4851d08fa6434d57d22b29ef09a905b22986051c204edddb8d252d0170580e52",
+      "bytes": 133482,
+      "geometry": {
+        "x": 27.700000762939453,
+        "y": 129.5800018310547,
+        "width": 35.57999801635742,
+        "height": 21.05999755859375
+      }
+    },
+    "C1.2.338": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.338.png",
+      "sha256": "31814093c1518a10842cc8120c32910fdde879f8c690cc0bfbea1706f47f50ab",
+      "bytes": 133605,
+      "geometry": {
+        "x": 76.19000244140625,
+        "y": 109.66000366210938,
+        "width": 33.68999481201172,
+        "height": 13.089996337890625
+      }
+    },
+    "C1.2.339": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.339.png",
+      "sha256": "d17b1cd075a59ec90c55e047f9e70886a00c900d00577069c7491ab3cc57c01e",
+      "bytes": 133630,
+      "geometry": {
+        "x": 25.360000610351562,
+        "y": 113.69999694824219,
+        "width": 36.15999984741211,
+        "height": 18.970001220703125
+      }
+    },
+    "C1.2.340": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.340.png",
+      "sha256": "6f229a723180a9aa0d95d87f373e1137c5692243200951736a2a6a8cbda57156",
+      "bytes": 133769,
+      "geometry": {
+        "x": 17.149999618530273,
+        "y": 56.810001373291016,
+        "width": 42.81999969482422,
+        "height": 60.06999588012695
+      }
+    },
+    "C1.2.344": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.344.png",
+      "sha256": "8a8e92d4361360cb682161769296dd5db57e2d4b21a4f94132fe4bb7442a254e",
+      "bytes": 133470,
+      "geometry": {
+        "x": 105.25,
+        "y": 49.06999969482422,
+        "width": 58.72999572753906,
+        "height": 46
+      }
+    },
+    "C1.2.346": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.346.png",
+      "sha256": "4e4df3673d36d304d5fd22f8fc100b651126ecc8cb57bb69dfc20f1756f00ed4",
+      "bytes": 133545,
+      "geometry": {
+        "x": 163.97999572753906,
+        "y": 49.06999969482422,
+        "width": 58.80000305175781,
+        "height": 46
+      }
+    },
+    "C1.2.352": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.352.png",
+      "sha256": "be4ab3aef5e31d46377c752cf041f8abb05fdf4f3485787114cb497f463d90fa",
+      "bytes": 133798,
+      "geometry": {
+        "x": 219.8699951171875,
+        "y": 51.16999816894531,
+        "width": 37.5,
+        "height": 46.69000244140625
+      }
+    },
+    "C1.2.354": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.354.png",
+      "sha256": "2a3574184efaddd8cdb5fc7c61f16c288434a32e1ffa039e43c6cae864e7033a",
+      "bytes": 133635,
+      "geometry": {
+        "x": 269.4100036621094,
+        "y": 56.09000015258789,
+        "width": 41.470001220703125,
+        "height": 48.46000289916992
+      }
+    },
+    "C1.2.358": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.358.png",
+      "sha256": "16afd1cd1333aaffd4614433518661b2e7366b7367b4e723ab239d40ed11ecb2",
+      "bytes": 134087,
+      "geometry": {
+        "x": 262.5799865722656,
+        "y": 122,
+        "width": 38.870025634765625,
+        "height": 50.50999450683594
+      }
+    },
+    "C1.2.359": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.359.png",
+      "sha256": "66b3745eef21df34847ac3d80fba22a6e98483b342d9555e8cc7983e814f1e05",
+      "bytes": 134042,
+      "geometry": {
+        "x": 217.13999938964844,
+        "y": 109.20999908447266,
+        "width": 34.649993896484375,
+        "height": 29.93999481201172
+      }
+    },
+    "C1.2.360": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.360.png",
+      "sha256": "73a4f97294c6d87f7c2f423978946bed43d91876531a226be51f36f074df529f",
+      "bytes": 133983,
+      "geometry": {
+        "x": 215.16000366210938,
+        "y": 136.25,
+        "width": 33.91999816894531,
+        "height": 32.42999267578125
+      }
+    },
+    "C1.2.362": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.362.png",
+      "sha256": "492fe38f4d7efd8dd6c0cada6d3b3155df521e5ac463a3161775ad46b8d0d37e",
+      "bytes": 133763,
+      "geometry": {
+        "x": 212.3699951171875,
+        "y": 190.63999938964844,
+        "width": 31.510009765625,
+        "height": 16.470001220703125
+      }
+    },
+    "C1.2.363": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.363.png",
+      "sha256": "cee1abd9c32c72f5a90c4396adea88b7f3bce1d181989b2c2898422020761bf6",
+      "bytes": 133985,
+      "geometry": {
+        "x": 258.8399963378906,
+        "y": 193.5,
+        "width": 32.019989013671875,
+        "height": 18.30999755859375
+      }
+    },
+    "C1.2.364": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.364.png",
+      "sha256": "e7a940dbac857069912722f35df3eb1de511dbbda163e8cae768c9e671c25cf1",
+      "bytes": 133697,
+      "geometry": {
+        "x": 211.60000610351562,
+        "y": 205.4199981689453,
+        "width": 30.839996337890625,
+        "height": 15.949996948242188
+      }
+    },
+    "C1.2.365": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.365.png",
+      "sha256": "f1adb79713dfd71a2e6651f64771d18951a2c4096ffdf9b1140768c637c4dde0",
+      "bytes": 134045,
+      "geometry": {
+        "x": 257.3999938964844,
+        "y": 208.1699981689453,
+        "width": 31.20001220703125,
+        "height": 18.150009155273438
+      }
+    },
+    "C1.2.366": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.366.png",
+      "sha256": "6e95633230e61bc856057bdbee31b5f99996089eebd5440fbc28850ef8ce0459",
+      "bytes": 134061,
+      "geometry": {
+        "x": 210.75999450683594,
+        "y": 219.72999572753906,
+        "width": 30.290008544921875,
+        "height": 17.220001220703125
+      }
+    },
+    "C1.2.367": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.367.png",
+      "sha256": "684a87b61bcf76c137c5541859c874d0b64a625fbc44f69b99f67b57af4c29a5",
+      "bytes": 133802,
+      "geometry": {
+        "x": 255.9600067138672,
+        "y": 222.9199981689453,
+        "width": 30.479995727539062,
+        "height": 18.540008544921875
+      }
+    },
+    "C1.2.368": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.368.png",
+      "sha256": "60c0ba2d2389460d53331e72e093b9003e0944587c28b99591fedb8440faf41c",
+      "bytes": 134053,
+      "geometry": {
+        "x": 209.99000549316406,
+        "y": 235.57000732421875,
+        "width": 29.489990234375,
+        "height": 16.459991455078125
+      }
+    },
+    "C1.2.369": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.369.png",
+      "sha256": "39d9ddec51e7a64f83a209c6a8c8da5e2d4c6e13de04d9fd3585d806d3b618c3",
+      "bytes": 134068,
+      "geometry": {
+        "x": 254.47999572753906,
+        "y": 237.6999969482422,
+        "width": 29.780014038085938,
+        "height": 18.270004272460938
+      }
+    },
+    "C1.2.370": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.370.png",
+      "sha256": "0390897e6de5992708ed80e7df62d4aa10d59d78f2b36367ddd397c225f10911",
+      "bytes": 133738,
+      "geometry": {
+        "x": 209.1699981689453,
+        "y": 249.86000061035156,
+        "width": 28.889999389648438,
+        "height": 17.139999389648438
+      }
+    },
+    "C1.2.371": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.371.png",
+      "sha256": "c83e25a836b5d434c300e60977605a44613c5e7a36a282fa4b7502b6d96bc1a4",
+      "bytes": 133560,
+      "geometry": {
+        "x": 252.97000122070312,
+        "y": 252.8300018310547,
+        "width": 29.079986572265625,
+        "height": 18.659988403320312
+      }
+    },
+    "C1.2.374": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.374.png",
+      "sha256": "d7316feb3452cc6e72fcaea1269e17fa11a784bb32d5ddb3812264e42781effd",
+      "bytes": 133436,
+      "geometry": {
+        "x": 212.9199981689453,
+        "y": 278.489990234375,
+        "width": 22.419998168945312,
+        "height": 43.8699951171875
+      }
+    },
+    "C1.2.375": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.375.png",
+      "sha256": "9068d2239561218aecc1517bd2ac90e25689368cbbc7d1bf58c1715c07b3ebae",
+      "bytes": 133892,
+      "geometry": {
+        "x": 231.19000244140625,
+        "y": 291.6700134277344,
+        "width": 19.3800048828125,
+        "height": 32.66998291015625
+      }
+    },
+    "C1.2.376": {
+      "block": "C1.2",
+      "floor": 3,
+      "floorId": "C1_2_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.2.376.png",
+      "sha256": "0f5b1c472b6a823711171839b34a933b506bbe67d330c948385cb9554402ba30",
+      "bytes": 133826,
+      "geometry": {
+        "x": 247.5,
+        "y": 281.1600036621094,
+        "width": 30.44000244140625,
+        "height": 46.79998779296875
+      }
+    },
+    "C1.3.121": {
+      "block": "C1.3",
+      "floor": 1,
+      "floorId": "C1_3_1",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.121.png",
+      "sha256": "fd482278f3a68215b307662e6803bd74f01e62539779ac292a02f51ac3dcd824",
+      "bytes": 114683,
+      "geometry": {
+        "x": 84.72000122070312,
+        "y": 85.0199966430664,
+        "width": 38.589996337890625,
+        "height": 29.56999969482422
+      }
+    },
+    "C1.3.125": {
+      "block": "C1.3",
+      "floor": 1,
+      "floorId": "C1_3_1",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.125.png",
+      "sha256": "ec5b56e0f9bba9fd77f68e1901b36d3d5a9c9331d6e3b79b8a20e7bfef09a1e5",
+      "bytes": 114982,
+      "geometry": {
+        "x": 91.5999984741211,
+        "y": 32.970001220703125,
+        "width": 45.349998474121094,
+        "height": 52.66999816894531
+      }
+    },
+    "C1.3.126": {
+      "block": "C1.3",
+      "floor": 1,
+      "floorId": "C1_3_1",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.126.png",
+      "sha256": "b59817ffc72a641ef2810ebc878860f5f6ec8077b274a95a79aaa376aedfc5d1",
+      "bytes": 114819,
+      "geometry": {
+        "x": 45.939998626708984,
+        "y": 24.399999618530273,
+        "width": 54.750003814697266,
+        "height": 51.97999572753906
+      }
+    },
+    "C1.3.128": {
+      "block": "C1.3",
+      "floor": 1,
+      "floorId": "C1_3_1",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.128.png",
+      "sha256": "f4d4a3cdb926601b34ccbd0718ad9fbf515763ad3fd3664ec82baed95067d7f5",
+      "bytes": 114955,
+      "geometry": {
+        "x": 130.57000732421875,
+        "y": 68.44000244140625,
+        "width": 23.439987182617188,
+        "height": 22.56999969482422
+      }
+    },
+    "C1.3.129": {
+      "block": "C1.3",
+      "floor": 1,
+      "floorId": "C1_3_1",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.129.png",
+      "sha256": "b67fb60154d0c2f98c0066169ee449f364ef624650587ad07ed52a61355954dd",
+      "bytes": 114943,
+      "geometry": {
+        "x": 130.49000549316406,
+        "y": 41.08000183105469,
+        "width": 18.029998779296875,
+        "height": 29.150001525878906
+      }
+    },
+    "C1.3.130": {
+      "block": "C1.3",
+      "floor": 1,
+      "floorId": "C1_3_1",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.130.png",
+      "sha256": "4295465fe07f3e1ce7ba7dd546d5206862d209fb992389edb4d3b904956bac3a",
+      "bytes": 114977,
+      "geometry": {
+        "x": 141.5800018310547,
+        "y": 43.900001525878906,
+        "width": 19.639999389648438,
+        "height": 29.73999786376953
+      }
+    },
+    "C1.3.168": {
+      "block": "C1.3",
+      "floor": 1,
+      "floorId": "C1_3_1",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.168.png",
+      "sha256": "6edbba4f782fe206ef6c061b5101c21a49157178ebae58cd8bd4621935c50cff",
+      "bytes": 115140,
+      "geometry": {
+        "x": 207.52999877929688,
+        "y": 153.36000061035156,
+        "width": 23.970001220703125,
+        "height": 30.330001831054688
+      }
+    },
+    "C1.3.187": {
+      "block": "C1.3",
+      "floor": 1,
+      "floorId": "C1_3_1",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.187.png",
+      "sha256": "a71d39c5bd5124626e5f196bc61f0eff2bba9188c660a2bf035282d964000877",
+      "bytes": 114993,
+      "geometry": {
+        "x": 36.97999954223633,
+        "y": 186.60000610351562,
+        "width": 57.65999984741211,
+        "height": 34.1199951171875
+      }
+    },
+    "C1.3.188": {
+      "block": "C1.3",
+      "floor": 1,
+      "floorId": "C1_3_1",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.188.png",
+      "sha256": "761f060acf13d9007eb36d69c9a907486f6111bb70b3aaac156236629522e12d",
+      "bytes": 115417,
+      "geometry": {
+        "x": 43.16999816894531,
+        "y": 158.5,
+        "width": 56.86000061035156,
+        "height": 36.850006103515625
+      }
+    },
+    "C1.3.221K": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.221K.png",
+      "sha256": "82d76a9200b957f795b4399e01ae09a143d6ce281f1c8c648a359f1b6d17bdbc",
+      "bytes": 163323,
+      "geometry": {
+        "x": 46.02000045776367,
+        "y": 24.399999618530273,
+        "width": 25.14999771118164,
+        "height": 45.97999572753906
+      }
+    },
+    "C1.3.222P": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.222P.png",
+      "sha256": "069c63900ad54b6f6af5ebd5c00c8eee0d4d3dea0d8a16cd73efb83e3ecf5c66",
+      "bytes": 163847,
+      "geometry": {
+        "x": 64.66999816894531,
+        "y": 27.34000015258789,
+        "width": 32.290000915527344,
+        "height": 47.53000259399414
+      }
+    },
+    "C1.3.223P": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.223P.png",
+      "sha256": "4686c108e7090a5c89c475eaf45c9f392c1a87181af26a6e1f88e57c71ce885e",
+      "bytes": 163864,
+      "geometry": {
+        "x": 88.4800033569336,
+        "y": 32.209999084472656,
+        "width": 31.43000030517578,
+        "height": 47.43000030517578
+      }
+    },
+    "C1.3.224P": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.224P.png",
+      "sha256": "257eae27637a6638a4d1544ab78a0a15838ac74d8c23a193fc460a0bf265505d",
+      "bytes": 163741,
+      "geometry": {
+        "x": 110.93000030517578,
+        "y": 37.119998931884766,
+        "width": 28.95000457763672,
+        "height": 46.96999740600586
+      }
+    },
+    "C1.3.225P": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.225P.png",
+      "sha256": "e43d60196b38e576c663bbaef6d6d4fd97f6f6d9d3657b33c5a2fa75b4383c0d",
+      "bytes": 163787,
+      "geometry": {
+        "x": 130.1300048828125,
+        "y": 41.790000915527344,
+        "width": 33.22999572753906,
+        "height": 47.91999816894531
+      }
+    },
+    "C1.3.226P": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.226P.png",
+      "sha256": "d4193df30f0826e9c8125a11081018ae6ec954563d0ba98ed3353c93034b478a",
+      "bytes": 164041,
+      "geometry": {
+        "x": 152.67999267578125,
+        "y": 47.70000076293945,
+        "width": 34.59001159667969,
+        "height": 48.249996185302734
+      }
+    },
+    "C1.3.227P": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.227P.png",
+      "sha256": "f31677125e50535f5eeae487fa25ae8dbef18eb641a5df01d2eb8828f494b98f",
+      "bytes": 163857,
+      "geometry": {
+        "x": 175.99000549316406,
+        "y": 54.18000030517578,
+        "width": 34.69999694824219,
+        "height": 48.18000030517578
+      }
+    },
+    "C1.3.228K": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.228K.png",
+      "sha256": "ca556c12cc875e4372e1006e2c9cb10cf27f299b7e1cd3aec22514a14bf2b7b1",
+      "bytes": 164322,
+      "geometry": {
+        "x": 198.4199981689453,
+        "y": 60.95000076293945,
+        "width": 35.910003662109375,
+        "height": 48.189998626708984
+      }
+    },
+    "C1.3.229P": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.229P.png",
+      "sha256": "dc8519f89bf6a5dc62446a4ccf380a7ca034bd0b998d681a24963aef90ed4dfe",
+      "bytes": 164271,
+      "geometry": {
+        "x": 220.7899932861328,
+        "y": 68.22000122070312,
+        "width": 43.85002136230469,
+        "height": 50.36000061035156
+      }
+    },
+    "C1.3.230P": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.230P.png",
+      "sha256": "7fab7809863cdcb5da9a7608654bcedf6ebab3d8c03aa2a0d163cc6332d24f29",
+      "bytes": 164591,
+      "geometry": {
+        "x": 250.07000732421875,
+        "y": 78.22000122070312,
+        "width": 43.67999267578125,
+        "height": 49.73999786376953
+      }
+    },
+    "C1.3.231P": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.231P.png",
+      "sha256": "860cf7989eaf22b4ec2ffd712021fcd2aec44262144d8039ee11b0b701ad89fc",
+      "bytes": 164361,
+      "geometry": {
+        "x": 277.3500061035156,
+        "y": 88.3499984741211,
+        "width": 47.529998779296875,
+        "height": 50.20000457763672
+      }
+    },
+    "C1.3.232P": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.232P.png",
+      "sha256": "0744dfda9b1a8fd72e24415e96dc6f5ae7909a9af80f2982bb4b2afacb93a2b5",
+      "bytes": 164724,
+      "geometry": {
+        "x": 306.19000244140625,
+        "y": 100.80999755859375,
+        "width": 40.260009765625,
+        "height": 51.589996337890625
+      }
+    },
+    "C1.3.233P": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.233P.png",
+      "sha256": "6e155e54a378ce67aa91e08e3f2e4dcaafbd54ee184b4d54b3060a461a320c92",
+      "bytes": 164609,
+      "geometry": {
+        "x": 247.42999267578125,
+        "y": 136.69000244140625,
+        "width": 38.45001220703125,
+        "height": 39.25
+      }
+    },
+    "C1.3.234K": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.234K.png",
+      "sha256": "e6a2ebf30b512b211bc54127bffa4001aec66a6929834cb0564f2ef3101d716d",
+      "bytes": 164856,
+      "geometry": {
+        "x": 206.27999877929688,
+        "y": 124.81999969482422,
+        "width": 52.1300048828125,
+        "height": 62.56000518798828
+      }
+    },
+    "C1.3.235L": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.235L.png",
+      "sha256": "204b8ca2e90c2afe7fc3d344cff51e750147fb82b67d63bbd4207be54bf89335",
+      "bytes": 164276,
+      "geometry": {
+        "x": 73.01000213623047,
+        "y": 86.80000305175781,
+        "width": 47.05999755859375,
+        "height": 62.58000183105469
+      }
+    },
+    "C1.3.236P": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.236P.png",
+      "sha256": "e8cd77fdc45a000d576479ff704e3bdea9fe313ea35074d5f4e872f9c66c396f",
+      "bytes": 164046,
+      "geometry": {
+        "x": 40.400001525878906,
+        "y": 79.66999816894531,
+        "width": 31.080001831054688,
+        "height": 29.6300048828125
+      }
+    },
+    "C1.3.237P": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.237P.png",
+      "sha256": "836ebb6b7dcc68de1c2ab38fa443c34cefec770b515398a0327c9eebba095d60",
+      "bytes": 163940,
+      "geometry": {
+        "x": 35.79999923706055,
+        "y": 105.23999786376953,
+        "width": 31.570003509521484,
+        "height": 34.860008239746094
+      }
+    },
+    "C1.3.240P": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.240P.png",
+      "sha256": "f488826d63ec56eefc40d421abf1ff9ed4114bec11955636aa5b189d438e40ab",
+      "bytes": 163842,
+      "geometry": {
+        "x": 27.1200008392334,
+        "y": 159.64999389648438,
+        "width": 35.23999786376953,
+        "height": 40.260009765625
+      }
+    },
+    "C1.3.241P": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.241P.png",
+      "sha256": "86e78aec53e411711bfd423255d69f3af363128607497702d794e4e50d601d5a",
+      "bytes": 163945,
+      "geometry": {
+        "x": 68.31999969482422,
+        "y": 164.97000122070312,
+        "width": 40.48999786376953,
+        "height": 43.779998779296875
+      }
+    },
+    "C1.3.243P": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.243P.png",
+      "sha256": "a4ad1f74edff196b4e3dfdfe7a041f028f563e01920f11dafc3b577578c2b276",
+      "bytes": 163822,
+      "geometry": {
+        "x": 21.25,
+        "y": 194.86000061035156,
+        "width": 34.90999984741211,
+        "height": 43.660003662109375
+      }
+    },
+    "C1.3.244P": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.244P.png",
+      "sha256": "056f1b371716e91454e391468dbd39fc8943bd59a4d38319c7866ae450a01465",
+      "bytes": 164086,
+      "geometry": {
+        "x": 62.029998779296875,
+        "y": 201.5,
+        "width": 38.980003356933594,
+        "height": 45.05999755859375
+      }
+    },
+    "C1.3.246": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.246.png",
+      "sha256": "666ccd37f9ab695249f1cf775e27d5d95529206292ff1822b2267f5718643c78",
+      "bytes": 163753,
+      "geometry": {
+        "x": 39.5099983215332,
+        "y": 250.64999389648438,
+        "width": 32.67000198364258,
+        "height": 49.339996337890625
+      }
+    },
+    "C1.3.247P": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.247P.png",
+      "sha256": "cadf2ccb9cfcab9b5bb3972a4b9bd77a6ea961dea3bf2c7210d881e1ae293443",
+      "bytes": 163718,
+      "geometry": {
+        "x": 12.880000114440918,
+        "y": 246.72999572753906,
+        "width": 34.189998626708984,
+        "height": 48.31001281738281
+      }
+    },
+    "C1.3.248P": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.248P.png",
+      "sha256": "7d67b28cc5e460e99a466ab334f0a31dd070fce3af5ed7077145b9dac64d4bb8",
+      "bytes": 164414,
+      "geometry": {
+        "x": 239.5800018310547,
+        "y": 166.24000549316406,
+        "width": 32.77998352050781,
+        "height": 30.209991455078125
+      }
+    },
+    "C1.3.249K": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.249K.png",
+      "sha256": "bbedb56048ae0750c1cf87ecfa8b1e220c4992689ebfb6419f13d3527be2cd2c",
+      "bytes": 164667,
+      "geometry": {
+        "x": 291.0899963378906,
+        "y": 150.69000244140625,
+        "width": 41.510009765625,
+        "height": 27.8699951171875
+      }
+    },
+    "C1.3.250K": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.250K.png",
+      "sha256": "f133eef40877141f8f00fb30612cab563dc029451a2b2e0df30d1d687b6ba55a",
+      "bytes": 164638,
+      "geometry": {
+        "x": 284.70001220703125,
+        "y": 163.5399932861328,
+        "width": 40.970001220703125,
+        "height": 29.560012817382812
+      }
+    },
+    "C1.3.251K": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.251K.png",
+      "sha256": "53f40c28156fa357588495cfadc9a83fffb3fed3367972969f5c27c6754a303c",
+      "bytes": 164425,
+      "geometry": {
+        "x": 277.4200134277344,
+        "y": 177.11000061035156,
+        "width": 40.17999267578125,
+        "height": 30.17999267578125
+      }
+    },
+    "C1.3.252K": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.252K.png",
+      "sha256": "05ef9abfff6ea0b1bc3b360b44f14787c16df19829b90a7550971409544bf5f1",
+      "bytes": 164479,
+      "geometry": {
+        "x": 271.07000732421875,
+        "y": 192.6300048828125,
+        "width": 38.639984130859375,
+        "height": 28.389999389648438
+      }
+    },
+    "C1.3.253K": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.253K.png",
+      "sha256": "70d4a8489d2b11c57e7576735f1d9ad414beb357e328ffee2af26827da932ab8",
+      "bytes": 164547,
+      "geometry": {
+        "x": 264.2200012207031,
+        "y": 206,
+        "width": 37.8699951171875,
+        "height": 28.69000244140625
+      }
+    },
+    "C1.3.254L": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.254L.png",
+      "sha256": "c929513344ce4f08d45dc581991fa9d68478a616a29920b39299cf969851ebd4",
+      "bytes": 163743,
+      "geometry": {
+        "x": 179.55999755859375,
+        "y": 197.0500030517578,
+        "width": 42.18000793457031,
+        "height": 56.02000427246094
+      }
+    },
+    "C1.3.255L": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.255L.png",
+      "sha256": "419c4257ccb5817b62e60493fd28e3afd044097fbfaf28a35252e6b8c53b7ded",
+      "bytes": 164516,
+      "geometry": {
+        "x": 204.1199951171875,
+        "y": 206.22999572753906,
+        "width": 45.80000305175781,
+        "height": 56.96000671386719
+      }
+    },
+    "C1.3.257P": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.257P.png",
+      "sha256": "eaf645a714a7ec922cb54ca9c6cfd0717cbb51c2b4482c5a4d96f5ad2e5daf75",
+      "bytes": 164306,
+      "geometry": {
+        "x": 257.3900146484375,
+        "y": 220.7899932861328,
+        "width": 37.129974365234375,
+        "height": 27.860000610351562
+      }
+    },
+    "C1.3.258P": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.258P.png",
+      "sha256": "510322f202e500da59087e19174fbcd3571e2878db9f7384c5be7a5b971702c6",
+      "bytes": 164290,
+      "geometry": {
+        "x": 250.22000122070312,
+        "y": 235.33999633789062,
+        "width": 36.540008544921875,
+        "height": 28.25
+      }
+    },
+    "C1.3.259P": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.259P.png",
+      "sha256": "ef3df4fd41af0d27dd7353fbfa771aaebe64bb8ce4e7d3c9bcd970b617247b1b",
+      "bytes": 164348,
+      "geometry": {
+        "x": 243.77000427246094,
+        "y": 250.64999389648438,
+        "width": 34.68998718261719,
+        "height": 26.350006103515625
+      }
+    },
+    "C1.3.260P": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.260P.png",
+      "sha256": "a5c4186ef39d6368e645ee3d7db085f2c976baa6b0bfdfe764deab9117f269b2",
+      "bytes": 164405,
+      "geometry": {
+        "x": 237.0399932861328,
+        "y": 264.3999938964844,
+        "width": 33.97001647949219,
+        "height": 26.550018310546875
+      }
+    },
+    "C1.3.261P": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.261P.png",
+      "sha256": "eecb8befef21dc2e6c4b5beb7f327f5bc0a92f5773b38c0d3bc69ba69a46f7fe",
+      "bytes": 164052,
+      "geometry": {
+        "x": 230.10000610351562,
+        "y": 278.75,
+        "width": 33.16998291015625,
+        "height": 26.829986572265625
+      }
+    },
+    "C1.3.262P": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.262P.png",
+      "sha256": "c5a3e616d4f2aac010459978f7f2478528787ea5c840df5f87a6f3b21a3cf24d",
+      "bytes": 164234,
+      "geometry": {
+        "x": 219.07000732421875,
+        "y": 293.8599853515625,
+        "width": 36.06999206542969,
+        "height": 34.09002685546875
+      }
+    },
+    "C1.3.263P": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.263P.png",
+      "sha256": "e787e0c16cd735fb20a99c6e3834aaeaf8a83d519eb8f19bef098b22aaa8b64b",
+      "bytes": 164636,
+      "geometry": {
+        "x": 198.41000366210938,
+        "y": 313.1499938964844,
+        "width": 44.31999206542969,
+        "height": 41.75
+      }
+    },
+    "C1.3.264L": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.264L.png",
+      "sha256": "02778921948c79c88698bb93d68123537100dab26ca8ba391cc98b270f72d229",
+      "bytes": 164368,
+      "geometry": {
+        "x": 167.41000366210938,
+        "y": 284.44000244140625,
+        "width": 49.34999084472656,
+        "height": 57.329986572265625
+      }
+    },
+    "C1.3.266P": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.266P.png",
+      "sha256": "c54e83d29e60551fec78e60eeab2080dabda37c4a8f312dcc71af571982a0d4a",
+      "bytes": 164319,
+      "geometry": {
+        "x": 171.88999938964844,
+        "y": 244.4600067138672,
+        "width": 32.22999572753906,
+        "height": 30.800003051757812
+      }
+    },
+    "C1.3.267P": {
+      "block": "C1.3",
+      "floor": 2,
+      "floorId": "C1_3_2",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.267P.png",
+      "sha256": "c9c0f61397692d0c199a4d635e8c2622d834b5f6e675421f0c964a6698564508",
+      "bytes": 164399,
+      "geometry": {
+        "x": 195.99000549316406,
+        "y": 253.07000732421875,
+        "width": 34.81999206542969,
+        "height": 31.80999755859375
+      }
+    },
+    "C1.3.318P": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.318P.png",
+      "sha256": "0ef4cbb2e652ac65dd0e21771abae027bbc9859b25153931d7dd5c4476a173ef",
+      "bytes": 154750,
+      "geometry": {
+        "x": 39.099998474121094,
+        "y": 250.64999389648438,
+        "width": 33.08000183105469,
+        "height": 49.339996337890625
+      }
+    },
+    "C1.3.319P": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.319P.png",
+      "sha256": "5c2acaa4756c0406814ea4171a661a08570599450ce086968c7ef0a6290607e4",
+      "bytes": 154723,
+      "geometry": {
+        "x": 12.880000114440918,
+        "y": 246.72999572753906,
+        "width": 34.189998626708984,
+        "height": 48.24000549316406
+      }
+    },
+    "C1.3.321P": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.321P.png",
+      "sha256": "e76f224fc8ab508a1733db0e441e98617e6e9b6c257cc80b33de6926a197ee44",
+      "bytes": 154420,
+      "geometry": {
+        "x": 49.650001525878906,
+        "y": 199.91000366210938,
+        "width": 32.72999572753906,
+        "height": 42.899993896484375
+      }
+    },
+    "C1.3.322P": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.322P.png",
+      "sha256": "60cf0aac2490e293a68002b0250d8cb433fa9584d744cec0dc80e6e715593e53",
+      "bytes": 154852,
+      "geometry": {
+        "x": 21.25,
+        "y": 194.86000061035156,
+        "width": 34.90999984741211,
+        "height": 43.660003662109375
+      }
+    },
+    "C1.3.323K": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.323K.png",
+      "sha256": "ea313537c4bce393b55a9c898ba048b82762efa13f428955863d082036f8a416",
+      "bytes": 155049,
+      "geometry": {
+        "x": 56.15999984741211,
+        "y": 163.8000030517578,
+        "width": 33.34000015258789,
+        "height": 40.709991455078125
+      }
+    },
+    "C1.3.324K": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.324K.png",
+      "sha256": "22402de38afd446b597ff2f96732a6a8b328e6b3a84671149e0a3c1fd41fd796",
+      "bytes": 154917,
+      "geometry": {
+        "x": 27.1200008392334,
+        "y": 159.64999389648438,
+        "width": 35.23999786376953,
+        "height": 40.260009765625
+      }
+    },
+    "C1.3.327K": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.327K.png",
+      "sha256": "43556afdf62e9545819685fb2b972cb9429380a2e89023ef174b331666669dbc",
+      "bytes": 154751,
+      "geometry": {
+        "x": 35.79999923706055,
+        "y": 105.23999786376953,
+        "width": 31.570003509521484,
+        "height": 34.860008239746094
+      }
+    },
+    "C1.3.328": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.328.png",
+      "sha256": "6343cd4a003bff3a40f15d4fbf460a521503caa49e1e26b89caa4f1760fa9530",
+      "bytes": 155000,
+      "geometry": {
+        "x": 73.01000213623047,
+        "y": 110.93000030517578,
+        "width": 41.66999816894531,
+        "height": 38.45000457763672
+      }
+    },
+    "C1.3.331P": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.331P.png",
+      "sha256": "414ba03aae7e33111b9e5b8208019d86ae973255e2e0e484e79efca5f0037a17",
+      "bytes": 154438,
+      "geometry": {
+        "x": 40.400001525878906,
+        "y": 79.66999816894531,
+        "width": 31.080001831054688,
+        "height": 29.6300048828125
+      }
+    },
+    "C1.3.337": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.337.png",
+      "sha256": "4e3b7883c754f2a75d4a2972401b2276bcb2497ea8806957b7385bdea6d28af8",
+      "bytes": 154064,
+      "geometry": {
+        "x": 46.02000045776367,
+        "y": 24.399999618530273,
+        "width": 50.939998626708984,
+        "height": 50.470001220703125
+      }
+    },
+    "C1.3.338": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.338.png",
+      "sha256": "87ee6c33ba846ee70040a255011508e16ad262c9f6043a2d80c10d7b59e7fb26",
+      "bytes": 154590,
+      "geometry": {
+        "x": 88.4800033569336,
+        "y": 32.209999084472656,
+        "width": 51.400001525878906,
+        "height": 51.87999725341797
+      }
+    },
+    "C1.3.339": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.339.png",
+      "sha256": "a87380654d08075abfc1e8334eed0a3b9d9e63bb103d3bec0e4c925d3940c44e",
+      "bytes": 154656,
+      "geometry": {
+        "x": 130.1300048828125,
+        "y": 41.790000915527344,
+        "width": 33.22999572753906,
+        "height": 47.91999816894531
+      }
+    },
+    "C1.3.340": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.340.png",
+      "sha256": "0a7f27c684f77726f77ed5c2e07d35246edc76a0e2edd8ef43bd7298c6868de3",
+      "bytes": 154942,
+      "geometry": {
+        "x": 152.67999267578125,
+        "y": 47.689998626708984,
+        "width": 34.59001159667969,
+        "height": 48.2599983215332
+      }
+    },
+    "C1.3.341": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.341.png",
+      "sha256": "143d9188365dd5e4fb00d625746174f38bdf44f461cc31f7dd64613d0d713f0e",
+      "bytes": 154693,
+      "geometry": {
+        "x": 175.99000549316406,
+        "y": 54.13999938964844,
+        "width": 34.69999694824219,
+        "height": 48.220001220703125
+      }
+    },
+    "C1.3.342": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.342.png",
+      "sha256": "5e57e86f9e3fa36d28a20f5bf0c78c213b2d08faa0fc5082477b7ba3d008ac1d",
+      "bytes": 155009,
+      "geometry": {
+        "x": 198.4199981689453,
+        "y": 60.95000076293945,
+        "width": 35.910003662109375,
+        "height": 48.189998626708984
+      }
+    },
+    "C1.3.343": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.343.png",
+      "sha256": "26f6c0b9fca0c92c224e12c0a3ccb87bdba20cd36ca9aad1eaaeb5f1d7815638",
+      "bytes": 154968,
+      "geometry": {
+        "x": 220.7899932861328,
+        "y": 68.22000122070312,
+        "width": 40.38002014160156,
+        "height": 49.48999786376953
+      }
+    },
+    "C1.3.344": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.344.png",
+      "sha256": "53b64a23b97775e5a668e1888feb26c926093628e763c54077f6a9f756f6fa83",
+      "bytes": 154664,
+      "geometry": {
+        "x": 247.42999267578125,
+        "y": 77.0199966430664,
+        "width": 35.83001708984375,
+        "height": 48.25
+      }
+    },
+    "C1.3.345": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.345.png",
+      "sha256": "6486b6a15125e67f8a4168717db5da5586bd3ea73f96efc74f05398826eef7d2",
+      "bytes": 155136,
+      "geometry": {
+        "x": 269.6400146484375,
+        "y": 84.5999984741211,
+        "width": 37.759979248046875,
+        "height": 48.860008239746094
+      }
+    },
+    "C1.3.346": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.346.png",
+      "sha256": "3c925a24ada941795c87f2db9d522e3adacf76ec363887f3135c8f9fe4c27d69",
+      "bytes": 155460,
+      "geometry": {
+        "x": 292.6400146484375,
+        "y": 93.36000061035156,
+        "width": 49.379974365234375,
+        "height": 52.149993896484375
+      }
+    },
+    "C1.3.352": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.352.png",
+      "sha256": "3783412d9584ff848bbe4aee538cb668009b907ca60f57dd9646266181791fdc",
+      "bytes": 155134,
+      "geometry": {
+        "x": 274.9700012207031,
+        "y": 183.52999877929688,
+        "width": 39.3699951171875,
+        "height": 29.389999389648438
+      }
+    },
+    "C1.3.353": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.353.png",
+      "sha256": "ee4056d56dd36c12aba1470d812b2715465a63cb8b5f1d0145cc4293b4b83416",
+      "bytes": 155177,
+      "geometry": {
+        "x": 268.44000244140625,
+        "y": 197.89999389648438,
+        "width": 38.149993896484375,
+        "height": 28.240005493164062
+      }
+    },
+    "C1.3.354": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.354.png",
+      "sha256": "4afcdb3c5e519b511d2b45ea50a37a460026513729e0536b1a62f84612fd6995",
+      "bytes": 154877,
+      "geometry": {
+        "x": 261.5799865722656,
+        "y": 211.80999755859375,
+        "width": 37.670013427734375,
+        "height": 28.300003051757812
+      }
+    },
+    "C1.3.355": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.355.png",
+      "sha256": "7cca9cb3885ed89c490b6f9dc1a33cd77c504313193b999bac611797e1379f37",
+      "bytes": 155016,
+      "geometry": {
+        "x": 254.94000244140625,
+        "y": 226.44000244140625,
+        "width": 36.55999755859375,
+        "height": 27.459991455078125
+      }
+    },
+    "C1.3.356": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.356.png",
+      "sha256": "b7acb1aaf548a8c86acd8f70c4ae4cb5884bc6fb98827807ed24b2a75fb17df1",
+      "bytes": 155318,
+      "geometry": {
+        "x": 248.07000732421875,
+        "y": 240.57000732421875,
+        "width": 35.769989013671875,
+        "height": 27.529998779296875
+      }
+    },
+    "C1.3.357P": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.357P.png",
+      "sha256": "faaebd3f3769e87c88716fea76a31787538029642ec26fa8b9d7c6afeaa48dd0",
+      "bytes": 155157,
+      "geometry": {
+        "x": 241.55999755859375,
+        "y": 255.22999572753906,
+        "width": 34.399993896484375,
+        "height": 26.400009155273438
+      }
+    },
+    "C1.3.358P": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.358P.png",
+      "sha256": "4f7c4a253ea541a28edfb5bd5a4aa3cdca58237d7c947553107499fd8df0f0f8",
+      "bytes": 155416,
+      "geometry": {
+        "x": 234.85000610351562,
+        "y": 269.1400146484375,
+        "width": 33.589996337890625,
+        "height": 26.399993896484375
+      }
+    },
+    "C1.3.359P": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.359P.png",
+      "sha256": "88905eb8de0a3867842381728a622da2df3807788fd196fb919762358bcb8626",
+      "bytes": 155186,
+      "geometry": {
+        "x": 227.9499969482422,
+        "y": 283.4100036621094,
+        "width": 32.77000427246094,
+        "height": 26.139984130859375
+      }
+    },
+    "C1.3.360K": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.360K.png",
+      "sha256": "45ff8682e6a46afffec60ca67a7a3230815ab093d193fa020c3bf703d582701d",
+      "bytes": 155480,
+      "geometry": {
+        "x": 221.0399932861328,
+        "y": 298.0199890136719,
+        "width": 31.900009155273438,
+        "height": 25.8800048828125
+      }
+    },
+    "C1.3.361": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.361.png",
+      "sha256": "561ed9867096ff04727290b2d08484690eec44c740ff205f6c172883c7b2bbf2",
+      "bytes": 154765,
+      "geometry": {
+        "x": 196.86000061035156,
+        "y": 308.6499938964844,
+        "width": 48.11000061035156,
+        "height": 46.25
+      }
+    },
+    "C1.3.362P": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.362P.png",
+      "sha256": "d02d79c991ef2b4c0cbba57cea100b102f566a10761d911d760417a079d6d148",
+      "bytes": 155709,
+      "geometry": {
+        "x": 167.97000122070312,
+        "y": 296.3500061035156,
+        "width": 43.100006103515625,
+        "height": 44.829986572265625
+      }
+    },
+    "C1.3.365L": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.365L.png",
+      "sha256": "04113cb2900aa2569e748bb102220b8955459336d1e6afdcaf76bd3a5bab657c",
+      "bytes": 155709,
+      "geometry": {
+        "x": 180.42999267578125,
+        "y": 255.1300048828125,
+        "width": 47.6300048828125,
+        "height": 39.79998779296875
+      }
+    },
+    "C1.3.366L": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.366L.png",
+      "sha256": "7710d2af05227d5886e44a43595d74b2873dddb67b0c36aa2c6ffc6dde28e539",
+      "bytes": 155765,
+      "geometry": {
+        "x": 189.8699951171875,
+        "y": 228.14999389648438,
+        "width": 49.59001159667969,
+        "height": 41.6300048828125
+      }
+    },
+    "C1.3.367K": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.367K.png",
+      "sha256": "0b4ee7e35fa861565592aa51e814e12c588eabdde91407c52cb54ca7ad87ef94",
+      "bytes": 155815,
+      "geometry": {
+        "x": 197.16000366210938,
+        "y": 200.99000549316406,
+        "width": 53.61000061035156,
+        "height": 42.68998718261719
+      }
+    },
+    "C1.3.370L": {
+      "block": "C1.3",
+      "floor": 3,
+      "floorId": "C1_3_3",
+      "imagePath": "/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1.3.370L.png",
+      "sha256": "e56d5f1c6f0785f4944ff3b00d119237f39827501dea6a5f7e5ac44614770ff7",
+      "bytes": 156061,
+      "geometry": {
+        "x": 206.17999267578125,
+        "y": 124.81999969482422,
+        "width": 76.260009765625,
+        "height": 70.87999725341797
+      }
+    }
+  }
+}

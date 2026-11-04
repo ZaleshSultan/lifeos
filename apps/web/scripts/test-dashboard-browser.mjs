@@ -5,8 +5,8 @@ import { createServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { execFileSync } from "node:child_process";
 import { spawn } from "node:child_process";
-import { mkdir, writeFile, readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { mkdir, writeFile, readFile, rename } from "node:fs/promises";
+import { resolve, basename } from "node:path";
 import {
   clearIdealHumanReflection,
   emptyIdealHumanDay,
@@ -24,6 +24,8 @@ import {
 } from "../../../packages/core/src/ai-model-router.ts";
 import { captureBrowserFixture } from "../../../scripts/capture-browser-fixtures.mjs";
 import { captureBrowserScenarios } from "../../../scripts/capture-browser-scenarios.mjs";
+import { academicBrowserFixture } from "../../../scripts/academic-browser-fixtures.mjs";
+import { academicBrowserScenarios } from "../../../scripts/academic-browser-scenarios.mjs";
 const { chromium } = await import(
   process.env.LIFEOS_PLAYWRIGHT_MODULE || "playwright"
 );
@@ -59,6 +61,10 @@ const receipts = new Map();
 const captureFixtures = new Map([
   ["A", captureBrowserFixture("A")],
   ["B", captureBrowserFixture("B")],
+]);
+const academicFixtures = new Map([
+  ["A", academicBrowserFixture("A")],
+  ["B", academicBrowserFixture("B")],
 ]);
 const routerSettings = new Map([
   ["A", { settings: defaultAiRouterSettings(), revision: 0 }],
@@ -300,6 +306,13 @@ const backend = createServer(async (req, res) => {
     }
     if (path.startsWith("/api/tma/captures")) {
       const result = await captureFixtures
+        .get(owner)
+        .response(path.slice("/api/tma/".length), req.method, input);
+      res.writeHead(result.status, { "content-type": "application/json" });
+      return res.end(JSON.stringify(result.body));
+    }
+    if (path.startsWith("/api/tma/study/concierge")) {
+      const result = await academicFixtures
         .get(owner)
         .response(path.slice("/api/tma/".length), req.method, input);
       res.writeHead(result.status, { "content-type": "application/json" });
@@ -741,6 +754,22 @@ const frontend = createHttpsServer(
   { key: await readFile(tlsKey), cert: await readFile(tlsCert) },
   async (req, res) => {
     try {
+      const assetPath = new URL(req.url, "https://fixture").pathname;
+      if (
+        req.method === "GET" &&
+        /^\/tma\/campus-maps\/[a-f0-9]{40}\/C1\.[123]\.[123][0-9]{2}[KLP]?\.png$/.test(
+          assetPath,
+        )
+      ) {
+        const publicRoot = resolve(
+          process.env.LIFEOS_TMA_DIST || resolve(workspace, "apps/tma/dist"),
+        );
+        const image = await readFile(
+          resolve(publicRoot, assetPath.slice("/tma/".length)),
+        );
+        res.writeHead(200, { "content-type": "image/png" });
+        return res.end(image);
+      }
       const chunks = [];
       for await (const chunk of req) chunks.push(chunk);
       const response = await fetch(localOrigin + req.url, {
@@ -792,15 +821,88 @@ app.stdout.on("data", (v) => (logs += v));
 app.stderr.on("data", (v) => (logs += v));
 let browser;
 let passed = 0;
+let currentCase = null;
+let runFailure = null;
+const startedAtUtc = new Date().toISOString();
+const caseResults = [];
+const screenshots = [];
+const pageErrors = [];
+const expectedCases = process.env.LIFEOS_WEB_BROWSER_LOGOUT_ONLY ? 2 : 77;
+async function checkpoint() {
+  const path = resolve(artifacts, "checkpoint.json");
+  await writeFile(
+    path + ".tmp",
+    JSON.stringify(
+      {
+        startedAtUtc,
+        updatedAtUtc: new Date().toISOString(),
+        passed,
+        expectedCases,
+        currentCase,
+        caseResults,
+        screenshots,
+        runFailure,
+        pageErrors,
+        productionVerified: false,
+        realProviderCalls: 0,
+        telegramSends: 0,
+      },
+      null,
+      2,
+    ),
+  );
+  await rename(path + ".tmp", path);
+}
+async function captureScreenshot(page, options) {
+  const record = {
+    file: basename(String(options.path)),
+    state: "running",
+    startedAtUtc: new Date().toISOString(),
+  };
+  screenshots.push(record);
+  await checkpoint();
+  try {
+    await page.screenshot({
+      ...options,
+      animations: "disabled",
+      timeout: 120000,
+    });
+    record.state = "passed";
+  } catch (error) {
+    record.state = "failed";
+    record.error = error.message;
+    runFailure = { stage: "screenshot_evidence", error: error.message };
+    throw error;
+  } finally {
+    record.finishedAtUtc = new Date().toISOString();
+    await checkpoint();
+  }
+}
 async function test(name, fn) {
   if (
     process.env.LIFEOS_WEB_BROWSER_LOGOUT_ONLY &&
     !/unauthenticated|logout/.test(name)
   )
     return;
-  await fn();
-  passed++;
-  console.log("PASS " + name);
+  currentCase = name;
+  await checkpoint();
+  try {
+    await fn();
+    passed++;
+    caseResults.push({
+      name,
+      state: "passed",
+      finishedAtUtc: new Date().toISOString(),
+    });
+    console.log("PASS " + name);
+  } catch (error) {
+    caseResults.push({ name, state: "failed", error: error.message });
+    runFailure ??= { stage: "functional_assertion", error: error.message };
+    throw error;
+  } finally {
+    currentCase = null;
+    await checkpoint();
+  }
 }
 try {
   for (let i = 0; i < 100; i++) {
@@ -871,7 +973,7 @@ try {
     timezoneId: "UTC",
   });
   const page = await context.newPage();
-  const errors = [];
+  const errors = pageErrors;
   page.on("pageerror", (e) => errors.push(e.message));
   const acceptDialog = (dialog) => void dialog.accept();
   page.on("dialog", acceptDialog);
@@ -910,7 +1012,7 @@ try {
           geometry.headingContentWidth <= geometry.headingWidth,
         `Long profile name overflows or is clipped: ${JSON.stringify(geometry)}`,
       );
-      await page.screenshot({
+      await captureScreenshot(page, {
         path: resolve(artifacts, `web-long-profile-name-${width}.png`),
       });
     }
@@ -1676,7 +1778,7 @@ try {
         `router settings overflow at ${width}`,
       );
     }
-    await page.screenshot({
+    await captureScreenshot(page, {
       path: resolve(artifacts, "web-ai-router-settings.png"),
     });
   });
@@ -1749,7 +1851,7 @@ try {
         3,
       );
       assert.equal(await details.count(), 1);
-      await page.screenshot({
+      await captureScreenshot(page, {
         path: resolve(artifacts, "web-ai-model-receipt-320.png"),
       });
     } finally {
@@ -1812,13 +1914,28 @@ try {
       prefix: `Web ${width}px`,
       open: () => page.goto(`${origin}/web/capture`),
     });
-    await page.screenshot({
+    await captureScreenshot(page, {
       path: resolve(artifacts, `web-capture-${width}.png`),
       fullPage: true,
     });
   }
+  for (const width of [320, 390, 768, 1440]) {
+    academicFixtures.set("A", academicBrowserFixture("A"));
+    await page.setViewportSize({ width, height: 900 });
+    await academicBrowserScenarios({
+      page,
+      fixture: academicFixtures.get("A"),
+      prefix: `Web academic ${width}px`,
+      test,
+      open: () => page.goto(`${origin}/web/study`),
+    });
+    await captureScreenshot(page, {
+      path: resolve(artifacts, `web-academic-${width}.png`),
+      fullPage: true,
+    });
+  }
   page.on("dialog", acceptDialog);
-  await test("web sessions isolate users in the rendered journal and capture inbox", async () => {
+  await test("web sessions isolate users in the rendered journal, capture inbox and academic events", async () => {
     const b = await isolatedContext({ viewport: { width: 390, height: 844 } });
     const p = await b.newPage();
     await p.goto(`${origin}/web/login?token=fixture-login-B`);
@@ -1844,6 +1961,41 @@ try {
     assert.equal(
       await p
         .getByRole("region", { name: "Просмотр записи", exact: true })
+        .count(),
+      0,
+    );
+    await p.goto(`${origin}/web/study`);
+    const academic = p.getByLabel("Учебный консьерж", { exact: true });
+    await academic
+      .getByRole("heading", {
+        name: "Экзамены и учебный календарь",
+        exact: true,
+      })
+      .waitFor();
+    assert.equal(
+      await academic
+        .getByRole("heading", {
+          name: "Synthetic Systems examination",
+          exact: true,
+        })
+        .count(),
+      0,
+    );
+    assert.equal(
+      await academic
+        .getByRole("heading", { name: "Synthetic CSV selected", exact: true })
+        .count(),
+      0,
+    );
+    await academic
+      .getByRole("tab", { name: "Личные экзамены", exact: true })
+      .click();
+    assert.equal(
+      await academic
+        .getByRole("heading", {
+          name: "Synthetic personal event corrected",
+          exact: true,
+        })
         .count(),
       0,
     );
@@ -1878,7 +2030,7 @@ try {
         );
       }
       await page.goto(`${origin}/web/ideal-human`);
-      await page.screenshot({
+      await captureScreenshot(page, {
         path: resolve(artifacts, `web-ideal-human-${width}.png`),
         fullPage: true,
       });
@@ -1941,15 +2093,33 @@ try {
     await page.goto(`${origin}/web/ideal-human`);
     await page.getByRole("heading", { name: "Твой LifeOS Web" }).waitFor();
   });
+  assert.equal(passed, expectedCases);
+  console.log(
+    `Web dashboard browser: ${passed} scenarios passed; fixtures only.`,
+  );
+} catch (error) {
+  runFailure ??= { stage: "runner", error: error.message };
+  throw error;
+} finally {
+  await checkpoint();
   await writeFile(
     resolve(artifacts, "results.json"),
     JSON.stringify(
       {
+        success: !runFailure && passed === expectedCases,
+        startedAtUtc,
+        finishedAtUtc: new Date().toISOString(),
         passed,
-        viewports: [320, 768, 1440],
+        expectedCases,
+        caseResults,
+        screenshots,
+        runFailure,
+        pageErrors,
+        viewports: [320, 390, 768, 1440],
         api: "isolated_loopback_fixtures",
         productionVerified: false,
         realProviderCalls: 0,
+        telegramSends: 0,
         mockRoutedReplies: routerChats.length,
         mockRouterSettingsPuts: routerSettingsPuts,
       },
@@ -1957,10 +2127,6 @@ try {
       2,
     ),
   );
-  console.log(
-    `Web dashboard browser: ${passed} scenarios passed; fixtures only.`,
-  );
-} finally {
   if (browser) await browser.close();
   app.kill("SIGTERM");
   await new Promise((r) => frontend.close(r));

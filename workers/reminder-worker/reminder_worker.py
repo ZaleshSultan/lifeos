@@ -30,6 +30,7 @@ from common.notification_time import (
     next_quiet_end as quiet_end,
     quiet_hour_deferral_at,
 )
+from common.academic_notifications import plan_notifications, room_photo, photo_caption
 
 JsonObject = dict[str, Any]
 
@@ -72,6 +73,7 @@ class Settings:
     quiet_hours_end: str = "08:00"
     # Legacy environment compatibility; leases are enforced by PostgreSQL.
     claim_timeout_minutes: int = 5
+    academic_notifications_enabled: bool = False
 
 
 @dataclass
@@ -83,6 +85,9 @@ class ProcessSummary:
     unknown: int = 0
     deferred: int = 0
     stale: int = 0
+    academic_queued: int = 0
+    academic_cancelled: int = 0
+    academic_planning_failed: int = 0
 
 
 def utc_now() -> str:
@@ -160,6 +165,7 @@ def load_settings(env_file: Path | None = None) -> Settings:
         ).strip()
         or "08:00",
         claim_timeout_minutes=getenv_int("REMINDER_WORKER_CLAIM_TIMEOUT_MINUTES", 5),
+        academic_notifications_enabled=os.environ.get("LIFEOS_ACADEMIC_NOTIFICATIONS_ENABLED", "false").strip().lower() == "true",
     )
 
 
@@ -436,6 +442,11 @@ def format_telegram_message(
     timezone_name: str = LOCAL_TIMEZONE,
 ) -> str:
     metadata = reminder_metadata(reminder)
+    if metadata.get("academic_concierge_kind"):
+        text = str(reminder.get("message") or "").strip()
+        if not text or len(text) > 3500 or len(text.encode("utf-8")) > 16000:
+            raise WorkerError("academic_message_invalid")
+        return text
     message = (
         str(metadata.get("title") or reminder.get("message") or "").strip()
         or "Reminder"
@@ -513,6 +524,16 @@ def process_due_reminders(
     current = now or datetime.now(timezone.utc)
     recovered = supabase.recover_deliveries("reminder")
     summary = ProcessSummary(stale=int(recovered.get("stale", 0)))
+    if settings.academic_notifications_enabled:
+        try:
+            planned = plan_notifications(supabase)
+            summary.academic_queued = planned["queued"]
+            summary.academic_cancelled = planned["cancelled"]
+            summary.academic_planning_failed = planned["failed"]
+        except Exception:
+            # Keep ordinary reminders usable when academic planning is unavailable.
+            summary.academic_planning_failed = 1
+        logging.info("academic_reminders queued=%s cancelled=%s planning_failed=%s", summary.academic_queued, summary.academic_cancelled, summary.academic_planning_failed)
     logging.info(
         "reminder_worker stale=%s recovered_unknown=%s",
         summary.stale,
@@ -552,6 +573,13 @@ def process_due_reminders(
         current = now or datetime.now(timezone.utc)
         summary.processed += 1
         reminder_id = str(reminder.get("id") or "unknown")
+        academic_metadata = reminder_metadata(reminder)
+        is_academic = bool(academic_metadata.get("academic_concierge_kind"))
+        if is_academic and not settings.academic_notifications_enabled:
+            finish(reminder, "cancelled", "academic_operator_disabled")
+            continue
+        photo_url = None
+        caption = None
         try:
             profile = supabase.resolve_reminder_recipient(reminder)
             if not profile:
@@ -560,16 +588,18 @@ def process_due_reminders(
             recipient_settings = replace(
                 settings, local_timezone=str(profile.get("timezone") or "UTC")
             )
-            defer_until = quiet_hour_deferral(reminder, recipient_settings, current)
+            # Bound academic jobs recheck their own owner preferences/time window
+            # transactionally at begin, rather than inheriting legacy nudge bypasses.
+            defer_until = None if is_academic else quiet_hour_deferral(reminder, recipient_settings, current)
             if defer_until:
                 if supabase.defer_reminder_delivery(reminder, defer_until):
                     summary.deferred += 1
                 else:
                     summary.mark_failed += 1
                 continue
-            context = supabase.fetch_reminder_context(reminder)
+            context = {} if is_academic else supabase.fetch_reminder_context(reminder)
             # Slow DB preparation can cross into quiet hours; recheck before begin.
-            defer_until = quiet_hour_deferral(
+            defer_until = None if is_academic else quiet_hour_deferral(
                 reminder, recipient_settings, now or datetime.now(timezone.utc)
             )
             if defer_until:
@@ -581,6 +611,10 @@ def process_due_reminders(
             text = format_telegram_message(
                 reminder, context, recipient_settings.local_timezone
             )
+            if is_academic and callable(getattr(telegram, "send_photo", None)):
+                photo_url = room_photo(academic_metadata.get("academic_room"), academic_metadata.get("academic_concierge_kind"))
+                if photo_url:
+                    caption = photo_caption(academic_metadata, "Asia/Almaty", local_time_label)
         except Exception:
             summary.send_failed += 1
             finish(reminder, "retry", "preparation_failed")
@@ -603,7 +637,7 @@ def process_due_reminders(
             reminder.get("failure_count", 0),
         )
         try:
-            message_id = telegram.send_message(recipient, text)
+            message_id = telegram.send_photo(recipient, photo_url, caption) if photo_url else telegram.send_message(recipient, text)
         except TelegramDeliveryError as exc:
             summary.send_failed += 1
             summary.unknown += int(exc.outcome == "unknown")
