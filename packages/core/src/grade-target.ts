@@ -351,7 +351,7 @@ export function calculateCourseGradeTarget(
     return {
       remainingScore,
       final: scenario.finalScore!,
-      attestationWarning: scenario.belowThreshold,
+      attestationWarning: scenario.belowThreshold === true,
     };
   });
   return result;
