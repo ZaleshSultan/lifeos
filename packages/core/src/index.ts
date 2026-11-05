@@ -3,6 +3,7 @@ export * from "./finance.js";
 export * from "./finance-types.js";
 export * from "./focus.js";
 export * from "./grade-engine.js";
+export * from "./grade-target.js";
 export * from "./study.js";
 export * from "./study-evidence.js";
 export * from "./scholarship.js";
