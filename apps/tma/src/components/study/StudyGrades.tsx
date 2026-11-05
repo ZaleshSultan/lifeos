@@ -61,6 +61,7 @@ export function StudyGrades({
         <label className="block text-sm text-zinc-300">
           Курс для оценок
           <select
+            aria-label="Курс для оценок"
             className="mt-2 min-h-11 w-full min-w-0 rounded-lg border border-white/10 bg-graphite-950 px-3 text-base text-white"
             value={
               scope.unavailable ? "__unavailable__" : (scope.selected?.id ?? "")

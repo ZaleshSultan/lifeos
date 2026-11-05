@@ -3,7 +3,14 @@ import type {
   DailyLifeSummary,
 } from "../../../packages/core/src/daily-life.js";
 import { SectionPanel } from "@/components/SectionPanel";
-export function BriefingPanel({ view }: { view: BriefingView }) {
+import type { ReactNode } from "react";
+export function BriefingPanel({
+  view,
+  children,
+}: {
+  view: BriefingView;
+  children?: ReactNode;
+}) {
   return (
     <SectionPanel title={view.title} eyebrow="Факты и предложения">
       <div className="space-y-4">
@@ -52,6 +59,7 @@ export function BriefingPanel({ view }: { view: BriefingView }) {
             ))}
           </div>
         ) : null}
+        {children}
         {view.tomorrowOrder.length ? (
           <p className="text-xs leading-relaxed text-zinc-400">
             Для просмотра на завтра: {view.tomorrowOrder.join(" → ")}. Этот

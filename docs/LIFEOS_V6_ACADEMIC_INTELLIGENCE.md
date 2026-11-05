@@ -1,0 +1,64 @@
+# LifeOS 6 academic intelligence
+
+Candidate development only. No production migration, deployment, LMS reconnection, provider call or new Telegram category activation is authorized by this work.
+
+## Baseline and gaps
+
+The accepted branch was `codex/overnight-stabilization-20261031` at `71bdaa82e96368ef9acc2a29b870cfd7e1bbfa67`. Read-only public and loopback health confirmed loaded application `066374876a0c7d086965ccdfd6cec1d1fe435ba8`; the read-only migration ledger contained 58 migrations, latest `20261104030000`. Bot, web, reminders and the real `lifeos-daily-digest.service` were active. This task never restarts them. Candidate development includes the separately reviewed, unmerged [PR #68](https://github.com/ZaleshSultan/lifeos/pull/68) retry-intent fix as an explicit dependency.
+
+| Capability           | Previously present                                                                                                                                                         | Gap addressed by this candidate                                                                                                                                           |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Grade ingestion      | Stable Moodle identifiers, owner/platform leases, raw maxima, unknown-score preservation, baseline suppression and first-posted reminder retries.                          | Durable old/new grade history, corrected-versus-posted events, explicit grade consent and final-boundary revalidation.                                                    |
+| Grade mathematics    | `calculateGrade`, `calculateStudyScenario`, `StudyTargetPlan`, source-referenced syllabus profiles, target default 70, weighted scholarship bindings and manual scenarios. | Stable-course evidence-backed observed forecast, explicit exact-definition/enrollment review, grade-source freshness and observations separated from hypothetical values. |
+| Assignment reminders | Concierge opt-ins default OFF, freshness/submission checks, revision fingerprints, quiet hours, durable delivery claims and ambiguous-result receipts.                     | Suggested 72/24-hour configuration, separately opted-in supported quiz closing semantics, shared understandable settings and superseded-job validation.                   |
+| Home summaries       | Daily Life morning/evening views, tasks, deterministic planner, health and LMS freshness warnings.                                                                         | Read-only recent grade/history references, verified upcoming deadlines/exams and confirmed target-risk links; no second sender.                                           |
+
+## Units, formulas and evidence
+
+For a numeric observation with a known positive maximum, item percentage is `100 × rawScore / rawMaximum`. For example, 15/30 means 50% on that item. If that item is worth 6% of the final course grade, it earns 3 final points, not 15 or 50.
+
+For a validated linear policy, let `w_i` be the item weight as a fraction of the complete course and `p_i` its observed percentage. Earned final points are `E = Σ(w_i × p_i)`. If `R` is the remaining course weight as a fraction and `T` the owner's target, the required remaining average is `(T − E) / R`. When remaining weight is represented in percentage points instead, this becomes `100 × (T − E) / remainingWeightPercent`. The existing engine supplies these calculations; no Python or UI copy of the grade formula is introduced.
+
+The existing syllabus calculator represents each attestation and exam internally as 100%, then applies 30%, 30% and 40% course contributions. This distribution is conditional until the owner reviews its applicability to the exact current course, definition and stable assessment mappings. Known profiles are DBMS (source p. 2), Digital Logic Design (p. 4), Computer Networks (p. 8), Operating Systems (p. 8), and Russian C1 (pp. 7–8); their original source references remain in `study-syllabi.ts`. A title match does not prove enrollment or policy equivalence.
+
+Unknown observations and unknown maxima remain unknown. Theoretical minimum and maximum bounds use possible future scores, not fabricated recorded zeros. Missing work counts as observed zero only with verified evidence. A real numeric zero is valid. Per-item conditional requirements assume the other remaining work reaches the stated target; the individual requirements are not independent promises. The scenario simulator changes hypothetical values only and can restore the observed baseline.
+
+Bonuses, dropped work, nonlinear rules, extra examination admission minima and ambiguous/partial bindings require a supported reviewed model; they must be flagged rather than silently normalized. Imported attestation thresholds are source-specific and do not establish universal university rules. Passing-threshold display rounds required scores conservatively rather than rounding an insufficient score into a pass.
+
+## Source and notification boundaries
+
+First observations establish a baseline without historical alert flooding. A successful source refresh with an incomplete inventory is distinct from a failed or partially fetched synchronization. Missing rows never become removed grades or zero scores. Known verified item changes can be compared without claiming the source inventory is complete; unseen numeric rows in an incomplete inventory remain baseline-only.
+
+The candidate uses the existing reminder queue and durable send boundary. Owner identity, current consent, fresh source revision, exact recipient, quiet hours, retry windows and ambiguous Telegram outcomes remain authoritative at delivery. Preparing preferences does not turn on a release switch. No actual grade or deadline notification is sent during development verification.
+
+## Durable history and delivery
+
+Candidate migration `20261106010000_academic_grade_events.sql` adds owner-scoped observations, immutable posted/corrected events, per-run receipts, staged normalized snapshots, reviewed-policy records and preferences. A bounded snapshot is staged under the existing active source lease **before** source facts and successful completion are committed. Successful snapshots drain in observation order; failed runs do not advance history. A temporarily failed history capture cannot silently lose an intermediate correction. Replaying a committed run returns its original receipt, and concurrent replays create one event. Consumed payloads are cleared atomically with their receipts; unconsumed stages remain available for recovery.
+
+Stable Moodle course/item identifiers establish identity. First observations are a silent baseline; disappearance, partial inventory, hidden grades and failed runs do not manufacture zeroes or removals. Numeric zero is preserved, while an absent or non-positive maximum stays unknown. The bounded feed returns at most 100 events and explicitly reports truncation and successful snapshots still awaiting capture. Home shows a pending-history warning instead of presenting an authoritative empty update list.
+
+Grade consent has a separate epoch: changing another preference does not invalidate an authorized event, while disabling and later enabling grade alerts cannot replay old captured events. Grade groups display at most five changes, retain a history link and share the existing five-jobs-per-hour owner limit. Notification formatting invokes the same pure TypeScript forecast engine through a bounded local stdin process; it makes no provider call and has no database credentials. Unmapped or unreviewed courses get an honest forecast-unavailable explanation.
+
+At the existing durable `begin` boundary, the database checks the owned source, recipient, consent epoch, render/link fingerprint, freshness, quiet time and delivery window again. Sent, attempted and ambiguous receipts remain closed. Only cancelled jobs with no attempts, failures or external receipt may be safely prepared again. New workers refuse legacy unbound academic jobs rather than bypass this fence.
+
+## Deadlines and preferences
+
+Candidate migration `20261106020000_academic_deadline_intelligence.sql` extends the existing planner; it does not add a scheduler or sender. Fresh authenticated assignment modules need a verified future due time and a known unfinished submission. Quizzes are separate: they need verified closing semantics and known incomplete state. A score or grade percentage, including zero, suppresses unfinished-work reminders. Unknown completion, stale data, cancelled work and unsupported modules are ineligible.
+
+Suggested offsets are 4,320 and 1,440 minutes (72/24 hours), with an optional 180-minute urgent reminder. Existing saved offsets are preserved. Assignment settings and quiet hours remain shared with Academic Concierge; grade and quiz consent are separate and default OFF. Settings require a fresh explicit confirmation and both preference revisions. A retained draft keeps its original revisions; navigation never saves it or retains a previous approval click.
+
+Submission, grading, due-date and preference changes cancel superseded pending work. Semantic fingerprints exclude harmless refresh timestamps, but include material facts and settings. Preparation uses the existing five-minute eligibility window and owner cap; downtime does not cause a missed-window flood. Only canonical HTTPS links to the expected Moodle host and actual supported module IDs are allowed.
+
+Both `LIFEOS_ACADEMIC_GRADE_EVENTS_ENABLED` and the compatible worker's existing notification master switch remain OFF. Owner opt-in does not override these release gates. Reading Home or grade history never creates jobs, marks events delivered or sends a second morning notification. The scheduled digest worker, its renderer, units and existing summary function are unchanged.
+
+## Authenticated interfaces and limits
+
+The existing authenticated owner boundary supplies identity to `GET /api/tma/study/grade-events`, `PUT /api/tma/study/academic-preferences` and `PUT /api/tma/study/grade-policy/:courseId`. These resources accept no identity/query override, use bounded validated bodies and return `no-store` responses. Browser requests use the existing same-origin allowlisted bridge and session/CSRF safeguards; service-role access remains server-only. New tables have RLS, and service RPCs are denied to browser roles.
+
+An exact forecast requires stable item bindings, a saved supported definition, an explicit current-enrollment/source review bound to that definition, bindings and course dates, a review no older than 90 days, a current known enrollment window, successful LMS synchronization within six hours and sufficiently recent observations. Different rules, extra credit, dropped assessments, hidden/non-numeric results, missing dates and ambiguous mappings remain conditional or unsupported. The candidate does not reconnect Moodle or repair the owner's source evidence.
+
+Actual cards refresh from read-only source data; dirty hypothetical scores retain their own original base. Calculator saves check that base and `updated_at`, returning a conflict for stale edits instead of overwriting another window. Saved hypothetical scores are never used as observed facts or notification forecast input.
+
+History is a bounded recent view, not an unlimited archive UI. Pending/failed stages have a per-stage size bound but require operational backlog monitoring before activation. Real Telegram delivery, personal handset behavior and live Moodle availability have not been tested by this mission.
+
+Implementation SHAs, migrations, focused PRs and final test results are recorded in [release readiness](LIFEOS_V6_RELEASE_READINESS.md) as the candidate milestones complete.

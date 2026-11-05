@@ -450,6 +450,7 @@ export function StudyScreen({
               <label className="block text-sm text-zinc-300">
                 Предмет
                 <select
+                  aria-label="Предмет"
                   className="mt-2 min-h-11 w-full min-w-0 max-w-full rounded-lg border border-white/[0.12] bg-graphite-900 px-3 py-3 text-base text-white"
                   value={course?.id ?? ""}
                   onChange={(event) => setCourseId(event.target.value)}

@@ -132,11 +132,12 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: "auto" });
   };
   const openAcademicCourse = (
-    courseId: string,
-    studyTab: "grades" | "calculator" | "work" | "academic",
+    courseId: string | null,
+    studyTab: "grades" | "calculator" | "work" | "concierge",
   ) => {
     const url = new URL(window.location.href);
-    url.searchParams.set("courseId", courseId);
+    if (courseId) url.searchParams.set("courseId", courseId);
+    else url.searchParams.delete("courseId");
     url.searchParams.set("studyTab", studyTab);
     window.history.replaceState(null, "", url);
     setScreen("study");
@@ -290,6 +291,7 @@ export default function App() {
                 {view === "workout" ? <WorkoutScreen /> : null}
                 {view === "daily-life" ? (
                   <DailyLifeScreen
+                    onOpenAcademicCourse={openAcademicCourse}
                     onOpenIdealHuman={() => setScreen("ideal-human")}
                     onOpenReminders={() => setScreen("reminders")}
                     onDirtyChange={setDailyLifeDirty}

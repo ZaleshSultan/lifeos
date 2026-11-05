@@ -294,6 +294,7 @@ export function GradeTargetWorkspace({
           <label className="block text-sm text-zinc-300">
             Предмет
             <select
+              aria-label="Предмет"
               className={inputClass}
               value={course?.id ?? ""}
               disabled={busy}
