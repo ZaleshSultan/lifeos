@@ -538,6 +538,30 @@ describe("free-only profile on the existing router/governor", () => {
       expect.anything(),
     );
   });
+  it("revoked consent during a durable quota claim stops the first dispatch", async () => {
+    const f = fixture();
+    const reserve = f.budget.reserveProviderAttempt!;
+    f.budget.reserveProviderAttempt = async (input, signal) => {
+      const result = await reserve(input, signal);
+      f.revoke();
+      return result;
+    };
+    await expect(f.make().execute(f.input())).rejects.toThrow();
+    expect(f.fetcher).not.toHaveBeenCalled();
+    expect(f.attempts).toHaveLength(1);
+  });
+  it("expired model and account evidence during a quota claim stops dispatch", async () => {
+    const f = fixture();
+    const reserve = f.budget.reserveProviderAttempt!;
+    f.budget.reserveProviderAttempt = async (input, signal) => {
+      const result = await reserve(input, signal);
+      f.advance(86400_001);
+      return result;
+    };
+    await expect(f.make().execute(f.input())).rejects.toThrow();
+    expect(f.fetcher).not.toHaveBeenCalled();
+    expect(f.attempts).toHaveLength(1);
+  });
   it("fails closed without quota storage and never claims account quota from key presence", async () => {
     const f = fixture();
     delete f.budget.reserveProviderAttempt;
@@ -562,21 +586,24 @@ describe("free-only profile on the existing router/governor", () => {
     expect(f.fetcher).not.toHaveBeenCalled();
     expect(f.reservations).toHaveLength(0);
   });
-  it("halts a purported free domain for owner review after a positive observed cost", async () => {
-    const f = fixture();
-    const input = f.input();
-    delete (input as { publicPrompt?: unknown }).publicPrompt;
-    f.fetcher.mockResolvedValue(openrouter('{"ok":true}', 0.01));
-    await expect(f.make().execute(input)).rejects.toThrow();
-    expect(f.fetcher).toHaveBeenCalledTimes(1);
-    expect(
-      f.cooldowns.get("openrouter:openrouter-account")!.reviewRequired,
-    ).toBe(true);
-    await expect(
-      f.make().execute({ ...input, requestId: "cost-retry" }),
-    ).rejects.toThrow();
-    expect(f.fetcher).toHaveBeenCalledTimes(1);
-  });
+  it.each(['{"ok":true}', '{"ok":true,"tools":["send"]}', "not-json"])(
+    "halts a purported free domain after positive cost even when output is %s",
+    async (output) => {
+      const f = fixture();
+      const input = f.input();
+      delete (input as { publicPrompt?: unknown }).publicPrompt;
+      f.fetcher.mockResolvedValue(openrouter(output, 0.01));
+      await expect(f.make().execute(input)).rejects.toThrow();
+      expect(f.fetcher).toHaveBeenCalledTimes(1);
+      expect(
+        f.cooldowns.get("openrouter:openrouter-account")!.reviewRequired,
+      ).toBe(true);
+      await expect(
+        f.make().execute({ ...input, requestId: "cost-retry" }),
+      ).rejects.toThrow();
+      expect(f.fetcher).toHaveBeenCalledTimes(1);
+    },
+  );
 });
 
 describe("closed structured output contracts", () => {
