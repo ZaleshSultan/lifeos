@@ -3,6 +3,7 @@ import {
   calculateCourseGradeTarget,
   gradeTargetBindingsKey,
   gradeTargetContextKey,
+  gradeTargetEnrollmentCurrent,
   gradeTargetDefinitionKey,
   type CourseGradeTargetInput,
   type GradePolicyReview,
@@ -13,6 +14,11 @@ function input(): CourseGradeTargetInput {
     courseId: "owned-course",
     externalCourseKey: "moodle:42",
     now: "2026-11-06T10:00:00Z",
+    lms: {
+      configured: true,
+      stale: false,
+      lastSuccessfulSyncAt: "2026-11-06T09:00:00Z",
+    },
     calculator: {
       definition: {
         version: 1,
@@ -102,6 +108,36 @@ describe("deterministic course grade target", () => {
       expect(calculateCourseGradeTarget(changed).status).toBe("conditional");
     }
   });
+  it("requires known enrollment bounds to cover the current Almaty day", () => {
+    expect(
+      gradeTargetEnrollmentCurrent(
+        { startsOn: "2026-11-06", endsOn: "2026-11-06" },
+        "2026-11-05T19:30:00Z",
+      ),
+    ).toBe(true);
+    expect(
+      gradeTargetEnrollmentCurrent(
+        { startsOn: null, endsOn: "2026-11-05" },
+        "2026-11-05T19:30:00Z",
+      ),
+    ).toBe(false);
+    expect(
+      gradeTargetEnrollmentCurrent(
+        { startsOn: "2026-11-07", endsOn: null },
+        "2026-11-06T10:00:00Z",
+      ),
+    ).toBe(false);
+    expect(
+      gradeTargetEnrollmentCurrent(
+        { startsOn: "2026-02-30", endsOn: null },
+        "2026-11-06T10:00:00Z",
+      ),
+    ).toBe(false);
+    const value = input();
+    value.courseEndsOn = "2026-11-05";
+    value.review = review(value);
+    expect(calculateCourseGradeTarget(value).status).toBe("conditional");
+  });
   it("canonical review keys ignore field and entry order but include policy changes", () => {
     const value = input();
     const definition = structuredClone(value.calculator!.definition);
@@ -134,6 +170,35 @@ describe("deterministic course grade target", () => {
     expect(calculateCourseGradeTarget(value).status).toBe("conditional");
     value.review.reviewedAt = "2026-11-07T00:00:00Z";
     expect(calculateCourseGradeTarget(value).status).toBe("conditional");
+  });
+  it.each([
+    undefined,
+    {
+      configured: false,
+      stale: false,
+      lastSuccessfulSyncAt: "2026-11-06T09:00:00Z",
+    },
+    {
+      configured: true,
+      stale: true,
+      lastSuccessfulSyncAt: "2026-11-06T09:00:00Z",
+    },
+    {
+      configured: true,
+      stale: false,
+      lastSuccessfulSyncAt: "2026-11-06T03:00:00Z",
+    },
+    {
+      configured: true,
+      stale: false,
+      lastSuccessfulSyncAt: "2026-11-07T09:00:00Z",
+    },
+  ])("keeps a stale or unverifiable LMS feed conditional", (lms) => {
+    const value = input();
+    value.review = review(value);
+    const result = calculateCourseGradeTarget({ ...value, lms });
+    expect(result.status).toBe("conditional");
+    expect(result.warnings.join(" ")).toContain("6 часов");
   });
   it.each([
     "missing-course",

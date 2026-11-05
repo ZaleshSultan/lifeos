@@ -1,5 +1,10 @@
 import { calculateGrade } from "./grade-engine.js";
 import {
+  academicDate,
+  academicLocalDate,
+  ACADEMIC_TIMEZONE,
+} from "./academic-concierge.js";
+import {
   calculateStudyScenario,
   calculateStudyTargetPlan,
   validateStudyCalculatorDefinition,
@@ -26,6 +31,11 @@ export interface GradePolicyReview {
   supportedPolicy: "linear-30-30-40";
 }
 export type GradeTargetBindings = Record<string, ScholarshipBinding>;
+export interface GradeTargetLmsSource {
+  configured: boolean;
+  stale: boolean;
+  lastSuccessfulSyncAt: string | null;
+}
 // Code-point ordering keeps review keys identical across browser/server locales.
 const compareKey = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 export function gradeTargetContextKey(context: {
@@ -38,6 +48,28 @@ export function gradeTargetContextKey(context: {
     startsOn: context.startsOn,
     endsOn: context.endsOn,
   });
+}
+/** Unknown dates require explicit review; known dates must cover the campus day. */
+export function gradeTargetEnrollmentCurrent(
+  context: { startsOn: string | null; endsOn: string | null },
+  now: string,
+): boolean {
+  try {
+    const day = academicLocalDate(
+      new Date(now).toISOString(),
+      ACADEMIC_TIMEZONE,
+    );
+    const start =
+      context.startsOn === null ? null : academicDate(context.startsOn);
+    const end = context.endsOn === null ? null : academicDate(context.endsOn);
+    return (
+      (!start || start <= day) &&
+      (!end || end >= day) &&
+      (!start || !end || start <= end)
+    );
+  } catch {
+    return false;
+  }
 }
 export function gradeTargetDefinitionKey(
   definition: StudyCalculatorDefinition,
@@ -79,6 +111,7 @@ export interface CourseGradeTargetInput {
   records: StudyGradeEvidence[];
   bindings: GradeTargetBindings;
   review?: GradePolicyReview | null;
+  lms?: GradeTargetLmsSource;
   /** Explicit clock: core has no I/O, ambient clock or external services. */
   now: string;
   maxAgeHours?: number;
@@ -183,6 +216,28 @@ export function calculateCourseGradeTarget(
   const course = /^moodle:([1-9]\d{0,15})$/.exec(
     input.externalCourseKey ?? "",
   )?.[1];
+  const syncAt = Date.parse(input.lms?.lastSuccessfulSyncAt ?? "");
+  const enrollmentCurrent = gradeTargetEnrollmentCurrent(
+    {
+      startsOn: input.courseStartsOn ?? null,
+      endsOn: input.courseEndsOn ?? null,
+    },
+    input.now,
+  );
+  if (!enrollmentCurrent)
+    result.warnings.push(
+      "Известные даты курса не подтверждают текущее обучение. Исторический или будущий курс рассчитывается только условно.",
+    );
+  const sourceFresh =
+    input.lms?.configured === true &&
+    input.lms.stale === false &&
+    Number.isFinite(syncAt) &&
+    syncAt <= now &&
+    now - syncAt <= 6 * 3_600_000;
+  if (!sourceFresh)
+    result.warnings.push(
+      "Свежая успешная синхронизация Moodle за последние 6 часов не подтверждена: прогноз остаётся условным.",
+    );
   const records = input.records.filter(
     (row) =>
       gradeEvidenceIdentity(row)?.course === course && course !== undefined,
@@ -315,6 +370,8 @@ export function calculateCourseGradeTarget(
       "Условный расчёт 30/30/40: требуется проверка силабуса текущего курса и сопоставлений владельцем. Проверка действует до 90 дней и сбрасывается при изменении семестра, весов или связей.",
     );
   else if (
+    sourceFresh &&
+    enrollmentCurrent &&
     !result.observations.some((row) =>
       ["stale", "ambiguous", "unsupported"].includes(row.status),
     )
