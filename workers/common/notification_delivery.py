@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.request
 from typing import Any
@@ -49,8 +50,23 @@ class TelegramApiClient:
             payload["parse_mode"] = parse_mode
         if reply_markup is not None:
             payload["reply_markup"] = reply_markup
+        return self._send_payload(self.api_url, payload)
+
+    def send_photo(self, chat_id: str, photo_url: str, caption: str) -> int:
+        # Only reviewed public campus PNGs; never a user-controlled image URL.
+        if not isinstance(photo_url, str) or re.fullmatch(
+            r"https://lifeos\.zalewko\.me/tma/campus-maps/028869ba9f6b03627d7bef64511491101adf2ace/C1\.[123]\.[123][0-9]{2}[KLP]?\.png",
+            photo_url,
+        ) is None or not isinstance(caption, str) or len(caption.encode("utf-16-le")) > 2048:
+            raise WorkerError("academic_photo_invalid")
+        return self._send_payload(
+            self.api_url.rsplit("/", 1)[0] + "/sendPhoto",
+            {"chat_id": chat_id, "photo": photo_url, "caption": caption},
+        )
+
+    def _send_payload(self, api_url: str, payload: dict[str, Any]) -> int:
         request = urllib.request.Request(
-            self.api_url,
+            api_url,
             data=json.dumps(payload).encode(),
             headers={"content-type": "application/json"},
             method="POST",

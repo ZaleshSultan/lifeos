@@ -3,6 +3,7 @@ import {
   BookText,
   Calculator,
   CalendarDays,
+  GraduationCap,
   MapPinned,
   RefreshCw,
 } from "lucide-react";
@@ -20,6 +21,7 @@ import { StudyGrades } from "../components/study/StudyGrades";
 import { StudySchedule } from "../components/study/StudySchedule";
 import { StudySyllabi } from "../components/study/StudySyllabi";
 import { StudyLmsOverview } from "../components/study/StudyLmsOverview";
+import { AcademicConciergeScreen } from "../components/study/AcademicConciergeScreen";
 import {
   createStudyDraft,
   isStudyDrafts,
@@ -42,6 +44,7 @@ import {
 
 const tabs = [
   { id: "schedule", label: "Расписание", icon: CalendarDays },
+  { id: "concierge", label: "Экзамены", icon: GraduationCap },
   { id: "calculator", label: "Калькулятор", icon: Calculator },
   { id: "grades", label: "Оценки", icon: BookOpen },
   { id: "syllabi", label: "Силабус", icon: BookText },
@@ -57,13 +60,36 @@ function initialStudyTab(): StudyTabId {
     : "schedule";
 }
 
-export function StudyScreen({ onOpenLms }: { onOpenLms: () => void }) {
+export function StudyScreen({
+  onOpenLms,
+  onDirtyChange,
+}: {
+  onOpenLms: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
+}) {
   const query = useStudyQuery();
   const syllabi = useStudySyllabusProfiles(query.data);
   const save = useSaveStudyCalculatorMutation();
   const configure = useConfigureStudyCalculatorMutation();
   const [pendingProfile, setPendingProfile] = useState<string | null>(null);
   const [tab, setTab] = useState<StudyTabId>(initialStudyTab);
+  const [academicDirty, setAcademicDirty] = useState(false);
+  function selectStudyTab(next: StudyTabId) {
+    if (
+      next !== tab &&
+      academicDirty &&
+      !window.confirm(
+        "Отменить несохранённые правки учебных событий и открыть другой раздел?",
+      )
+    )
+      return false;
+    if (next !== tab) {
+      setAcademicDirty(false);
+      onDirtyChange?.(false);
+    }
+    setTab(next);
+    return true;
+  }
   const [courseId, setCourseId] = useState<string | null>(() =>
     new URLSearchParams(window.location.search).get("courseId"),
   );
@@ -217,7 +243,7 @@ export function StudyScreen({ onOpenLms }: { onOpenLms: () => void }) {
         </p>
       ) : null}
       <div
-        className="grid grid-cols-5 gap-1 rounded-xl border border-white/[0.08] bg-white/[0.03] p-1"
+        className="grid grid-cols-3 gap-1 rounded-xl border border-white/[0.08] bg-white/[0.03] p-1 sm:grid-cols-6"
         role="tablist"
         aria-label="Разделы учёбы"
       >
@@ -240,10 +266,10 @@ export function StudyScreen({ onOpenLms }: { onOpenLms: () => void }) {
                     (event.key === "ArrowRight" ? 1 : tabs.length - 1)) %
                     tabs.length
                 ];
-              setTab(next.id);
-              document.getElementById(`study-tab-${next.id}`)?.focus();
+              if (selectStudyTab(next.id))
+                document.getElementById(`study-tab-${next.id}`)?.focus();
             }}
-            onClick={() => setTab(id)}
+            onClick={() => selectStudyTab(id)}
             className={cx(
               "flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-lg px-0.5 py-2 text-[10px] font-semibold transition-colors hover:bg-white/[0.06] active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400",
               tab === id ? "bg-cyan-400/10 text-cyan-200" : "text-zinc-400",
@@ -261,6 +287,14 @@ export function StudyScreen({ onOpenLms }: { onOpenLms: () => void }) {
       >
         {tab === "schedule" ? (
           <StudySchedule courses={data.courses} timezone={data.timezone} />
+        ) : null}
+        {tab === "concierge" ? (
+          <AcademicConciergeScreen
+            onDirtyChange={(value) => {
+              setAcademicDirty(value);
+              onDirtyChange?.(value);
+            }}
+          />
         ) : null}
         {tab === "grades" ? <StudyGrades records={data.records} /> : null}
         {tab === "syllabi" ? <StudySyllabi courses={data.courses} /> : null}

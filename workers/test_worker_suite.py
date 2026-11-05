@@ -16,6 +16,7 @@ TEST_FILES = (
     ROOT / "common" / "lms_sessions_test.py",
     ROOT / "common" / "lms_sync_lease_test.py",
     ROOT / "common" / "academic_sync_test.py",
+    ROOT / "common" / "academic_notifications_test.py",
     ROOT / "reminder-worker" / "reminder_worker_test.py",
     ROOT / "daily-digest-worker" / "daily_digest_worker_test.py",
     ROOT / "google-sync" / "google_sync_test.py",

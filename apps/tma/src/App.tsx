@@ -127,13 +127,15 @@ export default function App() {
   const [idealHumanDirty, setIdealHumanDirty] = useState(false);
   const [aiRouterDirty, setAiRouterDirty] = useState(false);
   const [captureDirty, setCaptureDirty] = useState(false);
+  const [academicDirty, setAcademicDirty] = useState(false);
   const setScreen = (next: ScreenId) => {
     if (
       next !== screen &&
       (((screen === "ideal-human" || screen === "daily-life") &&
         idealHumanDirty) ||
         (screen === "ai" && aiRouterDirty) ||
-        (screen === "capture" && captureDirty)) &&
+        (screen === "capture" && captureDirty) ||
+        (screen === "study" && academicDirty)) &&
       !window.confirm(
         "Есть несохранённые изменения. Открыть другой раздел и отменить их?",
       )
@@ -142,6 +144,7 @@ export default function App() {
     setIdealHumanDirty(false);
     setAiRouterDirty(false);
     setCaptureDirty(false);
+    setAcademicDirty(false);
     setRawScreen(next);
   };
   const [aiDate, setAiDate] = useState<string>();
@@ -282,7 +285,10 @@ export default function App() {
               />
             ) : null}
             {screen === "study" ? (
-              <StudyScreen onOpenLms={() => setScreen("lms")} />
+              <StudyScreen
+                onOpenLms={() => setScreen("lms")}
+                onDirtyChange={setAcademicDirty}
+              />
             ) : null}
             {screen === "lms" ? (
               <Suspense
