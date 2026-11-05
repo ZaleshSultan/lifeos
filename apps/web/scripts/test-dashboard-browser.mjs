@@ -1093,8 +1093,7 @@ try {
       await primary.getByRole("link", { name: "Главная", exact: true }).click();
       await page
         .getByRole("navigation", {
-          name: "Внутри раздела «Главная»",
-          exact: true,
+          name: /^(?:Внутри|Модули) раздела «Главная»$/,
         })
         .getByRole("link", { name: "Задачи и план", exact: true })
         .click();

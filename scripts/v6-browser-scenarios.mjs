@@ -66,16 +66,10 @@ export function v6BrowserDriver(page, platform, origin) {
     async restoreSettings() {
       await this.section("Настройки");
       if (!tma) {
-        const nav = page.getByRole("navigation", {
-          name: "Модули раздела «Настройки»",
-          exact: true,
-        });
-        const mobile = page.getByRole("navigation", {
-          name: "Внутри раздела «Настройки»",
-          exact: true,
-        });
-        const current = (await nav.isVisible()) ? nav : mobile;
-        await current
+        await page
+          .getByRole("navigation", {
+            name: /^(?:Внутри|Модули) раздела «Настройки»$/,
+          })
           .getByRole("link", { name: "Уведомления", exact: true })
           .click();
       }
