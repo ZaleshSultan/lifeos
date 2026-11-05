@@ -125,9 +125,11 @@ function CourseForecast({
             />
           </div>
           <p className="mt-2 text-xs leading-relaxed text-zinc-400">
-            По сохранённым значениям набрано {studyScoreLabel(plan.earnedFinalPoints)} из
-            100; максимально возможно {studyScoreLabel(plan.maximumFinal)}.
-            Ручные значения могут быть гипотетическими. Подтверждённый диапазон Moodle — во вкладке «Стипендия». Неизвестные оценки остаются неизвестными.
+            По сохранённым значениям набрано{" "}
+            {studyScoreLabel(plan.earnedFinalPoints)} из 100; максимально
+            возможно {studyScoreLabel(plan.maximumFinal)}. Ручные значения могут
+            быть гипотетическими. Подтверждённый диапазон Moodle — во вкладке
+            «Стипендия». Неизвестные оценки остаются неизвестными.
           </p>
           {!plan.targetPossible ? (
             <p className="mt-2 text-xs font-semibold text-amber-200">
@@ -306,6 +308,20 @@ export function AcademicDashboardScreen({
         </div>
       </header>
 
+      <button
+        type="button"
+        className="flex min-h-11 w-full items-center justify-between gap-3 rounded-xl border border-cyan-300/20 bg-cyan-300/[0.04] px-4 py-3 text-left text-sm font-semibold text-cyan-100"
+        onClick={() => {
+          const url = new URL(window.location.href);
+          url.searchParams.set("studyTab", "concierge");
+          window.history.replaceState(null, "", url);
+          onOpenStudy();
+        }}
+      >
+        Экзамены, личные события и учебный календарь{" "}
+        <ArrowRight className="h-4 w-4 shrink-0" aria-hidden="true" />
+      </button>
+
       <section className="space-y-2">
         <div className="flex items-center justify-between gap-2">
           <h2 className="flex items-center gap-2 text-base font-bold text-white">
@@ -480,9 +496,36 @@ export function AcademicDashboardScreen({
 }
 
 export function StudyDashboardScreen(props: Props) {
-  const [overview,setOverview]=useState(false);
-  return <div className="space-y-4"><div className="grid grid-cols-2 gap-2" role="group" aria-label="Учебные дашборды">
-    <button type="button" className="min-h-11 rounded-xl border border-white/15 px-3 text-sm text-cyan-200" aria-pressed={!overview} onClick={()=>setOverview(false)}>Стипендия</button>
-    <button type="button" className="min-h-11 rounded-xl border border-white/15 px-3 text-sm text-zinc-300" aria-pressed={overview} onClick={()=>setOverview(true)}>Обзор учёбы</button>
-    </div>{overview?<AcademicDashboardScreen {...props}/>:<ScholarshipPlannerScreen {...props}/>}</div>;
+  const [overview, setOverview] = useState(false);
+  return (
+    <div className="space-y-4">
+      <div
+        className="grid grid-cols-2 gap-2"
+        role="group"
+        aria-label="Учебные дашборды"
+      >
+        <button
+          type="button"
+          className="min-h-11 rounded-xl border border-white/15 px-3 text-sm text-cyan-200"
+          aria-pressed={!overview}
+          onClick={() => setOverview(false)}
+        >
+          Стипендия
+        </button>
+        <button
+          type="button"
+          className="min-h-11 rounded-xl border border-white/15 px-3 text-sm text-zinc-300"
+          aria-pressed={overview}
+          onClick={() => setOverview(true)}
+        >
+          Обзор учёбы
+        </button>
+      </div>
+      {overview ? (
+        <AcademicDashboardScreen {...props} />
+      ) : (
+        <ScholarshipPlannerScreen {...props} />
+      )}
+    </div>
+  );
 }

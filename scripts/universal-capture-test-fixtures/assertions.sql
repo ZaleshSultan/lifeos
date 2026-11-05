@@ -40,7 +40,9 @@ rollback;
 -- Selective approval and lost-response retries must not double-write any domain.
 begin;set local role service_role;
  do $$declare a jsonb;b jsonb;c jsonb;owner uuid:='00000000-0000-4000-8000-000000000001';begin
- a:=public.capture_test_ready('selective-review-1','[{"kind":"task.create","args":{"title":"Captured task","notes":"Keep evidence","dueAt":null}},{"kind":"water.log","args":{"amountMl":250}},{"kind":"reminder.create","args":{"title":"Remember review","remindAt":"2026-11-04T10:00:00+05:00"}}]');
+ -- This fixture executes a future-only reminder mutation. Keep it future-dated
+ -- when CI runs after the original overnight mission; production validation stays strict.
+ a:=public.capture_test_ready('selective-review-1',jsonb_set('[{"kind":"task.create","args":{"title":"Captured task","notes":"Keep evidence","dueAt":null}},{"kind":"water.log","args":{"amountMl":250}},{"kind":"reminder.create","args":{"title":"Remember review","remindAt":null}}]'::jsonb,'{2,args,remindAt}',to_jsonb(date_trunc('milliseconds',clock_timestamp()+interval '1 day'))));
  b:=public.capture_test_confirm(a,'["action-1","action-2"]','selective-approval-1');
  perform public.capture_test_assert((select count(*)=1 from public.tasks where title='Captured task')and(select count(*)=1 from public.hydration_entries),'selected task and water saved');
  perform public.capture_test_assert((select count(*)=0 from public.reminders),'unselected reminder remains unwritten');

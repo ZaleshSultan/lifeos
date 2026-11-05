@@ -3,6 +3,7 @@ import importlib.util
 import sys
 import unittest
 from copy import deepcopy
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -420,6 +421,77 @@ class ReminderWorkerTest(unittest.TestCase):
             ),
             message,
         )
+
+
+class AcademicReminderWorkerTest(unittest.TestCase):
+    def fixture(self):
+        db = FakeDB()
+        db.rows[0]["message"] = "📚 Synthetic class\nНачало: 10:00 (Asia/Almaty)\nАудитория: C1.3.319\nКарта: https://yuujiso.github.io/aitumap/"
+        db.rows[0]["metadata_json"] = {"academic_concierge_kind": "class", "academic_room": "C1.3.319", "academic_title": "Synthetic class", "academic_start": "2026-05-18T05:00:00Z"}
+        return db
+
+    def test_master_flag_defaults_off_and_cancels_bound_jobs_without_planning(self):
+        db = self.fixture(); telegram = Telegram()
+        with patch.object(rw, "plan_notifications") as plan:
+            summary = rw.process_due_reminders(SETTINGS, db, telegram, now=NOW)
+        self.assertFalse(SETTINGS.academic_notifications_enabled)
+        plan.assert_not_called(); self.assertEqual(summary.sent, 0); self.assertEqual(telegram.calls, [])
+        self.assertEqual(db.transitions[0][1:3], ("cancelled", "academic_operator_disabled"))
+
+    def test_verified_cached_room_uses_one_photo_under_existing_receipt(self):
+        db = self.fixture()
+        class PhotoTelegram(Telegram):
+            def __init__(self): super().__init__(); self.photos = []
+            def send_photo(self, chat, url, caption): self.photos.append((chat, url, caption)); return 84
+        telegram = PhotoTelegram()
+        with patch.object(rw, "plan_notifications", return_value={"queued": 0, "cancelled": 0, "failed": 0}), patch.object(rw, "room_photo", return_value="https://lifeos.zalewko.me/tma/campus-maps/pinned.png"):
+            result = rw.process_due_reminders(replace(SETTINGS, academic_notifications_enabled=True), db, telegram, now=NOW)
+        self.assertEqual(result.sent, 1); self.assertEqual(telegram.calls, []); self.assertEqual(len(telegram.photos), 1)
+        self.assertIn("10:00 (Asia/Almaty)", telegram.photos[0][2]); self.assertIn("C1.3.319", telegram.photos[0][2])
+        self.assertEqual(db.transitions[0][1:4], ("sent", "none", 84))
+
+    def test_missing_cache_sends_only_text_and_interactive_fallback(self):
+        db = self.fixture(); telegram = Telegram()
+        with patch.object(rw, "plan_notifications", return_value={"queued": 0, "cancelled": 0, "failed": 0}):
+            result = rw.process_due_reminders(replace(SETTINGS, academic_notifications_enabled=True), db, telegram, now=NOW)
+        self.assertEqual(result.sent, 1); self.assertEqual(len(telegram.calls), 1)
+        self.assertIn("https://yuujiso.github.io/aitumap/", telegram.calls[0][1])
+
+    def test_photo_timeout_is_unknown_and_never_falls_back_or_repeats(self):
+        db = self.fixture()
+        class PhotoTelegram(Telegram):
+            def __init__(self): super().__init__(); self.photos = []
+            def send_photo(self, chat, url, caption):
+                self.photos.append((chat, url)); raise rw.TelegramDeliveryError("unknown", "telegram_transport_unknown")
+        telegram = PhotoTelegram(); enabled = replace(SETTINGS, academic_notifications_enabled=True)
+        with patch.object(rw, "plan_notifications", return_value={"queued": 0, "cancelled": 0, "failed": 0}), patch.object(rw, "room_photo", return_value="https://lifeos.zalewko.me/tma/campus-maps/pinned.png"):
+            first = rw.process_due_reminders(enabled, db, telegram, now=NOW)
+            rw.process_due_reminders(enabled, db, telegram, now=NOW)
+        self.assertEqual(first.unknown, 1); self.assertEqual(len(telegram.photos), 1); self.assertEqual(telegram.calls, [])
+        self.assertEqual(db.rows[0]["status"], "unknown")
+
+    def test_revocation_during_photo_preparation_is_fenced_before_send(self):
+        db = self.fixture(); telegram = Telegram()
+        telegram.send_photo = lambda *args: self.fail("revoked preparation sent photo")
+        def revoked(*args): db.rows[0]["status"] = "cancelled"; return "https://lifeos.zalewko.me/tma/campus-maps/pinned.png"
+        with patch.object(rw, "plan_notifications", return_value={"queued": 0, "cancelled": 0, "failed": 0}), patch.object(rw, "room_photo", side_effect=revoked):
+            result = rw.process_due_reminders(replace(SETTINGS, academic_notifications_enabled=True), db, telegram, now=NOW)
+        self.assertEqual(result.sent, 0); self.assertEqual(telegram.calls, [])
+
+    def test_academic_planning_failure_preserves_ordinary_manual_reminders(self):
+        db = FakeDB(); telegram = Telegram()
+        with patch.object(rw, "plan_notifications", side_effect=RuntimeError("raw private failure")):
+            result = rw.process_due_reminders(replace(SETTINGS, academic_notifications_enabled=True), db, telegram, now=NOW)
+        self.assertEqual(result.academic_planning_failed, 1); self.assertEqual(result.sent, 1)
+
+    def test_personal_event_clock_is_not_rewritten_using_travel_profile(self):
+        db = self.fixture(); db.profiles["user-0"]["timezone"] = "Asia/Tokyo"
+        db.rows[0]["message"] = "Личный экзамен: 16:00 (Asia/Almaty)\nМесто: Synthetic location"
+        db.rows[0]["metadata_json"]["academic_concierge_kind"] = "personal_exam"
+        telegram = Telegram()
+        with patch.object(rw, "plan_notifications", return_value={"queued": 0, "cancelled": 0, "failed": 0}):
+            rw.process_due_reminders(replace(SETTINGS, academic_notifications_enabled=True), db, telegram, now=NOW)
+        self.assertIn("16:00 (Asia/Almaty)", telegram.calls[0][1]); self.assertNotIn("Asia/Tokyo", telegram.calls[0][1])
 
 
 if __name__ == "__main__":

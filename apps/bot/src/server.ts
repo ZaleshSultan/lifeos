@@ -8,6 +8,7 @@ import { handleDailyLifeRoute } from "./daily-life-routes.js";
 import { CaptureService, readCaptureConfig } from "./capture-service.js";
 import { TelegramHttpClient } from "./telegram/client.js";
 import { handleCaptureRoute } from "./capture-routes.js";
+import { handleAcademicConciergeRoute } from "./academic-concierge-routes.js";
 import { createCaptureTelegramPort } from "./capture-telegram-adapter.js";
 import { CaptureTelegramIngestError, type CaptureTelegramPort } from "./telegram/capture.js";
 import { isMealPhotoMessage } from "./telegram/meal-photo.js";
@@ -152,6 +153,7 @@ export interface BotServerOptions {
       | "openRouterApiKey"
       | "financeAiModel"
       | "financeAiEnabled"
+      | "academicNotificationsEnabled"
       | "googleOAuthClientId"
       | "googleOAuthClientSecret"
       | "googleOAuthRedirectUri"
@@ -185,6 +187,7 @@ interface HealthResponse {
 }
 
 interface ResolvedBotServerOptions {
+  academicNotificationsEnabled: boolean;
   captures?: CaptureService;
   capture?: CaptureTelegramPort;
   aiGovernor?: AiGovernor;
@@ -2491,7 +2494,8 @@ async function handleRequest(
   if (requestUrl.pathname.startsWith("/api/tma/")) {
     const lmsRoute = requestUrl.pathname.startsWith("/api/tma/lms/");
     const captureRoute = requestUrl.pathname === "/api/tma/captures" || requestUrl.pathname.startsWith("/api/tma/captures/");
-    if (lmsRoute || captureRoute) response.setHeader("Cache-Control", "no-store");
+    const academicRoute = requestUrl.pathname === "/api/tma/study/concierge" || requestUrl.pathname.startsWith("/api/tma/study/concierge/");
+    if (lmsRoute || captureRoute || academicRoute) response.setHeader("Cache-Control", "no-store");
     const safeLmsRead = request.method === "GET" && ["/api/tma/lms/work", "/api/tma/lms/connection"].includes(requestUrl.pathname);
     const auth = await resolveTmaUser(request, options, lmsRoute && (!safeLmsRead || request.headers.authorization === undefined));
 
@@ -2512,6 +2516,7 @@ async function handleRequest(
     }
 
     if (await handleCaptureRoute({request,response,url:requestUrl,user:auth.user,captures:options.captures,readJsonBody,writeJson})) return;
+    if (await handleAcademicConciergeRoute({request,response,url:requestUrl,user:auth.user,academic:store.academicConcierge,deliveryEnabled:options.academicNotificationsEnabled,readJsonBody,writeJson})) return;
     if (await handleAiModelRouterRoute({request,response,url:requestUrl,userId:auth.user.userId,router:options.aiRouter,readJsonBody,writeJson})) return;
 
     if (await handleLmsRoute({
@@ -3700,6 +3705,7 @@ export function createBotServer(options: BotServerOptions = {}): Server {
   const capture = options.capture ?? (captures?.capabilities().enabled && options.store
     ? createCaptureTelegramPort(captures, options.store) : undefined);
   const resolvedOptions: ResolvedBotServerOptions = {
+    academicNotificationsEnabled: options.config?.academicNotificationsEnabled ?? false,
     captures,
     capture,
     aiGovernor: options.aiGovernor,

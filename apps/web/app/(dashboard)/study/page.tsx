@@ -12,6 +12,8 @@ import { MetricCard } from "@/components/MetricCard";
 import { PageHeader } from "@/components/PageHeader";
 import { SectionPanel } from "@/components/SectionPanel";
 import { lifeosApi, type WebStudySummary } from "@/lib/lifeos-api";
+import { AcademicWorkspace } from "@/components/workspaces/AcademicWorkspace";
+import type { AcademicSnapshot } from "../../../../tma/src/api/study-concierge";
 
 const dayOrder = [
   "monday",
@@ -34,10 +36,11 @@ const dayLabels: Record<string, string> = {
 };
 
 export default async function StudyPage() {
-  const [study, lmsConnection, lmsWork] = await Promise.all([
+  const [study, lmsConnection, lmsWork, academic] = await Promise.all([
     lifeosApi<WebStudySummary>("/api/tma/study"),
     dashboardData<WebLmsConnection>("/api/tma/lms/connection"),
     dashboardData<WebLmsWork>("/api/tma/lms/work"),
+    dashboardData<AcademicSnapshot>("/api/tma/study/concierge"),
   ]);
   if (!study) redirect("/access");
 
@@ -89,6 +92,9 @@ export default async function StudyPage() {
 
       <div className="mt-6">
         <LmsStatus connection={lmsConnection} work={lmsWork} />
+      </div>
+      <div className="mt-6">
+        <AcademicWorkspace initial={academic} />
       </div>
       <p className="mt-4 text-sm text-amber-100">
         Сохранённое расписание; проверь актуальность в AITU.

@@ -25,6 +25,7 @@ export interface BotConfig {
   openRouterApiKey?: string;
   financeAiModel?: string;
   financeAiEnabled: boolean;
+  academicNotificationsEnabled: boolean;
   googleOAuthClientId?: string;
   googleOAuthClientSecret?: string;
   googleOAuthRedirectUri?: string;
@@ -97,6 +98,7 @@ export function loadBotConfig(source: EnvSource = process.env): BotConfig {
 
   return {
     nodeEnv,
+    academicNotificationsEnabled: booleanEnv(source, "LIFEOS_ACADEMIC_NOTIFICATIONS_ENABLED", false),
     corsAllowedOrigins: (optionalEnv(source, "LIFEOS_CORS_ALLOWED_ORIGINS") ?? "").split(",").map(value => value.trim()).filter(Boolean),
     host: optionalEnv(source, "HOST", "0.0.0.0") ?? "0.0.0.0",
     port: integerEnv(source, "PORT", 3000),
