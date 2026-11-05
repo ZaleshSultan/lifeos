@@ -72,7 +72,7 @@ export const DEFAULT_ACADEMIC_PREFERENCES: AcademicPreferences = {
   staleWarningEnabled: false,
   includeOnlineClasses: false,
   classOffsetMinutes: 10,
-  assignmentOffsetsMinutes: [1440, 180, 30],
+  assignmentOffsetsMinutes: [4320, 1440],
   examOffsetsMinutes: [1440, 120],
   personalOffsetsMinutes: [1440, 120, 30],
   quietStart: "22:00",
