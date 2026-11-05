@@ -4,6 +4,8 @@ import { PageHeader } from "@/components/PageHeader";
 import { NotificationsWorkspace } from "@/components/workspaces/NotificationsWorkspace";
 import { dashboardData } from "@/lib/dashboard-data";
 import type { RemindersResponse } from "../../../../tma/src/api/types";
+import type { GradeEventFeed } from "../../../../../packages/core/src/academic-intelligence.js";
+import { AcademicSettingsWorkspace } from "@/components/workspaces/AcademicSettingsWorkspace";
 export default async function NotificationsPage() {
   return (
     <>
@@ -15,6 +17,13 @@ export default async function NotificationsPage() {
       <NotificationsWorkspace
         initial={await dashboardData<RemindersResponse>("/api/tma/reminders")}
       />
+      <div className="mt-6">
+        <AcademicSettingsWorkspace
+          initial={await dashboardData<GradeEventFeed>(
+            "/api/tma/study/grade-events",
+          )}
+        />
+      </div>
       <div className="mt-6">
         <NotificationPreferences
           initial={await dashboardData<DailyLifePreferences>(
