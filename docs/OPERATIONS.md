@@ -150,6 +150,18 @@ Cluster IAM, external provider grants, database passwords and hosted platform
 configuration require separate recovery; this is a logical database restore,
 not a whole Supabase platform clone.
 
+Internal release checks that supply `verification_sql_files` must also declare
+`verification_user` and `expected_verification_role` (`superuser`, `bypassrls`,
+and `inherit`, all explicit booleans). The archive is restored by the isolated
+administrator, while verification connects directly as the declared caller.
+The drill checks both session identity and role attributes before executing
+release SQL and records them separately in `release_verification`. A missing or
+mismatched caller fails closed. It never grants privileges or changes roles to
+make a rehearsal pass. Release preparation must additionally compare the
+caller's effective table privileges and memberships with production; role
+attributes alone do not prove that parity. Scheduled restores without release
+SQL keep their existing behavior.
+
 On November 3, an actual fresh encrypted production archive was restored this
 way with the two original identities/profiles, five courses, 97 academic
 records, four workouts and 20 finance transactions intact. The first attempt
