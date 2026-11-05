@@ -308,7 +308,7 @@ describe("study calculator form", () => {
     expect(html).toContain("округлён вверх до 0,1");
   });
 
-  it("shows guaranteed points, maximum and a forecast for each remaining field", () => {
+  it("shows scenario points, maximum and a conditional forecast for each remaining field", () => {
     const html = renderToStaticMarkup(
       createElement(StudyTargetForecast, {
         state: {
@@ -319,7 +319,7 @@ describe("study calculator form", () => {
       }),
     );
     const text = html.replace(/<[^>]+>/g, "");
-    expect(text).toContain("Гарантировано в итог30");
+    expect(text).toContain("Учтено в сценарии30");
     expect(text).toContain("Максимальный итог100");
     expect(text).toContain("Нужно в среднем дальше50 / 100");
     expect(html).toContain("<details open=");
@@ -416,7 +416,7 @@ describe("study synced grades", () => {
         records: [record, { ...record, id: "grade-2", score: 0 }],
       }),
     );
-    expect(html).toContain("Ещё не оценено");
+    expect(html).toContain("Числовая оценка не подтверждена");
     expect(html).toContain("0 / 10");
     expect(html).toContain("Значения калькулятора сохраняются отдельно");
   });

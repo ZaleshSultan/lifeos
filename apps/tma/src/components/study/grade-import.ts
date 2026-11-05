@@ -1,5 +1,5 @@
 import type { AcademicRecord } from "../../api/types";
-import type { StudyWorkspaceCourse } from "../../api/study";
+import type { StudyWorkspaceCourse } from "../../api/study-types";
 import type { StudyDraft } from "./model";
 import {
   studyEvidenceBelongsToCourse,

@@ -1,5 +1,6 @@
 import {
   BookOpen,
+  BookOpenCheck,
   BookText,
   Calculator,
   CalendarDays,
@@ -12,8 +13,19 @@ import { ApiError } from "../api/client";
 import {
   useConfigureStudyCalculatorMutation,
   useSaveStudyCalculatorMutation,
+  useSaveScholarshipPlanMutation,
   useStudyQuery,
 } from "../api/study";
+import {
+  useGradeEventFeed,
+  useGradePolicyReviewMutation,
+} from "../api/academic-intelligence";
+import {
+  gradeTargetDefinitionKey,
+  gradeTargetBindingsKey,
+  gradeTargetContextKey,
+} from "../../../../packages/core/src/grade-target.js";
+import { GradeTargetBindings } from "../components/study/GradeTargetBindings";
 import { ErrorPanel, LoadingPanel } from "../components/AsyncState";
 import { StudyCalculator } from "../components/study/StudyCalculator";
 import { StudyCampusMap } from "../components/study/StudyCampusMap";
@@ -21,6 +33,16 @@ import { StudyGrades } from "../components/study/StudyGrades";
 import { StudySchedule } from "../components/study/StudySchedule";
 import { StudySyllabi } from "../components/study/StudySyllabi";
 import { StudyLmsOverview } from "../components/study/StudyLmsOverview";
+import {
+  resolveOwnedStudyCourse,
+  studyCourseIdFromSearch,
+} from "../components/study/grade-target-model";
+import {
+  STUDY_NAVIGATION_TABS,
+  studyTabFromRequest,
+  type StudyTabId,
+} from "../components/study/study-navigation";
+import type { GradeTargetLmsSource } from "../../../../packages/core/src/grade-target.js";
 import { AcademicConciergeScreen } from "../components/study/AcademicConciergeScreen";
 import {
   createStudyDraft,
@@ -42,22 +64,65 @@ import {
   studySyllabusDefinitionMatches,
 } from "../../../../packages/core/src/study-syllabi.js";
 
-const tabs = [
-  { id: "schedule", label: "Расписание", icon: CalendarDays },
-  { id: "concierge", label: "Экзамены", icon: GraduationCap },
-  { id: "calculator", label: "Калькулятор", icon: Calculator },
-  { id: "grades", label: "Оценки", icon: BookOpen },
-  { id: "syllabi", label: "Силабус", icon: BookText },
-  { id: "map", label: "Карта", icon: MapPinned },
-] as const;
-
-type StudyTabId = (typeof tabs)[number]["id"];
+const tabIcons = {
+  schedule: CalendarDays,
+  work: BookOpenCheck,
+  concierge: GraduationCap,
+  calculator: Calculator,
+  grades: BookOpen,
+  syllabi: BookText,
+  map: MapPinned,
+};
+const tabs = STUDY_NAVIGATION_TABS.map((tab) => ({
+  ...tab,
+  icon: tabIcons[tab.id],
+}));
 
 function initialStudyTab(): StudyTabId {
   const requested = new URLSearchParams(window.location.search).get("studyTab");
-  return tabs.some((tab) => tab.id === requested)
-    ? (requested as StudyTabId)
-    : "schedule";
+  return studyTabFromRequest(requested) ?? "schedule";
+}
+function StudyConnectionStrip({
+  lms,
+  onOpenLms,
+  onOpenWork,
+}: {
+  lms?: GradeTargetLmsSource;
+  onOpenLms: () => void;
+  onOpenWork: () => void;
+}) {
+  return (
+    <section
+      className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/[0.08] bg-white/[0.03] p-3"
+      aria-label="Подключение Moodle"
+    >
+      <p className="text-xs text-zinc-400">
+        {!lms
+          ? "Статус Moodle пока не загружен"
+          : !lms.configured
+            ? "Moodle не подключён"
+            : lms.stale
+              ? "Moodle: требуется свежая синхронизация"
+              : "Moodle подключён"}
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={onOpenWork}
+          className="min-h-11 rounded-lg px-2 text-xs text-cyan-200"
+        >
+          Работы и дедлайны
+        </button>
+        <button
+          type="button"
+          onClick={onOpenLms}
+          className="min-h-11 rounded-lg border border-white/10 px-2 text-xs text-zinc-300"
+        >
+          Подключение Moodle
+        </button>
+      </div>
+    </section>
+  );
 }
 
 export function StudyScreen({
@@ -71,6 +136,9 @@ export function StudyScreen({
   const syllabi = useStudySyllabusProfiles(query.data);
   const save = useSaveStudyCalculatorMutation();
   const configure = useConfigureStudyCalculatorMutation();
+  const policyFeed = useGradeEventFeed();
+  const reviewPolicy = useGradePolicyReviewMutation();
+  const saveBindings = useSaveScholarshipPlanMutation();
   const [pendingProfile, setPendingProfile] = useState<string | null>(null);
   const [tab, setTab] = useState<StudyTabId>(initialStudyTab);
   const [academicDirty, setAcademicDirty] = useState(false);
@@ -91,8 +159,33 @@ export function StudyScreen({
     return true;
   }
   const [courseId, setCourseId] = useState<string | null>(() =>
-    new URLSearchParams(window.location.search).get("courseId"),
+    studyCourseIdFromSearch(new URLSearchParams(window.location.search)),
   );
+  useEffect(() => {
+    const navigate = () => {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("screen") !== "study") return;
+      const requested = studyTabFromRequest(params.get("studyTab"));
+      if (requested) {
+        if (!selectStudyTab(requested)) {
+          const restored = new URL(window.location.href);
+          restored.searchParams.set("studyTab", tab);
+          if (courseId) restored.searchParams.set("courseId", courseId);
+          else restored.searchParams.delete("courseId");
+          window.history.replaceState(null, "", restored);
+          return;
+        }
+      }
+      const requestedCourse = studyCourseIdFromSearch(params);
+      setCourseId(requestedCourse);
+    };
+    window.addEventListener("lifeos:navigation", navigate);
+    window.addEventListener("popstate", navigate);
+    return () => {
+      window.removeEventListener("lifeos:navigation", navigate);
+      window.removeEventListener("popstate", navigate);
+    };
+  }, [academicDirty, tab, courseId, onDirtyChange]);
   const storageKey = useDraftStorageKey("study");
   const [drafts, setDrafts] = useState<Record<string, StudyDraft>>(
     () => readSessionDraft(storageKey, isStudyDrafts) ?? {},
@@ -112,9 +205,13 @@ export function StudyScreen({
 
   useEffect(() => {
     const url = new URL(window.location.href);
+    // Visited screens remain mounted under primary navigation. A hidden Study
+    // screen must not replace another screen's URL when background data updates.
+    if (url.searchParams.get("screen") !== "study") return;
     url.searchParams.set("screen", "study");
     url.searchParams.set("studyTab", tab);
     if (courseId) url.searchParams.set("courseId", courseId);
+    else if (courseId === null) url.searchParams.delete("courseId");
     window.history.replaceState(null, "", url);
   }, [tab, courseId]);
 
@@ -135,14 +232,22 @@ export function StudyScreen({
   if (query.isLoading)
     return (
       <div className="min-w-0 space-y-4">
-        <StudyLmsOverview key="lms-overview" onOpenConnection={onOpenLms} />
+        <StudyConnectionStrip
+          lms={policyFeed.data?.lms}
+          onOpenLms={onOpenLms}
+          onOpenWork={() => selectStudyTab("work")}
+        />
         <LoadingPanel title="Загружаем учёбу…" />
       </div>
     );
   if (!query.data)
     return (
       <div className="min-w-0 space-y-4">
-        <StudyLmsOverview key="lms-overview" onOpenConnection={onOpenLms} />
+        <StudyConnectionStrip
+          lms={policyFeed.data?.lms}
+          onOpenLms={onOpenLms}
+          onOpenWork={() => selectStudyTab("work")}
+        />
         <ErrorPanel
           title="Не удалось загрузить учёбу"
           detail="Проверь подключение и попробуй ещё раз."
@@ -152,10 +257,8 @@ export function StudyScreen({
     );
 
   const data = { ...query.data, courses: syllabi.courses };
-  const course =
-    data.courses.find((item) => item.id === courseId) ??
-    data.courses.find((item) => item.calculator) ??
-    data.courses[0];
+  const course = resolveOwnedStudyCourse(data.courses, courseId);
+  const unavailableCourse = courseId !== null && !course;
   const draft = course?.calculator
     ? (drafts[course.id] ?? createStudyDraft(course.calculator))
     : null;
@@ -202,7 +305,11 @@ export function StudyScreen({
           <RefreshCw className="h-5 w-5" aria-hidden="true" />
         </button>
       </header>
-      <StudyLmsOverview key="lms-overview" onOpenConnection={onOpenLms} />
+      <StudyConnectionStrip
+        lms={policyFeed.data?.lms}
+        onOpenLms={onOpenLms}
+        onOpenWork={() => selectStudyTab("work")}
+      />
       {syllabi.pending ? (
         <p role="status" className="text-xs text-emerald-200">
           Сохраняем формулы из силабусов для найденных предметов…
@@ -243,7 +350,7 @@ export function StudyScreen({
         </p>
       ) : null}
       <div
-        className="grid grid-cols-3 gap-1 rounded-xl border border-white/[0.08] bg-white/[0.03] p-1 sm:grid-cols-6"
+        className="grid grid-cols-4 gap-1 rounded-xl border border-white/[0.08] bg-white/[0.03] p-1 sm:grid-cols-7"
         role="tablist"
         aria-label="Разделы учёбы"
       >
@@ -288,6 +395,9 @@ export function StudyScreen({
         {tab === "schedule" ? (
           <StudySchedule courses={data.courses} timezone={data.timezone} />
         ) : null}
+        {tab === "work" ? (
+          <StudyLmsOverview onOpenConnection={onOpenLms} />
+        ) : null}
         {tab === "concierge" ? (
           <AcademicConciergeScreen
             onDirtyChange={(value) => {
@@ -296,11 +406,41 @@ export function StudyScreen({
             }}
           />
         ) : null}
-        {tab === "grades" ? <StudyGrades records={data.records} /> : null}
+        {tab === "grades" ? (
+          <StudyGrades
+            records={data.records}
+            courses={query.data.courses}
+            reviews={policyFeed.data?.preferences.courseReviews}
+            lms={policyFeed.data?.lms}
+            selectedCourseId={courseId}
+            onSelectCourse={setCourseId}
+            events={policyFeed.data?.events}
+            historyTruncated={policyFeed.data?.truncated}
+            onAnalyze={(id) => {
+              setCourseId(id);
+              selectStudyTab("calculator");
+            }}
+          />
+        ) : null}
         {tab === "syllabi" ? <StudySyllabi courses={data.courses} /> : null}
         {tab === "map" ? <StudyCampusMap /> : null}
         {tab === "calculator" ? (
           <div className="space-y-4">
+            {unavailableCourse ? (
+              <div
+                role="status"
+                className="rounded-xl border border-amber-400/20 p-4 text-sm text-amber-200"
+              >
+                <p>Запрошенный курс недоступен. Выбери свой курс ниже.</p>
+                <button
+                  type="button"
+                  onClick={() => setCourseId(null)}
+                  className="mt-2 min-h-11 rounded-lg border border-white/10 px-3 text-xs"
+                >
+                  Снять выбор курса
+                </button>
+              </div>
+            ) : null}
             {!data.courses.length ? (
               <p className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 text-sm text-zinc-400">
                 Курсы пока не добавлены. Импортируй учебный план, затем обнови
@@ -311,9 +451,14 @@ export function StudyScreen({
                 Предмет
                 <select
                   className="mt-2 min-h-11 w-full min-w-0 max-w-full rounded-lg border border-white/[0.12] bg-graphite-900 px-3 py-3 text-base text-white"
-                  value={course?.id}
+                  value={course?.id ?? ""}
                   onChange={(event) => setCourseId(event.target.value)}
                 >
+                  {unavailableCourse ? (
+                    <option value="" disabled>
+                      Выбери свой курс
+                    </option>
+                  ) : null}
                   {data.courses.map((item) => (
                     <option key={item.id} value={item.id}>
                       {item.title}
@@ -398,57 +543,115 @@ export function StudyScreen({
               </p>
             ) : null}
             {course && draft ? (
-              <StudyCalculator
-                key={course.id}
-                course={storedCourse ?? course}
-                records={data.records}
-                draft={draft}
-                onChange={(next) => {
-                  setDrafts((current) => ({ ...current, [course.id]: next }));
-                  setSavedCourse(null);
-                  setErrors((current) => ({ ...current, [course.id]: null }));
-                }}
-                onReset={() => {
-                  if (course.calculator)
-                    setDrafts((current) => ({
-                      ...current,
-                      [course.id]: createStudyDraft(course.calculator!),
-                    }));
-                  setErrors((current) => ({ ...current, [course.id]: null }));
-                }}
-                onSave={(state) => {
-                  setErrors((current) => ({ ...current, [course.id]: null }));
-                  save.mutate(
-                    { courseId: course.id, state },
-                    {
-                      onSuccess: (stored) => {
-                        setDrafts((current) => ({
-                          ...current,
-                          [course.id]: createStudyDraft(stored),
-                        }));
-                        setSavedCourse(course.id);
+              <>
+                <GradeTargetBindings
+                  key={`bindings-${course.id}`}
+                  course={storedCourse ?? course}
+                  records={data.records}
+                  saving={saveBindings.isPending}
+                  error={
+                    saveBindings.isError
+                      ? "Не удалось сохранить связь. Обнови данные и повтори: параллельные правки не перезаписываются."
+                      : null
+                  }
+                  onSave={(config) =>
+                    saveBindings.mutate({
+                      courseId: course.id,
+                      config,
+                      expectedConfig: storedCourse?.scholarship ?? null,
+                    })
+                  }
+                />
+                {policyFeed.isError ? (
+                  <p className="text-xs text-amber-200">
+                    Проверку политики загрузить не удалось. Расчёт остаётся
+                    условным.
+                  </p>
+                ) : null}
+                <StudyCalculator
+                  key={course.id}
+                  course={storedCourse ?? course}
+                  records={data.records}
+                  draft={draft}
+                  onChange={(next) => {
+                    setDrafts((current) => ({ ...current, [course.id]: next }));
+                    setSavedCourse(null);
+                    setErrors((current) => ({ ...current, [course.id]: null }));
+                  }}
+                  onReset={() => {
+                    if (course.calculator)
+                      setDrafts((current) => ({
+                        ...current,
+                        [course.id]: createStudyDraft(course.calculator!),
+                      }));
+                    setErrors((current) => ({ ...current, [course.id]: null }));
+                  }}
+                  onSave={(state) => {
+                    setErrors((current) => ({ ...current, [course.id]: null }));
+                    save.mutate(
+                      { courseId: course.id, state },
+                      {
+                        onSuccess: (stored) => {
+                          setDrafts((current) => ({
+                            ...current,
+                            [course.id]: createStudyDraft(stored),
+                          }));
+                          setSavedCourse(course.id);
+                        },
+                        onError: (error) =>
+                          setErrors((current) => ({
+                            ...current,
+                            [course.id]:
+                              error instanceof ApiError && error.status === 409
+                                ? "Данные курса изменились. Обнови их и попробуй сохранить ещё раз. Твои введённые значения останутся на экране."
+                                : "Не удалось сохранить сценарий. Проверь подключение и повтори сохранение.",
+                          })),
                       },
-                      onError: (error) =>
-                        setErrors((current) => ({
-                          ...current,
-                          [course.id]:
-                            error instanceof ApiError && error.status === 409
-                              ? "Данные курса изменились. Обнови их и попробуй сохранить ещё раз. Твои введённые значения останутся на экране."
-                              : "Не удалось сохранить сценарий. Проверь подключение и повтори сохранение.",
-                        })),
-                    },
-                  );
-                }}
-                saving={
-                  save.isPending ||
-                  configure.isPending ||
-                  Boolean(autoApplication && syllabi.pending)
-                }
-                syllabusUnpersisted={Boolean(autoApplication)}
-                saved={savedCourse === course.id}
-                saveError={errors[course.id] ?? null}
-                onRefresh={() => void query.refetch()}
-              />
+                    );
+                  }}
+                  saving={
+                    save.isPending ||
+                    configure.isPending ||
+                    Boolean(autoApplication && syllabi.pending)
+                  }
+                  syllabusUnpersisted={Boolean(autoApplication)}
+                  saved={savedCourse === course.id}
+                  saveError={errors[course.id] ?? null}
+                  onRefresh={() => void query.refetch()}
+                  policyReview={
+                    policyFeed.data?.preferences.courseReviews[course.id]
+                  }
+                  lms={policyFeed.data?.lms}
+                  onReview={
+                    policyFeed.data && storedCourse?.calculator
+                      ? (sourceRef) =>
+                          reviewPolicy.mutate({
+                            courseId: course.id,
+                            expectedRevision:
+                              policyFeed.data!.preferences.revision,
+                            definitionKey: gradeTargetDefinitionKey(
+                              storedCourse.calculator!.definition,
+                            ),
+                            bindingsKey: gradeTargetBindingsKey(
+                              storedCourse.scholarship?.bindings ?? {},
+                            ),
+                            contextKey: gradeTargetContextKey({
+                              externalCourseKey: storedCourse.externalCourseKey,
+                              startsOn: storedCourse.startsOn,
+                              endsOn: storedCourse.endsOn,
+                            }),
+                            sourceRef,
+                          })
+                      : undefined
+                  }
+                  reviewing={reviewPolicy.isPending}
+                  reviewError={
+                    reviewPolicy.isError
+                      ? "Проверка не сохранена. Обнови данные: формула, связи или настройки могли измениться."
+                      : null
+                  }
+                />
+              </>
             ) : course ? (
               <p className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 text-sm text-zinc-400">
                 Для этого предмета ещё нет схемы расчёта. Добавь её в учебный

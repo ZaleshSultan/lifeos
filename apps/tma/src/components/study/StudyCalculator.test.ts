@@ -3,7 +3,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { StudyCalculatorState } from "../../../../../packages/core/src/study.js";
 import type { StudyWorkspaceCourse } from "../../api/study";
-import { StudyCalculator, StudyTargetForecast } from "./StudyCalculator";
+import {
+  StudyCalculator,
+  StudyTargetForecast,
+  StudyScenarioResult,
+} from "./StudyCalculator";
 import { createStudyDraft, type StudyDraft } from "./model";
 import { syllabusProfiles } from "./syllabus-profiles";
 
@@ -48,6 +52,53 @@ function textContent(html: string): string {
 }
 
 describe("StudyCalculator assessment inputs", () => {
+  it("uses the fresh saved course definition for observed facts while retaining an older dirty scenario", () => {
+    const oldState: StudyCalculatorState = {
+      definition: {
+        ...syllabusProfiles[0].definition,
+        sourceName: "Old draft source",
+        attestationThreshold: 25,
+      },
+      values: {},
+      target: 70,
+    };
+    const draft = createStudyDraft(oldState);
+    draft.inputs[oldState.definition.fields[0].id] = "75";
+    const fresh: StudyCalculatorState = {
+      ...oldState,
+      definition: {
+        ...oldState.definition,
+        sourceName: "Fresh saved source",
+        attestationThreshold: 50,
+      },
+    };
+    const html = renderCalculator(fresh, draft);
+    expect(textContent(html)).toContain(
+      "В выбранном источнике порог аттестаций: 50",
+    );
+    expect(inputByName(html, oldState.definition.fields[0].id)).toContain(
+      'value="75"',
+    );
+    expect(textContent(html)).toContain("Схема курса изменилась");
+  });
+  it("keeps an unspecified admission threshold unknown rather than presenting zero as a university rule", () => {
+    const html = renderToStaticMarkup(
+      createElement(StudyScenarioResult, {
+        state: {
+          definition: {
+            ...syllabusProfiles[0].definition,
+            attestationThreshold: 0,
+          },
+          values: {},
+          target: 70,
+        },
+      }),
+    );
+    expect(textContent(html)).toContain(
+      "Порог допуска в источнике не указан; уточни правила у преподавателя.",
+    );
+    expect(textContent(html)).not.toContain("Порог каждой аттестации: 0");
+  });
   it.each(syllabusProfiles)(
     "keeps every $title assessment value attached to its own field",
     ({ definition }) => {
@@ -167,7 +218,7 @@ describe("StudyCalculator forecast guidance", () => {
       }),
     );
 
-    expect(textContent(html)).toContain("Гарантировано в итог 0");
+    expect(textContent(html)).toContain("Учтено в сценарии 0");
     expect(textContent(html)).toContain("Максимальный итог 0");
     expect(textContent(html)).toContain("Цель уже недостижима");
     expect(html).not.toContain("<li");

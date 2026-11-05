@@ -6,44 +6,14 @@ import {
 } from "../../../../packages/core/src/study.js";
 import { telegram } from "../telegram";
 import { request } from "./client";
-import type { AcademicRecord } from "./types";
 
-export type StudyWeekday =
-  | "monday"
-  | "tuesday"
-  | "wednesday"
-  | "thursday"
-  | "friday"
-  | "saturday"
-  | "sunday";
-
-export interface StudySchedule {
-  id: string;
-  dayOfWeek: StudyWeekday;
-  startTime: string;
-  endTime: string;
-  room: string | null;
-  sessionType: string | null;
-  instructorName: string | null;
-}
-
-export interface StudyWorkspaceCourse {
-  id: string;
-  code: string;
-  title: string;
-  startsOn: string | null;
-  endsOn: string | null;
-  externalCourseKey: string | null;
-  schedules: StudySchedule[];
-  calculator: StudyCalculatorState | null;
-  scholarship?: ScholarshipConfig | null;
-}
-
-export interface StudyWorkspace {
-  timezone: string;
-  courses: StudyWorkspaceCourse[];
-  records: AcademicRecord[];
-}
+export type {
+  StudyWeekday,
+  StudySchedule,
+  StudyWorkspaceCourse,
+  StudyWorkspace,
+} from "./study-types";
+import type { StudyWorkspace } from "./study-types";
 
 export const studyQueryKey = ["study"] as const;
 

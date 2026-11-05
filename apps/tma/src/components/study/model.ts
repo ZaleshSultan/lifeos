@@ -3,7 +3,7 @@ import {
   validateStudyCalculatorDefinition,
   type StudyCalculatorState,
 } from "../../../../../packages/core/src/study.js";
-import type { StudyWeekday, StudyWorkspaceCourse } from "../../api/study";
+import type { StudyWeekday, StudyWorkspaceCourse } from "../../api/study-types";
 
 export const studyDays: { id: StudyWeekday; short: string; label: string }[] = [
   { id: "monday", short: "Пн", label: "Понедельник" },

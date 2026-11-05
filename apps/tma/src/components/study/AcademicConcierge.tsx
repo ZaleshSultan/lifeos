@@ -40,6 +40,13 @@ const tabs = [
   ["import", "Импорт"],
 ] as const;
 type Tab = (typeof tabs)[number][0];
+function requestedAcademicTab(): Tab {
+  const value =
+    typeof window === "undefined"
+      ? null
+      : new URLSearchParams(window.location.search).get("academicTab");
+  return tabs.some(([id]) => id === value) ? (value as Tab) : "exams";
+}
 
 function moodleAssignmentUrl(value: string | null): string | null {
   if (!value) return null;
@@ -78,7 +85,7 @@ export function AcademicConcierge({
   const [snapshot, setSnapshot] = useState(initial);
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<Tab>("exams");
+  const [tab, setTab] = useState<Tab>(requestedAcademicTab);
   const [now, setNow] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -200,6 +207,7 @@ export function AcademicConcierge({
     }
   }
   function chooseTab(value: Tab) {
+    if (inFlight.current) return false;
     if (
       tab !== value &&
       dirty &&
@@ -207,7 +215,7 @@ export function AcademicConcierge({
         "В этом разделе есть несохранённые правки. Перейти и отменить их?",
       )
     )
-      return;
+      return false;
     if (tab !== value) {
       setEditing(null);
       setDecision(null);
@@ -217,7 +225,30 @@ export function AcademicConcierge({
     setTab(value);
     setError(null);
     setMessage(null);
+    const url = new URL(window.location.href);
+    url.searchParams.set("academicTab", value);
+    window.history.replaceState(null, "", url);
+    return true;
   }
+  useEffect(() => {
+    const navigate = () => {
+      const requested = new URLSearchParams(window.location.search).get(
+        "academicTab",
+      );
+      if (!tabs.some(([id]) => id === requested) || requested === tab) return;
+      if (!chooseTab(requested as Tab)) {
+        const url = new URL(window.location.href);
+        url.searchParams.set("academicTab", tab);
+        window.history.replaceState(null, "", url);
+      }
+    };
+    window.addEventListener("lifeos:navigation", navigate);
+    window.addEventListener("popstate", navigate);
+    return () => {
+      window.removeEventListener("lifeos:navigation", navigate);
+      window.removeEventListener("popstate", navigate);
+    };
+  }, [tab, dirty]);
   const locked = busy || !ready;
   const events = snapshot?.events ?? [];
   const exams = events

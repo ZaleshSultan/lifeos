@@ -46,7 +46,7 @@ export function useWebResource<T>(resource: string, initial: T | null) {
   }
   return { data, setData, busy, error, setError, reload };
 }
-export function useUnsavedGuard(dirty: boolean) {
+export function useUnsavedGuard(dirty: boolean, retained = false) {
   useEffect(() => {
     if (!dirty) return;
     const beforeUnload = (event: BeforeUnloadEvent) => {
@@ -59,6 +59,7 @@ export function useUnsavedGuard(dirty: boolean) {
           ? event.target.closest("a[href]")
           : null;
       if (
+        !retained &&
         target &&
         target.getAttribute("href")?.startsWith("/") &&
         !window.confirm("Есть несохранённые изменения. Перейти и отменить их?")
@@ -73,5 +74,5 @@ export function useUnsavedGuard(dirty: boolean) {
       window.removeEventListener("beforeunload", beforeUnload);
       document.removeEventListener("click", navigate, true);
     };
-  }, [dirty]);
+  }, [dirty, retained]);
 }
