@@ -6,7 +6,7 @@ task_container="lifeos-ai-provider-quota-${RANDOM}-$$"
 task_results="$(mktemp -d)"
 cleanup(){ docker rm -f "$task_container" >/dev/null 2>&1 || true; rm -rf -- "$task_results"; }
 trap cleanup EXIT
-docker run --rm -d --network none --log-driver none --name "$task_container" --tmpfs /var/lib/postgresql/data:rw,size=128m -e POSTGRES_HOST_AUTH_METHOD=trust postgres:15-alpine >/dev/null
+docker run --rm -d --network none --log-driver none --memory 256m --cpus 1 --pids-limit 96 --name "$task_container" --tmpfs /var/lib/postgresql/data:rw,size=128m -e POSTGRES_HOST_AUTH_METHOD=trust postgres:15-alpine >/dev/null
 task_ready=false
 for attempt in {1..60}; do
   if docker exec "$task_container" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; then task_ready=true; break; fi
