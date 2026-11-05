@@ -6,6 +6,9 @@ import {
   type AiExecutionFeature,
   type AiExecutionState,
   type AiRoutingAccounting,
+  type AiProviderAttempt,
+  type AiProviderCooldown,
+  type AiProviderQuotaIdentity,
   type EnvSource,
 } from "@lifeos/core";
 
@@ -194,6 +197,55 @@ export class AiGovernor {
       now?: () => number;
     },
   ) {}
+  providerQuotaConfigured() {
+    return Boolean(
+      this.options.store?.reserveProviderAttempt &&
+      this.options.store.cooldownProviderQuota &&
+      this.options.store.providerQuotaStatus,
+    );
+  }
+  async reserveProviderAttempt(input: AiProviderAttempt, signal: AbortSignal) {
+    if (this.killed || this.options.config.killSwitch)
+      throw new AiGovernorError("ai_shutdown");
+    if (signal.aborted) throw new AiGovernorError("ai_cancelled");
+    if (
+      !this.active.has(input.userId + ":" + input.requestId) ||
+      !this.options.store?.reserveProviderAttempt
+    )
+      throw new AiGovernorError("ai_budget_unavailable");
+    try {
+      return await this.options.store.reserveProviderAttempt(input, signal);
+    } catch {
+      throw new AiGovernorError("ai_budget_unavailable");
+    }
+  }
+  async cooldownProviderQuota(input: AiProviderCooldown, _signal: AbortSignal) {
+    if (
+      !this.active.has(input.userId + ":" + input.requestId) ||
+      !this.options.store?.cooldownProviderQuota
+    )
+      throw new AiGovernorError("ai_budget_unavailable");
+    // A provider's accepted rate-limit response remains safety accounting even
+    // if its caller cancels. This bounded DB-only write never dispatches AI.
+    const cleanup = new AbortController();
+    const timer = setTimeout(() => cleanup.abort(), 2500);
+    try {
+      await this.options.store.cooldownProviderQuota(input, cleanup.signal);
+    } catch {
+      throw new AiGovernorError("ai_budget_unavailable");
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  async providerQuotaStatus(input: AiProviderQuotaIdentity) {
+    if (!this.options.store?.providerQuotaStatus)
+      throw new AiGovernorError("ai_budget_unavailable");
+    try {
+      return await this.options.store.providerQuotaStatus(input);
+    } catch {
+      throw new AiGovernorError("ai_budget_unavailable");
+    }
+  }
   status() {
     return {
       killSwitch: this.killed || this.options.config.killSwitch,

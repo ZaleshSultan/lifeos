@@ -225,8 +225,18 @@ export function AiRouterSettings({
       </p>
       {loaded?.operatorLimits.routerEnabled === false ? (
         <p className="rounded-lg border border-amber-300/20 p-3 text-amber-200">
-          Новый маршрутизатор пока выключен на сервере. Здесь можно подготовить
-          настройки; существующие функции Gemini не переключаются автоматически.
+          {loaded.operatorLimits.freeProfileEnabled
+            ? "Маршрутизатор выключен. Бесплатный профиль подготовлен; внешние запросы приостановлены без перехода на платный путь."
+            : "Новый маршрутизатор пока выключен на сервере. Здесь можно подготовить настройки; существующие функции Gemini не переключаются автоматически."}
+        </p>
+      ) : null}
+      {loaded?.operatorLimits.freeProfileEnabled ? (
+        <p className="rounded-lg border border-cyan-300/20 p-3 text-cyan-100">
+          Бесплатный профиль: только проверенные нулевые цены, без платного
+          запасного варианта. Ключи одного проекта или аккаунта делят лимит.
+          Личные данные не отправляются в бесплатный Gemini: доступна только
+          встроенная публичная проверка формата. Просмотр настроек не вызывает
+          AI.
         </p>
       ) : null}
       <button
@@ -275,6 +285,38 @@ export function AiRouterSettings({
                 <p className="mt-1 break-words text-xs text-zinc-400">
                   Профили ключей: {provider.credentialLabels.join(", ")}
                 </p>
+              ) : null}
+              {provider.freeRouting &&
+              loaded.operatorLimits.freeProfileEnabled ? (
+                <div className="mt-2 space-y-1 text-xs text-zinc-400">
+                  <p>
+                    Бесплатный маршрут:{" "}
+                    {
+                      {
+                        disabled: "выключен",
+                        not_configured: "ключи не подключены",
+                        metadata_required: "нужно подтвердить тариф и условия",
+                        quota_unavailable: "учёт квоты недоступен",
+                        prepared: "подготовлен, реальный запрос не проверен",
+                        cooldown: "ожидание после ограничения",
+                        review_required: "приостановлен до проверки владельцем",
+                      }[provider.freeRouting.status]
+                    }
+                  </p>
+                  <p>
+                    Резервы запросов LifeOS за день провайдера (
+                    {provider.id === "gemini" ? "America/Los_Angeles" : "UTC"}):{" "}
+                    {provider.freeRouting.localRequestsToday ?? "—"} /{" "}
+                    {provider.freeRouting.localDailyLimit ?? "—"}. Это лимит
+                    приложения, не остаток общего аккаунта.
+                  </p>
+                  {provider.freeRouting.retryAt ? (
+                    <p>
+                      Повтор доступен не раньше (UTC):{" "}
+                      {provider.freeRouting.retryAt}
+                    </p>
+                  ) : null}
+                </div>
               ) : null}
             </div>
           ))}
@@ -417,6 +459,19 @@ export function AiRouterSettings({
             <legend className="font-semibold text-white">
               Разрешённые провайдеры
             </legend>
+            <button
+              type="button"
+              className={buttonClass}
+              disabled={!ready || busy}
+              onClick={() => change("allowedProviders", [])}
+            >
+              Отключить провайдеров маршрутизатора
+            </button>
+            <p className="text-xs text-zinc-400">
+              Применится после сохранения настроек. Уже переданные данные
+              отозвать нельзя; серверный аварийный выключатель действует
+              отдельно.
+            </p>
             <div className="grid gap-1 sm:grid-cols-2">
               {AI_ROUTER_PROVIDERS.map((id) => (
                 <label key={id} className="flex min-h-11 items-center gap-3">
@@ -593,6 +648,11 @@ export function AiRouterSettings({
                     >
                       <strong>{model.label}</strong> ·{" "}
                       {providers[model.provider]}
+                      {model.billing === "free" ? (
+                        <span className="ml-2 text-cyan-200">
+                          Бесплатный тариф · требуется проверка доступа
+                        </span>
+                      ) : null}
                       <p className="mt-1">
                         {model.capabilities.join(", ")} ·{" "}
                         {model.billing === "chatgpt_plan"

@@ -15,6 +15,7 @@ import {
   type AiModelRouteReceipt,
   type AiRouterSettingsSnapshot,
   type AiRouterDecision,
+  type AiRouterProviderStatus,
 } from "@lifeos/core";
 import type { AiRouterSettingsStore } from "@lifeos/db";
 import {
@@ -41,6 +42,17 @@ import {
   CAPTURE_SPEECH_MODEL,
 } from "./capture-speech-provider.js";
 import type { GovernedCaptureSpeechAdapter } from "./telegram/voice.js";
+import {
+  freeCredentialPermits,
+  freeCredentialReady,
+  freeModelReason,
+  isPublicRouterInput,
+  type PublicRouterPrompt,
+} from "./ai-model-router-free-policy.js";
+import {
+  routerJsonSchema,
+  type RouterJsonSchemaKey,
+} from "./ai-model-router-json.js";
 
 export class AiRouterError extends Error {
   constructor(
@@ -65,6 +77,9 @@ export interface AiRouterExecutionInput {
   timeoutMs?: number;
   /** A capture owner reviewed this exact saved policy revision. */
   expectedSettingsRevision?: number;
+  schemaKey?: RouterJsonSchemaKey;
+  /** In-memory proof issued only for a fixed server-owned public probe. */
+  publicPrompt?: PublicRouterPrompt;
 }
 export interface AiRouterSpeechInput {
   userId: string;
@@ -119,7 +134,11 @@ export class AiModelRouter {
   }
   catalog(userId: string, feature?: AiExecutionFeature): AiRouterModel[] {
     return this.config.models.map((row) => {
-      const available = this.credentials(userId, row, feature).length > 0;
+      const keys = this.credentials(userId, row, feature);
+      const available = keys.length > 0;
+      const freeReady =
+        !this.config.freeProfileEnabled ||
+        freeModelReason(row, keys, this.now()) === null;
       const cooling =
         (this.unavailableUntil.get(userId + ":" + row.model.id) ?? 0) >
         this.now();
@@ -128,11 +147,13 @@ export class AiModelRouter {
         metadataVerified:
           row.model.metadataVerified &&
           this.now() >= row.verifiedAtMs &&
-          this.now() - row.verifiedAtMs <= 30 * 86400_000,
+          this.now() - row.verifiedAtMs <=
+            (this.config.freeProfileEnabled ? 1 : 30) * 86400_000,
         configured: available,
         authorized:
           this.config.enabled &&
           available &&
+          freeReady &&
           (row.model.billing !== "api" || this.config.paidRequestsEnabled),
         status: !this.config.enabled
           ? "disabled"
@@ -154,6 +175,15 @@ export class AiModelRouter {
         this.config.models.some(
           (row) =>
             row.model.metadataVerified &&
+            (!this.config.freeProfileEnabled ||
+              freeModelReason(
+                row,
+                this.config.credentials.filter(
+                  (key) =>
+                    row.credentialIds.includes(key.id) && Boolean(key.secret),
+                ),
+                this.now(),
+              ) === null) &&
             this.config.credentials.some(
               (c) => row.credentialIds.includes(c.id) && c.secret,
             ) &&
@@ -175,6 +205,76 @@ export class AiModelRouter {
       throw new AiRouterError("ai_router_storage_unavailable");
     }
   }
+  private async freeProviderStatus(
+    userId: string,
+    provider: string,
+  ): Promise<AiRouterProviderStatus["freeRouting"]> {
+    if (!["gemini", "openrouter"].includes(provider)) return undefined;
+    const result: NonNullable<AiRouterProviderStatus["freeRouting"]> = {
+      status: "disabled",
+      localRequestsToday: null,
+      localDailyLimit: null,
+      retryAt: null,
+      providerRemaining: null,
+    };
+    if (!this.config.freeProfileEnabled) return result;
+    const keys = this.config.credentials.filter(
+      (key) =>
+        key.ownerUserId === userId && key.provider === provider && key.secret,
+    );
+    if (!keys.length) return { ...result, status: "not_configured" };
+    const ready = keys.filter((key) => freeCredentialReady(key, this.now()));
+    if (!ready.length) return { ...result, status: "metadata_required" };
+    if (
+      !this.config.models.some(
+        (row) =>
+          row.model.provider === provider &&
+          freeModelReason(row, ready, this.now()) === null,
+      )
+    )
+      return { ...result, status: "metadata_required" };
+    if (!this.dependencies.governor?.providerQuotaConfigured())
+      return { ...result, status: "quota_unavailable" };
+    const groups = [
+      ...new Map(ready.map((key) => [key.quota!.domain, key])).values(),
+    ];
+    try {
+      const quotas = await Promise.all(
+        groups.map((key) =>
+          this.dependencies.governor!.providerQuotaStatus({
+            userId,
+            provider: key.provider as "gemini" | "openrouter",
+            quotaDomain: key.quota!.domain,
+          }),
+        ),
+      );
+      const retry =
+        quotas
+          .flatMap((quota) => (quota?.retryAt ? [quota.retryAt] : []))
+          .sort()
+          .at(-1) ?? null;
+      return {
+        ...result,
+        status: quotas.some((quota) => quota?.reviewRequired)
+          ? "review_required"
+          : retry
+            ? "cooldown"
+            : "prepared",
+        localRequestsToday: quotas.every((quota) => quota !== null)
+          ? quotas.reduce((sum, quota) => sum + quota!.requestsInDay, 0)
+          : null,
+        localDailyLimit: groups.reduce(
+          (sum, key, index) =>
+            sum +
+            (quotas[index]?.requestsPerDay ?? key.quota!.limits.requestsPerDay),
+          0,
+        ),
+        retryAt: retry,
+      };
+    } catch {
+      return { ...result, status: "quota_unavailable" };
+    }
+  }
   async snapshot(userId: string): Promise<AiRouterSettingsSnapshot> {
     const saved = await this.saved(userId);
     const recentExecutions =
@@ -183,32 +283,39 @@ export class AiModelRouter {
       ...saved,
       recentExecutions,
       models: this.catalog(userId),
-      providers: AI_ROUTER_PROVIDERS.map((id) => ({
-        id,
-        status:
-          id === "chatgpt_plan"
-            ? "permission_required"
-            : !this.config.enabled
-              ? "disabled"
-              : this.config.credentials.some(
-                    (c) =>
-                      c.provider === id && c.ownerUserId === userId && c.secret,
-                  )
-                ? "configured_unverified"
-                : "not_configured",
-        credentialLabels: this.config.credentials
-          .filter(
-            (c) => c.provider === id && c.ownerUserId === userId && c.secret,
-          )
-          .map((c) => c.id),
-        verified: false,
-      })),
+      providers: await Promise.all(
+        AI_ROUTER_PROVIDERS.map(async (id) => ({
+          id,
+          status:
+            id === "chatgpt_plan"
+              ? "permission_required"
+              : !this.config.enabled
+                ? "disabled"
+                : this.config.credentials.some(
+                      (c) =>
+                        c.provider === id &&
+                        c.ownerUserId === userId &&
+                        c.secret,
+                    )
+                  ? "configured_unverified"
+                  : "not_configured",
+          credentialLabels: this.config.credentials
+            .filter(
+              (c) => c.provider === id && c.ownerUserId === userId && c.secret,
+            )
+            .map((c) => c.id),
+          verified: false,
+          freeRouting: await this.freeProviderStatus(userId, id),
+        })),
+      ),
       operatorLimits: {
         routerEnabled: this.config.enabled,
         maxRequestCostMicros: this.config.maxRequestCostMicros,
         maxDailyCostMicros: this.config.maxDailyCostMicros,
         paidRequestsEnabled: this.config.paidRequestsEnabled,
         maxOutputTokens: this.config.maxOutputTokens,
+        freeProfileEnabled: this.config.freeProfileEnabled === true,
+        freeOnly: this.config.freeProfileEnabled === true,
       },
       chatgptPlan: {
         status: "prepared",
@@ -257,7 +364,11 @@ export class AiModelRouter {
     return selectAiModelRoute({
       task,
       settings: this.effective(settings),
-      models: this.catalog(userId, feature),
+      models: this.catalog(userId, feature).map((model) =>
+        this.config.freeProfileEnabled && model.provider === "gemini"
+          ? { ...model, authorized: false }
+          : model,
+      ),
       estimatedInputTokens,
       maxOutputTokens,
       previousModelId,
@@ -427,6 +538,8 @@ export class AiModelRouter {
     if (!this.config.enabled) throw new AiRouterError("ai_router_disabled");
     if (input.task.category === "voice")
       throw new AiRouterError("ai_router_audio_transport_required", 400);
+    if (this.config.freeProfileEnabled && !input.schemaKey)
+      throw new AiRouterError("ai_router_trusted_schema_required", 400);
     if (!this.dependencies.governor)
       throw new AiRouterError("ai_budget_unavailable");
     if (input.signal?.aborted) throw new AiRouterError("ai_cancelled", 408);
@@ -461,7 +574,11 @@ export class AiModelRouter {
             }),
     }));
     const estimatedInputTokens =
-      estimateAiInputTokens(metered) + images * 80000;
+      estimateAiInputTokens(metered) +
+      images * 80000 +
+      (input.schemaKey
+        ? estimateAiInputTokens(routerJsonSchema(input.schemaKey))
+        : 0);
     if (images > 1) throw new AiRouterError("ai_router_invalid_request", 400);
     const saved = await this.saved(input.userId);
     if (
@@ -472,7 +589,22 @@ export class AiModelRouter {
     )
       throw new AiRouterError("ai_router_consent_changed", 403);
     const settings = this.effective(saved.settings);
-    const catalog = this.catalog(input.userId, input.feature);
+    const publicInput = isPublicRouterInput(
+      input.publicPrompt,
+      messages,
+      input.task,
+      input.feature,
+    );
+    const catalog = this.catalog(input.userId, input.feature).map((model) => {
+      if (!this.config.freeProfileEnabled) return model;
+      const row = this.config.models.find(
+        (item) => item.model.id === model.id,
+      )!;
+      const permitted = this.credentials(input.userId, row, input.feature).some(
+        (key) => freeCredentialPermits(key, publicInput, this.now()),
+      );
+      return { ...model, authorized: model.authorized && permitted };
+    });
     const task = ["deterministic", "tagging"].includes(input.task.category)
       ? input.task
       : {
@@ -512,6 +644,7 @@ export class AiModelRouter {
     if (!primaryKey)
       throw new AiRouterError("ai_router_owner_credentials_required");
     const atomicOpenRouter =
+      !this.config.freeProfileEnabled &&
       primary.model.provider === "openrouter" &&
       candidates.every(
         (m) =>
@@ -611,8 +744,22 @@ export class AiModelRouter {
       async (signal) => {
         let attempts = 0;
         let last: unknown;
+        const quotaBlockedProviders = new Set<string>();
         for (const row of atomicOpenRouter ? [primary] : candidates) {
-          const keys = this.credentials(input.userId, row, input.feature);
+          if (
+            this.config.freeProfileEnabled &&
+            quotaBlockedProviders.has(row.model.provider)
+          )
+            continue;
+          const keys = this.credentials(
+            input.userId,
+            row,
+            input.feature,
+          ).filter(
+            (key) =>
+              !this.config.freeProfileEnabled ||
+              freeCredentialPermits(key, publicInput, this.now()),
+          );
           for (
             let keyIndex = 0;
             keyIndex < keys.length && attempts < attemptsBound;
@@ -635,6 +782,51 @@ export class AiModelRouter {
             )
               throw new AiRouterError("ai_router_model_unavailable");
             const key = keys[keyIndex];
+            if (this.config.freeProfileEnabled) {
+              if (
+                !key.quota ||
+                !["gemini", "openrouter"].includes(key.provider)
+              )
+                throw new AiRouterError("ai_router_free_eligibility_required");
+              const quota =
+                await this.dependencies.governor!.reserveProviderAttempt(
+                  {
+                    userId: input.userId,
+                    requestId,
+                    feature: input.feature,
+                    attempt: attempts + 1,
+                    provider: key.provider as "gemini" | "openrouter",
+                    quotaDomain: key.quota.domain,
+                    model: row.model.model,
+                    reservedTokens:
+                      estimatedInputTokens + input.maxOutputTokens,
+                    limits: key.quota.limits,
+                  },
+                  signal,
+                );
+              if (quota.outcome !== "reserved") {
+                if (
+                  ["cooldown", "minute_limit", "day_limit"].includes(
+                    quota.outcome,
+                  )
+                ) {
+                  quotaBlockedProviders.add(row.model.provider);
+                  last = new RouterProviderError(
+                    "quota_exceeded",
+                    false,
+                    false,
+                    429,
+                    quota.retryAt,
+                  );
+                  break;
+                }
+                throw new AiGovernorError(
+                  quota.outcome === "duplicate"
+                    ? "ai_duplicate_request"
+                    : "ai_budget_unavailable",
+                );
+              }
+            }
             attempts++;
             Object.assign(routing, {
               provider: row.model.provider,
@@ -665,6 +857,8 @@ export class AiModelRouter {
                   messages,
                   maxOutputTokens: input.maxOutputTokens,
                   signal,
+                  ...(input.schemaKey ? { schemaKey: input.schemaKey } : {}),
+                  nowMs: this.now(),
                   openRouter: {
                     providerOnly: row.providerOnly,
                     sort: row.sort,
@@ -681,6 +875,24 @@ export class AiModelRouter {
                   "ai_provider_unavailable",
                   "ai_invalid_response",
                 );
+              if (
+                this.config.freeProfileEnabled &&
+                response.reportedCostMicros !== null &&
+                response.reportedCostMicros !== 0
+              ) {
+                await this.dependencies.governor!.cooldownProviderQuota(
+                  {
+                    userId: input.userId,
+                    requestId,
+                    provider: key.provider as "gemini" | "openrouter",
+                    quotaDomain: key.quota!.domain,
+                    retryAt: null,
+                    reviewRequired: true,
+                  },
+                  signal,
+                );
+                throw new RouterProviderError("invalid_response", false, true);
+              }
               const observed =
                 response.reportedCostMicros ??
                 (response.usage
@@ -719,6 +931,32 @@ export class AiModelRouter {
               };
             } catch (error) {
               last = error;
+              if (
+                this.config.freeProfileEnabled &&
+                error instanceof RouterProviderError &&
+                error.code === "quota_exceeded" &&
+                error.httpStatus === 429
+              ) {
+                await this.dependencies.governor!.cooldownProviderQuota(
+                  {
+                    userId: input.userId,
+                    requestId,
+                    provider: key.provider as "gemini" | "openrouter",
+                    quotaDomain: key.quota!.domain,
+                    retryAt: error.retryAt ?? null,
+                    reviewRequired: error.quotaReviewRequired,
+                  },
+                  signal,
+                );
+                quotaBlockedProviders.add(row.model.provider);
+                if (signal.aborted) throw new AiGovernorError("ai_cancelled");
+                if (
+                  decision.fallbackAllowed &&
+                  settings.fallback.allowProviderChange
+                )
+                  break;
+                throw error;
+              }
               if (
                 !(error instanceof RouterProviderError) ||
                 error.ambiguous ||
@@ -784,7 +1022,10 @@ export function routerModeRequested(
   router: AiModelRouter | undefined,
 ): router is AiModelRouter {
   return Boolean(
-    router && (router.config.enabled || router.config.configurationInvalid),
+    router &&
+    (router.config.enabled ||
+      router.config.freeProfileEnabled ||
+      router.config.configurationInvalid),
   );
 }
 

@@ -26,6 +26,10 @@ import { captureBrowserFixture } from "../../../scripts/capture-browser-fixtures
 import { captureBrowserScenarios } from "../../../scripts/capture-browser-scenarios.mjs";
 import { academicBrowserFixture } from "../../../scripts/academic-browser-fixtures.mjs";
 import { academicBrowserScenarios } from "../../../scripts/academic-browser-scenarios.mjs";
+import {
+  freeRouterBrowserSnapshot,
+  assertFreeRouterBrowserPanel,
+} from "../../../scripts/free-ai-router-browser-fixtures.mjs";
 const { chromium } = await import(
   process.env.LIFEOS_PLAYWRIGHT_MODULE || "playwright"
 );
@@ -73,6 +77,7 @@ const routerSettings = new Map([
 let routerSettingsPuts = 0,
   routerSaveFailure = 0,
   routerChatEnabled = false;
+let routerFreeProfileState = null;
 const routerChats = [];
 const routerModels = [
   {
@@ -108,48 +113,56 @@ const routerModels = [
     metadataVerified: true,
   },
 ];
-const routerSnapshot = (owner) => ({
-  ...structuredClone(routerSettings.get(owner)),
-  models: routerModels.map((model) =>
-    owner === "A"
-      ? { ...model }
-      : {
-          ...model,
-          configured: false,
-          authorized: false,
-          status: "disconnected",
-        },
-  ),
-  providers: AI_ROUTER_PROVIDERS.map((id) => ({
-    id,
-    status:
-      id === "chatgpt_plan"
-        ? "permission_required"
-        : owner === "A" && ["gemini", "openrouter"].includes(id)
-          ? "configured_unverified"
-          : "not_configured",
-    credentialLabels:
-      owner === "A" && ["gemini", "openrouter"].includes(id)
-        ? ["fixture-" + id + "-project"]
-        : [],
-    verified: false,
-  })),
-  recentExecutions: [],
-  operatorLimits: {
-    routerEnabled: true,
-    maxRequestCostMicros: 1_000_000,
-    maxDailyCostMicros: 5_000_000,
-    paidRequestsEnabled: true,
-    maxOutputTokens: 256,
-  },
-  chatgptPlan: {
-    status: "prepared",
-    identityConnected: false,
-    planUsageAuthorized: false,
-    usesApiCredits: false,
-    manageUsageUrl: "https://chatgpt.com/settings/usage",
-  },
-});
+const routerSnapshot = (owner) => {
+  const snapshot = {
+    ...structuredClone(routerSettings.get(owner)),
+    models: routerModels.map((model) =>
+      owner === "A"
+        ? { ...model }
+        : {
+            ...model,
+            configured: false,
+            authorized: false,
+            status: "disconnected",
+          },
+    ),
+    providers: AI_ROUTER_PROVIDERS.map((id) => ({
+      id,
+      status:
+        id === "chatgpt_plan"
+          ? "permission_required"
+          : owner === "A" && ["gemini", "openrouter"].includes(id)
+            ? "configured_unverified"
+            : "not_configured",
+      credentialLabels:
+        owner === "A" && ["gemini", "openrouter"].includes(id)
+          ? ["fixture-" + id + "-project"]
+          : [],
+      verified: false,
+    })),
+    recentExecutions: [],
+    operatorLimits: {
+      routerEnabled: true,
+      maxRequestCostMicros: 1_000_000,
+      maxDailyCostMicros: 5_000_000,
+      paidRequestsEnabled: true,
+      maxOutputTokens: 256,
+    },
+    chatgptPlan: {
+      status: "prepared",
+      identityConnected: false,
+      planUsageAuthorized: false,
+      usesApiCredits: false,
+      manageUsageUrl: "https://chatgpt.com/settings/usage",
+    },
+  };
+  return routerFreeProfileState
+    ? freeRouterBrowserSnapshot(snapshot, {
+        status: routerFreeProfileState,
+        ownerConfigured: owner === "A",
+      })
+    : snapshot;
+};
 let taskVersion = 0,
   waterVersion = 0,
   workout = null;
@@ -827,7 +840,7 @@ const startedAtUtc = new Date().toISOString();
 const caseResults = [];
 const screenshots = [];
 const pageErrors = [];
-const expectedCases = process.env.LIFEOS_WEB_BROWSER_LOGOUT_ONLY ? 2 : 77;
+const expectedCases = process.env.LIFEOS_WEB_BROWSER_LOGOUT_ONLY ? 2 : 78;
 async function checkpoint() {
   const path = resolve(artifacts, "checkpoint.json");
   await writeFile(
@@ -1856,6 +1869,124 @@ try {
       });
     } finally {
       routerChatEnabled = false;
+    }
+  });
+  await test("free-only router preparation at320/390 preserves pooled quotas, unavailable status and zero paid consent", async () => {
+    const original = structuredClone(routerSettings.get("A"));
+    const untouchedOtherOwner = structuredClone(routerSettings.get("B"));
+    const beforeChats = routerChats.length,
+      beforePuts = routerSettingsPuts;
+    routerSettings.set("A", {
+      settings: defaultAiRouterSettings(),
+      revision: 0,
+    });
+    routerFreeProfileState = "cooldown";
+    try {
+      for (const width of [320, 390]) {
+        routerFreeProfileState = "cooldown";
+        await page.setViewportSize({ width, height: 900 });
+        await page.goto(`${origin}/web/settings`);
+        const region = page.getByRole("region", {
+          name: "AI Model Router settings",
+          exact: true,
+        });
+        await assertFreeRouterBrowserPanel(region, routerFreeProfileState);
+        const mode = region.getByLabel("Выбор модели", { exact: true });
+        const save = region.getByRole("button", {
+          name: "Сохранить настройки AI",
+          exact: true,
+        });
+        const requestLimit = region.getByLabel("Максимум на запрос, USD", {
+          exact: true,
+        });
+        await requestLimit.fill("0.01");
+        await save.click();
+        await region
+          .getByText(
+            "Лимит превышает ограничение сервера. Уменьши сумму перед сохранением.",
+            { exact: true },
+          )
+          .waitFor();
+        assert.equal(routerSettingsPuts, beforePuts + (width === 320 ? 0 : 2));
+        await requestLimit.fill("0");
+        await mode.selectOption("manual");
+        await region
+          .getByLabel("Ручная модель", { exact: true })
+          .selectOption("fixture-or-balanced");
+        await save.click();
+        await region
+          .getByText(
+            "Настройки сохранены. Сохранение не запускает AI-запрос или проверку провайдера.",
+            { exact: true },
+          )
+          .waitFor();
+        assert.equal(routerSettings.get("A").settings.mode, "manual");
+        assert.equal(
+          routerSettings.get("A").settings.manualModelId,
+          "fixture-or-balanced",
+        );
+        await region
+          .getByRole("button", { name: "Обновить настройки AI", exact: true })
+          .click();
+        await region
+          .getByText(
+            "Настройки сохранены. Сохранение не запускает AI-запрос или проверку провайдера.",
+            { exact: true },
+          )
+          .waitFor({ state: "hidden" });
+        assert.equal(await mode.inputValue(), "manual");
+        await mode.selectOption("auto");
+        await save.click();
+        await region
+          .getByText(
+            "Настройки сохранены. Сохранение не запускает AI-запрос или проверку провайдера.",
+            { exact: true },
+          )
+          .waitFor();
+        routerFreeProfileState = "review_required";
+        await region
+          .getByRole("button", { name: "Обновить настройки AI", exact: true })
+          .click();
+        await region
+          .getByText(/приостановлен до проверки владельцем/)
+          .waitFor();
+        await assertFreeRouterBrowserPanel(region, "review_required");
+        assert.equal(await mode.inputValue(), "auto");
+        assert.deepEqual(routerSettings.get("A").settings.allowedProviders, []);
+        assert.deepEqual(routerSettings.get("A").settings.spending, {
+          paidCallsAuthorized: false,
+          maxRequestCostMicros: 0,
+          maxDailyCostMicros: 0,
+        });
+        assert.ok(
+          Object.values(routerSettings.get("A").settings.privacy).every(
+            (providers) => providers.length === 0,
+          ),
+        );
+        assert.equal(routerChats.length, beforeChats);
+        assert.ok(
+          await page.evaluate(
+            () => document.documentElement.scrollWidth <= innerWidth,
+          ),
+          `free router settings overflow at${width}`,
+        );
+        await captureScreenshot(page, {
+          path: resolve(artifacts, `web-free-router-settings-${width}.png`),
+        });
+      }
+      assert.equal(routerSettingsPuts, beforePuts + 4);
+      assert.deepEqual(routerSettings.get("B"), untouchedOtherOwner);
+      assert.deepEqual(
+        routerSnapshot("B")
+          .providers.filter((provider) =>
+            ["gemini", "openrouter"].includes(provider.id),
+          )
+          .map((provider) => provider.credentialLabels),
+        [[], []],
+      );
+    } finally {
+      routerFreeProfileState = null;
+      routerSettings.set("A", original);
     }
   });
   await test("reflection deletion confirms intent, blocks dirty drafts and preserves other facts", async () => {

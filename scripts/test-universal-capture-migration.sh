@@ -6,7 +6,7 @@ task_container="lifeos-capture-test-${RANDOM}-$$"
 task_results="$(mktemp -d)"
 cleanup(){ docker rm -f "$task_container" >/dev/null 2>&1 || true;rm -rf -- "$task_results"; }
 trap cleanup EXIT
-docker run --rm -d --network none --log-driver none --memory 256m --pids-limit 96 --name "$task_container" --tmpfs /var/lib/postgresql/data:rw,size=256m -e POSTGRES_HOST_AUTH_METHOD=trust postgres:15-alpine >/dev/null
+docker run --cpus 1 --rm -d --network none --log-driver none --memory 256m --pids-limit 96 --name "$task_container" --tmpfs /var/lib/postgresql/data:rw,size=256m -e POSTGRES_HOST_AUTH_METHOD=trust postgres:15-alpine >/dev/null
 task_ready=false
 for task_attempt in {1..45};do
  if docker exec "$task_container" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1;then task_ready=true;break;fi

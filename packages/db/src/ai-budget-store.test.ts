@@ -32,6 +32,99 @@ function fixture(data: unknown, error: unknown = null) {
   };
 }
 describe("durable AI budget RPC adapter", () => {
+  it("links provider-attempt quotas to the existing owned execution without another budget reservation", async () => {
+    const f = fixture({ outcome: "reserved", retryAt: null });
+    const request = {
+      userId: "owner-a",
+      requestId: "req1",
+      feature: "classification" as const,
+      attempt: 1,
+      provider: "gemini" as const,
+      quotaDomain: "project-alias",
+      model: "gemini-free",
+      reservedTokens: 50,
+      limits: {
+        requestsPerMinute: 2,
+        requestsPerDay: 5,
+        tokensPerMinute: 100,
+        tokensPerDay: 500,
+      },
+    };
+    await expect(f.store.reserveProviderAttempt!(request)).resolves.toEqual({
+      outcome: "reserved",
+      retryAt: null,
+    });
+    expect(f.rpc).toHaveBeenCalledExactlyOnceWith(
+      "reserve_ai_provider_attempt",
+      {
+        p_user_id: "owner-a",
+        p_request_id: "req1",
+        p_feature: "classification",
+        p_attempt: 1,
+        p_provider: "gemini",
+        p_quota_domain: "project-alias",
+        p_model: "gemini-free",
+        p_tokens: 50,
+        p_limits: request.limits,
+      },
+    );
+    await expect(
+      fixture({ outcome: "reserved", retryAt: null, secret: "private" }).store
+        .reserveProviderAttempt!(request),
+    ).rejects.toThrow("AI provider quota unavailable");
+  });
+  it("persists only safe cooldown facts and projects local counters without a credential or domain echo", async () => {
+    const f = fixture(true);
+    await f.store.cooldownProviderQuota!({
+      userId: "owner-b",
+      requestId: "req2",
+      provider: "openrouter",
+      quotaDomain: "account-alias",
+      retryAt: "2026-11-04T12:00:00Z",
+      reviewRequired: false,
+    });
+    expect(f.rpc).toHaveBeenCalledExactlyOnceWith(
+      "cooldown_ai_provider_quota",
+      {
+        p_user_id: "owner-b",
+        p_request_id: "req2",
+        p_provider: "openrouter",
+        p_quota_domain: "account-alias",
+        p_retry_at: "2026-11-04T12:00:00Z",
+        p_review_required: false,
+      },
+    );
+    const identity = {
+      userId: "owner-b",
+      provider: "openrouter" as const,
+      quotaDomain: "account-alias",
+    };
+    await expect(
+      fixture(null).store.providerQuotaStatus!(identity),
+    ).resolves.toBeNull();
+    const snapshot = {
+      requestsInMinute: 1,
+      requestsInDay: 2,
+      tokensInMinute: 10,
+      tokensInDay: 20,
+      requestsPerDay: 50,
+      retryAt: null,
+      reviewRequired: false,
+    };
+    await expect(
+      fixture(snapshot).store.providerQuotaStatus!(identity),
+    ).resolves.toEqual(snapshot);
+    await expect(
+      fixture({ ...snapshot, userId: "foreign" }).store.providerQuotaStatus!(
+        identity,
+      ),
+    ).rejects.toThrow();
+    await expect(
+      fixture({ ...snapshot, requestsInDay: -1 }).store.providerQuotaStatus!(
+        identity,
+      ),
+    ).rejects.toThrow();
+  });
   it("passes only owned accounting facts and forwards cancellation", async () => {
     const f = fixture("reserved"),
       controller = new AbortController();

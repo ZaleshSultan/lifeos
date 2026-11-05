@@ -1,5 +1,14 @@
-import { isAiRouterModelId, type AiRouterModel } from "@lifeos/core";
+import {
+  aiProviderRetryAfter,
+  isAiRouterModelId,
+  type AiRouterModel,
+} from "@lifeos/core";
 import { validateMealImage } from "./meal-image.js";
+import {
+  routerJsonSchema,
+  validRouterJson,
+  type RouterJsonSchemaKey,
+} from "./ai-model-router-json.js";
 
 export type RouterProviderMessage = {
   role: "system" | "user" | "assistant";
@@ -17,6 +26,9 @@ export interface RouterProviderInput {
   messages: RouterProviderMessage[];
   maxOutputTokens: number;
   signal: AbortSignal;
+  schemaKey?: RouterJsonSchemaKey;
+  /** Trusted clock for normalized Retry-After; never a caller URL/header override. */
+  nowMs?: number;
   openRouter?: {
     providerOnly: string[];
     sort: "price" | "latency" | "throughput";
@@ -51,6 +63,8 @@ export class RouterProviderError extends Error {
     readonly retryable = false,
     readonly ambiguous = false,
     readonly httpStatus?: number,
+    readonly retryAt?: string | null,
+    readonly quotaReviewRequired = false,
   ) {
     super(code);
     this.name = "RouterProviderError";
@@ -226,6 +240,19 @@ function bodyFor(
     return badRequest();
   if (hasImages(messages) && !primary.capabilities.includes("vision"))
     throw new RouterProviderError("unsupported_capability");
+  let schema: Record<string, unknown> | undefined;
+  if (input.schemaKey !== undefined) {
+    try {
+      schema = routerJsonSchema(input.schemaKey);
+    } catch {
+      return badRequest();
+    }
+    if (
+      !["gemini", "openrouter"].includes(primary.provider) ||
+      !primary.capabilities.includes("json")
+    )
+      throw new RouterProviderError("unsupported_capability");
+  }
   const headers: Record<string, string> = {
     "content-type": "application/json",
     accept: "application/json",
@@ -277,6 +304,14 @@ function bodyFor(
         messages,
         max_tokens: input.maxOutputTokens,
         stream: false,
+        ...(schema
+          ? {
+              response_format: {
+                type: "json_schema",
+                json_schema: { name: input.schemaKey, strict: true, schema },
+              },
+            }
+          : {}),
         provider: {
           ...(routing.providerOnly.length
             ? { only: [...routing.providerOnly] }
@@ -356,7 +391,15 @@ function bodyFor(
               },
             }
           : {}),
-        generationConfig: { maxOutputTokens: input.maxOutputTokens },
+        generationConfig: {
+          maxOutputTokens: input.maxOutputTokens,
+          ...(schema
+            ? {
+                responseMimeType: "application/json",
+                responseJsonSchema: schema,
+              }
+            : {}),
+        },
       },
     };
   }
@@ -700,8 +743,20 @@ export async function callAiRouterProvider(
         false,
         response.status,
       );
-    if (response.status === 429)
-      throw new RouterProviderError("quota_exceeded");
+    if (response.status === 429) {
+      const retry = aiProviderRetryAfter(
+        response.headers.get("retry-after"),
+        input.nowMs ?? Date.now(),
+      );
+      throw new RouterProviderError(
+        "quota_exceeded",
+        false,
+        false,
+        429,
+        retry.retryAt,
+        retry.reviewRequired,
+      );
+    }
     if (response.status === 404)
       throw new RouterProviderError("model_unavailable", true, false);
     if (response.status === 503)
@@ -712,6 +767,8 @@ export async function callAiRouterProvider(
     await responseJson(response, input.signal),
     request.models,
   );
+  if (input.schemaKey && !validRouterJson(input.schemaKey, result.text))
+    return badResponse();
   if (
     input.apiKey.length >= 12 &&
     JSON.stringify(result).includes(input.apiKey)

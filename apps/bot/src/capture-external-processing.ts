@@ -276,6 +276,9 @@ export async function processCaptureExternal(input: {
       const reply = await router.execute({
         userId: user.userId,
         feature: "classification",
+        ...(router.config.freeProfileEnabled
+          ? { schemaKey: "capture_actions_v1" as const }
+          : {}),
         task,
         messages,
         maxOutputTokens,

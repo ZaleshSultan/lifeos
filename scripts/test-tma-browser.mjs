@@ -16,6 +16,10 @@ import {
   defaultAiRouterSettings,
   parseAiRouterSettings,
 } from "../packages/core/src/ai-model-router.ts";
+import {
+  freeRouterBrowserSnapshot,
+  assertFreeRouterBrowserPanel,
+} from "./free-ai-router-browser-fixtures.mjs";
 const artifact = resolve(
   process.env.LIFEOS_BROWSER_ARTIFACTS || "/tmp/lifeos-tma-browser-artifacts",
 );
@@ -266,7 +270,10 @@ async function setup(width, options = {}) {
   });
   const page = await context.newPage();
   const data = workspace();
-  const router = routerFixture(Boolean(options.activeRouterPolicy));
+  const baseRouter = routerFixture(Boolean(options.activeRouterPolicy));
+  const router = options.freeProfile
+    ? freeRouterBrowserSnapshot(baseRouter)
+    : baseRouter;
   let routerReads = 0,
     routerWrites = 0,
     failRouterWrite = 0;
@@ -404,9 +411,13 @@ async function setup(width, options = {}) {
     } else if (url.pathname === "/api/tma/ai/status")
       body = {
         data: {
-          enabled: Boolean(options.router),
-          available: Boolean(options.router),
-          reason: options.router ? null : "ai_disabled",
+          enabled: Boolean(options.router && !options.freeProfile),
+          available: Boolean(options.router && !options.freeProfile),
+          reason: options.freeProfile
+            ? "ai_router_disabled"
+            : options.router
+              ? null
+              : "ai_disabled",
           liveEnabled: false,
           assistantEnabled: false,
         },
@@ -1252,6 +1263,125 @@ try {
         await page.screenshot({
           path: artifact + `/browser/tma-router-chat-${width}.png`,
           fullPage: true,
+        });
+      } finally {
+        await t.context.close();
+      }
+    });
+  }
+  for (const width of [320, 390]) {
+    await test(`${width}px free router preparation keeps shared quotas and consent separate from inference`, async () => {
+      const t = await setup(width, { router: true, freeProfile: true });
+      const { page } = t;
+      const panel = page.getByRole("region", {
+        name: "AI Model Router settings",
+        exact: true,
+      });
+      try {
+        await page.goto(origin + "/tma/?screen=ai");
+        await page
+          .getByRole("heading", {
+            name: "AI assistance unavailable",
+            exact: true,
+          })
+          .waitFor();
+        assert.equal(t.routerReads(), 0);
+        await page
+          .getByText("Настройки моделей и приватности AI", { exact: true })
+          .click();
+        await assertFreeRouterBrowserPanel(panel);
+        assert.equal(t.router.operatorLimits.routerEnabled, false);
+        assert.equal(t.router.operatorLimits.freeOnly, true);
+        assert.equal(t.router.operatorLimits.paidRequestsEnabled, false);
+        const mode = panel.getByLabel("Выбор модели", { exact: true });
+        const save = panel.getByRole("button", {
+          name: "Сохранить настройки AI",
+          exact: true,
+        });
+        const requestLimit = panel.getByLabel("Максимум на запрос, USD", {
+          exact: true,
+        });
+        await requestLimit.fill("0.01");
+        await save.click();
+        await panel
+          .getByText(
+            "Лимит превышает ограничение сервера. Уменьши сумму перед сохранением.",
+            { exact: true },
+          )
+          .waitFor();
+        assert.equal(
+          t.routerWrites(),
+          0,
+          "free preparation must reject a positive spending cap locally",
+        );
+        await requestLimit.fill("0");
+        await mode.selectOption("manual");
+        await panel
+          .getByLabel("Ручная модель", { exact: true })
+          .selectOption("fixture-openrouter");
+        await save.click();
+        await panel
+          .getByText(
+            "Настройки сохранены. Сохранение не запускает AI-запрос или проверку провайдера.",
+            { exact: true },
+          )
+          .waitFor();
+        assert.equal(t.router.settings.mode, "manual");
+        assert.equal(t.router.settings.manualModelId, "fixture-openrouter");
+        assert.deepEqual(t.router.settings.allowedProviders, []);
+        assert.deepEqual(t.router.settings.spending, {
+          paidCallsAuthorized: false,
+          maxRequestCostMicros: 0,
+          maxDailyCostMicros: 0,
+        });
+        assert.ok(
+          Object.values(t.router.settings.privacy).every(
+            (providers) => providers.length === 0,
+          ),
+        );
+        await panel
+          .getByRole("button", { name: "Обновить настройки AI", exact: true })
+          .click();
+        await panel
+          .getByText(
+            "Настройки сохранены. Сохранение не запускает AI-запрос или проверку провайдера.",
+            { exact: true },
+          )
+          .waitFor({ state: "hidden" });
+        assert.equal(await mode.inputValue(), "manual");
+        await mode.selectOption("auto");
+        await save.click();
+        await panel
+          .getByText(
+            "Настройки сохранены. Сохранение не запускает AI-запрос или проверку провайдера.",
+            { exact: true },
+          )
+          .waitFor();
+        t.router.providers.find(
+          (provider) => provider.id === "openrouter",
+        ).freeRouting = {
+          ...t.router.providers.find((provider) => provider.id === "openrouter")
+            .freeRouting,
+          status: "review_required",
+          retryAt: null,
+        };
+        await panel
+          .getByRole("button", { name: "Обновить настройки AI", exact: true })
+          .click();
+        await panel.getByText(/приостановлен до проверки владельцем/).waitFor();
+        await assertFreeRouterBrowserPanel(panel, "review_required");
+        assert.equal(await mode.inputValue(), "auto");
+        assert.equal(t.routerWrites(), 2);
+        assert.equal(t.chatRequests.length, 0);
+        assert.deepEqual(t.externalRequests, []);
+        assert.deepEqual(t.errors, []);
+        await noOverflow(page);
+        await mkdir(artifact + "/browser", { recursive: true });
+        await page.screenshot({
+          path: artifact + `/browser/tma-free-router-${width}.png`,
+          fullPage: true,
+          animations: "disabled",
+          timeout: 120_000,
         });
       } finally {
         await t.context.close();

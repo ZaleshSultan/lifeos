@@ -31,6 +31,20 @@ export interface AiRouterProviderStatus {
     | "expired";
   credentialLabels: string[];
   verified: boolean;
+  freeRouting?: {
+    status:
+      | "disabled"
+      | "not_configured"
+      | "metadata_required"
+      | "quota_unavailable"
+      | "prepared"
+      | "cooldown"
+      | "review_required";
+    localRequestsToday: number | null;
+    localDailyLimit: number | null;
+    retryAt: string | null;
+    providerRemaining: null;
+  };
 }
 
 export interface AiRouterSettingsSnapshot {
@@ -45,6 +59,8 @@ export interface AiRouterSettingsSnapshot {
     maxDailyCostMicros: number | null;
     paidRequestsEnabled: boolean;
     maxOutputTokens: number;
+    freeProfileEnabled?: boolean;
+    freeOnly?: boolean;
   };
   chatgptPlan: {
     status: "prepared" | "permission_required" | "disabled";

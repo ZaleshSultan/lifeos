@@ -88,4 +88,65 @@ export interface AiBudgetStore {
     },
     signal?: AbortSignal,
   ): Promise<void>;
+  /** Provider quota bookkeeping belongs to the same reserved execution. */
+  reserveProviderAttempt?(
+    input: AiProviderAttempt,
+    signal?: AbortSignal,
+  ): Promise<AiProviderQuotaResult>;
+  cooldownProviderQuota?(
+    input: AiProviderCooldown,
+    signal?: AbortSignal,
+  ): Promise<void>;
+  providerQuotaStatus?(
+    input: AiProviderQuotaIdentity,
+    signal?: AbortSignal,
+  ): Promise<AiProviderQuotaSnapshot | null>;
+}
+
+export type AiQuotaProvider = "gemini" | "openrouter";
+/** Trusted server aliases only; never raw account/project IDs or key values. */
+export interface AiProviderQuotaIdentity {
+  userId: string;
+  provider: AiQuotaProvider;
+  quotaDomain: string;
+}
+export interface AiProviderQuotaLimits {
+  requestsPerMinute: number;
+  requestsPerDay: number;
+  tokensPerMinute: number;
+  tokensPerDay: number;
+}
+export interface AiProviderAttempt extends AiProviderQuotaIdentity {
+  requestId: string;
+  feature: AiExecutionFeature;
+  attempt: number;
+  model: string;
+  reservedTokens: number;
+  limits: AiProviderQuotaLimits;
+}
+export interface AiProviderQuotaSnapshot {
+  requestsInMinute: number;
+  requestsInDay: number;
+  tokensInMinute: number;
+  tokensInDay: number;
+  requestsPerDay: number;
+  retryAt: string | null;
+  reviewRequired: boolean;
+}
+export interface AiProviderQuotaResult {
+  outcome:
+    | "reserved"
+    | "duplicate"
+    | "execution_inactive"
+    | "profile_inactive"
+    | "attempt_limit"
+    | "cooldown"
+    | "minute_limit"
+    | "day_limit";
+  retryAt: string | null;
+}
+export interface AiProviderCooldown extends AiProviderQuotaIdentity {
+  requestId: string;
+  retryAt: string | null;
+  reviewRequired: boolean;
 }
