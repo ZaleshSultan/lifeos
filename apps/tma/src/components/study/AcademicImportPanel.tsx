@@ -16,6 +16,7 @@ import {
 } from "./academic-import";
 import {
   academicButton,
+  academicError,
   academicInput,
   academicPanel,
   academicWarning,
@@ -127,9 +128,13 @@ export function AcademicImportPanel({
       setBundle(parsed);
       const result = await onPreview(parsed);
       setPreview(result);
-    } catch {
+    } catch (error) {
       setMessage(
-        "Предпросмотр не готов. Проверь формат, обязательные поля и источник. Вставляй нормализованный JSON с sources/events либо таблицу CSV или ICS без повторяющихся событий. Данные и выбор не импортированы.",
+        academicError(
+          error,
+          () =>
+            "Предпросмотр не готов. Проверь формат, обязательные поля и источник. Вставляй нормализованный JSON с sources/events либо таблицу CSV или ICS без повторяющихся событий. Данные и выбор не импортированы.",
+        ),
       );
     } finally {
       setLocalBusy(false);

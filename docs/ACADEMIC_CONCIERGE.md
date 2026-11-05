@@ -87,6 +87,10 @@ the owner changes their profile timezone while travelling. Persistent instants
 remain UTC. Personal-event clocks use their own stored timezone; quiet hours and
 recipient-local scheduling controls use the profile timezone. No university class
 time is inferred from the owner's current location or an expired LMS session.
+Personal wall clocks that repeat during a daylight-saving rollback require an
+explicit UTC instant or offset in normalized JSON, or UTC time in ICS. A title
+or location edit preserves the existing instant, including seconds and which
+occurrence of a repeated hour the source specified.
 
 Recurring classes require an explicitly reviewed, date-bounded weekly timetable,
 an unchanged timetable fingerprint and a confirmed teaching period. Known
