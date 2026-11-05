@@ -3,7 +3,7 @@ set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 task_container="lifeos-finance-rls-test-$$"
 trap 'docker rm -f "$task_container" >/dev/null 2>&1 || true' EXIT
-docker run --rm -d --name "$task_container" --network none \
+docker run --log-driver none --memory 256m --cpus 1 --pids-limit 96 --rm -d --name "$task_container" --network none \
   --tmpfs /var/lib/postgresql/data:rw,size=128m \
   -e POSTGRES_HOST_AUTH_METHOD=trust postgres:15-alpine >/dev/null
 for _ in {1..60}; do

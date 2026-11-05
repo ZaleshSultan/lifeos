@@ -6,7 +6,7 @@ academic_container="lifeos-academic-test-${RANDOM}-$$"
 academic_results="$(mktemp -d)"
 cleanup(){ docker rm -f "$academic_container" >/dev/null 2>&1 || true; rm -rf -- "$academic_results"; }
 trap cleanup EXIT
-docker run --rm -d --network none --log-driver none --memory 256m --cpus 1 --name "$academic_container" --tmpfs /var/lib/postgresql/data:rw,size=256m -e POSTGRES_HOST_AUTH_METHOD=trust postgres:15-alpine >/dev/null
+docker run --pids-limit 96 --rm -d --network none --log-driver none --memory 256m --cpus 1 --name "$academic_container" --tmpfs /var/lib/postgresql/data:rw,size=256m -e POSTGRES_HOST_AUTH_METHOD=trust postgres:15-alpine >/dev/null
 academic_ready=false
 for academic_attempt in {1..120};do
  if docker exec "$academic_container" pg_isready -h127.0.0.1 -U postgres >/dev/null 2>&1;then academic_ready=true;break;fi

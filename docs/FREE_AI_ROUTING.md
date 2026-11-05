@@ -107,6 +107,16 @@ After explicit approval and actual eligibility/terms checks, a protected referen
 
 A free model row additionally needs `freeCosts:{request:0,image:0|null,audio:0|null}` from reviewed evidence. Unknown costs stay null and block any modality that uses them. Vision capability requires a verified zero image cost; audio capability requires verified zero audio cost. Current free-profile code does not implement audio transport. OpenRouter candidates must be fixed `:free` IDs, have a reviewed nonempty `providerOnly` shortlist and keep `requireZdr:true`. Transport requests also require supported parameters, deny data collection, ZDR and zero request/token price ceilings. If no compliant endpoint exists, manual processing remains available; privacy is not relaxed to get a response.
 
+Before a private-data trial, verify that the protected OpenRouter account or
+guardrail uses ZDR only, including `allow_safety_retention_google=false` and
+`allow_safety_retention_other=false`, and review each pinned endpoint. The request
+field `provider.zdr:true` follows the account or guardrail choice; self-serve
+defaults can admit Safety Retention. Verify content logging and response caching
+separately. Public catalog metadata cannot establish these account settings.
+Keep privacy eligibility unverified until an explicitly consented review is
+complete. See [OpenRouter ZDR](https://openrouter.ai/docs/guides/features/zdr) and
+[response caching](https://openrouter.ai/docs/guides/features/response-caching).
+
 ## Private-data and language limits
 
 Google's unpaid-service terms allow product improvement/human review and prohibit sensitive/confidential/personal input outside their stated regional exception. This owner is not verified to qualify for that exception. Consent does not replace provider terms. Free Gemini therefore accepts only an in-memory proof issued for fixed server-owned RU/KK/EN public format probes. It cannot receive arbitrary owner chat, LMS data, health information, personal voice or captures. Neither a JSON `publicPrompt` flag, source instruction nor model output can issue that proof. The model still needs actual owner/provider consent even for a public probe.
