@@ -1,10 +1,52 @@
 import { describe, expect, it } from "vitest";
-import {
-  calculateGrade,
-  type GradeAssessmentInput,
-} from "./grade-engine.js";
+import { calculateGrade, type GradeAssessmentInput } from "./grade-engine.js";
 
 describe("calculateGrade", () => {
+  it.each([null, NaN, Infinity, -1])(
+    "keeps a graded item with unknown/invalid score %s pending",
+    (actualScore) => {
+      const result = calculateGrade(
+        [{ weightPercent: 100, maxScore: 30, actualScore, status: "graded" }],
+        70,
+      );
+      expect(result.completedWeightPercent).toBe(0);
+      expect(result.remainingWeightPercent).toBe(100);
+      expect(result.currentGrade).toBeNull();
+      expect(result.requiredAverageOnRemaining).toBe(70);
+    },
+  );
+  it("distinguishes an observed zero, raw 15/30 and an explicitly missed item", () => {
+    expect(
+      calculateGrade([
+        { weightPercent: 100, maxScore: 30, actualScore: 0, status: "graded" },
+      ]).currentGrade,
+    ).toBe(0);
+    expect(
+      calculateGrade([
+        { weightPercent: 100, maxScore: 30, actualScore: 15, status: "graded" },
+      ]).currentGrade,
+    ).toBe(50);
+    expect(
+      calculateGrade([
+        {
+          weightPercent: 100,
+          maxScore: null,
+          actualScore: null,
+          status: "missed",
+        },
+      ]).currentGrade,
+    ).toBe(0);
+  });
+  it.each([0, -1, NaN, Infinity])(
+    "keeps invalid raw maximum %s unknown",
+    (maxScore) => {
+      const result = calculateGrade([
+        { weightPercent: 100, maxScore, actualScore: 15, status: "graded" },
+      ]);
+      expect(result.completedWeightPercent).toBe(0);
+      expect(result.currentGrade).toBeNull();
+    },
+  );
   const referenceAssessments: GradeAssessmentInput[] = [
     {
       weightPercent: 25,
@@ -401,7 +443,10 @@ describe("calculateGrade", () => {
 
     // Boundary 4: slightly below 0 -> requiredPoints = 39.95 - 40 = -0.05 -> requiredAverage = -0.1 <= 0
     const resultAlreadyAchieved = calculateGrade(assessments, 39.95);
-    expect(resultAlreadyAchieved.requiredAverageOnRemaining).toBeCloseTo(-0.1, 4);
+    expect(resultAlreadyAchieved.requiredAverageOnRemaining).toBeCloseTo(
+      -0.1,
+      4,
+    );
     expect(resultAlreadyAchieved.targetAchieved).toBe(true);
     expect(resultAlreadyAchieved.targetImpossible).toBe(false);
   });

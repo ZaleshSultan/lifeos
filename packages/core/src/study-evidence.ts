@@ -57,6 +57,12 @@ export function studyEvidencePercent(
 ): number | null {
   if (
     studyEvidenceIsMocked(record) ||
+    // Sync preserves a last-known numeric value when Moodle temporarily hides
+    // a grade. That history is not a currently observed score.
+    (record.rawJson !== null &&
+      typeof record.rawJson === "object" &&
+      "_grade_visibility_unknown" in record.rawJson &&
+      record.rawJson._grade_visibility_unknown === true) ||
     record.score === null ||
     record.maxScore === null ||
     !Number.isFinite(record.score) ||
