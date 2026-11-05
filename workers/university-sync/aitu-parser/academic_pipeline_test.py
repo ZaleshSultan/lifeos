@@ -712,3 +712,37 @@ class AcademicPersistenceTest(unittest.TestCase):
                 scraper.sync_once(SETTINGS)
         self.assertEqual(db.finish_sync_run.call_args.args[:2], ("run-a", "failed"))
         db.upsert_event.assert_not_called()
+
+
+class DurableGradeStagingTests(unittest.TestCase):
+    def test_verified_fetch_is_staged_before_facts_and_success(self):
+        db = MemoryDb()
+        def staged(_db, **kwargs):
+            self.assertEqual(db.tables["source_events"], [])
+            self.assertEqual(db.tables["academic_records"], [])
+            self.assertEqual(db.finished, [])
+            self.assertEqual(kwargs["records"][0]["score"], 15)
+            self.assertEqual(kwargs["lease_owner"], "current-lease")
+            return False
+        with patch.object(scraper, "grade_events_enabled", return_value=True), patch.object(scraper, "stage_grade_snapshot", side_effect=staged) as stage:
+            scraper.sync_grades(db, SETTINGS, [{**RECORD, "score": 15}], "normal", False, history_lease_owner="current-lease")
+        stage.assert_called_once()
+        self.assertEqual(db.finished[-1][1], "success")
+        self.assertEqual(db.tables["academic_records"][0]["score"], 15)
+        self.assertIs(db.tables["sync_runs"][0]["metadata_json"]["moodle_grade_inventory_complete"], False)
+
+    def test_staging_failure_never_declares_success_or_changes_facts(self):
+        db = MemoryDb()
+        with patch.object(scraper, "grade_events_enabled", return_value=True), patch.object(scraper, "stage_grade_snapshot", side_effect=SyncError("unavailable")):
+            with self.assertRaises(SyncError):
+                scraper.sync_grades(db, SETTINGS, [{**RECORD, "score": 15}], "normal", False, history_lease_owner="current-lease")
+        self.assertEqual(db.finished[-1][1], "failed")
+        self.assertEqual(db.tables["academic_records"], [])
+        self.assertEqual(db.tables["source_events"], [])
+
+    def test_enabled_verified_pipeline_requires_shared_lease(self):
+        db = MemoryDb()
+        with patch.object(scraper, "grade_events_enabled", return_value=True), self.assertRaises(SyncError):
+            scraper.sync_grades(db, SETTINGS, [RECORD], "normal", False)
+        self.assertEqual(db.finished[-1][1], "failed")
+        self.assertEqual(db.tables["source_events"], [])

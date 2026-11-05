@@ -62,6 +62,7 @@ from common.lifeos_sync import (  # noqa: E402
 )
 from common.lms_sessions import LmsSessionError, decrypt_lms_session, decrypt_secret  # noqa: E402
 from common.lms_sync_lease import LmsSyncLease, guard_lms_client  # noqa: E402
+from common.academic_grade_events import drain_grade_snapshots, grade_events_enabled  # noqa: E402
 from university_scraper import (  # noqa: E402
     MoodleClient,
     Settings as MoodleSettings,
@@ -186,10 +187,14 @@ def _handle_aitu_moodle(
         cookie = None
     # Persistence needs timezone/source configuration, never authentication.
     moodle_settings = dataclasses.replace(moodle_settings, password="", ws_token=None, sso_cookie=None)
-    return sync_moodle_grades(
+    stats = sync_moodle_grades(
         db, moodle_settings, records, mode, client.is_mocked,
         run_id=run_id, assignments=assignments,
+        history_lease_owner=lease.owner if lease and grade_events_enabled() and not client.is_mocked and "grade_html_incomplete" not in row["_unsupported_features"] else None,
     )
+    if grade_events_enabled() and not client.is_mocked and "grade_html_incomplete" not in row["_unsupported_features"]:
+        row["_verified_grade_snapshot"] = True
+    return stats
 
 
 def _handle_platonus(
@@ -285,6 +290,15 @@ def sync_config(master_db: SupabaseRestClient, master_settings: BaseSettings, ro
                 if session_mode:
                     final["session_state"] = "connected"
                 master_db.request("PATCH", "user_lms_settings", query=scope, body=final)
+                snapshot = current.get("_verified_grade_snapshot")
+                if snapshot is not None:
+                    try:
+                        lease.assert_held()
+                        drain_grade_snapshots(user_db, user_id=user_id, lease_owner=lease.owner)
+                    except Exception:
+                        # The exact fetch was durably staged before facts/run success.
+                        # Recover all successful stages in order under the next lease.
+                        log.warning("Grade history drain unavailable; verified staged runs retained for ordered retry.")
                 log.info("%s sync completed: seen=%d created=%d updated=%d", handler.name, stats.seen, stats.created, stats.updated)
                 return True
             except Exception as exc:

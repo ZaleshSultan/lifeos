@@ -2,6 +2,7 @@ import { recalculateHealthDailyScores } from "./health-daily-scoring.js";
 import { createDailyLifeStore, type DailyLifeStore } from "./daily-life-store.js";
 import { createCaptureStore } from "./capture-store.js";
 import { createAcademicConciergeStore, type AcademicConciergeStore } from "./academic-concierge-port.js";
+import { createAcademicIntelligenceStore, type AcademicIntelligenceStore } from "./academic-intelligence-store.js";
 import { idealHumanStore } from "./ideal-human-store.js";
 import type { ScholarshipConfig } from "../../core/src/scholarship.js";
 import { healthCredentialStore, type HealthCredentialStore } from "./health-credential-store.js";
@@ -1395,6 +1396,7 @@ export interface TmaStudySummary {
 
 export interface LifeOSStore extends LmsSessionStore, WebSessionStore, HealthCredentialStore {
   academicConcierge?: AcademicConciergeStore;
+  academicIntelligence?: AcademicIntelligenceStore;
   captureInbox?: import("./capture-store.js").CaptureServiceStore;
   dailyLife?: DailyLifeStore;
   assistant?: AssistantStore;
@@ -3473,6 +3475,7 @@ export interface SupabaseLifeOSStoreOptions {
 
 export class SupabaseLifeOSStore implements LifeOSStore {
   readonly academicConcierge: AcademicConciergeStore;
+  readonly academicIntelligence: AcademicIntelligenceStore;
   readonly captureInbox: import("./capture-store.js").CaptureServiceStore;
   readonly assistant: AssistantStore;
   readonly dailyLife: DailyLifeStore;
@@ -3524,6 +3527,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     options: SupabaseLifeOSStoreOptions = {},
   ) {
     this.academicConcierge = createAcademicConciergeStore(client);
+    this.academicIntelligence = createAcademicIntelligenceStore(client);
     this.captureInbox = createCaptureStore(client);
     this.assistant = new SupabaseAssistantStore(client);
     this.dailyLife = createDailyLifeStore(client);

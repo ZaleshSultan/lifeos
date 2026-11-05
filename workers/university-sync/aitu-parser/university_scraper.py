@@ -64,6 +64,7 @@ from common.lifeos_sync import (  # noqa: E402
 from common.academic_sync import load_courses, match_course, sync_assessment, mark_missing_grades, link_course
 from common.moodle_grades import normalize_title, number, parse_report
 from common.lms_sync_lease import LmsSyncLease, guard_lms_client
+from common.academic_grade_events import drain_grade_snapshots, grade_events_enabled, stage_grade_snapshot
 from moodle_session_security import MoodleSessionError, SsoDiagnostics, safe_url, secure_request, valid_sso_cookie, MOODLE_HOST, MICROSOFT_HOST
 from moodle_activities import AssignmentSnapshot, GradeSnapshot, UnsupportedMoodlePage, activity_links, parse_activity
 
@@ -1057,7 +1058,7 @@ def sync_assignments(
         # An insert can succeed while the instant reminder fails. Retry for
         # every post-bootstrap event; the user-scoped dedup key prevents repeats.
         first_seen_at = parse_datetime(synced_event.get("created_at"))
-        if (baseline_at and first_seen_at and first_seen_at > baseline_at
+        if (not grade_events_enabled() and baseline_at and first_seen_at and first_seen_at > baseline_at
                 and due_at and due_at > datetime.now(timezone.utc) and not terminal
                 and not (grade is None and _has_unique_scored_grade_title(assignment, grades, title_counts))):
             local_due = due_at.astimezone(timezone_for(settings.base.timezone_name))
@@ -1081,17 +1082,25 @@ def sync_grades(
     is_mocked: bool,
     run_id: str | None = None,
     assignments: list[dict[str, Any]] | None = None,
+    history_lease_owner: str | None = None,
 ) -> SyncStats:
     """Write grades and, when WS is available, assignment deadlines."""
     if run_id is None:
         source = db.ensure_source("university_platform", "university", "University Platform")
         run_id = db.start_sync_run(source)
     stats = SyncStats(seen=len(records))
+    history_complete = bool(getattr(records, "complete", True))
 
     try:
         if db.settings.user_id != settings.base.user_id:
             raise SyncError("Moodle sync user scope mismatch")
-        notify_new_grades = not is_mocked and moodle_grade_notifications_enabled(db)
+        if grade_events_enabled() and not is_mocked and (records or bool(getattr(records, "complete", True))):
+            if not history_lease_owner:
+                raise SyncError("grade_snapshot_lease_required")
+            history_complete = stage_grade_snapshot(db, user_id=settings.base.user_id, run_id=run_id,
+                                 lease_owner=history_lease_owner, records=records,
+                                 complete=bool(getattr(records, "complete", True)))
+        notify_new_grades = not grade_events_enabled() and not is_mocked and moodle_grade_notifications_enabled(db)
         seen_external_ids: set[str] = set()
         courses = load_courses(db) if records and not is_mocked else []
         unmatched: set[str] = set()
@@ -1152,7 +1161,7 @@ def sync_grades(
             )
             previous_raw = existing[0].get("raw_json") if existing else None
             retry_pending = isinstance(previous_raw, dict) and previous_raw.get("_grade_notification_pending") is True
-            notify_grade = score is not None and (retry_pending or (notify_new_grades and newly_graded))
+            notify_grade = not grade_events_enabled() and score is not None and (retry_pending or (notify_new_grades and newly_graded))
             academic_raw_json = dict(raw_json)
             if score is None and isinstance(previous_raw, dict):
                 # Preserve an earlier explanation when Moodle hides the score.
@@ -1245,7 +1254,7 @@ def sync_grades(
             stats.reminders_created += assignment_stats.reminders_created
             stats.reminders_updated += assignment_stats.reminders_updated
             stats.reminders_cancelled += assignment_stats.reminders_cancelled
-        metadata = {"moodle_grades_synced": bool(records) or bool(getattr(records, "complete", True)), "moodle_grade_inventory_complete": bool(getattr(records, "complete", True))} if not is_mocked else None
+        metadata = {"moodle_grades_synced": bool(records) or bool(getattr(records, "complete", True)), "moodle_grade_inventory_complete": history_complete} if not is_mocked else None
         if assignments is not None and not is_mocked:
             assert metadata is not None
             metadata["moodle_assignments_synced"] = getattr(assignments, "verified_pages", 1) > 0
@@ -1288,8 +1297,16 @@ def sync_once(settings: Settings) -> SyncStats:
         finally:
             moodle.close()
         persistence_settings = replace(settings, username="", password="", ws_token=None, sso_cookie=None)
-        return sync_grades(db, persistence_settings, records, mode, moodle.is_mocked,
-                           run_id=run_id, assignments=assignments)
+        stats = sync_grades(db, persistence_settings, records, mode, moodle.is_mocked,
+                            run_id=run_id, assignments=assignments,
+                            history_lease_owner=lease.owner if grade_events_enabled() and not moodle.is_mocked and "grade_html_incomplete" not in moodle.unsupported_features else None)
+        if grade_events_enabled() and not moodle.is_mocked and "grade_html_incomplete" not in moodle.unsupported_features:
+            try:
+                lease.assert_held()
+                drain_grade_snapshots(db, user_id=settings.base.user_id, lease_owner=lease.owner)
+            except Exception:
+                logging.warning("Grade history drain unavailable; verified staged runs retained for ordered retry.")
+        return stats
 
 
 def status_cmd(settings: Settings) -> None:
