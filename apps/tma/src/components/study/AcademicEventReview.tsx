@@ -12,6 +12,7 @@ import {
   academicCalendarDate,
   academicCountdown,
   academicDateTime,
+  academicError,
   academicInput,
   academicKindLabel,
   academicPanel,
@@ -125,11 +126,11 @@ export function AcademicEventEditor({
   const [end, setEnd] = useState(
     localAcademicInput(event.endsAt, event.timezone),
   );
-  const [invalid, setInvalid] = useState(false);
+  const [invalid, setInvalid] = useState<string | null>(null);
   const timed = event.startsAt !== null;
   async function submit(e: FormEvent) {
     e.preventDefault();
-    setInvalid(false);
+    setInvalid(null);
     try {
       if (!title.trim()) throw new Error();
       const patch: AcademicEventRevisionInput["patch"] = {
@@ -137,13 +138,25 @@ export function AcademicEventEditor({
         location: location.trim() || null,
       };
       if (timed) {
-        patch.startsAt = academicInputTimestamp(start, event.timezone);
-        patch.endsAt = end ? academicInputTimestamp(end, event.timezone) : null;
+        patch.startsAt = academicInputTimestamp(
+          start,
+          event.timezone,
+          event.startsAt,
+        );
+        patch.endsAt = end
+          ? academicInputTimestamp(end, event.timezone, event.endsAt)
+          : null;
         if (patch.endsAt && patch.endsAt <= patch.startsAt) throw new Error();
       }
       await onSave(patch);
-    } catch {
-      setInvalid(true);
+    } catch (error) {
+      setInvalid(
+        academicError(
+          error,
+          () =>
+            "Проверь название и порядок времени. Если сервер недоступен или версия изменилась, правки остались в форме.",
+        ),
+      );
     }
   }
   return (
@@ -158,8 +171,7 @@ export function AcademicEventEditor({
       </p>
       {invalid ? (
         <p role="alert" className="mt-2 text-sm text-amber-100">
-          Проверь название и порядок времени. Если сервер недоступен или версия
-          изменилась, правки остались в форме.
+          {invalid}
         </p>
       ) : null}
       <fieldset disabled={busy} className="mt-3 min-w-0 space-y-3">
