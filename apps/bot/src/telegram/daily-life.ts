@@ -6,6 +6,7 @@ import {
 } from "@lifeos/core";
 import type { TelegramUserRecord } from "@lifeos/db";
 import { dailyLifeSummary } from "../daily-life-routes.js";
+import { handleAcademicScheduleCommand } from "./academic-schedule.js";
 import type { TelegramMessage, TelegramBotRuntime } from "./types.js";
 const escape = (v: string) =>
   v.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
@@ -184,6 +185,7 @@ export async function handleBriefingCommand(
   message: TelegramMessage,
   runtime: TelegramBotRuntime,
   user: TelegramUserRecord,
+  includeTomorrowSchedule = false,
 ) {
   if (!(await requirePrivateOwner(message, runtime, user))) return;
   if (!runtime.store) return;
@@ -240,4 +242,12 @@ export async function handleBriefingCommand(
         }
       : {}),
   });
+  if (kind === "morning" && includeTomorrowSchedule) {
+    try {
+      await handleAcademicScheduleCommand("tomorrow", message, runtime, user);
+    } catch {
+      // The normal briefing is already sent. Do not retry a secondary reply
+      // whose Telegram acceptance may be ambiguous.
+    }
+  }
 }
