@@ -143,7 +143,8 @@ application containers cannot pass the guard.
 The archive is restored with standard PostgreSQL ordering and exit-on-error.
 Cluster login passwords are not part of `pg_dump`: missing platform owner names
 from its TOC are created only in the disposable fixture as nonprivileged
-`NOLOGIN` roles. The archive restores database ownership and ACLs. The drill
+`NOLOGIN` roles. The archive restores schema and object ownership and ACLs; it
+does not set the owner of the separately created disposable database. The drill
 checks actual restored rows and canonical ownership against the authenticated
 archive and configured data floors, then removes only its new container.
 Cluster IAM, external provider grants, database passwords and hosted platform
@@ -157,10 +158,12 @@ administrator, while verification connects directly as the declared caller.
 The drill checks both session identity and role attributes before executing
 release SQL and records them separately in `release_verification`. A missing or
 mismatched caller fails closed. It never grants privileges or changes roles to
-make a rehearsal pass. Release preparation must additionally compare the
-caller's effective table privileges and memberships with production; role
-attributes alone do not prove that parity. Scheduled restores without release
-SQL keep their existing behavior.
+make a rehearsal pass. Release preparation must separately reproduce the verified
+production database owner in its explicit fixture and compare the caller's
+effective table and schema privileges and memberships with production.
+`pg_database_owner` can change effective schema privileges when database owners
+differ; role attributes alone do not prove parity. Scheduled restores without
+release SQL keep their existing behavior.
 
 On November 3, an actual fresh encrypted production archive was restored this
 way with the two original identities/profiles, five courses, 97 academic
