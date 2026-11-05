@@ -1090,7 +1090,10 @@ try {
       await primary
         .getByRole("link", { name: "Настройки", exact: true })
         .click();
-      await page.locator("h1").waitFor();
+      await page.waitForURL((url) => url.pathname === "/web/settings");
+      await page
+        .getByRole("heading", { level: 1, name: /^Настройки(?: ·|$)/ })
+        .waitFor();
       await primary.getByRole("link", { name: "Главная", exact: true }).click();
       await page
         .getByRole("navigation", {
