@@ -596,6 +596,39 @@ class AcademicPersistenceTest(unittest.TestCase):
         self.assertEqual(len(db.tables["reminders"]), 1)
         self.assertNotIn("_grade_notification_pending", db.tables["academic_records"][0]["raw_json"])
 
+    def test_pending_grade_notification_survives_hidden_score_until_visible(self):
+        class FailOnceDb(MemoryDb):
+            fail_next_reminder = False
+
+            def request(self, method, table, query=None, body=None, prefer=None):
+                if self.fail_next_reminder and method == "POST" and table == "reminders":
+                    self.fail_next_reminder = False
+                    raise SyncError("temporary reminder insert failure")
+                return super().request(method, table, query, body, prefer)
+
+        for score in (0, 9):
+            with self.subTest(score=score):
+                db = FailOnceDb()
+                scraper.sync_grades(db, SETTINGS, [RECORD], "normal", False)
+                graded = {**RECORD, "score": score}
+                db.fail_next_reminder = True
+                with self.assertRaises(SyncError):
+                    scraper.sync_grades(db, SETTINGS, [graded], "normal", False)
+
+                for _ in range(2):
+                    hidden = scraper.sync_grades(db, SETTINGS, [RECORD], "normal", False)
+                    saved = db.tables["academic_records"][0]
+                    self.assertEqual(saved["score"], score)
+                    self.assertTrue(saved["raw_json"].get("_grade_notification_pending"))
+                    self.assertEqual(hidden.reminders_created, 0)
+                    self.assertEqual(db.tables["reminders"], [])
+
+                retry = scraper.sync_grades(db, SETTINGS, [graded], "normal", False)
+                repeated = scraper.sync_grades(db, SETTINGS, [graded], "normal", False)
+                self.assertEqual((retry.reminders_created, repeated.reminders_created), (1, 0))
+                self.assertEqual(len(db.tables["reminders"]), 1)
+                self.assertNotIn("_grade_notification_pending", db.tables["academic_records"][0]["raw_json"])
+
     def test_repeated_sync_rename_hidden_grade_and_manual_fields(self):
         db = MemoryDb()
         scraper.sync_grades(db, SETTINGS, [RECORD], "normal", False)
