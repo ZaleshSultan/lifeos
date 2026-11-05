@@ -4,6 +4,7 @@ export interface AcademicGradePolicyReview {
   externalCourseKey: string;
   definitionKey: string;
   bindingsKey: string;
+  contextKey: string;
   reviewedAt: string;
   sourceRef: string;
   supportedPolicy: "linear-30-30-40";
