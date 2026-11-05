@@ -76,7 +76,7 @@ const canonical: Record<ScreenId, PrimarySection> = {
 };
 const aliases: Record<string, TmaLocation> = {
   today: { screen: "home", section: "home" },
-  planner: { screen: "daily-life", section: "home" },
+  planner: { screen: "home", section: "home" },
   calendar: { screen: "home", section: "home" },
   workouts: { screen: "workout", section: "health" },
   nutrition: { screen: "daily-life", section: "health" },

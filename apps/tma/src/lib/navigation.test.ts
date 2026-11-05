@@ -48,7 +48,7 @@ describe("four-section TMA navigation", () => {
   it.each([
     ["workouts", "workout", "health"],
     ["nutrition", "daily-life", "health"],
-    ["planner", "daily-life", "home"],
+    ["planner", "home", "home"],
     ["calendar", "home", "home"],
     ["notifications", "reminders", "settings"],
     ["integrations", "sources", "settings"],

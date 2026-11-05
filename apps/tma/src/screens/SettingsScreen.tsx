@@ -6,13 +6,18 @@ import {
   SlidersHorizontal,
   Sparkles,
 } from "lucide-react";
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { LoadingPanel } from "../components/AsyncState";
 import type { ScreenId } from "../types";
 const Router = lazy(() =>
   import("../components/AiRouterSettingsPanel").then((module) => ({
     default: module.AiRouterSettingsPanel,
   })),
+);
+const AcademicNotifications = lazy(() =>
+  import("../components/study/AcademicNotificationSettingsPanel").then(
+    (module) => ({ default: module.AcademicNotificationSettingsPanel }),
+  ),
 );
 export function SettingsScreen({
   onNavigate,
@@ -21,6 +26,11 @@ export function SettingsScreen({
   onNavigate: (screen: ScreenId) => void;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
+  const [routerDirty, setRouterDirty] = useState(false);
+  const [academicDirty, setAcademicDirty] = useState(false);
+  useEffect(() => {
+    onDirtyChange?.(routerDirty || academicDirty);
+  }, [onDirtyChange, routerDirty, academicDirty]);
   const groups = [
     {
       icon: Link2,
@@ -83,6 +93,20 @@ export function SettingsScreen({
               </button>
             ))}
           </div>
+          {title === "Уведомления" ? (
+            <details className="mt-3">
+              <summary className="min-h-11 cursor-pointer text-sm font-medium text-cyan-200">
+                Оценки и дедлайны · согласие и интервалы
+              </summary>
+              <Suspense
+                fallback={
+                  <LoadingPanel title="Загружаем академические настройки…" />
+                }
+              >
+                <AcademicNotifications onDirtyChange={setAcademicDirty} />
+              </Suspense>
+            </details>
+          ) : null}
         </section>
       ))}
       <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
@@ -96,7 +120,7 @@ export function SettingsScreen({
         </p>
         <div className="mt-3">
           <Suspense fallback={<LoadingPanel title="Загружаем настройки AI…" />}>
-            <Router onDirtyChange={onDirtyChange} />
+            <Router onDirtyChange={setRouterDirty} />
           </Suspense>
         </div>
       </section>

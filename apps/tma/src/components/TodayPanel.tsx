@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   CalendarClock,
   ChevronLeft,
@@ -23,6 +23,16 @@ export function shiftPlanDate(date: string, days: number): string {
   const value = new Date(`${date}T12:00:00Z`);
   value.setUTCDate(value.getUTCDate() + days);
   return value.toISOString().slice(0, 10);
+}
+export function planningDeepLinkDate(search: string, fallback: string): string {
+  const params = new URLSearchParams(search);
+  const requested = params.get("date") ?? params.get("day");
+  if (!requested || !/^\d{4}-\d{2}-\d{2}$/.test(requested)) return fallback;
+  const parsed = new Date(requested + "T12:00:00Z");
+  return Number.isFinite(parsed.getTime()) &&
+    parsed.toISOString().slice(0, 10) === requested
+    ? requested
+    : fallback;
 }
 
 export function formatPlanTime(value: string, timezone: string): string {
@@ -273,7 +283,41 @@ export function TodayDetails({ summary }: { summary: TodaySummary }) {
 }
 
 export function TodayPanel({ date, onOpenAi }: TodayPanelProps) {
-  const [selectedDate, setSelectedDate] = useState(date);
+  const [selectedDate, setSelectedDate] = useState(() =>
+    typeof window === "undefined"
+      ? date
+      : planningDeepLinkDate(window.location.search, date),
+  );
+  useEffect(() => {
+    const restore = () => {
+      const params = new URLSearchParams(window.location.search);
+      if (
+        ![null, "home", "today", "planner", "calendar"].includes(
+          params.get("screen"),
+        )
+      )
+        return;
+      setSelectedDate(planningDeepLinkDate(window.location.search, date));
+    };
+    window.addEventListener("lifeos:navigation", restore);
+    window.addEventListener("popstate", restore);
+    return () => {
+      window.removeEventListener("lifeos:navigation", restore);
+      window.removeEventListener("popstate", restore);
+    };
+  }, [date]);
+  const selectDate = (next: string) => {
+    setSelectedDate(next);
+    const url = new URL(window.location.href);
+    if (
+      [null, "home", "today", "planner", "calendar"].includes(
+        url.searchParams.get("screen"),
+      )
+    ) {
+      url.searchParams.set("date", next);
+      window.history.replaceState(null, "", url);
+    }
+  };
   const query = useTodayQuery(selectedDate);
 
   return (
@@ -303,7 +347,7 @@ export function TodayPanel({ date, onOpenAi }: TodayPanelProps) {
         <button
           aria-label="Previous day"
           type="button"
-          onClick={() => setSelectedDate(shiftPlanDate(selectedDate, -1))}
+          onClick={() => selectDate(shiftPlanDate(selectedDate, -1))}
           className="grid min-h-11 min-w-11 place-items-center rounded-lg text-zinc-300 hover:bg-white/[0.06] active:scale-[0.98]"
         >
           <ChevronLeft className="h-5 w-5" />
@@ -313,14 +357,14 @@ export function TodayPanel({ date, onOpenAi }: TodayPanelProps) {
           type="date"
           value={selectedDate}
           onChange={(event) => {
-            if (event.target.value) setSelectedDate(event.target.value);
+            if (event.target.value) selectDate(event.target.value);
           }}
           className="min-h-11 min-w-0 flex-1 rounded-lg border border-white/[0.08] bg-graphite-900 px-2 text-sm text-white"
         />
         <button
           aria-label="Next day"
           type="button"
-          onClick={() => setSelectedDate(shiftPlanDate(selectedDate, 1))}
+          onClick={() => selectDate(shiftPlanDate(selectedDate, 1))}
           className="grid min-h-11 min-w-11 place-items-center rounded-lg text-zinc-300 hover:bg-white/[0.06] active:scale-[0.98]"
         >
           <ChevronRight className="h-5 w-5" />
@@ -328,7 +372,7 @@ export function TodayPanel({ date, onOpenAi }: TodayPanelProps) {
         {selectedDate !== date ? (
           <button
             type="button"
-            onClick={() => setSelectedDate(date)}
+            onClick={() => selectDate(date)}
             className="min-h-11 rounded-lg px-2 text-xs font-medium text-cyan-200 hover:bg-white/[0.06] active:scale-[0.98]"
           >
             Today

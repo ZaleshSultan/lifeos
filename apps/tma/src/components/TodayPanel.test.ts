@@ -11,9 +11,21 @@ import {
   shiftPlanDate,
   TodayDetails,
   TodayPanel,
+  planningDeepLinkDate,
 } from "./TodayPanel";
 
 describe("Today planner presentation", () => {
+  it("loads the requested calendar day instead of only retaining it in the URL", () => {
+    expect(
+      planningDeepLinkDate("?screen=calendar&date=2030-03-06", "2030-03-05"),
+    ).toBe("2030-03-06");
+    expect(
+      planningDeepLinkDate("?screen=planner&day=2030-03-07", "2030-03-05"),
+    ).toBe("2030-03-07");
+    expect(planningDeepLinkDate("?date=2030-02-30", "2030-03-05")).toBe(
+      "2030-03-05",
+    );
+  });
   it("uses planner timezone rather than the browser timezone and handles date boundaries", () => {
     expect(formatPlanTime("2026-10-10T04:00:00Z", "Asia/Almaty")).toMatch(
       /09:00|9:00/,
