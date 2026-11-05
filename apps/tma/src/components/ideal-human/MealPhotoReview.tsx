@@ -1,4 +1,5 @@
 "use client";
+import { useDraftState, useDraftRetention } from "../../lib/retained-draft";
 import { useEffect, useRef, useState } from "react";
 import type { IdealHumanMeal } from "../../../../../packages/core/src/ideal-human.js";
 import type { MealPhotoDraft } from "../../../../../packages/core/src/nutrition.js";
@@ -74,6 +75,7 @@ export function MealPhotoReview({
   errorMessage = () =>
     "Фотоанализ временно недоступен. Проверь соединение и повтори попытку.",
   onDirtyChange,
+  draftScope = "nutrition:photo",
 }: {
   disabled: boolean;
   initialDraftId?: string;
@@ -81,16 +83,29 @@ export function MealPhotoReview({
   errorMessage?: (error: unknown) => string;
   onDirtyChange?: (dirty: boolean) => void;
   onConfirm: (meals: IdealHumanMeal[], date?: string) => Promise<void>;
+  draftScope?: string;
 }) {
   const [capability, setCapability] = useState<{
     available: boolean;
     requiresConsent: true;
     reason: string | null;
   } | null>(null);
-  const [image, setImage] = useState<string | null>(null);
+  const [image, setImage] = useDraftState<string | null>(
+    draftScope,
+    "image",
+    null,
+  );
   const [consent, setConsent] = useState(false);
-  const [draft, setDraft] = useState<FoodDraft | null>(null);
-  const [corrected, setCorrected] = useState(false);
+  const [draft, setDraft] = useDraftState<FoodDraft | null>(
+    draftScope,
+    "draft",
+    null,
+  );
+  const [corrected, setCorrected] = useDraftState(
+    draftScope,
+    "corrected",
+    false,
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<string | null>(null);
@@ -98,6 +113,7 @@ export function MealPhotoReview({
   const requestId = useRef<string | null>(null);
   const analysisControl = useRef<AbortController | null>(null);
   const dirty = image !== null || draft !== null || busy;
+  useDraftRetention(draftScope, image !== null || draft !== null);
   useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
   useEffect(() => () => analysisControl.current?.abort(), []);

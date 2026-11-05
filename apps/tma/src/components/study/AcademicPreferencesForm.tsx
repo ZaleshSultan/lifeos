@@ -1,3 +1,4 @@
+import { useDraftState, useDraftRetention } from "../../lib/retained-draft";
 import { useEffect, useState, type FormEvent } from "react";
 import {
   parseAcademicPreferences,
@@ -26,17 +27,32 @@ export function AcademicPreferencesForm({
   onSave: (preferences: AcademicPreferences) => Promise<void>;
   onDirtyChange: (dirty: boolean) => void;
 }) {
-  const [draft, setDraft] = useState(initial);
-  const [classOffset, setClassOffset] = useState(
+  const [draft, setDraft] = useDraftState(
+    "academic:preferences",
+    "draft",
+    initial,
+  );
+  const [classOffset, setClassOffset] = useDraftState(
+    "academic:preferences",
+    "classOffset",
     String(initial.classOffsetMinutes),
   );
-  const [offsets, setOffsets] = useState({
-    assignmentOffsetsMinutes: initial.assignmentOffsetsMinutes.join(", "),
-    examOffsetsMinutes: initial.examOffsetsMinutes.join(", "),
-    personalOffsetsMinutes: initial.personalOffsetsMinutes.join(", "),
-  });
-  const [dirty, setDirty] = useState(false);
+  const [offsets, setOffsets] = useDraftState(
+    "academic:preferences",
+    "offsets",
+    {
+      assignmentOffsetsMinutes: initial.assignmentOffsetsMinutes.join(", "),
+      examOffsetsMinutes: initial.examOffsetsMinutes.join(", "),
+      personalOffsetsMinutes: initial.personalOffsetsMinutes.join(", "),
+    },
+  );
+  const [dirty, setDirty] = useDraftState(
+    "academic:preferences",
+    "dirty",
+    false,
+  );
   const [invalid, setInvalid] = useState(false);
+  useDraftRetention("academic:preferences", dirty);
   useEffect(() => {
     onDirtyChange(dirty);
   }, [dirty, onDirtyChange]);
@@ -220,11 +236,36 @@ export function AcademicScheduleVerificationForm({
   onSave: (input: AcademicScheduleVerificationInput) => Promise<void>;
   onDirtyChange: (dirty: boolean) => void;
 }) {
-  const [from, setFrom] = useState(verification.validFrom ?? "");
-  const [through, setThrough] = useState(verification.validThrough ?? "");
-  const [source, setSource] = useState(verification.sourceLabel ?? "");
+  const [from, setFrom] = useDraftState(
+    "academic:schedule-verification",
+    "from",
+    verification.validFrom ?? "",
+  );
+  const [through, setThrough] = useDraftState(
+    "academic:schedule-verification",
+    "through",
+    verification.validThrough ?? "",
+  );
+  const [source, setSource] = useDraftState(
+    "academic:schedule-verification",
+    "source",
+    verification.sourceLabel ?? "",
+  );
+  const [baseRevision, setBaseRevision] = useDraftState(
+    "academic:schedule-verification",
+    "baseRevision",
+    verification.revision,
+  );
   const [agreed, setAgreed] = useState(false);
-  const [dirty, setDirty] = useState(false);
+  const [dirty, setDirty] = useDraftState(
+    "academic:schedule-verification",
+    "dirty",
+    false,
+  );
+  useDraftRetention("academic:schedule-verification", dirty);
+  useEffect(() => {
+    if (!dirty) setBaseRevision(verification.revision);
+  }, [dirty, verification.revision]);
   useEffect(() => {
     onDirtyChange(dirty);
   }, [dirty, onDirtyChange]);
@@ -233,7 +274,7 @@ export function AcademicScheduleVerificationForm({
     if (!agreed) return;
     try {
       await onSave({
-        expectedRevision: verification.revision,
+        expectedRevision: baseRevision,
         validFrom: from,
         validThrough: through,
         sourceLabel: source,

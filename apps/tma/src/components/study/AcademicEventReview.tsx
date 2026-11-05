@@ -1,3 +1,8 @@
+import {
+  useDraftState,
+  useDraftRetention,
+  useDiscardDraft,
+} from "../../lib/retained-draft";
 import { useState, type FormEvent } from "react";
 import type {
   AcademicEvent,
@@ -117,13 +122,29 @@ export function AcademicEventEditor({
   onSave: (patch: AcademicEventRevisionInput["patch"]) => Promise<void>;
   onCancel: () => void;
 }) {
-  const [title, setTitle] = useState(event.title);
-  const [location, setLocation] = useState(event.location ?? "");
-  const [start, setStart] = useState(
+  const [title, setTitle] = useDraftState(
+    `academic:event:${event.sourceKey}:${event.key}`,
+    "title",
+    event.title,
+  );
+  const [location, setLocation] = useDraftState(
+    `academic:event:${event.sourceKey}:${event.key}`,
+    "location",
+    event.location ?? "",
+  );
+  const [start, setStart] = useDraftState(
+    `academic:event:${event.sourceKey}:${event.key}`,
+    "start",
     localAcademicInput(event.startsAt, event.timezone),
   );
-  const [end, setEnd] = useState(
+  const [end, setEnd] = useDraftState(
+    `academic:event:${event.sourceKey}:${event.key}`,
+    "end",
     localAcademicInput(event.endsAt, event.timezone),
+  );
+  useDraftRetention(`academic:event:${event.sourceKey}:${event.key}`, true);
+  const discardDraft = useDiscardDraft(
+    `academic:event:${event.sourceKey}:${event.key}`,
   );
   const [invalid, setInvalid] = useState(false);
   const timed = event.startsAt !== null;
@@ -142,6 +163,7 @@ export function AcademicEventEditor({
         if (patch.endsAt && patch.endsAt <= patch.startsAt) throw new Error();
       }
       await onSave(patch);
+      discardDraft();
     } catch {
       setInvalid(true);
     }
@@ -214,7 +236,14 @@ export function AcademicEventEditor({
           <button type="submit" className={academicButton}>
             Сохранить ручную правку
           </button>
-          <button type="button" className={academicButton} onClick={onCancel}>
+          <button
+            type="button"
+            className={academicButton}
+            onClick={() => {
+              discardDraft();
+              onCancel();
+            }}
+          >
             Отменить правку
           </button>
         </div>

@@ -1,3 +1,4 @@
+import { ContextLink } from "@/components/ContextLink";
 import { LmsStatus } from "@/components/LmsStatus";
 import { AiRouterSettingsPanel } from "@/components/workspaces/AiRouterSettingsPanel";
 import type { AiRouterSettingsSnapshot } from "../../../../../packages/core/src/ai-router-settings-view.js";
@@ -44,51 +45,86 @@ export default async function SettingsPage() {
         }
       />
 
-      <div className="dashboard-grid">
-        <MetricCard
-          detail="Web-сессия привязана к тому же user_id, что и Telegram-профиль."
-          icon={Bot}
-          label="Telegram"
-          tone="mint"
-          value={session.integrations.telegram.connected ? "Linked" : "Off"}
-        />
-        <MetricCard
-          detail={
-            googleReady
-              ? google.accountEmail || "Calendar events enabled"
-              : google.reconnectRequired
-                ? "Нужно переподключить Google один раз"
-                : "Подключи Google в Mini App / Sources"
-          }
-          icon={CalendarDays}
-          label="Google Calendar"
-          tone={googleReady ? "mint" : "amber"}
-          value={googleReady ? "Ready" : "Setup"}
-        />
-        <MetricCard
-          detail={
-            home?.weather
-              ? "Используется в Web, Mini App и ежедневной сводке."
-              : "Задай через /weather <город> в Telegram."
-          }
-          icon={CloudSun}
-          label="Weather"
-          tone="violet"
-          value={home?.weather?.locationName ?? "Not set"}
-        />
-        <MetricCard
-          detail="Защищённая сессия отзывается при выходе или блокировке. Для нового входа используй /web в Telegram."
-          icon={ShieldCheck}
-          label="Session"
-          value="Scoped"
-        />
-      </div>
+      <section
+        id="integrations"
+        aria-label="Подключения и аккаунт"
+        className="scroll-mt-24"
+      >
+        <h2 className="mb-4 text-lg font-semibold text-zinc-100">
+          Подключения и аккаунт
+        </h2>
+        <div className="dashboard-grid">
+          <MetricCard
+            detail="Web-сессия привязана к тому же user_id, что и Telegram-профиль."
+            icon={Bot}
+            label="Telegram"
+            tone="mint"
+            value={session.integrations.telegram.connected ? "Linked" : "Off"}
+          />
+          <MetricCard
+            detail={
+              googleReady
+                ? google.accountEmail || "Calendar events enabled"
+                : google.reconnectRequired
+                  ? "Нужно переподключить Google один раз"
+                  : "Подключи Google в Mini App / Sources"
+            }
+            icon={CalendarDays}
+            label="Google Calendar"
+            tone={googleReady ? "mint" : "amber"}
+            value={googleReady ? "Ready" : "Setup"}
+          />
+          <MetricCard
+            detail={
+              home?.weather
+                ? "Используется в Web, Mini App и ежедневной сводке."
+                : "Задай через /weather <город> в Telegram."
+            }
+            icon={CloudSun}
+            label="Weather"
+            tone="violet"
+            value={home?.weather?.locationName ?? "Not set"}
+          />
+          <MetricCard
+            detail="Защищённая сессия отзывается при выходе или блокировке. Для нового входа используй /web в Telegram."
+            icon={ShieldCheck}
+            label="Session"
+            value="Scoped"
+          />
+        </div>
 
-      <div className="mt-6">
-        <LmsStatus connection={lmsConnection} work={null} />
-      </div>
-      <div className="mt-6">
+        <div className="mt-6">
+          <LmsStatus connection={lmsConnection} work={null} />
+        </div>
+      </section>
+      <section
+        id="ai"
+        aria-label="AI и приватность"
+        className="mt-6 scroll-mt-24"
+      >
         <AiRouterSettingsPanel initial={routerSettings} />
+      </section>
+      <div className="mt-6 grid gap-4 lg:grid-cols-2">
+        <SectionPanel title="Уведомления и личные обзоры">
+          <p className="text-sm leading-relaxed text-zinc-400">
+            Напоминания, тихие часы и учебные категории включаются отдельно с
+            твоего согласия.
+          </p>
+          <ContextLink
+            href="/notifications"
+            section="settings"
+            className="mt-3 inline-flex min-h-11 items-center rounded-lg border border-white/15 px-3 text-sm text-cyan-200"
+          >
+            Настроить уведомления
+          </ContextLink>
+        </SectionPanel>
+        <SectionPanel title="Внешний вид и язык">
+          <p className="text-sm leading-relaxed text-zinc-400">
+            Текущий интерфейс — на русском, в тёмной теме LifeOS. В Mini App
+            оформление учитывает тему Telegram. Редактируемые подключения и
+            разрешения собраны на этой странице.
+          </p>
+        </SectionPanel>
       </div>
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
         <SectionPanel

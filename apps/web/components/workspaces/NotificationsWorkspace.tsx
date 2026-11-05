@@ -1,4 +1,8 @@
 "use client";
+import {
+  useDraftState,
+  useDraftRetention,
+} from "../../../tma/src/lib/retained-draft";
 import { useRef, useState } from "react";
 import type { RemindersResponse } from "../../../tma/src/api/types";
 import { SectionPanel } from "@/components/SectionPanel";
@@ -8,6 +12,7 @@ import {
   inputClass,
   rowClass,
   useWebResource,
+  useUnsavedGuard,
 } from "@/components/WorkspaceUI";
 import { webErrorMessage, webRequest } from "@/lib/web-client";
 export function NotificationsWorkspace({
@@ -16,9 +21,14 @@ export function NotificationsWorkspace({
   initial: RemindersResponse | null;
 }) {
   const resource = useWebResource<RemindersResponse>("reminders", initial);
-  const [message, setMessage] = useState("");
-  const [time, setTime] = useState("");
+  const [message, setMessage] = useDraftState("reminder:create", "message", "");
+  const [time, setTime] = useDraftState("reminder:create", "time", "");
   const [busy, setBusy] = useState(false);
+  const retained = useDraftRetention(
+    "reminder:create",
+    Boolean(message || time),
+  );
+  useUnsavedGuard(Boolean(message || time) || busy, retained && !busy);
   const inflight = useRef(false);
   const [receipt, setReceipt] = useState<string | null>(null);
   async function create() {

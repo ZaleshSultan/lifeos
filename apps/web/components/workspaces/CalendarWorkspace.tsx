@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import type { WebTodaySummary as TodaySummary } from "@/lib/dashboard-contracts";
 import { SectionPanel } from "@/components/SectionPanel";
 import {
@@ -22,6 +23,7 @@ export function CalendarWorkspace({
   initial: TodaySummary | null;
   date: string;
 }) {
+  const router = useRouter();
   const [date, setDate] = useState(initialDate);
   const [data, setData] = useState(initial);
   const [busy, setBusy] = useState(false);
@@ -37,6 +39,9 @@ export function CalendarWorkspace({
           `today?date=${encodeURIComponent(date)}`,
         ),
       );
+      const params = new URLSearchParams(window.location.search);
+      params.set("date", date);
+      router.replace(`/calendar?${params}`);
     } catch (e) {
       setError(webErrorMessage(e));
     } finally {

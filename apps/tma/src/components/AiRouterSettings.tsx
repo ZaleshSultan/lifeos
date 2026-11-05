@@ -1,4 +1,5 @@
 "use client";
+import { useDraftState, useDraftRetention } from "../lib/retained-draft";
 import { useEffect, useRef, useState } from "react";
 import {
   AI_ROUTER_PROVIDERS,
@@ -83,21 +84,26 @@ export function AiRouterSettings({
   errorMessage,
   onDirtyChange,
 }: AiRouterSettingsProps) {
-  const [draft, setDraft] = useState<AiRouterSettings>(
+  const [draft, setDraft] = useDraftState<AiRouterSettings>(
+    "ai:settings",
+    "draft",
     () => snapshot?.settings ?? defaultAiRouterSettings(),
   );
-  const [loaded, setLoaded] = useState(snapshot);
-  const [requestUsd, setRequestUsd] = useState(() =>
-    routerUsdInput(draft.spending.maxRequestCostMicros),
+  const [loaded, setLoaded] = useDraftState("ai:settings", "loaded", snapshot);
+  const [requestUsd, setRequestUsd] = useDraftState(
+    "ai:settings",
+    "requestUsd",
+    () => routerUsdInput(draft.spending.maxRequestCostMicros),
   );
-  const [dailyUsd, setDailyUsd] = useState(() =>
+  const [dailyUsd, setDailyUsd] = useDraftState("ai:settings", "dailyUsd", () =>
     routerUsdInput(draft.spending.maxDailyCostMicros),
   );
-  const [dirty, setDirty] = useState(false);
+  const [dirty, setDirty] = useDraftState("ai:settings", "dirty", false);
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const inflight = useRef(false);
+  useDraftRetention("ai:settings", dirty);
   useEffect(() => setReady(true), []);
   useEffect(() => {
     if (snapshot && !dirty && !inflight.current) {

@@ -1,30 +1,25 @@
 "use client";
 import {
-  BookOpenCheck,
-  CalendarDays,
-  CheckSquare,
-  CircleDollarSign,
-  Clapperboard,
-  Video,
-  Dumbbell,
+  GraduationCap,
   HeartPulse,
-  Inbox,
-  LayoutDashboard,
+  House,
   LogOut,
-  Menu,
-  MessageSquare,
-  Bell,
-  Settings,
-  Utensils,
-  X,
+  Settings2,
   Zap,
-  type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
-import { cx } from "@/lib/styles";
-import type { SystemStatus } from "@/lib/system-status";
+import { usePathname, useSearchParams } from "next/navigation";
+import React, { useEffect, useRef, useState } from "react";
+import { cx } from "../lib/styles";
+import type { SystemStatus } from "../lib/system-status";
+import {
+  WEB_MODULES,
+  WEB_SECTIONS,
+  webNavigationHref,
+  webPathname,
+  webSection,
+} from "../lib/navigation";
+import { DraftSessionProvider } from "../../tma/src/lib/retained-draft";
 
 function SignOutButton({ mobile = false }: { mobile?: boolean }) {
   const [ready, setReady] = useState(false);
@@ -53,6 +48,7 @@ function SignOutButton({ mobile = false }: { mobile?: boolean }) {
         destination.pathname !== "/web/access"
       )
         throw new Error("logout_unavailable");
+      window.dispatchEvent(new Event("lifeos:signed-out"));
       window.location.assign("/web/access");
     } catch {
       setError(true);
@@ -80,181 +76,172 @@ function SignOutButton({ mobile = false }: { mobile?: boolean }) {
   );
 }
 
-const navItems: Array<{ href: string; label: string; icon: LucideIcon }> = [
-  { href: "/today", label: "Сегодня", icon: LayoutDashboard },
-  { href: "/planner", label: "Задачи и план", icon: CheckSquare },
-  { href: "/calendar", label: "Календарь", icon: CalendarDays },
-  { href: "/study", label: "Учёба", icon: BookOpenCheck },
-  { href: "/workouts", label: "Тренировки", icon: Dumbbell },
-  { href: "/health", label: "Здоровье", icon: HeartPulse },
-  { href: "/nutrition", label: "Еда и вода", icon: Utensils },
-  { href: "/finance", label: "Финансы", icon: CircleDollarSign },
-  { href: "/ai", label: "AI помощник", icon: MessageSquare },
-  { href: "/capture", label: "Входящие", icon: Inbox },
-  { href: "/ideal-human", label: "Ideal Human", icon: Clapperboard },
-  { href: "/creator", label: "Creator", icon: Video },
-  { href: "/notifications", label: "Напоминания", icon: Bell },
-  { href: "/settings", label: "Настройки", icon: Settings },
-];
-const mobileItems = navItems.filter((item) =>
-  ["/today", "/planner", "/study", "/ideal-human"].includes(item.href),
-);
-
+const icons = {
+  home: House,
+  health: HeartPulse,
+  study: GraduationCap,
+  settings: Settings2,
+};
 export function AppShell({
   children,
   systemStatus,
   userName,
+  draftOwner,
 }: {
   children: React.ReactNode;
   systemStatus: SystemStatus;
   userName?: string | null;
+  draftOwner: number;
 }) {
-  const pathname = usePathname().replace(/^\/web(?=\/|$)/, "") || "/today";
-  const [moreOpen, setMoreOpen] = useState(false);
-  const navigation = (mobile = false) =>
-    navItems.map(({ href, label, icon: Icon }) => (
-      <Link
-        key={href}
-        href={href}
-        prefetch={false}
-        aria-current={pathname === href ? "page" : undefined}
-        onClick={() => setMoreOpen(false)}
-        className={cx(
-          "flex min-h-11 min-w-0 items-center gap-3 rounded-lg px-3 text-sm transition-colors",
-          pathname === href
-            ? "bg-cyan-400/10 text-cyan-200"
-            : "text-zinc-300 hover:bg-white/[0.05] hover:text-white",
-          mobile && "border border-white/[0.06]",
-        )}
-      >
-        <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
-        <span className="min-w-0 break-words">{label}</span>
-      </Link>
-    ));
-  return (
-    <div className="min-h-screen">
-      <a
-        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-cyan-300 focus:p-3 focus:text-zinc-950"
-        href="#lifeos-main"
-      >
-        К содержимому
-      </a>
-      <aside className="fixed inset-y-0 left-0 hidden w-60 flex-col border-r border-white/[0.08] bg-graphite-950 px-3 py-5 xl:flex">
+  const pathname = webPathname(usePathname());
+  const search = useSearchParams().toString();
+  const section = webSection(
+    pathname,
+    new URLSearchParams(search).get("section"),
+  );
+  const active = WEB_SECTIONS.find(({ id }) => id === section)!;
+  const primaryLinks = (mobile = false) =>
+    WEB_SECTIONS.map(({ id, href, label }) => {
+      const Icon = icons[id];
+      return (
         <Link
-          href="/today"
-          className="mb-5 flex min-h-11 items-center gap-3 px-3 text-lg font-semibold text-white"
+          key={id}
+          href={webNavigationHref(href, search, id)}
+          prefetch={false}
+          aria-current={section === id ? "page" : undefined}
+          className={cx(
+            mobile
+              ? "flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 text-center text-[10px]"
+              : "flex min-h-12 items-center gap-3 rounded-xl px-3 text-sm",
+            section === id
+              ? "bg-cyan-300/10 text-cyan-200"
+              : "text-zinc-400 hover:bg-white/[0.05] hover:text-white",
+          )}
         >
-          <Zap className="h-6 w-6 text-cyan-300" />
-          LifeOS
+          <Icon className={mobile ? "h-5 w-5" : "h-4 w-4"} aria-hidden="true" />
+          <span>{label}</span>
         </Link>
-        <nav
-          aria-label="Разделы LifeOS"
-          className="min-h-0 flex-1 space-y-1 overflow-y-auto"
+      );
+    });
+  return (
+    <DraftSessionProvider owner={draftOwner}>
+      <div className="min-h-screen">
+        <a
+          className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-cyan-300 focus:p-3 focus:text-zinc-950"
+          href="#lifeos-main"
         >
-          {navigation()}
-        </nav>
-        <div className="mt-4 border-t border-white/[0.08] px-3 pt-4">
-          <p className="truncate text-sm text-zinc-100">
-            {userName || "Мой LifeOS"}
-          </p>
-          <p className="mt-1 text-xs text-zinc-400">{systemStatus.label}</p>
-          <SignOutButton />
-        </div>
-      </aside>
-      <div className="xl:pl-60">
-        <header className="sticky top-0 z-30 flex min-h-16 items-center justify-between gap-3 border-b border-white/[0.08] bg-graphite-950/95 px-4 backdrop-blur-md xl:hidden">
+          К содержимому
+        </a>
+        <aside className="fixed inset-y-0 left-0 hidden w-60 flex-col border-r border-white/[0.08] bg-graphite-950 px-3 py-5 xl:flex">
           <Link
-            href="/today"
-            className="flex items-center gap-2 font-semibold text-white"
+            href={webNavigationHref("/today", search, "home")}
+            className="mb-5 flex min-h-11 items-center gap-3 px-3 text-lg font-semibold text-white"
           >
-            <Zap className="h-5 w-5 text-cyan-300" />
+            <Zap className="h-6 w-6 text-cyan-300" />
             LifeOS
           </Link>
-          <span className="min-w-0 truncate text-xs text-zinc-300">
-            {userName}
-          </span>
-          <span
-            className={cx(
-              "shrink-0 rounded-full border px-2 py-1 text-[11px]",
-              systemStatus.online
-                ? "border-emerald-300/20 text-emerald-200"
-                : "border-amber-300/20 text-amber-200",
-            )}
-          >
-            {systemStatus.shortLabel}
-          </span>
-        </header>
-        <main
-          id="lifeos-main"
-          className="mx-auto min-h-screen max-w-7xl px-4 pb-32 pt-6 md:px-6 md:pt-8 xl:pb-12"
-        >
-          {children}
-        </main>
-        <nav
-          aria-label="Быстрая навигация"
-          onKeyDown={(event) => {
-            if (event.key === "Escape") setMoreOpen(false);
-          }}
-          className="fixed inset-x-0 bottom-0 z-40 border-t border-white/[0.08] bg-graphite-950/95 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md xl:hidden"
-        >
-          {moreOpen ? (
-            <section
-              id="web-more-nav"
-              className="max-h-[70vh] overflow-y-auto border-b border-white/[0.08] p-4"
+          <nav aria-label="Основные разделы LifeOS" className="space-y-1">
+            {primaryLinks()}
+          </nav>
+          <div className="mt-5 min-h-0 flex-1 overflow-y-auto border-t border-white/[0.08] pt-4">
+            <p className="px-3 text-xs leading-relaxed text-zinc-400">
+              {active.description}
+            </p>
+            <nav
+              aria-label={`Модули раздела «${active.label}»`}
+              className="mt-3 space-y-1"
             >
-              <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-zinc-100">
-                  Все разделы
-                </h2>
-                <button
-                  aria-label="Закрыть разделы"
-                  type="button"
-                  className="grid h-11 w-11 place-items-center text-zinc-200"
-                  onClick={() => setMoreOpen(false)}
+              {WEB_MODULES[section].map(({ href, label }) => (
+                <Link
+                  key={href}
+                  href={webNavigationHref(href, search, section)}
+                  prefetch={false}
+                  aria-current={pathname === href ? "page" : undefined}
+                  className={cx(
+                    "flex min-h-11 items-center rounded-lg px-3 text-sm",
+                    pathname === href
+                      ? "bg-white/[0.06] text-cyan-100"
+                      : "text-zinc-400 hover:bg-white/[0.04] hover:text-white",
+                  )}
                 >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-              <div className="grid grid-cols-2 gap-2">{navigation(true)}</div>
-              <SignOutButton mobile />
-            </section>
-          ) : null}
-          <div className="mx-auto grid max-w-xl grid-cols-5 px-2 pt-2">
-            {mobileItems.map(({ href, label, icon: Icon }) => (
-              <Link
-                key={href}
-                href={href}
-                prefetch={false}
-                aria-label={label}
-                aria-current={pathname === href ? "page" : undefined}
-                className={cx(
-                  "flex min-h-14 flex-col items-center justify-center gap-1 rounded-lg px-1 text-center text-[10px]",
-                  pathname === href
-                    ? "bg-cyan-300/10 text-cyan-200"
-                    : "text-zinc-400",
-                )}
-              >
-                <Icon className="h-5 w-5" aria-hidden="true" />
-                <span className="min-w-0 break-words">{label}</span>
-              </Link>
-            ))}
-            <button
-              type="button"
-              aria-label="Все разделы"
-              aria-controls="web-more-nav"
-              aria-expanded={moreOpen}
-              onClick={() => setMoreOpen(!moreOpen)}
+                  {label}
+                </Link>
+              ))}
+            </nav>
+          </div>
+          <div className="mt-4 border-t border-white/[0.08] px-3 pt-4">
+            <p className="truncate text-sm text-zinc-100">
+              {userName || "Мой LifeOS"}
+            </p>
+            <p className="mt-1 text-xs text-zinc-400">{systemStatus.label}</p>
+            <SignOutButton />
+          </div>
+        </aside>
+        <div className="xl:pl-60">
+          <header className="sticky top-0 z-30 flex min-h-16 items-center justify-between gap-3 border-b border-white/[0.08] bg-graphite-950/95 px-4 backdrop-blur-md xl:hidden">
+            <Link
+              href={webNavigationHref("/today", search, "home")}
+              className="flex items-center gap-2 font-semibold text-white"
+            >
+              <Zap className="h-5 w-5 text-cyan-300" />
+              LifeOS
+            </Link>
+            <span className="min-w-0 truncate text-xs text-zinc-300">
+              {userName}
+            </span>
+            <span
               className={cx(
-                "flex min-h-14 flex-col items-center justify-center gap-1 rounded-lg text-[10px]",
-                moreOpen ? "bg-white/10 text-white" : "text-zinc-400",
+                "shrink-0 rounded-full border px-2 py-1 text-[11px]",
+                systemStatus.online
+                  ? "border-emerald-300/20 text-emerald-200"
+                  : "border-amber-300/20 text-amber-200",
               )}
             >
-              <Menu className="h-5 w-5" />
-              <span>Ещё</span>
-            </button>
-          </div>
-        </nav>
+              {systemStatus.shortLabel}
+            </span>
+          </header>
+          <main
+            id="lifeos-main"
+            className="mx-auto min-h-screen max-w-7xl px-4 pb-32 pt-6 md:px-6 md:pt-8 xl:pb-12"
+          >
+            <nav
+              aria-label={`Внутри раздела «${active.label}»`}
+              className="mb-6 flex flex-wrap gap-2 xl:hidden"
+            >
+              {WEB_MODULES[section].map(({ href, label }) => (
+                <Link
+                  key={href}
+                  href={webNavigationHref(href, search, section)}
+                  prefetch={false}
+                  aria-current={pathname === href ? "page" : undefined}
+                  className={cx(
+                    "flex min-h-11 min-w-0 items-center rounded-xl border px-3 py-2 text-xs",
+                    pathname === href
+                      ? "border-cyan-300/25 bg-cyan-300/10 text-cyan-100"
+                      : "border-white/10 bg-white/[0.03] text-zinc-300",
+                  )}
+                >
+                  {label}
+                </Link>
+              ))}
+            </nav>
+            {children}
+            {section === "settings" ? (
+              <div className="mt-6 xl:hidden">
+                <SignOutButton mobile />
+              </div>
+            ) : null}
+          </main>
+          <nav
+            aria-label="Основные разделы LifeOS"
+            className="fixed inset-x-0 bottom-0 z-40 border-t border-white/[0.08] bg-graphite-950/95 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md xl:hidden"
+          >
+            <div className="mx-auto grid max-w-xl grid-cols-4 gap-1 px-2 pt-2">
+              {primaryLinks(true)}
+            </div>
+          </nav>
+        </div>
       </div>
-    </div>
+    </DraftSessionProvider>
   );
 }

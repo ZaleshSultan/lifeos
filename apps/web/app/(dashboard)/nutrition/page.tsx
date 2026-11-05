@@ -3,8 +3,13 @@ import { NutritionWorkspace } from "@/components/workspaces/NutritionWorkspace";
 import { dashboardData, localDate } from "@/lib/dashboard-data";
 import type { DailyLifeSummary } from "../../../../../packages/core/src/daily-life.js";
 import type { IdealHumanDay } from "../../../../../packages/core/src/ideal-human.js";
-export default async function NutritionPage() {
-  const date = localDate();
+import { webContextDate } from "@/lib/navigation";
+export default async function NutritionPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ date?: string | string[] }>;
+}) {
+  const date = webContextDate((await searchParams).date, localDate());
   const [summary, days] = await Promise.all([
     dashboardData<DailyLifeSummary>(`/api/tma/daily-life/summary?date=${date}`),
     dashboardData<IdealHumanDay[]>("/api/tma/ideal-human/days"),
@@ -16,7 +21,12 @@ export default async function NutritionPage() {
         title="Еда и вода"
         summary="Лёгкие ручные записи с честными оценками. Питание сохраняется в существующем дневнике Ideal Human."
       />
-      <NutritionWorkspace summary={summary} days={days} date={date} />
+      <NutritionWorkspace
+        key={date}
+        summary={summary}
+        days={days}
+        date={date}
+      />
     </>
   );
 }

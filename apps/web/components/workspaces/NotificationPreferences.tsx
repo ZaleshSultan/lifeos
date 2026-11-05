@@ -1,4 +1,8 @@
 "use client";
+import {
+  useDraftState,
+  useDraftRetention,
+} from "../../../tma/src/lib/retained-draft";
 import { useRef, useState } from "react";
 import {
   DEFAULT_DAILY_LIFE_PREFERENCES,
@@ -18,15 +22,24 @@ export function NotificationPreferences({
 }: {
   initial: DailyLifePreferences | null;
 }) {
-  const [draft, setDraft] = useState(initial ?? DEFAULT_DAILY_LIFE_PREFERENCES);
-  const [dirty, setDirty] = useState(false);
+  const [draft, setDraft] = useDraftState(
+    "notification:preferences",
+    "draft",
+    initial ?? DEFAULT_DAILY_LIFE_PREFERENCES,
+  );
+  const [dirty, setDirty] = useDraftState(
+    "notification:preferences",
+    "dirty",
+    false,
+  );
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(
     initial ? null : "Настройки пока не загружены. Обнови перед изменением.",
   );
   const [available, setAvailable] = useState(initial !== null);
   const inflight = useRef(false);
-  useUnsavedGuard(dirty);
+  const retained = useDraftRetention("notification:preferences", dirty);
+  useUnsavedGuard(dirty || busy, retained && !busy);
   function change<K extends keyof DailyLifePreferences>(
     key: K,
     value: DailyLifePreferences[K],

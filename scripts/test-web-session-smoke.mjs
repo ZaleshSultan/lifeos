@@ -44,6 +44,7 @@ const backend = createServer((req, res) => {
       JSON.stringify({
         data: {
           state: "active",
+          telegramUserId: 900001,
           displayName: "Smoke user",
           profile: { status: "active", role: "user" },
           integrations: {

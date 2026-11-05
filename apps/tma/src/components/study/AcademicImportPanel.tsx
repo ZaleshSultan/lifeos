@@ -1,4 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  useDraftState,
+  useDraftRetention,
+  useDiscardDraft,
+  useDraftRef,
+} from "../../lib/retained-draft";
 import type { AcademicEventInput } from "../../../../../packages/core/src/academic-concierge.js";
 import type {
   AcademicImportBundle,
@@ -38,25 +44,55 @@ export function AcademicImportPanel({
   ) => Promise<{ created: number; unchanged: number; conflicts: string[] }>;
   onDirtyChange: (dirty: boolean) => void;
 }) {
-  const [format, setFormat] = useState<AcademicImportFormat>("json");
-  const [kind, setKind] = useState<"university_exam" | "personal_exam">(
+  const [format, setFormat] = useDraftState<AcademicImportFormat>(
+    "academic:import",
+    "format",
+    "json",
+  );
+  const [kind, setKind] = useDraftState<"university_exam" | "personal_exam">(
+    "academic:import",
+    "kind",
     "university_exam",
   );
-  const [code, setCode] = useState<"exam" | "examfx">("exam");
-  const [filename, setFilename] = useState("");
-  const [text, setText] = useState("");
-  const [bundle, setBundle] = useState<AcademicImportBundle | null>(null);
-  const [preview, setPreview] = useState<AcademicImportPreview | null>(null);
+  const [code, setCode] = useDraftState<"exam" | "examfx">(
+    "academic:import",
+    "code",
+    "exam",
+  );
+  const [filename, setFilename] = useDraftState(
+    "academic:import",
+    "filename",
+    "",
+  );
+  const [text, setText] = useDraftState("academic:import", "text", "");
+  const [bundle, setBundle] = useDraftState<AcademicImportBundle | null>(
+    "academic:import",
+    "bundle",
+    null,
+  );
+  const [preview, setPreview] = useDraftState<AcademicImportPreview | null>(
+    "academic:import",
+    "preview",
+    null,
+  );
   const [selected, setSelected] = useState<string[]>([]);
   const [agreed, setAgreed] = useState(false);
   const [localBusy, setLocalBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [editing, setEditing] = useState<AcademicEventInput | null>(null);
-  const identity = useRef<{ signature: string; requestId: string } | null>(
+  const [editing, setEditing] = useDraftState<AcademicEventInput | null>(
+    "academic:import",
+    "editing",
+    null,
+  );
+  const identity = useDraftRef<{ signature: string; requestId: string } | null>(
+    "academic:import",
+    "identity",
     null,
   );
   const fileInput = useRef<HTMLInputElement>(null);
   const dirty = Boolean(text.trim() || bundle || preview);
+  useDraftRetention("academic:import", dirty);
+  const discardDraft = useDiscardDraft("academic:import");
   useEffect(() => {
     onDirtyChange(dirty);
   }, [dirty, onDirtyChange]);
@@ -69,6 +105,7 @@ export function AcademicImportPanel({
     setMessage(null);
   }
   function discard() {
+    discardDraft();
     setText("");
     setFilename("");
     setBundle(null);

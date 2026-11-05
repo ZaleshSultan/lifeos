@@ -1,4 +1,5 @@
 "use client";
+import { useDraftRetention } from "../../../tma/src/lib/retained-draft";
 import { useState } from "react";
 import type { AiRouterSettingsSnapshot } from "../../../../packages/core/src/ai-router-settings-view.js";
 import { AiRouterSettings } from "../../../tma/src/components/AiRouterSettings";
@@ -19,7 +20,8 @@ export function AiRouterSettingsPanel({
 }) {
   const [snapshot, setSnapshot] = useState(initial);
   const [dirty, setDirty] = useState(false);
-  useUnsavedGuard(dirty);
+  const retained = useDraftRetention("ai:settings:workspace", dirty);
+  useUnsavedGuard(dirty, retained);
   return (
     <SectionPanel eyebrow="AI settings" title="Модели, приватность и расходы">
       <AiRouterSettings

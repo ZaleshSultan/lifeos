@@ -1,4 +1,8 @@
 "use client";
+import {
+  useDraftState,
+  useDraftRetention,
+} from "../../../tma/src/lib/retained-draft";
 import { useEffect, useRef, useState } from "react";
 import type {
   WebAiAnswer,
@@ -12,6 +16,7 @@ import {
   buttonClass,
   inputClass,
   rowClass,
+  useUnsavedGuard,
 } from "@/components/WorkspaceUI";
 import { webRequest, webErrorMessage } from "@/lib/web-client";
 
@@ -92,8 +97,12 @@ export function AiWorkspace({
   status: WebAiStatus | null;
   date: string;
 }) {
-  const [history, setHistory] = useState<ConversationMessage[]>([]);
-  const [text, setText] = useState("");
+  const [history, setHistory] = useDraftState<ConversationMessage[]>(
+    "assistant",
+    "history",
+    [],
+  );
+  const [text, setText] = useDraftState("assistant", "text", "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<{
@@ -101,6 +110,14 @@ export function AiWorkspace({
     confirmation: { token: string; summary: string };
   } | null>(null);
   const [retry, setRetry] = useState<WebAiRequest | null>(null);
+  const retained = useDraftRetention(
+    "assistant",
+    Boolean(text || history.length),
+  );
+  useUnsavedGuard(
+    Boolean(text || history.length) || busy || Boolean(pending),
+    retained && !busy && !pending,
+  );
   const controller = useRef<AbortController | null>(null);
   const previousModelId = useRef<string | undefined>(undefined);
   useEffect(() => () => controller.current?.abort(), []);

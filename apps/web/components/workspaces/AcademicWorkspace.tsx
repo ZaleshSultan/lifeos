@@ -1,4 +1,5 @@
 "use client";
+import { useDraftRetention } from "../../../tma/src/lib/retained-draft";
 import { useMemo, useState } from "react";
 import { AcademicConcierge } from "../../../tma/src/components/study/AcademicConcierge";
 import {
@@ -15,7 +16,8 @@ export function AcademicWorkspace({
 }) {
   const transport = useMemo(() => academicTransport(webRequest), []);
   const [dirty, setDirty] = useState(false);
-  useUnsavedGuard(dirty);
+  const retained = useDraftRetention("academic:workspace", dirty);
+  useUnsavedGuard(dirty, retained);
   return (
     <AcademicConcierge
       initial={initial}

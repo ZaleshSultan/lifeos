@@ -1,3 +1,4 @@
+import { ContextLink } from "@/components/ContextLink";
 import { Activity, HeartPulse, Moon, RotateCw } from "lucide-react";
 import { MetricCard } from "@/components/MetricCard";
 import { PageHeader } from "@/components/PageHeader";
@@ -14,6 +15,42 @@ export default async function HealthPage() {
         title="Здоровье и восстановление"
         summary="Реальные измерения из существующего Health Connect потока. Неизвестные значения остаются пустыми."
       />
+      <nav
+        aria-label="Действия для здоровья"
+        className="mb-6 grid gap-3 sm:grid-cols-3"
+      >
+        {[
+          {
+            href: "/workouts",
+            title: "Движение",
+            detail: "Текущая тренировка и история",
+          },
+          {
+            href: "/nutrition",
+            title: "Еда и вода",
+            detail: "Питание, гидратация и ручные записи",
+          },
+          {
+            href: "/ideal-human?section=health",
+            title: "Дневник",
+            detail: "Самочувствие и наблюдения по дням",
+          },
+        ].map((item) => (
+          <ContextLink
+            key={item.href}
+            href={item.href}
+            section="health"
+            className="min-h-20 rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 hover:border-cyan-300/25"
+          >
+            <span className="block text-sm font-medium text-cyan-100">
+              {item.title}
+            </span>
+            <span className="mt-1 block text-xs leading-relaxed text-zinc-400">
+              {item.detail}
+            </span>
+          </ContextLink>
+        ))}
+      </nav>
       {data ? (
         <>
           <div className="dashboard-grid">

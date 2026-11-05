@@ -1,4 +1,8 @@
 "use client";
+import {
+  useDraftState,
+  useDraftRetention,
+} from "../../../tma/src/lib/retained-draft";
 import { useRef, useState } from "react";
 import type { WorkoutProgram } from "../../../../packages/core/src/workout.js";
 import { parseWorkoutSet } from "../../../../packages/core/src/workout.js";
@@ -13,6 +17,7 @@ import {
   buttonClass,
   inputClass,
   rowClass,
+  useUnsavedGuard,
 } from "@/components/WorkspaceUI";
 import { webRequest, webErrorMessage } from "@/lib/web-client";
 
@@ -28,13 +33,30 @@ function SetEditor({
     values?: { reps: number; weightKg: number | null; restSeconds: number },
   ) => Promise<void>;
 }) {
-  const [reps, setReps] = useState(String(set.targetReps ?? ""));
-  const [weight, setWeight] = useState(
+  const [reps, setReps] = useDraftState(
+    `workout:set:${set.id}`,
+    "reps",
+    String(set.targetReps ?? ""),
+  );
+  const [weight, setWeight] = useDraftState(
+    `workout:set:${set.id}`,
+    "weight",
     set.targetWeightKg === null || set.targetWeightKg === undefined
       ? ""
       : String(set.targetWeightKg),
   );
-  const [rest, setRest] = useState(String(set.restSeconds ?? 90));
+  const [rest, setRest] = useDraftState(
+    `workout:set:${set.id}`,
+    "rest",
+    String(set.restSeconds ?? 90),
+  );
+  const [dirty, setDirty] = useDraftState(
+    `workout:set:${set.id}`,
+    "dirty",
+    false,
+  );
+  const retained = useDraftRetention(`workout:set:${set.id}`, dirty);
+  useUnsavedGuard(dirty || busy, retained && !busy);
   const [error, setError] = useState<string | null>(null);
   async function action(next: "save" | "complete" | "undo") {
     try {
@@ -49,6 +71,7 @@ function SetEditor({
         restSeconds: rest.trim() ? Number(rest) : NaN,
       });
       await onAction(next, values);
+      setDirty(false);
     } catch {
       setError(
         "Повторы: 1–1000; вес: 0–2000 кг или пусто; отдых: 0–3600 секунд.",
@@ -72,7 +95,10 @@ function SetEditor({
             min={1}
             max={1000}
             value={reps}
-            onChange={(e) => setReps(e.target.value)}
+            onChange={(e) => {
+              setReps(e.target.value);
+              setDirty(true);
+            }}
           />
         </label>
         <label className="min-w-0 text-xs text-zinc-300">
@@ -84,7 +110,10 @@ function SetEditor({
             min={0}
             max={2000}
             value={weight}
-            onChange={(e) => setWeight(e.target.value)}
+            onChange={(e) => {
+              setWeight(e.target.value);
+              setDirty(true);
+            }}
           />
         </label>
         <label className="min-w-0 text-xs text-zinc-300">
@@ -95,7 +124,10 @@ function SetEditor({
             min={0}
             max={3600}
             value={rest}
-            onChange={(e) => setRest(e.target.value)}
+            onChange={(e) => {
+              setRest(e.target.value);
+              setDirty(true);
+            }}
           />
         </label>
       </fieldset>

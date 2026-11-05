@@ -1,4 +1,9 @@
 "use client";
+import {
+  useDraftState,
+  useDraftRetention,
+  useDraftRef,
+} from "../../../tma/src/lib/retained-draft";
 import { useEffect, useRef, useState } from "react";
 import { SectionPanel } from "@/components/SectionPanel";
 import {
@@ -32,18 +37,37 @@ function TaskEdit({
     expectedUpdatedAt: string;
   }) => Promise<void>;
 }) {
-  const [title, setTitle] = useState(task.title);
-  const [notes, setNotes] = useState(task.notes);
-  const [due, setDue] = useState(
+  const [title, setTitle] = useDraftState(
+    `planner:edit:${task.id}`,
+    "title",
+    task.title,
+  );
+  const [notes, setNotes] = useDraftState(
+    `planner:edit:${task.id}`,
+    "notes",
+    task.notes,
+  );
+  const [due, setDue] = useDraftState(
+    `planner:edit:${task.id}`,
+    "due",
     task.dueAt
       ? new Date(Date.parse(task.dueAt) + 5 * 3600000)
           .toISOString()
           .slice(0, 16)
       : "",
   );
-  const [base, setBase] = useState(task.updatedAt);
-  const [dirty, setDirty] = useState(false);
-  useUnsavedGuard(dirty);
+  const [base, setBase] = useDraftState(
+    `planner:edit:${task.id}`,
+    "base",
+    task.updatedAt,
+  );
+  const [dirty, setDirty] = useDraftState(
+    `planner:edit:${task.id}`,
+    "dirty",
+    false,
+  );
+  const retained = useDraftRetention(`planner:edit:${task.id}`, dirty);
+  useUnsavedGuard(dirty, retained && !busy);
   useEffect(() => {
     if (dirty) return;
     setTitle(task.title);
@@ -136,13 +160,21 @@ function TaskEdit({
 }
 export function PlannerWorkspace({ initial }: { initial: WebTasks | null }) {
   const resource = useWebResource<WebTasks>("tasks", initial);
-  const [title, setTitle] = useState("");
-  const [notes, setNotes] = useState("");
-  const [due, setDue] = useState("");
+  const [title, setTitle] = useDraftState("planner:create", "title", "");
+  const [notes, setNotes] = useDraftState("planner:create", "notes", "");
+  const [due, setDue] = useDraftState("planner:create", "due", "");
   const [busy, setBusy] = useState(false);
   const inflight = useRef(false);
-  const createId = useRef<string | null>(null);
-  useUnsavedGuard(Boolean(title || notes || due));
+  const createId = useDraftRef<string | null>(
+    "planner:create",
+    "requestId",
+    null,
+  );
+  const retained = useDraftRetention(
+    "planner:create",
+    Boolean(title || notes || due),
+  );
+  useUnsavedGuard(Boolean(title || notes || due) || busy, retained && !busy);
   async function create() {
     if (inflight.current || !title.trim()) return;
     inflight.current = true;
