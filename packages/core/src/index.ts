@@ -34,3 +34,4 @@ export * from "./universal-capture.js";
 export * from "./capture-intelligence.js";
 export * from "./ai-provider-quota.js";
 export * from "./academic-concierge.js";
+export * from "./academic-intelligence.js";
