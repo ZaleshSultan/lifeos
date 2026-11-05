@@ -9,7 +9,7 @@ const resources: Array<{ pattern: RegExp; methods: readonly string[] }> = [
   { pattern: /^study\/concierge$/, methods: ["GET"] },
   {
     pattern:
-      /^study\/courses\/[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\/(calculator|calculator\/configure|scholarship)$/,
+      /^study\/courses\/[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\/(calculator|syllabus|scholarship)$/,
     methods: ["PUT"],
   },
   { pattern: /^study\/grade-events$/, methods: ["GET"] },

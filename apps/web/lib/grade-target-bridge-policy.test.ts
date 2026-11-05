@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import { bridgeResourceAllowed } from "./bridge-policy";
 describe("grade target web bridge", () => {
   const id = "11111111-1111-4111-8111-111111111111";
-  it.each(["calculator", "calculator/configure", "scholarship"])(
+  it("does not expose an unimplemented calculator configure alias", () => {
+    expect(bridgeResourceAllowed(`study/courses/${id}/calculator/configure`, "PUT")).toBe(false);
+  });
+  it.each(["calculator", "syllabus", "scholarship"])(
     "permits only explicit owned course PUT %s selectors",
     (resource) => {
       const path = `study/courses/${id}/${resource}`;

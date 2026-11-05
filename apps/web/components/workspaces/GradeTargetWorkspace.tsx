@@ -383,7 +383,7 @@ export function GradeTargetWorkspace({
                       );
                       if (!profile) return;
                       const calculator = await webRequest<StudyCalculatorState>(
-                        `study/courses/${encodeURIComponent(course.id)}/calculator/configure`,
+                        `study/courses/${encodeURIComponent(course.id)}/syllabus`,
                         {
                           method: "PUT",
                           body: JSON.stringify({
