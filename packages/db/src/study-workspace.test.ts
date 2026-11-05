@@ -405,6 +405,105 @@ describe("study workspace", () => {
     );
   });
 
+  it.each(["definition", "values", "target", "missing-base"])(
+    "rejects a stale scenario save after a concurrent %s edit before reading",
+    async (edited) => {
+      const f = fixture();
+      const expectedState = (
+        await loadStudyWorkspaceCourses(f.client, "owner")
+      )[0].calculator!;
+      const current = structuredClone(expectedState);
+      if (edited === "definition")
+        current.definition.sourceName = "New owner-reviewed formula";
+      if (edited === "values") current.values = { att1: 85 };
+      if (edited === "target") current.target = 90;
+      f.courses[0].metadata = {
+        untouched: "keep",
+        study_calculator_v1: current,
+      };
+      const original = structuredClone(f.courses[0].metadata);
+      await expect(
+        saveStudyCalculator(f.client, "owner", courseId, {
+          expectedState: edited === "missing-base" ? null : expectedState,
+          values: { att1: 10 },
+          target: 75,
+        }),
+      ).rejects.toMatchObject({ code: "study_calculator_conflict" });
+      expect(f.requests.some((request) => request.method === "PATCH")).toBe(
+        false,
+      );
+      expect(f.courses[0].metadata).toEqual(original);
+    },
+  );
+
+  it.each([
+    {},
+    "not-a-state",
+    { definition, values: { att1: 101 }, target: 70 },
+    undefined,
+  ])(
+    "rejects malformed expected scenario state %j before mutation",
+    async (expectedState) => {
+      const f = fixture();
+      const original = structuredClone(f.courses[0].metadata);
+      await expect(
+        saveStudyCalculator(f.client, "owner", courseId, {
+          expectedState,
+          values: { att1: 10 },
+          target: 70,
+        }),
+      ).rejects.toMatchObject({ code: "invalid_study_calculator" });
+      expect(f.requests.some((request) => request.method === "PATCH")).toBe(
+        false,
+      );
+      expect(f.courses[0].metadata).toEqual(original);
+    },
+  );
+
+  it("accepts the current resolved fallback as the scenario save expectation", async () => {
+    const f = fixture();
+    f.courses[0].title = "Computer Networks | Teacher";
+    f.courses[0].code = "MOODLE-123";
+    f.courses[0].metadata = { untouched: "keep" };
+    const expectedState = (
+      await loadStudyWorkspaceCourses(f.client, "owner")
+    )[0].calculator!;
+    const saved = await saveStudyCalculator(f.client, "owner", courseId, {
+      expectedState,
+      values: { assignment_1: 0, cisco: 80 },
+      target: 75,
+    });
+    expect(saved.definition).toEqual(expectedState.definition);
+    expect(saved.values).toEqual({ assignment_1: 0, cisco: 80 });
+    expect(f.courses[0].metadata).toMatchObject({
+      untouched: "keep",
+      study_calculator_v1: saved,
+    });
+    expect(f.courses[0].external_course_key).toBe("moodle:1");
+  });
+
+  it("retains the database timestamp CAS after matching a scenario expectation", async () => {
+    const f = fixture();
+    const expectedState = (
+      await loadStudyWorkspaceCourses(f.client, "owner")
+    )[0].calculator!;
+    const original = structuredClone(f.courses[0].metadata);
+    f.setConflict();
+    await expect(
+      saveStudyCalculator(f.client, "owner", courseId, {
+        expectedState,
+        values: { att1: 0 },
+        target: 75,
+      }),
+    ).rejects.toMatchObject({ code: "study_calculator_conflict" });
+    expect(f.courses[0].metadata).toEqual(original);
+    const patch = f.requests.find((request) => request.method === "PATCH")!;
+    expect(patch.url.searchParams.get("user_id")).toBe("eq.owner");
+    expect(patch.url.searchParams.get("updated_at")).toBe(
+      "eq.2026-09-24T00:00:00Z",
+    );
+  });
+
   it("rejects another user's course and invalid values before writing", async () => {
     const f = fixture();
     await expect(
