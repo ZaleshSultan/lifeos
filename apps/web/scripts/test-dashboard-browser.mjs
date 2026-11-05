@@ -1069,6 +1069,7 @@ try {
         name: "Основные разделы LifeOS",
         exact: true,
       });
+      await primary.waitFor();
       assert.equal(await primary.getByRole("link").count(), 4);
       await page
         .getByRole("textbox", { name: "Название", exact: true })
