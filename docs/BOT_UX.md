@@ -17,6 +17,11 @@ stay in their existing workflows. See [assistant commands and safety](ASSISTANT_
 - `/task` - task creation.
 - `/deadline` - deadline capture.
 - `/today` - today timeline preview.
+- `/tomorrow` - confirmed next-day academic classes and examinations.
+- `/nextclass` - next known confirmed class within the Concierge horizon.
+- `/afterclasses [tomorrow]` - saved-commitment windows after the final known class through the planner's 21:00 boundary; unknown durations or incomplete inputs withhold the estimate.
+- `/deadlines verified` - fresh, active, unsubmitted Moodle assignments corroborated by the existing deadline reader. Plain `/deadlines` retains its existing behavior.
+- `/briefing tomorrow` - the existing on-demand morning briefing followed by the confirmed next-day academic view. Plain `/briefing` and the scheduled digest are unchanged.
 - `/focus` - focus score surface.
 - `/health` - latest health mode surface.
 - `/healthsync_status` - latest health ingest run status.

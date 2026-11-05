@@ -64,6 +64,11 @@ import { AssistantError } from "../assistant/registry.js";
 import { handleCaptureTelegramUpdate } from "./capture.js";
 import { assistantPrivateRequest } from "../assistant/brain.js";
 import { issueWebLoginToken } from "../web-session.js";
+import {
+  academicScheduleAction,
+  ACADEMIC_SCHEDULE_BUTTONS,
+  handleAcademicScheduleCommand,
+} from "./academic-schedule.js";
 
 interface ParsedCommand {
   command: string;
@@ -128,6 +133,11 @@ const HELP_TEXT = [
   "/task task title",
   "/deadline 2026-05-20 task title",
   "/today",
+  "/tomorrow — подтверждённое расписание на завтра",
+  "/nextclass — ближайшая подтверждённая пара",
+  "/afterclasses [tomorrow] — окна по сохранённым обязательствам после пар",
+  "/deadlines verified — проверенные будущие дедлайны LMS",
+  "/briefing tomorrow — обычный утренний обзор и расписание на завтра",
   "/weather [город] — погода и город для утренней сводки",
   "/web — личная web-панель",
   "/focus [sleep 7 mood 8 energy 7 stress 3]",
@@ -3304,6 +3314,7 @@ async function handleCourseCommand(
         ? {
             inline_keyboard: [
               [{ text: "Открыть учёбу", web_app: { url: studyUrl } }],
+              ...ACADEMIC_SCHEDULE_BUTTONS,
               [
                 {
                   text: "Расписание",
@@ -3595,11 +3606,15 @@ function formatDeadlineItem(
 }
 
 async function handleDeadlinesCommand(
-  _args: string,
+  args: string,
   message: TelegramMessage,
   runtime: TelegramBotRuntime,
   user: TelegramUserRecord | null,
 ): Promise<void> {
+  if (args.trim().toLowerCase() === "verified") {
+    await handleAcademicScheduleCommand("deadlines", message, runtime, user!);
+    return;
+  }
   const now = runtime.now?.() ?? new Date();
   const timezone = user?.timezone || LOCAL_TIMEZONE;
   const result = await runtime.store!.listUpcomingAssignmentDeadlines(
@@ -4170,7 +4185,11 @@ async function handleFinanceFixCommand(
 
 const COMMAND_REGISTRY: Record<string, CommandConfig> = {
   water: {requiresUser:true,handler:async(args,message,runtime,user)=>handleWaterCommand(args,message,runtime,user!)},
-  briefing: {requiresUser:true,handler:async(_args,message,runtime,user)=>handleBriefingCommand("morning",message,runtime,user!)},
+  briefing: {
+    requiresUser: true,
+    handler: async (args, message, runtime, user) =>
+      handleBriefingCommand("morning", message, runtime, user!, args.trim().toLowerCase() === "tomorrow"),
+  },
   evening: {requiresUser:true,handler:async(_args,message,runtime,user)=>handleBriefingCommand("evening",message,runtime,user!)},
   documentary: {requiresUser:true,handler:async(_args,message,runtime,user)=>handleBriefingCommand("documentary",message,runtime,user!)},
 
@@ -4232,6 +4251,21 @@ const COMMAND_REGISTRY: Record<string, CommandConfig> = {
   reminder: { handler: handleReminderCommand, requiresUser: true },
   course: { handler: handleCourseCommand, requiresUser: true },
   study: { handler: handleCourseCommand, requiresUser: true },
+  tomorrow: {
+    requiresUser: true,
+    handler: async (_args, message, runtime, user) =>
+      handleAcademicScheduleCommand("tomorrow", message, runtime, user!),
+  },
+  nextclass: {
+    requiresUser: true,
+    handler: async (_args, message, runtime, user) =>
+      handleAcademicScheduleCommand("nextclass", message, runtime, user!),
+  },
+  afterclasses: {
+    requiresUser: true,
+    handler: async (args, message, runtime, user) =>
+      handleAcademicScheduleCommand("afterclasses", message, runtime, user!, args.trim().toLowerCase() === "tomorrow"),
+  },
   deadlines: { handler: handleDeadlinesCommand, requiresUser: true },
   assignments: { handler: handleDeadlinesCommand, requiresUser: true },
   sources: { handler: handleSourcesCommand, requiresUser: true },
@@ -4775,7 +4809,8 @@ async function handleTelegramCallbackQuery(
 
   const dailyLifeAction = isDailyLifeCallback(data);
   const mealPhotoAction = isMealPhotoCallback(data);
-  if (data !== "workout_start" && !bankMatch && !studyAction && !dailyLifeAction && !mealPhotoAction) {
+  const academicAction = academicScheduleAction(data);
+  if (data !== "workout_start" && !bankMatch && !studyAction && !dailyLifeAction && !mealPhotoAction && !academicAction) {
     await answer("Эта кнопка недоступна. Откройте раздел заново.");
     return;
   }
@@ -4814,6 +4849,10 @@ async function handleTelegramCallbackQuery(
   }
 
   try {
+    if (academicAction) {
+      await handleAcademicScheduleCommand(academicAction, message, runtime, user);
+      return;
+    }
     if (mealPhotoAction) {await handleMealPhotoCallback(data!,message,runtime,user);return;}
     if (dailyLifeAction) {await handleDailyLifeCallback(data!,message,runtime,user);return;}
     if (data === "study_today") {

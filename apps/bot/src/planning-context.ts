@@ -295,6 +295,9 @@ function buildInputs(snapshot: PlanningSnapshot, day: DateTime) {
   };
 }
 
+/** Shared deterministic commitment projection; callers may supply verified occurrences. */
+export { buildInputs as buildPlanningInputs };
+
 export async function loadPlanningData(
   store: LifeOSStore,
   user: TelegramUserRecord,
