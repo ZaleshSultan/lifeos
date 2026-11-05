@@ -42,7 +42,7 @@ export default async function StudyPage({
   searchParams,
 }: {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
-} = {}) {
+}) {
   const requested = (await searchParams) ?? {};
   const requestedCourseId =
     requested.courseId === undefined
