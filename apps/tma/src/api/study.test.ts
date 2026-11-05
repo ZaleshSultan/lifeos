@@ -5,6 +5,8 @@ import { resolveStudyCalculator } from "../../../../packages/core/src/study-syll
 import {
   studyQueryKey,
   useConfigureStudyCalculatorMutation,
+  useSaveStudyCalculatorMutation,
+  type SaveStudyCalculatorInput,
   type ConfigureStudyCalculatorInput,
   type StudyWorkspace,
   type StudyWorkspaceCourse,
@@ -154,4 +156,51 @@ describe("Study syllabus persistence", () => {
     expect(cached()[0].calculator).toEqual(manual);
     expect(mocks.hapticImpact).toHaveBeenCalledWith("light");
   });
+});
+
+describe("Study scenario save concurrency", () => {
+  it("serializes the original edit base even when the query cache has a newer scenario", async () => {
+    const base = structuredClone(syllabus);
+    const current = { ...structuredClone(syllabus), target: 90 };
+    setup(current);
+    useSaveStudyCalculatorMutation();
+    const save = mocks.options as {
+      mutationFn: (
+        input: SaveStudyCalculatorInput,
+      ) => Promise<StudyCalculatorState>;
+    };
+    const state = { ...structuredClone(base), target: 75 };
+    mocks.request.mockResolvedValue(state);
+    await save.mutationFn({ courseId: course.id, state, expectedState: base });
+    const body = JSON.parse(mocks.request.mock.lastCall![1].body as string);
+    expect(body).toEqual({
+      values: state.values,
+      target: 75,
+      expectedState: base,
+    });
+    expect(body.expectedState.target).toBe(70);
+  });
+  it.each([undefined, null])(
+    "preserves explicit null and legacy omitted expectations (%s)",
+    async (expectedState) => {
+      setup(syllabus);
+      useSaveStudyCalculatorMutation();
+      const save = mocks.options as {
+        mutationFn: (
+          input: SaveStudyCalculatorInput,
+        ) => Promise<StudyCalculatorState>;
+      };
+      mocks.request.mockResolvedValue(syllabus);
+      await save.mutationFn({
+        courseId: course.id,
+        state: syllabus,
+        expectedState,
+      });
+      const body = JSON.parse(mocks.request.mock.lastCall![1].body as string);
+      expect(Object.hasOwn(body, "expectedState")).toBe(
+        expectedState !== undefined,
+      );
+      if (expectedState === null) expect(body.expectedState).toBeNull();
+    },
+  );
 });

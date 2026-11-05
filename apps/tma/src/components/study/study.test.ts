@@ -16,6 +16,7 @@ import {
   parseStudyDraft,
   parseStudyScore,
   reconcileStudyDraft,
+  isStudyDrafts,
   studyDaySessions,
   studyDraftIsDirty,
   studyWeekday,
@@ -283,8 +284,25 @@ describe("study calculator form", () => {
     const remote = { ...scenario, values: { ...scenario.values, a1: 60 } };
     expect(studyDraftIsDirty(dirty)).toBe(true);
     expect(reconcileStudyDraft(dirty, remote)).toBe(dirty);
+    expect(reconcileStudyDraft(dirty, remote).base).toEqual(scenario);
+    expect(reconcileStudyDraft(clean, remote).base).toEqual(remote);
     expect(reconcileStudyDraft(clean, remote).inputs.a1).toBe("60");
     expect(reconcileStudyDraft(undefined, remote).inputs.a1).toBe("60");
+  });
+  it("snapshots the original save base independently and validates restored expectations", () => {
+    const input = structuredClone(scenario);
+    const draft = createStudyDraft(input);
+    input.target = 95;
+    expect(draft.base?.target).toBe(80);
+    expect(isStudyDrafts({ course: draft })).toBe(true);
+    const legacy = { ...draft };
+    delete legacy.base;
+    expect(isStudyDrafts({ course: legacy })).toBe(true);
+    expect(
+      isStudyDrafts({
+        course: { ...draft, base: { ...draft.base, target: Infinity } },
+      }),
+    ).toBe(false);
   });
 
   it("renders incomplete results as unknown, preserves zero and explains the range", () => {

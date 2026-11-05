@@ -1,6 +1,7 @@
 import {
   studyCalculatorStatesMatch,
   validateStudyCalculatorDefinition,
+  validateStudyCalculatorValues,
   type StudyCalculatorState,
 } from "../../../../../packages/core/src/study.js";
 import type { StudyWeekday, StudyWorkspaceCourse } from "../../api/study-types";
@@ -42,6 +43,21 @@ export interface StudyDraft {
   inputs: Record<string, string>;
   target: string;
   saved: string;
+  /** Original saved scenario for optimistic concurrency; legacy drafts may lack it. */
+  base?: StudyCalculatorState;
+}
+function validDraftBase(base: unknown): boolean {
+  if (base === undefined) return true;
+  if (!base || typeof base !== "object" || Array.isArray(base)) return false;
+  const state = base as Record<string, unknown>;
+  return (
+    validateStudyCalculatorDefinition(state.definition) &&
+    validateStudyCalculatorValues(state.values, state.definition) &&
+    typeof state.target === "number" &&
+    Number.isFinite(state.target) &&
+    state.target >= 0 &&
+    state.target <= 100
+  );
 }
 
 export function isStudyDrafts(
@@ -66,6 +82,7 @@ export function isStudyDrafts(
         draft.target.length <= 12 &&
         typeof draft.saved === "string" &&
         draft.saved.length <= 20_000 &&
+        validDraftBase(draft.base) &&
         draft.inputs !== null &&
         typeof draft.inputs === "object" &&
         !Array.isArray(draft.inputs) &&
@@ -100,7 +117,11 @@ export function createStudyDraft(state: StudyCalculatorState): StudyDraft {
     ),
     target: String(state.target),
   };
-  return { ...draft, saved: draftSignature(draft) };
+  return {
+    ...draft,
+    saved: draftSignature(draft),
+    base: structuredClone(state),
+  };
 }
 
 export function studyDraftIsDirty(draft: StudyDraft): boolean {

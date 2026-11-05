@@ -34,21 +34,28 @@ export function useStudyQuery() {
   });
 }
 
+export interface SaveStudyCalculatorInput {
+  courseId: string;
+  state: StudyCalculatorState;
+  expectedState?: StudyCalculatorState | null;
+}
 export function useSaveStudyCalculatorMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({
       courseId,
       state,
-    }: {
-      courseId: string;
-      state: StudyCalculatorState;
-    }) =>
+      expectedState,
+    }: SaveStudyCalculatorInput) =>
       request<StudyCalculatorState>(
         `/api/tma/study/courses/${encodeURIComponent(courseId)}/calculator`,
         {
           method: "PUT",
-          body: JSON.stringify({ values: state.values, target: state.target }),
+          body: JSON.stringify({
+            values: state.values,
+            target: state.target,
+            ...(expectedState === undefined ? {} : { expectedState }),
+          }),
         },
       ),
     async onMutate() {

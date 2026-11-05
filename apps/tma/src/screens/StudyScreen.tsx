@@ -589,7 +589,11 @@ export function StudyScreen({
                   onSave={(state) => {
                     setErrors((current) => ({ ...current, [course.id]: null }));
                     save.mutate(
-                      { courseId: course.id, state },
+                      {
+                        courseId: course.id,
+                        state,
+                        expectedState: draft.base ?? null,
+                      },
                       {
                         onSuccess: (stored) => {
                           setDrafts((current) => ({
