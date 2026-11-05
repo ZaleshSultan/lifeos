@@ -348,7 +348,10 @@ export async function v6CourseAndHomeScenarios({
     assert.equal(new URL(page.url()).searchParams.get("studyTab"), "work");
     await page
       .getByRole("heading", {
-        name: "Работа из LMS и ручные записи",
+        name:
+          driver.platform === "tma"
+            ? "Работа из LMS и ручные записи"
+            : "Работы и дедлайны",
         exact: true,
       })
       .waitFor();
