@@ -35,6 +35,16 @@ export function v6BrowserDriver(page, platform, origin) {
       );
       await this.primary().waitFor();
     },
+    async studyDestination(courseId, tab) {
+      await page.waitForURL(
+        (url) =>
+          (tma
+            ? url.searchParams.get("screen") === "study"
+            : url.pathname === "/web/study") &&
+          url.searchParams.get("courseId") === (courseId ?? null) &&
+          url.searchParams.get("studyTab") === tab,
+      );
+    },
     async home() {
       await page.goto(
         tma ? `${origin}/tma/?screen=home` : `${origin}/web/today`,
@@ -320,6 +330,7 @@ export async function v6CourseAndHomeScenarios({
         name: new RegExp(alpha.title + " · Synthetic Alpha checkpoint"),
       })
       .click();
+    await driver.studyDestination(alpha.id, "grades");
     await card(page, alpha).waitFor();
     assert.equal(new URL(page.url()).searchParams.get("courseId"), alpha.id);
     assert.equal(new URL(page.url()).searchParams.get("studyTab"), "grades");
@@ -332,6 +343,7 @@ export async function v6CourseAndHomeScenarios({
     await home
       .getByRole("button", { name: /Synthetic Beta unfinished assignment/ })
       .click();
+    await driver.studyDestination(beta.id, "work");
     assert.equal(new URL(page.url()).searchParams.get("courseId"), beta.id);
     assert.equal(new URL(page.url()).searchParams.get("studyTab"), "work");
     await page
@@ -351,6 +363,7 @@ export async function v6CourseAndHomeScenarios({
     await home
       .getByRole("button", { name: /Synthetic Systems examination/ })
       .click();
+    await driver.studyDestination(null, "concierge");
     assert.equal(
       new URL(page.url()).searchParams.has("courseId"),
       false,
