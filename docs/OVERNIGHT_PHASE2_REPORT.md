@@ -1,5 +1,38 @@
 # LifeOS overnight phase 2 engineering report
 
+## Phase 5 release preparation — November 5, 2026
+
+[PR #60](https://github.com/ZaleshSultan/lifeos/pull/60),
+[PR #61](https://github.com/ZaleshSultan/lifeos/pull/61) and
+[PR #62](https://github.com/ZaleshSultan/lifeos/pull/62) are merged. Tested source
+`e63dee8310852ceaeaa7bebe6f47e66c2767ca90` matches accepted release merge
+`066374876a0c7d086965ccdfd6cec1d1fe435ba8`; exact-head source and accepted-merge CI passed.
+
+**Production is unchanged:** actual loaded application
+`a01a697fdfd40b0c5dd868c551177b7050f6130f`, checkout
+`e1bb7e46b421032f2ef95371cd591f67de2f4a28`, schema 56. Phase 5 is not deployed
+or imported in production. No Telegram test message, external inference or OAuth
+flow was initiated. Existing legacy AI/assistant configuration was preserved;
+new notification/router/free/paid/STT/vision gates remain off or absent.
+
+Verified: 2,147 TypeScript tests, 410 worker tests, 47 operations tests, 14 local SQL
+suites, both fresh production builds and 20 academic / 78 web / 24 Mini App fixture
+browser groups. Candidate full/production audits report zero advisories. Known
+configured-credential/private-fact scans passed across 366 source and 1,158 compiled
+files with zero matches. Fresh encrypted backup, matching actual isolated restore,
+isolated exact 56 → 58 migration/private import replay and compatible master-off worker
+rollback passed. The sealed artifact bundle also passed private publication and
+independent saved-copy verification. These do not establish production delivery
+or live provider access.
+
+See [the full Phase 5 preparation report](PHASE5_RELEASE_PREPARATION.md) for precise
+scope, evidence, rollback limits and remaining owner activation/LMS/provider/
+offsite-recovery gates. The private reviewed payload contains nine university
+exams, 30 calendar records and one separate personal proposal; originals and
+private records remain outside Git.
+
+## November 4 production checkpoint — historical verification
+
 November 4, 2026, Asia/Almaty. Current production application: **`a01a697fdfd40b0c5dd868c551177b7050f6130f`**, activated **03:09:46 UTC**, built from tested **`98dd805f6e2fabc300339e8875e12d185d2b2ab8`** via [PR #55](https://github.com/ZaleshSultan/lifeos/pull/55). Local/public HTTPS health and indexed TMA JS/CSS hashes match. Operations remain `60c046a55a2789bdd609eaea647cc6c77448da8d`. Documentation checkout commits are distinct from the loaded app.
 
 **Current verified state:** schema 56, all 12 release checks and both hosted workflows passed; 2,021 units across 124 files, 387 workers, 47 operations, 140 fixture-browser scenarios. Actual migration/recovery/promotion and a genuine scheduled monitor are verified below. The completed actual API attempt passed 15 groups/128 HTTP requests and guarded cleanup; a later actual browser child passed 87 checks at all eight target viewports. Reviewed reconciliation completed at 04:18:23 UTC with all 66 owner tables/Auth empty, original facts/settings preserved and no active manifest. The final read-only audit at **04:29:09–04:29:11 UTC** verified exact local/public application SHA, stable bot/web services, Telegram webhook identity/host/path with queue 0, capture/worker enabled and all nine external/unsafe flags OFF. **System-journal review is BLOCKED by OS permissions**; the runtime result is partial, not an overall pass. No clean-log claim is made. No combined-run or new handset/provider success is claimed.
