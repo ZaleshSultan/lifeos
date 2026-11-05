@@ -5,11 +5,11 @@ from the overnight release evidence before publication.
 
 | Area | Status | Observed state |
 | --- | --- | --- |
-| Loaded production application | VERIFIED_PRODUCTION | `a01a697fdfd40b0c5dd868c551177b7050f6130f`, healthy |
-| Production checkout | VERIFIED_PRODUCTION | `e1bb7e46b421032f2ef95371cd591f67de2f4a28`, clean |
+| Loaded production application | VERIFIED_PRODUCTION | `066374876a0c7d086965ccdfd6cec1d1fe435ba8` loaded locally after promotion; bounded production smoke pending |
+| Production checkout | VERIFIED_PRODUCTION | `066374876a0c7d086965ccdfd6cec1d1fe435ba8`, clean |
 | Accepted source | PREPARED_NOT_ACTIVATED | Accepted branch `codex/overnight-stabilization-20261031`, head `71bdaa82e96368ef9acc2a29b870cfd7e1bbfa67`; application bundle bound to `066374876a0c7d086965ccdfd6cec1d1fe435ba8` |
 | Database | VERIFIED_PRODUCTION | Schema 58 committed at `2026-11-05T20:06:51.060159+00:00`; both exact reviewed migration entries verified |
-| Bot, Web and reminder worker | VERIFIED_PRODUCTION | Original processes remain active; no Phase 5 promotion |
+| Bot, Web and reminder worker | VERIFIED_PRODUCTION | Phase 5 bot/Web/TMA installed; academic-aware reminder worker restarted with master off |
 | Prior migration attempt | FAILED | One request returned HTTP 400 without commitment; read-only classification found neither migration applied |
 | Release guard | VERIFIED_PRODUCTION | Corrected repeatable-read guard passed a production-equivalent non-superuser/ownership rehearsal and the actual migration; all 99 original tables preserved |
 | Backup and restoration | VERIFIED_TEST_ONLY | Fresh overnight encrypted schema-56 backup and matching actual isolated restore passed |
@@ -41,4 +41,6 @@ Independent fixes are committed and published for review, with no production act
 
 Exact-head push and pull-request workflows passed for #64 and #65. #66 exact-head push and pull-request workflows also passed. These CI and fixture results remain VERIFIED_TEST_ONLY.
 
-The corrected production transaction acknowledged the exact additive 56 → 57 → 58 sequence. All 99 original auth/public table projections, historical delivery/accounting state and relevant functions were preserved; all six new tables are empty and academic defaults are off. A schema-58 encrypted backup has started. Application promotion remains gated on its matching actual isolated restore. No private import, test Telegram message or external inference was performed.
+The corrected production transaction acknowledged the exact additive 56 → 57 → 58 sequence. All 99 original auth/public table projections, historical delivery/accounting state and relevant functions were preserved; all six new tables are empty and academic defaults are off. A schema-58 encrypted backup has started. The matching actual isolated schema-58 restore subsequently passed before application promotion. No private import, test Telegram message or external inference was performed.
+
+The sealed application was promoted after the schema-58 backup/restore gate passed. Bot, Web and compatible reminder worker restarted successfully. Loopback health reports the accepted application SHA; production smoke and final preservation checks are the next gate. New execution flags are explicitly false and legacy environment bytes are preserved. This checkpoint does not yet claim full production acceptance.
