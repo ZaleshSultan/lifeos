@@ -375,7 +375,18 @@ export async function v6CourseAndHomeScenarios({
     assert.equal(new URL(page.url()).searchParams.get("studyTab"), "concierge");
     await page
       .getByLabel("Учебный консьерж", { exact: true })
-      .getByRole("tab", { name: "Экзамены AITU", exact: true })
+      .getByRole("tab", {
+        name: "Экзамены AITU",
+        exact: true,
+        selected: true,
+      })
+      .waitFor();
+    await page
+      .getByRole("tabpanel", { name: "Экзамены AITU", exact: true })
+      .getByRole("heading", {
+        name: "Synthetic Systems examination",
+        exact: true,
+      })
       .waitFor();
     const requestStart = fixture.requests.length;
     await driver.day(V6_SELECTED_DAY);
