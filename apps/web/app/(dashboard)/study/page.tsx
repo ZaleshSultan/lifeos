@@ -17,6 +17,7 @@ import type { StudyWorkspace } from "../../../../tma/src/api/study-types";
 import type { GradeEventFeed } from "../../../../../packages/core/src/academic-intelligence.js";
 import { AcademicWorkspace } from "@/components/workspaces/AcademicWorkspace";
 import type { AcademicSnapshot } from "../../../../tma/src/api/study-concierge";
+import type { AcademicConciergeTab } from "../../../../tma/src/components/study/AcademicConcierge";
 
 const dayOrder = [
   "monday",
@@ -44,6 +45,18 @@ export default async function StudyPage({
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const requested = (await searchParams) ?? {};
+  const initialAcademicTab: AcademicConciergeTab =
+    typeof requested.academicTab === "string" &&
+    [
+      "exams",
+      "personal",
+      "calendar",
+      "assignments",
+      "settings",
+      "import",
+    ].includes(requested.academicTab)
+      ? (requested.academicTab as AcademicConciergeTab)
+      : "exams";
   const requestedCourseId =
     requested.courseId === undefined
       ? null
@@ -120,7 +133,10 @@ export default async function StudyPage({
         />
       </div>
       <div id="academic-calendar" className="mt-6 scroll-mt-24">
-        <AcademicWorkspace initial={academic} />
+        <AcademicWorkspace
+          initial={academic}
+          initialAcademicTab={initialAcademicTab}
+        />
       </div>
       <p className="mt-4 text-sm text-amber-100">
         Сохранённое расписание; проверь актуальность в AITU.

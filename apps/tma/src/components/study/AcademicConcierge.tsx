@@ -44,7 +44,8 @@ const tabs = [
   ["settings", "Уведомления"],
   ["import", "Импорт"],
 ] as const;
-type Tab = (typeof tabs)[number][0];
+export type AcademicConciergeTab = (typeof tabs)[number][0];
+type Tab = AcademicConciergeTab;
 function requestedAcademicTab(): Tab {
   const value =
     typeof window === "undefined"
@@ -77,12 +78,15 @@ function moodleAssignmentUrl(value: string | null): string | null {
 export function AcademicConcierge({
   transport,
   initial,
+  initialTab,
   errorMessage,
   onSnapshot,
   onDirtyChange,
 }: {
   transport: AcademicTransport;
   initial: AcademicSnapshot | null;
+  /** Web passes the server-validated tab; TMA can initialize from its CSR URL. */
+  initialTab?: AcademicConciergeTab;
   errorMessage: (error: unknown) => string;
   onSnapshot?: (snapshot: AcademicSnapshot) => void;
   onDirtyChange?: (dirty: boolean) => void;
@@ -90,7 +94,9 @@ export function AcademicConcierge({
   const [snapshot, setSnapshot] = useState(initial);
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<Tab>(requestedAcademicTab);
+  const [tab, setTab] = useState<Tab>(
+    () => initialTab ?? requestedAcademicTab(),
+  );
   const [now, setNow] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);

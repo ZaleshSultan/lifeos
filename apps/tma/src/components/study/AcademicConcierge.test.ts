@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_ACADEMIC_PREFERENCES,
   type AcademicEvent,
@@ -97,8 +97,59 @@ const transport = Object.fromEntries(
     "verifySchedule",
   ].map((name) => [name, vi.fn()]),
 ) as unknown as AcademicTransport;
+afterEach(() => vi.unstubAllGlobals());
 
 describe("shared academic review", () => {
+  it.each([
+    ["personal", "Личные экзамены"],
+    ["calendar", "Календарь"],
+    ["assignments", "Задания LMS"],
+    ["settings", "Уведомления"],
+    ["import", "Импорт"],
+  ] as const)(
+    "renders identical server and first-client markup for the explicit %s tab",
+    (initialTab, label) => {
+      const props = {
+        transport,
+        initial: overview,
+        initialTab,
+        errorMessage: () => "Unavailable",
+      };
+      vi.stubGlobal("window", undefined);
+      const server = renderToStaticMarkup(
+        createElement(AcademicConcierge, props),
+      );
+      vi.stubGlobal("window", {
+        location: { search: `?academicTab=${initialTab}` },
+      });
+      const firstClient = renderToStaticMarkup(
+        createElement(AcademicConcierge, props),
+      );
+      expect(firstClient).toBe(server);
+      expect(server).toMatch(
+        new RegExp(
+          `<button\\b[^>]*id="academic-tab-${initialTab}"[^>]*aria-selected="true"`,
+        ),
+      );
+      expect(server).toContain(label);
+      expect(server).toContain(`aria-labelledby="academic-tab-${initialTab}"`);
+    },
+  );
+  it("preserves CSR URL initialization when the TMA supplies no server tab", () => {
+    vi.stubGlobal("window", {
+      location: { search: "?academicTab=personal" },
+    });
+    const html = renderToStaticMarkup(
+      createElement(AcademicConcierge, {
+        transport,
+        initial: overview,
+        errorMessage: () => "Unavailable",
+      }),
+    );
+    expect(html).toMatch(
+      /<button\b[^>]*id="academic-tab-personal"[^>]*aria-selected="true"/,
+    );
+  });
   it("keeps campus clocks independent from a travelling profile and hides mutation controls before hydration", () => {
     const html = renderToStaticMarkup(
       createElement(AcademicConcierge, {
