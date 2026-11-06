@@ -26,7 +26,7 @@ describe("academic notification consent presentation", () => {
         onSave: save,
       }),
     );
-    expect(html).toContain("о новых оценках и тестах пока не активированы");
+    expect(html).toContain("об оценках и тестах пока не готовятся");
     expect(html).toContain('value="1440, 180, 30"');
     expect(html).toContain("Это подсказка, не согласие");
     expect(html).not.toContain(" checked=");
@@ -57,7 +57,7 @@ describe("academic notification consent presentation", () => {
       }),
     );
     expect((html.match(/checked=""/g) ?? []).length).toBe(1);
-    expect(html).toContain("о новых оценках и тестах пока не активированы");
+    expect(html).toContain("об оценках и тестах пока не готовятся");
     expect(html).toContain("Напоминания о заданиях сохраняют свои настройки");
     expect(html).toMatch(/type="submit" disabled=""/);
     expect(save).not.toHaveBeenCalled();
