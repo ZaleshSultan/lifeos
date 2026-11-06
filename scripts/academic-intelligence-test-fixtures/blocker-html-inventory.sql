@@ -25,6 +25,7 @@ do $$declare u uuid:='f6000000-0000-4000-8000-000000000047';eid uuid;rid uuid;cl
  perform intelligence_blocker_test.assert(recipient=760047,'verified incomplete HTML inventory passes actual final begin');
  update public.user_lms_settings set unsupported_features=array['grade_html_incomplete']where user_id=u;
  perform intelligence_blocker_test.assert(not exists(select from public.academic_candidate_rows(u,clock_timestamp())v where v->>'kind'='assignment')and not exists(select from public.academic_intelligence_deadline_rows(u,clock_timestamp())),'incomplete grade fetch remains fail closed in both shared eligibility paths');
- perform intelligence_blocker_test.assert(public.begin_notification_delivery('reminder',u,rid,claim)is null and exists(select from public.reminders where user_id=u and id=rid and status='cancelled'and delivery_attempts=0),'grade-incomplete source prevents queued assignment from starting');
+ recipient:=public.begin_notification_delivery('reminder',u,rid,claim);
+ perform intelligence_blocker_test.assert(recipient is null and exists(select from public.reminders where user_id=u and id=rid and status='cancelled'and delivery_attempts=0),'grade-incomplete source prevents queued assignment from starting');
 end;$$;
 reset role;

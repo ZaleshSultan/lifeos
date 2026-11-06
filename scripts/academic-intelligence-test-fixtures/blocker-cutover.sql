@@ -94,7 +94,8 @@ begin
  perform public.finish_notification_delivery('reminder',u,quiz_id,quiz_token,'unknown','synthetic_no_send',null,null);
  perform public.academic_intelligence_service(u,'preferences',jsonb_build_object('expectedRevision',4,'expectedAcademicRevision',1,'preferences',
  '{"gradeAlertsEnabled":true,"assignmentAlertsEnabled":false,"quizAlertsEnabled":true,"assignmentOffsetsMinutes":[30],"quizOffsetsMinutes":[180],"quietStart":"00:00","quietEnd":"00:00"}'::jsonb));
- perform intelligence_blocker_test.assert(public.begin_notification_delivery('reminder',u,assignment_id,assignment_token)is null and exists(select from public.reminders where id=assignment_id and status='cancelled'and delivery_attempts=0),'real assignment consent revocation still cancels and fences queued delivery');
+ recipient:=public.begin_notification_delivery('reminder',u,assignment_id,assignment_token);
+ perform intelligence_blocker_test.assert(recipient is null and exists(select from public.reminders where id=assignment_id and status='cancelled'and delivery_attempts=0),'real assignment consent revocation still cancels and fences queued delivery');
  perform intelligence_blocker_test.assert((select count(*)=2 from public.reminders where user_id=u and status='unknown'and delivery_attempts=1),'policy and consent edits preserve both synthetic closed delivery receipts');
 
 end;$$;
