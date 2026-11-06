@@ -128,11 +128,7 @@ export function AcademicEventEditor({
   // Keep their original anchor with the draft instead of rebasing it on a
   // background refresh that happens to display the same local minute.
   const [base] = useDraftState(draftScope, "base", () => ({ ...event }));
-  const [title, setTitle] = useDraftState(
-    draftScope,
-    "title",
-    base.title,
-  );
+  const [title, setTitle] = useDraftState(draftScope, "title", base.title);
   const [location, setLocation] = useDraftState(
     draftScope,
     "location",
@@ -149,9 +145,7 @@ export function AcademicEventEditor({
     localAcademicInput(base.endsAt, base.timezone),
   );
   useDraftRetention(draftScope, true);
-  const discardDraft = useDiscardDraft(
-    draftScope,
-  );
+  const discardDraft = useDiscardDraft(draftScope);
   const [invalid, setInvalid] = useState<string | null>(null);
   const timed = base.startsAt !== null;
   async function submit(e: FormEvent) {
