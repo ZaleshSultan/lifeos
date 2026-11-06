@@ -1,13 +1,21 @@
-import { useEffect, useRef } from "react";
 import { AlertTriangle, Calculator, Save } from "lucide-react";
 import {
   calculateStudyScenario,
   calculateStudyTargetPlan,
   type StudyCalculatorState,
 } from "../../../../../packages/core/src/study.js";
-import type { StudyWorkspaceCourse } from "../../api/study";
+import type { StudyWorkspaceCourse } from "../../api/study-types";
 import type { AcademicRecord } from "../../api/types";
 import { previewMoodleGrades } from "./grade-import";
+import {
+  gradeTargetDefinitionKey,
+  gradeTargetBindingsKey,
+  gradeTargetContextKey,
+  type GradePolicyReview,
+  type GradeTargetLmsSource,
+} from "../../../../../packages/core/src/grade-target.js";
+import { CourseGradeTargetCard } from "./CourseGradeTargetCard";
+import { courseGradeTarget, restoreObservedDraft } from "./grade-target-model";
 import { cx } from "../../lib/styles";
 import {
   parseStudyDraft,
@@ -135,9 +143,10 @@ export function StudyScenarioResult({
       ) : null}
       <StudyTargetForecast state={state} />
       <p className="text-xs leading-relaxed text-zinc-400">
-        Расчёт по твоему учебному плану. Порог каждой аттестации:{" "}
-        {state.definition.attestationThreshold}. Официальную оценку определяет
-        университет.
+        {state.definition.attestationThreshold > 0
+          ? `В выбранном источнике порог аттестаций: ${state.definition.attestationThreshold}. Дополнительные условия допуска уточни у преподавателя.`
+          : "Порог допуска в источнике не указан; уточни правила у преподавателя."}{" "}
+        Официальную оценку определяет университет.
       </p>
     </section>
   );
@@ -169,12 +178,13 @@ export function StudyTargetForecast({
           Как закрыть предмет на {studyScoreLabel(plan.target)}+
         </h4>
         <p className="mt-1 text-xs leading-relaxed text-zinc-300">
-          Точная формула по весам курса. Будущие оценки не считаются нулями.
+          Условный расчёт по выбранным весам 30/30/40. Проверь их по силабусу
+          текущего курса. Будущие оценки не считаются нулями.
         </p>
       </div>
       <div className="grid grid-cols-2 gap-2">
         <div className="rounded-xl bg-white/[0.05] p-3">
-          <p className="text-[11px] text-zinc-400">Гарантировано в итог</p>
+          <p className="text-[11px] text-zinc-400">Учтено в сценарии</p>
           <p className="mt-1 text-xl font-bold tabular-nums text-white">
             {studyScoreLabel(plan.earnedFinalPoints)}
           </p>
@@ -309,6 +319,11 @@ export function StudyCalculator({
   saved,
   onRefresh,
   syllabusUnpersisted = false,
+  policyReview,
+  onReview,
+  reviewing,
+  reviewError,
+  lms,
 }: {
   course: StudyWorkspaceCourse;
   records: AcademicRecord[];
@@ -321,6 +336,11 @@ export function StudyCalculator({
   saved: boolean;
   onRefresh: () => void;
   syllabusUnpersisted?: boolean;
+  policyReview?: GradePolicyReview;
+  onReview?: (sourceRef: string) => void;
+  reviewing?: boolean;
+  reviewError?: string | null;
+  lms?: GradeTargetLmsSource;
 }) {
   const parsed = parseStudyDraft(draft);
   const dirty = studyDraftIsDirty(draft);
@@ -328,28 +348,21 @@ export function StudyCalculator({
   const definitionChanged =
     JSON.stringify(draft.definition) !==
     JSON.stringify(course.calculator?.definition);
-  const lastImport = useRef("");
-  const importSignature = JSON.stringify([
-    course.id,
-    records.map((row) => [row.id, row.updatedAt, row.score, row.maxScore]),
-  ]);
-  useEffect(() => {
-    if (saving || definitionChanged || lastImport.current === importSignature)
-      return;
-    lastImport.current = importSignature;
-    if (importPreview.matches > 0)
-      onChange({
-        ...draft,
-        inputs: { ...draft.inputs, ...importPreview.updates },
-      });
-  }, [
-    importSignature,
-    saving,
-    definitionChanged,
-    draft,
-    onChange,
-    importPreview,
-  ]);
+  const observed = courseGradeTarget(
+    {
+      ...course,
+      calculator: course.calculator
+        ? {
+            ...course.calculator,
+            target: parsed.state?.target ?? course.calculator.target,
+          }
+        : null,
+    },
+    records,
+    policyReview,
+    new Date().toISOString(),
+    lms,
+  );
   return (
     <form
       className="space-y-4"
@@ -380,11 +393,12 @@ export function StudyCalculator({
             Импорт оценок из Moodle
           </p>
           <p className="mt-1 text-xs leading-relaxed text-zinc-400">
-            Пустые поля автоматически получают однозначно найденные оценки
-            Moodle, не перезаписывая ручные значения и не изменяя Moodle.
-            Квизы-агрегаты и неоднозначные Midterm не угадываются. Для DBMS:
-            Lecture Async 1/2 → Quiz соответствующей аттестации, Quiz Midterm →
-            Midterm; Register используется только для сверки.
+            Предварительный подбор по названиям заполняет только пустые поля
+            после твоего нажатия. Это условный сценарий, а не подтверждение
+            связи курса или весов. Квизы-агрегаты и неоднозначные Midterm не
+            угадываются. Для DBMS: Lecture Async 1/2 → Quiz соответствующей
+            аттестации, Quiz Midterm → Midterm; Register используется только для
+            сверки.
           </p>
           <button
             type="button"
@@ -399,7 +413,7 @@ export function StudyCalculator({
             }
             className="mt-3 min-h-11 w-full rounded-xl border border-emerald-300/20 bg-emerald-300/10 px-3 text-sm font-semibold text-emerald-200 disabled:opacity-50"
           >
-            Подставить подтверждённые оценки ({importPreview.matches})
+            Подставить предложенные оценки в сценарий ({importPreview.matches})
           </button>
           {importPreview.ambiguous > 0 ? (
             <p className="mt-2 text-xs text-amber-200">
@@ -459,6 +473,47 @@ export function StudyCalculator({
           </p>
         ) : null}
       </div>
+      <CourseGradeTargetCard
+        title={course.title}
+        result={observed}
+        reviewKey={
+          gradeTargetDefinitionKey(draft.definition) +
+          gradeTargetBindingsKey(course.scholarship?.bindings ?? {}) +
+          gradeTargetContextKey({
+            externalCourseKey: course.externalCourseKey,
+            startsOn: course.startsOn,
+            endsOn: course.endsOn,
+          })
+        }
+        sourceRef={
+          observed.status === "confirmed"
+            ? (policyReview?.sourceRef ??
+              course.calculator?.definition.sourceName)
+            : course.calculator?.definition.sourceName
+        }
+        reviewedAt={
+          observed.status === "confirmed" ? policyReview?.reviewedAt : undefined
+        }
+        onReview={!definitionChanged ? onReview : undefined}
+        reviewing={reviewing}
+        reviewError={reviewError}
+      />
+      <button
+        type="button"
+        disabled={saving || definitionChanged || !observed.actualState}
+        onClick={() => {
+          if (observed.actualState)
+            onChange(restoreObservedDraft(draft, observed.actualState.values));
+        }}
+        className="min-h-11 w-full rounded-xl border border-cyan-400/20 bg-cyan-400/10 px-3 text-sm font-semibold text-cyan-200 disabled:opacity-50"
+      >
+        Вернуть фактические наблюдения в сценарий
+      </button>
+      <p className="text-xs text-zinc-400">
+        Будут заменены только поля локального сценария. Неизвестные значения
+        станут пустыми. Moodle и сохранённые наблюдения не изменятся; сохранение
+        сценария — отдельное действие.
+      </p>
       {periods.map((period) => (
         <fieldset
           key={period.id}

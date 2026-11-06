@@ -7,13 +7,29 @@ const resources: Array<{ pattern: RegExp; methods: readonly string[] }> = [
   },
   { pattern: /^lms\/(work|connection)$/, methods: ["GET"] },
   { pattern: /^study\/concierge$/, methods: ["GET"] },
+  {
+    pattern:
+      /^study\/courses\/[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\/(calculator|syllabus|scholarship)$/,
+    methods: ["PUT"],
+  },
   { pattern: /^study\/grade-events$/, methods: ["GET"] },
   { pattern: /^study\/academic-preferences$/, methods: ["PUT"] },
   { pattern: /^study\/grade-policy\/[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/, methods: ["PUT"] },
   { pattern: /^study\/concierge\/preferences$/, methods: ["PUT"] },
-  { pattern: /^study\/concierge\/(import\/(preview|confirm)|schedule\/verify)$/, methods: ["POST"] },
-  { pattern: /^study\/concierge\/events\/[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/, methods: ["PATCH"] },
-  { pattern: /^study\/concierge\/events\/[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\/(confirm|cancel)$/, methods: ["POST"] },
+  {
+    pattern: /^study\/concierge\/(import\/(preview|confirm)|schedule\/verify)$/,
+    methods: ["POST"],
+  },
+  {
+    pattern:
+      /^study\/concierge\/events\/[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/,
+    methods: ["PATCH"],
+  },
+  {
+    pattern:
+      /^study\/concierge\/events\/[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\/(confirm|cancel)$/,
+    methods: ["POST"],
+  },
   { pattern: /^daily-life\/preferences$/, methods: ["GET", "PUT"] },
   { pattern: /^ideal-human\/days$/, methods: ["GET", "PUT"] },
   { pattern: /^ideal-human\/reflection\/clear$/, methods: ["POST"] },

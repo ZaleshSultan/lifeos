@@ -254,6 +254,20 @@ export async function saveStudyCalculator(
   if (!current)
     throw new StudyWorkspaceError("study_calculator_not_configured");
   const body = object(input);
+  // Compare the caller's original scenario with the current resolved state;
+  // the timestamp predicate below separately guards edits after this read.
+  if (Object.hasOwn(body, "expectedState")) {
+    const expected =
+      body.expectedState === null
+        ? null
+        : calculatorFromMetadata({
+            study_calculator_v1: body.expectedState,
+          } as Json);
+    if (body.expectedState !== null && !expected)
+      throw new StudyWorkspaceError("invalid_study_calculator");
+    if (!studyCalculatorStatesMatch(current, expected))
+      throw new StudyWorkspaceError("study_calculator_conflict");
+  }
   if (
     !validateStudyCalculatorValues(body.values, current.definition) ||
     typeof body.target !== "number" ||

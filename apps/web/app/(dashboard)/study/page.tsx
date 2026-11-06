@@ -11,7 +11,10 @@ import type { WebLmsConnection, WebLmsWork } from "@/lib/lms-contracts";
 import { MetricCard } from "@/components/MetricCard";
 import { PageHeader } from "@/components/PageHeader";
 import { SectionPanel } from "@/components/SectionPanel";
-import { lifeosApi, type WebStudySummary } from "@/lib/lifeos-api";
+import { lifeosApi } from "@/lib/lifeos-api";
+import { GradeTargetWorkspace } from "@/components/workspaces/GradeTargetWorkspace";
+import type { StudyWorkspace } from "../../../../tma/src/api/study-types";
+import type { GradeEventFeed } from "../../../../../packages/core/src/academic-intelligence.js";
 import { AcademicWorkspace } from "@/components/workspaces/AcademicWorkspace";
 import type { AcademicSnapshot } from "../../../../tma/src/api/study-concierge";
 
@@ -35,13 +38,26 @@ const dayLabels: Record<string, string> = {
   sunday: "Вс",
 };
 
-export default async function StudyPage() {
-  const [study, lmsConnection, lmsWork, academic] = await Promise.all([
-    lifeosApi<WebStudySummary>("/api/tma/study"),
-    dashboardData<WebLmsConnection>("/api/tma/lms/connection"),
-    dashboardData<WebLmsWork>("/api/tma/lms/work"),
-    dashboardData<AcademicSnapshot>("/api/tma/study/concierge"),
-  ]);
+export default async function StudyPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const requested = (await searchParams) ?? {};
+  const requestedCourseId =
+    requested.courseId === undefined
+      ? null
+      : typeof requested.courseId === "string"
+        ? requested.courseId
+        : "__invalid__";
+  const [study, lmsConnection, lmsWork, academic, gradeFeed] =
+    await Promise.all([
+      lifeosApi<StudyWorkspace>("/api/tma/study"),
+      dashboardData<WebLmsConnection>("/api/tma/lms/connection"),
+      dashboardData<WebLmsWork>("/api/tma/lms/work"),
+      dashboardData<AcademicSnapshot>("/api/tma/study/concierge"),
+      dashboardData<GradeEventFeed>("/api/tma/study/grade-events"),
+    ]);
   if (!study) redirect("/access");
 
   const scheduleCount = study.courses.reduce(
@@ -94,6 +110,16 @@ export default async function StudyPage() {
         <LmsStatus connection={lmsConnection} work={lmsWork} />
       </div>
       <div className="mt-6">
+        <GradeTargetWorkspace
+          initial={study}
+          initialFeed={gradeFeed}
+          initialCourseId={requestedCourseId}
+          initialTab={
+            requested.studyTab === "calculator" ? "calculator" : "grades"
+          }
+        />
+      </div>
+      <div id="academic-calendar" className="mt-6 scroll-mt-24">
         <AcademicWorkspace initial={academic} />
       </div>
       <p className="mt-4 text-sm text-amber-100">
@@ -157,67 +183,39 @@ export default async function StudyPage() {
       </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
-        <SectionPanel title="Работы и дедлайны">
-          <div className="space-y-3">
-            {lmsWork?.items.length ? (
-              lmsWork.items.slice(0, 40).map((item, index) => (
-                <article
-                  key={index}
-                  className="rounded-lg border border-white/[0.08] p-3"
-                >
-                  <p className="break-words text-sm font-semibold text-zinc-100">
-                    {item.title}
-                  </p>
-                  <p className="mt-1 break-words text-xs text-zinc-400">
-                    {item.courseTitle} · {item.category} ·{" "}
-                    {item.submissionStatus}
-                  </p>
-                  <p className="mt-2 text-xs text-zinc-300">
-                    Дедлайн: {dateTime(item.dueAt)}
-                    {item.score !== null
-                      ? ` · оценка ${item.score}${item.maxScore === null ? "" : `/${item.maxScore}`}`
-                      : ""}
-                  </p>
-                </article>
-              ))
-            ) : (
-              <p className="text-sm text-zinc-400">
-                Нет доступных подтверждённых работ. Это не означает отсутствие
-                заданий в LMS.
-              </p>
-            )}
-          </div>
-        </SectionPanel>
-        <SectionPanel title="Сохранённые оценки">
-          <div className="space-y-3">
-            {study.records
-              .filter(
-                (record) => record.score !== null && record.score !== undefined,
-              )
-              .slice(0, 60)
-              .map((record, index) => (
-                <article
-                  key={record.id ?? index}
-                  className="rounded-lg border border-white/[0.08] p-3"
-                >
-                  <p className="break-words text-sm font-medium text-zinc-100">
-                    {record.title ?? "Оценка"}
-                  </p>
-                  <p className="mt-1 break-words text-xs text-zinc-400">
-                    {record.courseTitle ??
-                      record.courseCode ??
-                      "Курс не указан"}
-                  </p>
-                  <p className="mt-2 text-sm text-zinc-200">
-                    {record.score}
-                    {record.maxScore === null || record.maxScore === undefined
-                      ? ""
-                      : ` / ${record.maxScore}`}
-                  </p>
-                </article>
-              ))}
-          </div>
-        </SectionPanel>
+        <div id="study-work" className="scroll-mt-24">
+          <SectionPanel title="Работы и дедлайны">
+            <div className="space-y-3">
+              {lmsWork?.items.length ? (
+                lmsWork.items.slice(0, 40).map((item, index) => (
+                  <article
+                    key={index}
+                    className="rounded-lg border border-white/[0.08] p-3"
+                  >
+                    <p className="break-words text-sm font-semibold text-zinc-100">
+                      {item.title}
+                    </p>
+                    <p className="mt-1 break-words text-xs text-zinc-400">
+                      {item.courseTitle} · {item.category} ·{" "}
+                      {item.submissionStatus}
+                    </p>
+                    <p className="mt-2 text-xs text-zinc-300">
+                      Дедлайн: {dateTime(item.dueAt)}
+                      {item.score !== null
+                        ? ` · оценка ${item.score}${item.maxScore === null ? "" : `/${item.maxScore}`}`
+                        : ""}
+                    </p>
+                  </article>
+                ))
+              ) : (
+                <p className="text-sm text-zinc-400">
+                  Нет доступных подтверждённых работ. Это не означает отсутствие
+                  заданий в LMS.
+                </p>
+              )}
+            </div>
+          </SectionPanel>
+        </div>
       </div>
       {!study.courses.length && (
         <div className="mt-6">

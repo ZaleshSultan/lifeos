@@ -31,6 +31,11 @@ vi.mock("../api/study", () => ({
   useStudyQuery: mocks.study,
   useConfigureStudyCalculatorMutation: () => ({ mutateAsync: mocks.configure }),
   useSaveStudyCalculatorMutation: () => ({ isPending: false }),
+  useSaveScholarshipPlanMutation: () => ({ isPending: false }),
+}));
+vi.mock("../api/academic-intelligence", () => ({
+  useGradeEventFeed: () => ({ data: undefined, isError: false }),
+  useGradePolicyReviewMutation: () => ({ isPending: false }),
 }));
 vi.mock("../telegram", () => ({ telegram: {} }));
 vi.mock("../components/study/StudyLmsOverview", () => ({
@@ -59,6 +64,8 @@ function renderStudy(items: StudyWorkspaceCourse[], search: string) {
   vi.stubGlobal("window", {
     location: { search, href: `https://lifeos.example/${search}` },
     history: { replaceState: vi.fn() },
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
   });
   mocks.study.mockReturnValue({
     data,

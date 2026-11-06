@@ -16,6 +16,7 @@ import {
   parseStudyDraft,
   parseStudyScore,
   reconcileStudyDraft,
+  isStudyDrafts,
   studyDaySessions,
   studyDraftIsDirty,
   studyWeekday,
@@ -283,8 +284,25 @@ describe("study calculator form", () => {
     const remote = { ...scenario, values: { ...scenario.values, a1: 60 } };
     expect(studyDraftIsDirty(dirty)).toBe(true);
     expect(reconcileStudyDraft(dirty, remote)).toBe(dirty);
+    expect(reconcileStudyDraft(dirty, remote).base).toEqual(scenario);
+    expect(reconcileStudyDraft(clean, remote).base).toEqual(remote);
     expect(reconcileStudyDraft(clean, remote).inputs.a1).toBe("60");
     expect(reconcileStudyDraft(undefined, remote).inputs.a1).toBe("60");
+  });
+  it("snapshots the original save base independently and validates restored expectations", () => {
+    const input = structuredClone(scenario);
+    const draft = createStudyDraft(input);
+    input.target = 95;
+    expect(draft.base?.target).toBe(80);
+    expect(isStudyDrafts({ course: draft })).toBe(true);
+    const legacy = { ...draft };
+    delete legacy.base;
+    expect(isStudyDrafts({ course: legacy })).toBe(true);
+    expect(
+      isStudyDrafts({
+        course: { ...draft, base: { ...draft.base, target: Infinity } },
+      }),
+    ).toBe(false);
   });
 
   it("renders incomplete results as unknown, preserves zero and explains the range", () => {
@@ -308,7 +326,7 @@ describe("study calculator form", () => {
     expect(html).toContain("округлён вверх до 0,1");
   });
 
-  it("shows guaranteed points, maximum and a forecast for each remaining field", () => {
+  it("shows scenario points, maximum and a conditional forecast for each remaining field", () => {
     const html = renderToStaticMarkup(
       createElement(StudyTargetForecast, {
         state: {
@@ -319,7 +337,7 @@ describe("study calculator form", () => {
       }),
     );
     const text = html.replace(/<[^>]+>/g, "");
-    expect(text).toContain("Гарантировано в итог30");
+    expect(text).toContain("Учтено в сценарии30");
     expect(text).toContain("Максимальный итог100");
     expect(text).toContain("Нужно в среднем дальше50 / 100");
     expect(html).toContain("<details open=");
@@ -416,7 +434,7 @@ describe("study synced grades", () => {
         records: [record, { ...record, id: "grade-2", score: 0 }],
       }),
     );
-    expect(html).toContain("Ещё не оценено");
+    expect(html).toContain("Числовая оценка не подтверждена");
     expect(html).toContain("0 / 10");
     expect(html).toContain("Значения калькулятора сохраняются отдельно");
   });
