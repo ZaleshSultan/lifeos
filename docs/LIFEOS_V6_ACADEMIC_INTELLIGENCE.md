@@ -61,4 +61,4 @@ Actual cards refresh from read-only source data; dirty hypothetical scores retai
 
 History is a bounded recent view, not an unlimited archive UI. Pending/failed stages have a per-stage size bound but require operational backlog monitoring before activation. Real Telegram delivery, personal handset behavior and live Moodle availability have not been tested by this mission.
 
-Implementation SHAs, migrations, focused PRs and final test results are recorded in [release readiness](LIFEOS_V6_RELEASE_READINESS.md) as the candidate milestones complete.
+Implementation SHAs, migrations, focused PRs, final test results and the separate production activation checklist are recorded in [release readiness](LIFEOS_V6_RELEASE_READINESS.md).
