@@ -7,7 +7,10 @@ import {
 } from "../packages/core/src/academic-concierge.ts";
 
 const sha = (value) => createHash("sha256").update(value).digest("hex");
-export function academicBrowserFixture(owner = "A") {
+export function academicBrowserFixture(
+  owner = "A",
+  { confirmedPersonalForHome = false } = {},
+) {
   const at = new Date().toISOString();
   const date = (days) =>
     new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
@@ -81,7 +84,7 @@ export function academicBrowserFixture(owner = "A") {
       startsAt: day + "T11:00:00.000Z",
       endsAt: null,
       location: "Invented test street, 9",
-      status: "proposed",
+      status: confirmedPersonalForHome ? "confirmed" : "proposed",
     }),
     ...[1, 2, 3].map((trimester) =>
       event({

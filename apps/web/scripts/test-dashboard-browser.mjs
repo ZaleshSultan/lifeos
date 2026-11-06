@@ -27,6 +27,16 @@ import { captureBrowserScenarios } from "../../../scripts/capture-browser-scenar
 import { academicBrowserFixture } from "../../../scripts/academic-browser-fixtures.mjs";
 import { academicBrowserScenarios } from "../../../scripts/academic-browser-scenarios.mjs";
 import {
+  v6BrowserFixture,
+  V6_VIEWPORTS,
+  V6_SCENARIO_COUNT,
+} from "../../../scripts/v6-browser-fixtures.mjs";
+import {
+  v6BrowserDriver,
+  v6CourseAndHomeScenarios,
+  v6PolicyAndPreferenceScenarios,
+} from "../../../scripts/v6-browser-scenarios.mjs";
+import {
   freeRouterBrowserSnapshot,
   assertFreeRouterBrowserPanel,
 } from "../../../scripts/free-ai-router-browser-fixtures.mjs";
@@ -70,6 +80,11 @@ const academicFixtures = new Map([
   ["A", academicBrowserFixture("A")],
   ["B", academicBrowserFixture("B")],
 ]);
+const v6Fixtures = new Map([
+  ["A", v6BrowserFixture("A")],
+  ["B", v6BrowserFixture("B")],
+]);
+const v6FixtureHistory = [...v6Fixtures.values()];
 const routerSettings = new Map([
   ["A", { settings: defaultAiRouterSettings(), revision: 0 }],
   ["B", { settings: defaultAiRouterSettings(), revision: 0 }],
@@ -331,6 +346,18 @@ const backend = createServer(async (req, res) => {
       res.writeHead(result.status, { "content-type": "application/json" });
       return res.end(JSON.stringify(result.body));
     }
+    const v6Result = v6Fixtures
+      .get(owner)
+      .response(
+        path.slice("/api/tma/".length),
+        req.method,
+        input,
+        url.searchParams,
+      );
+    if (v6Result) {
+      res.writeHead(v6Result.status, { "content-type": "application/json" });
+      return res.end(JSON.stringify(v6Result.body));
+    }
     if (path === "/api/tma/session")
       return json(res, {
         state: "active",
@@ -568,32 +595,6 @@ const backend = createServer(async (req, res) => {
       workout = null;
       return json(res, fixtureHistory[0]);
     }
-    if (path === "/api/tma/study")
-      return json(res, {
-        timezone: "Asia/Almaty",
-        courses: [
-          {
-            id: "fixture-course",
-            title: "Fixture cybersecurity",
-            code: "FIXTURE",
-            startsOn: null,
-            endsOn: null,
-            externalCourseKey: null,
-            calculator: null,
-            schedules: [],
-          },
-        ],
-        records: [
-          {
-            id: "fixture-grade",
-            courseTitle: "Fixture cybersecurity",
-            title: "Fixture assignment",
-            score: 75,
-            maxScore: 100,
-            dueAt: null,
-          },
-        ],
-      });
     if (path === "/api/tma/lms/connection")
       return json(res, {
         configured: false,
@@ -840,7 +841,12 @@ const startedAtUtc = new Date().toISOString();
 const caseResults = [];
 const screenshots = [];
 const pageErrors = [];
-const expectedCases = process.env.LIFEOS_WEB_BROWSER_LOGOUT_ONLY ? 2 : 82;
+const pageErrorContexts = [];
+const blockedExternalRequests = [];
+let diagnosticPage;
+const expectedCases = process.env.LIFEOS_WEB_BROWSER_LOGOUT_ONLY
+  ? 2
+  : 82 + (V6_VIEWPORTS.length - 4) + V6_SCENARIO_COUNT;
 async function checkpoint() {
   const path = resolve(artifacts, "checkpoint.json");
   await writeFile(
@@ -856,7 +862,9 @@ async function checkpoint() {
         screenshots,
         runFailure,
         pageErrors,
+        pageErrorContexts,
         productionVerified: false,
+        blockedExternalRequests,
         realProviderCalls: 0,
         telegramSends: 0,
       },
@@ -911,6 +919,27 @@ async function test(name, fn) {
   } catch (error) {
     caseResults.push({ name, state: "failed", error: error.message });
     runFailure ??= { stage: "functional_assertion", error: error.message };
+    if (diagnosticPage) {
+      await writeFile(
+        resolve(artifacts, "failure-page.json"),
+        JSON.stringify({
+          case: name,
+          pathname: new URL(diagnosticPage.url()).pathname,
+          text: (await diagnosticPage.locator("body").innerText()).slice(
+            0,
+            5000,
+          ),
+          blockedExternalRequests,
+        }),
+      ).catch(() => {});
+      await diagnosticPage
+        .screenshot({
+          path: resolve(artifacts, "failure-page.png"),
+          fullPage: true,
+          timeout: 10000,
+        })
+        .catch(() => {});
+    }
     throw error;
   } finally {
     currentCase = null;
@@ -946,6 +975,7 @@ try {
       const url = new URL(route.request().url());
       if (["data:", "blob:"].includes(url.protocol) || url.origin === origin)
         return route.continue();
+      blockedExternalRequests.push(url.origin);
       return route.abort("blockedbyclient");
     });
     return ctx;
@@ -986,8 +1016,19 @@ try {
     timezoneId: "UTC",
   });
   const page = await context.newPage();
+  diagnosticPage = page;
   const errors = pageErrors;
-  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("pageerror", (e) => {
+    errors.push(e.message);
+    const url = new URL(page.url());
+    pageErrorContexts.push({
+      case: currentCase,
+      pathname: url.pathname,
+      academicTab: url.searchParams.get("academicTab"),
+      studyTab: url.searchParams.get("studyTab"),
+      message: e.message,
+    });
+  });
   const acceptDialog = (dialog) => void dialog.accept();
   page.on("dialog", acceptDialog);
   await test("unauthenticated dashboard redirects and real one-time login establishes private cookie", async () => {
@@ -1030,7 +1071,7 @@ try {
       });
     }
   });
-  for (const width of [320, 360, 390, 430]) {
+  for (const width of V6_VIEWPORTS) {
     await test(`four primary sections preserve planner drafts and course/day context at ${width}px`, async () => {
       await page.setViewportSize({ width, height: 900 });
       await page.goto(
@@ -1040,6 +1081,7 @@ try {
         name: "Основные разделы LifeOS",
         exact: true,
       });
+      await primary.waitFor();
       assert.equal(await primary.getByRole("link").count(), 4);
       await page
         .getByRole("textbox", { name: "Название", exact: true })
@@ -1060,12 +1102,14 @@ try {
       await primary
         .getByRole("link", { name: "Настройки", exact: true })
         .click();
-      await page.locator("h1").waitFor();
+      await page.waitForURL((url) => url.pathname === "/web/settings");
+      await page
+        .getByRole("heading", { level: 1, name: /^Настройки(?: ·|$)/ })
+        .waitFor();
       await primary.getByRole("link", { name: "Главная", exact: true }).click();
       await page
         .getByRole("navigation", {
-          name: "Внутри раздела «Главная»",
-          exact: true,
+          name: /^(?:Внутри|Модули) раздела «Главная»$/,
         })
         .getByRole("link", { name: "Задачи и план", exact: true })
         .click();
@@ -1090,6 +1134,37 @@ try {
         .getByRole("textbox", { name: "Название", exact: true })
         .fill("");
     });
+  }
+  for (const width of V6_VIEWPORTS) {
+    const fixture = v6BrowserFixture("A");
+    academicFixtures.set(
+      "A",
+      academicBrowserFixture("A", { confirmedPersonalForHome: true }),
+    );
+    v6Fixtures.set("A", fixture);
+    v6FixtureHistory.push(fixture);
+    await page.setViewportSize({ width, height: 900 });
+    const driver = v6BrowserDriver(page, "web", origin);
+    await v6CourseAndHomeScenarios({
+      page,
+      fixture,
+      driver,
+      test,
+      prefix: `Web V6 ${width}px`,
+    });
+    if ([390, 1440].includes(width))
+      await v6PolicyAndPreferenceScenarios({
+        page,
+        fixture,
+        driver,
+        test,
+        prefix: `Web V6 ${width}px`,
+      });
+    if (!process.env.LIFEOS_WEB_BROWSER_LOGOUT_ONLY)
+      await captureScreenshot(page, {
+        path: resolve(artifacts, `web-v6-${width}.png`),
+        fullPage: true,
+      });
   }
   await test("Ideal Human saves once and persists after reloading", async () => {
     await openFixtureJournal(page);
@@ -1405,7 +1480,7 @@ try {
     await page.getByText("Последняя запись воды отменена.").waitFor();
     assert.equal(hydration("A", shownDate).totalMl, 0);
   });
-  await test("meal photo is local until consent, draft remains unsaved, confirmation writes reviewed estimate", async () => {
+  await test("meal photo is local until consent, its draft survives section switches, confirmation writes reviewed estimate", async () => {
     const shownDate = await shownNutritionDate(page);
     const beforeDays = structuredClone(days.get("A"));
     const previous = structuredClone(
@@ -1449,19 +1524,41 @@ try {
     assert.deepEqual(days.get("A"), beforeDays);
     assert.equal(journalPuts, putsBefore);
     await page.getByLabel("Ккал", { exact: true }).fill("650");
-    page.off("dialog", acceptDialog);
-    const guard = page.waitForEvent("dialog").then(async (dialog) => {
-      assert.match(dialog.message(), /несохранённые изменения/);
-      await dialog.dismiss();
-    });
-    await page.locator('a[href="/web/planner"]').first().click();
-    await guard;
-    page.on("dialog", acceptDialog);
+    let navigationDialogs = 0;
+    const countNavigationDialog = () => navigationDialogs++;
+    page.on("dialog", countNavigationDialog);
+    try {
+      const navigation = v6BrowserDriver(page, "web", origin);
+      await navigation.section("Главная");
+      await page
+        .getByRole("navigation", {
+          name: /^(?:Внутри|Модули) раздела «Главная»$/,
+        })
+        .getByRole("link", { name: "Задачи и план", exact: true })
+        .click();
+      await page
+        .getByRole("textbox", { name: "Название", exact: true })
+        .waitFor();
+      await navigation.section("Здоровье");
+      await page
+        .getByRole("navigation", {
+          name: /^(?:Внутри|Модули) раздела «Здоровье»$/,
+        })
+        .getByRole("link", { name: "Еда и вода", exact: true })
+        .click();
+      await page.getByLabel("Ккал", { exact: true }).waitFor();
+    } finally {
+      page.off("dialog", countNavigationDialog);
+    }
+    assert.equal(navigationDialogs, 0);
     assert.equal(new URL(page.url()).pathname, "/web/nutrition");
     assert.equal(
       await page.getByLabel("Ккал", { exact: true }).inputValue(),
       "650",
     );
+    assert.deepEqual(days.get("A"), beforeDays);
+    assert.equal(journalPuts, putsBefore);
+    assert.equal(analyses, 1);
     journalFail = true;
     const failedSave = page.waitForResponse(
       (response) =>
@@ -2143,6 +2240,20 @@ try {
       test,
       prefix: `Web ${width}px`,
       open: () => page.goto(`${origin}/web/capture`),
+      roundTripSections: async () => {
+        const navigation = v6BrowserDriver(page, "web", origin);
+        await navigation.section("Здоровье");
+        await navigation.section("Главная");
+        await page
+          .getByRole("navigation", {
+            name: /^(?:Внутри|Модули) раздела «Главная»$/,
+          })
+          .getByRole("link", { name: "Входящие", exact: true })
+          .click();
+        await page
+          .getByRole("region", { name: "Просмотр записи", exact: true })
+          .waitFor();
+      },
     });
     await captureScreenshot(page, {
       path: resolve(artifacts, `web-capture-${width}.png`),
@@ -2231,8 +2342,8 @@ try {
     );
     await b.close();
   });
-  await test("desktop tablet and 320px routes render without overflow or page errors", async () => {
-    for (const width of [320, 768, 1440]) {
+  await test("all legacy routes render at six viewport widths without overflow or page errors", async () => {
+    for (const width of V6_VIEWPORTS) {
       await page.setViewportSize({ width, height: 900 });
       for (const path of [
         "today",
@@ -2323,6 +2434,11 @@ try {
     await page.goto(`${origin}/web/ideal-human`);
     await page.getByRole("heading", { name: "Твой LifeOS Web" }).waitFor();
   });
+  assert.deepEqual(
+    blockedExternalRequests,
+    [],
+    "unexpected external browser request was blocked",
+  );
   assert.equal(passed, expectedCases);
   console.log(
     `Web dashboard browser: ${passed} scenarios passed; fixtures only.`,
@@ -2345,7 +2461,20 @@ try {
         screenshots,
         runFailure,
         pageErrors,
-        viewports: [320, 390, 768, 1440],
+        pageErrorContexts,
+        viewports: V6_VIEWPORTS,
+        v6FixtureCases: V6_SCENARIO_COUNT,
+        v6FixtureWrites: v6FixtureHistory.reduce(
+          (sum, fixture) => ({
+            preferences: sum.preferences + fixture.writes.preferences,
+            policy: sum.policy + fixture.writes.policy,
+          }),
+          { preferences: 0, policy: 0 },
+        ),
+        v6DeliveryJobs: v6FixtureHistory.reduce(
+          (sum, fixture) => sum + fixture.deliveryJobs,
+          0,
+        ),
         api: "isolated_loopback_fixtures",
         productionVerified: false,
         realProviderCalls: 0,

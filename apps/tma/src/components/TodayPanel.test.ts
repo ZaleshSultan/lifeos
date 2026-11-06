@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 vi.mock("../telegram", () => ({ telegram: { initData: "" } }));
 
 import type { TodaySummary } from "../api/planning";
+import { v6Today } from "../../../../scripts/v6-today-fixture";
 import {
   formatPlanTime,
   shiftPlanDate,
@@ -15,6 +16,15 @@ import {
 } from "./TodayPanel";
 
 describe("Today planner presentation", () => {
+  it("renders the real Today view with the shared browser fixture response", () => {
+    const html = renderToStaticMarkup(
+      createElement(TodayDetails, {
+        summary: v6Today("2031-04-07"),
+      }),
+    );
+    expect(html).toContain("2031-04-07");
+    expect(html).toContain("Actual daily task activity");
+  });
   it("loads the requested calendar day instead of only retaining it in the URL", () => {
     expect(
       planningDeepLinkDate("?screen=calendar&date=2030-03-06", "2030-03-05"),

@@ -29,8 +29,38 @@ jobs:
       - run: bash scripts/test-academic-intelligence.sh
       - run: bash scripts/test-daily-life-migration.sh
       - run: pnpm --filter @lifeos/tma build
+        env:
+          VITE_BASE_PATH: /tma/
+          VITE_ALLOW_MOCK_DATA: "false"
       - run: pnpm --filter @lifeos/web build
       - run: node scripts/test-web-session-smoke.mjs
+      - name: Install pinned browser verification tools
+        timeout-minutes: 10
+        run: |
+          npm install --prefix "$RUNNER_TEMP/lifeos-v6-browser" --no-save --package-lock=false --ignore-scripts playwright@1.64.1
+          node "$RUNNER_TEMP/lifeos-v6-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Verify TMA and web with isolated synthetic owners
+        timeout-minutes: 10
+        env:
+          NODE_OPTIONS: --max-old-space-size=640
+          LIFEOS_PLAYWRIGHT_MODULE: ${{ runner.temp }}/lifeos-v6-browser/node_modules/playwright/index.mjs
+          LIFEOS_TMA_DIST: ${{ github.workspace }}/apps/tma/dist
+          LIFEOS_BROWSER_ARTIFACTS: ${{ runner.temp }}/lifeos-v6-tma-results
+          LIFEOS_WEB_BROWSER_ARTIFACTS: ${{ runner.temp }}/lifeos-v6-web-results
+        run: |
+          node --import tsx scripts/test-navigation-browser.mjs
+          node --import tsx apps/web/scripts/test-dashboard-browser.mjs
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: lifeos-v6-synthetic-browser-evidence
+          retention-days: 7
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/lifeos-v6-tma-results/*.json
+            ${{ runner.temp }}/lifeos-v6-tma-results/*.png
+            ${{ runner.temp }}/lifeos-v6-web-results/*.json
+            ${{ runner.temp }}/lifeos-v6-web-results/*.png
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

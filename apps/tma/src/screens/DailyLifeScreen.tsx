@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   idealHumanLocalDate,
@@ -23,6 +23,8 @@ import { mergeReviewedMeals } from "../../../../packages/core/src/nutrition.js";
 import { useSaveIdealHumanDay } from "../api/ideal-human";
 import { ErrorPanel, LoadingPanel } from "../components/AsyncState";
 import { MealPhotoReview } from "../components/ideal-human/MealPhotoReview";
+import { AcademicHomeBriefing } from "../components/AcademicHomeBriefing";
+import type { AcademicHomeRow } from "../../../../packages/core/src/academic-home.js";
 import {
   ChoiceField,
   TextField,
@@ -31,7 +33,13 @@ import {
   inputClass,
   panelClass,
 } from "../components/ideal-human/Fields";
-function Briefing({ view }: { view: BriefingView }) {
+function Briefing({
+  view,
+  children,
+}: {
+  view: BriefingView;
+  children?: ReactNode;
+}) {
   return (
     <section className={`${panelClass} space-y-3`}>
       <h2 className="text-lg font-semibold text-white">{view.title}</h2>
@@ -66,6 +74,7 @@ function Briefing({ view }: { view: BriefingView }) {
           {s}
         </p>
       ))}
+      {children}
       {view.tomorrowOrder.length ? (
         <details>
           <summary className="min-h-11 cursor-pointer text-sm text-zinc-200">
@@ -89,10 +98,16 @@ export function DailyLifeScreen({
   onOpenIdealHuman,
   onOpenReminders,
   onDirtyChange,
+  onOpenAcademicCourse,
 }: {
   onOpenIdealHuman: () => void;
   onOpenReminders: () => void;
   onDirtyChange?: (dirty: boolean) => void;
+  onOpenAcademicCourse?: (
+    courseId: string | null,
+    tab: AcademicHomeRow["tab"],
+    academicTab?: AcademicHomeRow["academicTab"],
+  ) => void;
 }) {
   const [today, setToday] = useState(() => idealHumanLocalDate(new Date()));
   const [date, setDate] = useState(() => {
@@ -341,7 +356,15 @@ export function DailyLifeScreen({
               </div>
             ))}
           </section>
-          <Briefing view={data.data.morning} />
+          <Briefing view={data.data.morning}>
+            {onOpenAcademicCourse ? (
+              <AcademicHomeBriefing
+                onOpen={(row) =>
+                  onOpenAcademicCourse(row.courseId, row.tab, row.academicTab)
+                }
+              />
+            ) : null}
+          </Briefing>
           <Briefing view={data.data.evening} />
           <section className={`${panelClass} space-y-3`}>
             <h2 className="text-lg font-semibold text-white">

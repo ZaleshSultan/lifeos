@@ -5,17 +5,14 @@ import {
 import { ScholarshipDailySummary } from "../components/scholarship/ScholarshipDailySummary";
 import {
   Activity,
-  CalendarClock,
   CloudSun,
   Dumbbell,
-  GraduationCap,
   HeartPulse,
   NotebookText,
   PlugZap,
   RefreshCw,
 } from "lucide-react";
 import {
-  useAcademicQuery,
   useGenerateMonthlyReviewMutation,
   useHomeQuery,
   useMonthlyReviewQuery,
@@ -23,7 +20,7 @@ import {
 } from "../api/hooks";
 import { recoveryModeLabels, type TmaSessionStatus } from "../api/types";
 import { ErrorPanel, LoadingPanel } from "../components/AsyncState";
-import { AcademicGrades } from "../components/AcademicGrades";
+import { AcademicHomeBriefing } from "../components/AcademicHomeBriefing";
 import { IntegrationStatusCard } from "../components/IntegrationStatusCard";
 import { MetricTile } from "../components/MetricTile";
 import { ProgressRing } from "../components/ProgressRing";
@@ -38,6 +35,11 @@ interface HomeScreenProps {
   onOpenIdealHuman: () => void;
   onOpenDailyLife?: () => void;
   onOpenStudy: () => void;
+  onOpenAcademicCourse?: (
+    courseId: string | null,
+    tab: "grades" | "calculator" | "work" | "concierge",
+    academicTab?: "exams" | "personal",
+  ) => void;
   onOpenAi: (date: string) => void;
   session: TmaSessionStatus;
 }
@@ -49,12 +51,12 @@ export function HomeScreen({
   onOpenIdealHuman,
   onOpenDailyLife,
   onOpenStudy,
+  onOpenAcademicCourse,
   onOpenAi,
   session,
 }: HomeScreenProps) {
   const idealHumanDay = idealHumanDayNumber(idealHumanLocalDate(new Date()));
   const query = useHomeQuery();
-  const academicQuery = useAcademicQuery();
   const monthlyReviewQuery = useMonthlyReviewQuery();
   const generateMonthlyReview = useGenerateMonthlyReviewMutation();
   const startGoogleOAuth = useStartGoogleOAuthMutation();
@@ -83,9 +85,6 @@ export function HomeScreen({
   }
 
   const home = query.data;
-  const academic = academicQuery.data;
-  const nextAcademicEvent = academic?.nextAcademicEvent;
-  const activeCourse = academic?.activeCourse;
   const latestReview = monthlyReviewQuery.data?.latest;
   const reviewStats = latestReview?.statsJson;
   const financeStats =
@@ -140,6 +139,14 @@ export function HomeScreen({
           </span>
         </button>
       ) : null}
+      <AcademicHomeBriefing
+        onOpen={(row) =>
+          onOpenAcademicCourse
+            ? onOpenAcademicCourse(row.courseId, row.tab, row.academicTab)
+            : onOpenStudy()
+        }
+      />
+
       <TodayPanel date={home.localDate} onOpenAi={onOpenAi} />
       {onOpenDailyLife ? (
         <button
@@ -237,11 +244,11 @@ export function HomeScreen({
         />
       </section>
 
-      <section className="space-y-2">
-        <div className="flex items-center gap-2 text-sm font-semibold text-white">
+      <details className="space-y-2 rounded-xl border border-white/[0.08] p-4">
+        <summary className="min-h-11 cursor-pointer text-sm font-semibold text-white">
           <PlugZap className="h-5 w-5 text-cyan-400" />
-          Integrations
-        </div>
+          Источники и подключения
+        </summary>
         {integrationCards.map((card) => (
           <IntegrationStatusCard
             actionBusy={
@@ -261,13 +268,13 @@ export function HomeScreen({
             title={card.title}
           />
         ))}
-      </section>
+      </details>
 
-      <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
-        <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
+      <details className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
+        <summary className="min-h-11 cursor-pointer text-sm font-semibold text-white">
           <NotebookText className="h-5 w-5 text-amber-300" />
-          Monthly Review
-        </div>
+          Обзор месяца · финансы и активность
+        </summary>
         {monthlyReviewQuery.isLoading ? (
           <p className="text-sm text-zinc-500">Loading monthly review.</p>
         ) : monthlyReviewQuery.isError ? (
@@ -329,70 +336,7 @@ export function HomeScreen({
           <NotebookText className="h-4 w-4" />
           Generate previous month
         </button>
-      </section>
-
-      <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
-        <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
-          <GraduationCap className="h-5 w-5 text-cyan-400" />
-          Academic
-        </div>
-        {academicQuery.isLoading ? (
-          <p className="text-sm text-zinc-500">Loading academic data.</p>
-        ) : academicQuery.isError ? (
-          <p className="text-sm text-rose-300">
-            Academic unavailable: {academicQuery.error.message}
-          </p>
-        ) : academic ? (
-          <div className="space-y-3">
-            <div className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2">
-              <div className="text-xs text-zinc-500">Current mode</div>
-              <div className="mt-1 text-sm font-semibold text-white">
-                {academic.currentMode.label}
-              </div>
-            </div>
-            {nextAcademicEvent ? (
-              <div className="rounded-lg border border-cyan-400/20 bg-cyan-400/[0.08] px-3 py-2">
-                <div className="flex items-center gap-2 text-xs font-semibold uppercase text-cyan-300">
-                  <CalendarClock className="h-3.5 w-3.5" />
-                  Next event
-                </div>
-                <div className="mt-1 text-sm font-semibold text-white">
-                  {nextAcademicEvent.title ?? nextAcademicEvent.eventType}
-                </div>
-                <div className="mt-0.5 text-xs text-zinc-400">
-                  {nextAcademicEvent.startsAt
-                    ? formatDateTime(nextAcademicEvent.startsAt)
-                    : nextAcademicEvent.dueAt
-                      ? formatDateTime(nextAcademicEvent.dueAt)
-                      : "Time pending"}
-                </div>
-              </div>
-            ) : (
-              <p className="text-sm text-zinc-500">
-                No upcoming academic events.
-              </p>
-            )}
-            {activeCourse ? (
-              <div className="rounded-lg border border-emerald-400/20 bg-emerald-400/[0.08] px-3 py-2">
-                <div className="text-xs text-emerald-300">Active course</div>
-                <div className="mt-1 text-sm font-semibold text-white">
-                  {activeCourse.title}
-                </div>
-              </div>
-            ) : null}
-            <button
-              className="min-h-11 w-full rounded-lg border border-cyan-400/25 bg-cyan-400/10 px-3 py-2 text-sm font-medium text-cyan-200 active:scale-[0.98]"
-              onClick={onOpenStudy}
-              type="button"
-            >
-              Расписание, калькулятор и оценки
-            </button>
-            <AcademicGrades records={academic.academicRecords} />
-          </div>
-        ) : (
-          <p className="text-sm text-zinc-500">Academic data is empty.</p>
-        )}
-      </section>
+      </details>
 
       {home.activeWorkout ? (
         <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
@@ -437,7 +381,6 @@ export function HomeScreen({
         className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.03] text-sm font-semibold text-zinc-200 active:scale-[0.99]"
         onClick={() => {
           void query.refetch();
-          void academicQuery.refetch();
         }}
         type="button"
       >

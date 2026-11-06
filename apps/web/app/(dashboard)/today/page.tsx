@@ -15,6 +15,12 @@ import { MetricCard } from "@/components/MetricCard";
 import { PageHeader } from "@/components/PageHeader";
 import { SectionPanel } from "@/components/SectionPanel";
 import { lifeosApi, type WebHomeSummary } from "@/lib/lifeos-api";
+import type { GradeEventFeed } from "../../../../../packages/core/src/academic-intelligence.js";
+import type { AcademicOverview } from "../../../../../packages/core/src/academic-concierge.js";
+import { buildAcademicHome } from "../../../../../packages/core/src/academic-home.js";
+import type { StudyWorkspace } from "../../../../tma/src/api/study-types";
+import { academicHomeRisks } from "../../../../tma/src/lib/academic-home";
+import { AcademicHomeWorkspace } from "@/components/workspaces/AcademicHomeWorkspace";
 
 export default async function TodayPage() {
   const home = await lifeosApi<WebHomeSummary>("/api/tma/home");
@@ -24,6 +30,18 @@ export default async function TodayPage() {
     `/api/tma/daily-life/summary?date=${home.localDate}`,
   );
   const weather = home.weather;
+  const [gradeFeed, concierge, study] = await Promise.all([
+    dashboardData<GradeEventFeed>("/api/tma/study/grade-events"),
+    dashboardData<AcademicOverview>("/api/tma/study/concierge"),
+    dashboardData<StudyWorkspace>("/api/tma/study"),
+  ]);
+  const now = new Date().toISOString();
+  const academicBriefing = buildAcademicHome({
+    feed: gradeFeed,
+    concierge,
+    risks: academicHomeRisks(study, gradeFeed, now),
+    now,
+  });
   const temp =
     weather?.temperatureC === null || weather?.temperatureC === undefined
       ? "—"
@@ -36,6 +54,11 @@ export default async function TodayPage() {
         summary={home.modeReason}
         title={home.displayName ? `Сегодня · ${home.displayName}` : "Сегодня"}
       />
+      {!daily ? (
+        <div className="mb-6">
+          <AcademicHomeWorkspace view={academicBriefing} />
+        </div>
+      ) : null}
 
       <Link
         href="/capture"
@@ -63,7 +86,9 @@ export default async function TodayPage() {
       </Link>
       {daily ? (
         <div className="mb-6 grid gap-5 lg:grid-cols-2">
-          <BriefingPanel view={daily.morning} />
+          <BriefingPanel view={daily.morning}>
+            <AcademicHomeWorkspace view={academicBriefing} />
+          </BriefingPanel>
           <BriefingPanel view={daily.evening} />
           <DocumentaryPanel summary={daily} />
           <SectionPanel title="Сегодня в записях">

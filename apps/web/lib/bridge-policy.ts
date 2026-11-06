@@ -14,7 +14,11 @@ const resources: Array<{ pattern: RegExp; methods: readonly string[] }> = [
   },
   { pattern: /^study\/grade-events$/, methods: ["GET"] },
   { pattern: /^study\/academic-preferences$/, methods: ["PUT"] },
-  { pattern: /^study\/grade-policy\/[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/, methods: ["PUT"] },
+  {
+    pattern:
+      /^study\/grade-policy\/[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/,
+    methods: ["PUT"],
+  },
   { pattern: /^study\/concierge\/preferences$/, methods: ["PUT"] },
   {
     pattern: /^study\/concierge\/(import\/(preview|confirm)|schedule\/verify)$/,
