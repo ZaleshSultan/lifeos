@@ -841,6 +841,7 @@ const startedAtUtc = new Date().toISOString();
 const caseResults = [];
 const screenshots = [];
 const pageErrors = [];
+const pageErrorContexts = [];
 const blockedExternalRequests = [];
 let diagnosticPage;
 const expectedCases = process.env.LIFEOS_WEB_BROWSER_LOGOUT_ONLY
@@ -861,6 +862,7 @@ async function checkpoint() {
         screenshots,
         runFailure,
         pageErrors,
+        pageErrorContexts,
         productionVerified: false,
         blockedExternalRequests,
         realProviderCalls: 0,
@@ -1016,7 +1018,17 @@ try {
   const page = await context.newPage();
   diagnosticPage = page;
   const errors = pageErrors;
-  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("pageerror", (e) => {
+    errors.push(e.message);
+    const url = new URL(page.url());
+    pageErrorContexts.push({
+      case: currentCase,
+      pathname: url.pathname,
+      academicTab: url.searchParams.get("academicTab"),
+      studyTab: url.searchParams.get("studyTab"),
+      message: e.message,
+    });
+  });
   const acceptDialog = (dialog) => void dialog.accept();
   page.on("dialog", acceptDialog);
   await test("unauthenticated dashboard redirects and real one-time login establishes private cookie", async () => {
@@ -1125,6 +1137,10 @@ try {
   }
   for (const width of V6_VIEWPORTS) {
     const fixture = v6BrowserFixture("A");
+    academicFixtures.set(
+      "A",
+      academicBrowserFixture("A", { confirmedPersonalForHome: true }),
+    );
     v6Fixtures.set("A", fixture);
     v6FixtureHistory.push(fixture);
     await page.setViewportSize({ width, height: 900 });
@@ -2445,6 +2461,7 @@ try {
         screenshots,
         runFailure,
         pageErrors,
+        pageErrorContexts,
         viewports: V6_VIEWPORTS,
         v6FixtureCases: V6_SCENARIO_COUNT,
         v6FixtureWrites: v6FixtureHistory.reduce(

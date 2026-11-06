@@ -60,7 +60,9 @@ try {
   });
   for (const width of V6_VIEWPORTS) {
     const fixture = captureBrowserFixture();
-    const academic = academicBrowserFixture();
+    const academic = academicBrowserFixture("A", {
+      confirmedPersonalForHome: true,
+    });
     const v6 = v6BrowserFixture();
     syntheticStates.push(v6);
     const context = await browser.newContext({

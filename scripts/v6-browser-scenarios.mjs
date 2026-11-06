@@ -388,6 +388,41 @@ export async function v6CourseAndHomeScenarios({
         exact: true,
       })
       .waitFor();
+    assert.equal(new URL(page.url()).searchParams.get("academicTab"), "exams");
+    await driver.home();
+    home = page.getByRole("region", {
+      name: "Академический обзор дня",
+      exact: true,
+    });
+    const personalExam = home.getByRole("button", {
+      name: /Synthetic personal theory event/,
+      includeHidden: true,
+    });
+    await home
+      .locator("details")
+      .filter({ has: personalExam })
+      .locator("summary")
+      .click();
+    await personalExam.click();
+    await driver.studyDestination(null, "concierge");
+    assert.equal(
+      new URL(page.url()).searchParams.get("academicTab"),
+      "personal",
+    );
+    await page
+      .getByRole("tab", {
+        name: "Личные экзамены",
+        exact: true,
+        selected: true,
+      })
+      .waitFor();
+    await page
+      .getByRole("tabpanel", { name: "Личные экзамены", exact: true })
+      .getByRole("heading", {
+        name: "Synthetic personal theory event",
+        exact: true,
+      })
+      .waitFor();
     const requestStart = fixture.requests.length;
     await driver.day(V6_SELECTED_DAY);
     await page.waitForFunction(() =>
