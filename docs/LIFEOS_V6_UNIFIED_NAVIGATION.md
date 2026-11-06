@@ -2,6 +2,8 @@
 
 The candidate exposes exactly four primary destinations on both surfaces: **Главная**, **Здоровье**, **Учёба**, **Настройки**. There is no fifth More tab. Contextual navigation provides the existing workflows within each section.
 
+Current remediation status is **PARTIAL**. The 43-case TMA editor/navigation precursor passed; the final combined 43-TMA/108-web browser matrix and full exact-head CI remain pending. Historical 35-TMA/100-web results do not verify this newer integration. See [blocker remediation](LIFEOS_V6_BLOCKER_REMEDIATION.md).
+
 | Primary section | Existing workflows retained inside it                                                                                                                                              |
 | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Home            | Today, daily briefing, planner, calendar, tasks/reminders, capture/Inbox, assistant, focus, Ideal Human/documentary/creator and finance.                                           |
@@ -37,6 +39,8 @@ TMA visits load lazily and retain visited views so switching primary sections do
 Web's owner-keyed draft provider retains dirty form fields and their original optimistic revisions in React memory. It clears on logout, rejected authentication, owner replacement or provider disposal. It uses no local/session storage and no module-global personal cache. Clean forms adopt fresh server state. Dirty calculator, notification, journal, task, capture, nutrition and workout drafts retain their original comparison base. Acknowledged saves and accepted closes clear their relevant retained drafts; failed writes and declined closes preserve edits. Acknowledged memory capture clears its prepared form before unmount, while the proposed memory action still requires separate approval. An uncertain import retains its retry identity, while the confirm action must be clicked again.
 
 TMA retains lazily visited screens inside its existing owner-scoped workspace. Switching a primary section does not submit a form. In-flight operations retain their navigation guards. Credential fields and explicit one-time review/import/notification approval clicks are not retained by the draft helper. Draft survival across reload, browser close or a different device is intentionally not promised.
+
+The local #64 integration retains the editor's original exact instant and comparison revision across live prop refreshes and section navigation. Title-only edits preserve seconds, milliseconds and the instant represented by an explicit offset; storage may canonicalize the same instant to UTC. Ambiguous changed local clocks require correction instead of an inferred DST choice. Failed/stale saves and declined discard preserve the original draft; only acknowledged save or accepted discard clears it. The new combined browser cases exercise these behaviors at 320 and 390 px, including concurrent synthetic edits and a fresh explicit review/save after conflict. Their final combined runtime result is pending.
 
 Home's academic card is compact and read-only: recent grade references, verified upcoming unfinished deadlines, confirmed exams and reviewed target risks use existing services. Less frequent integrations and monthly review are disclosures. The same academic view composes inside the on-screen morning briefing; it never changes the scheduled digest or creates a second delivery path.
 
