@@ -36,6 +36,11 @@ if ! {
  cat "$blocker_root/scripts/academic-intelligence-test-fixtures/deadlines.sql"
  cat "$blocker_root/scripts/academic-intelligence-test-fixtures/blocker-setup.sql"
 } | blocker_psql >"$blocker_results/setup.log" 2>&1;then tail -100 "$blocker_results/setup.log" >&2;exit 1;fi
+if [[ "${1:-all}" == html-inventory ]];then
+ if ! blocker_psql <"$blocker_root/scripts/academic-intelligence-test-fixtures/blocker-html-inventory.sql" >"$blocker_results/html-inventory.log" 2>&1;then tail -60 "$blocker_results/html-inventory.log" >&2;exit 1;fi
+ printf 'PASS: verified incomplete HTML inventory preserves assignment delivery\n';exit 0
+fi
+if [[ "${1:-all}" != all ]];then printf 'Unsupported notification regression case\n' >&2;exit 1;fi
 blocker_failed=0
 for blocker_case in expiry cutover selection;do
  if blocker_psql <"$blocker_root/scripts/academic-intelligence-test-fixtures/blocker-$blocker_case.sql" >"$blocker_results/$blocker_case.log" 2>&1;then
@@ -79,5 +84,27 @@ for blocker_worker in {1..8};do
 done
 for blocker_pid in "${blocker_pids[@]}";do if ! wait "$blocker_pid";then cat "$blocker_results"/begin-*.log >&2;exit 1;fi;done
 if ! blocker_psql <"$blocker_root/scripts/academic-intelligence-test-fixtures/blocker-parallel-assertions.sql" >"$blocker_results/parallel-assertions.log" 2>&1;then tail -60 "$blocker_results/parallel-assertions.log" >&2;exit 1;fi
+if ! blocker_psql <"$blocker_root/scripts/academic-intelligence-test-fixtures/blocker-race-setup.sql" >"$blocker_results/race-setup.log" 2>&1;then tail -60 "$blocker_results/race-setup.log" >&2;exit 1;fi
+blocker_pids=()
+for blocker_worker in {1..8};do
+ blocker_psql -c "set role service_role;insert into intelligence_blocker_test.expiry_results select $blocker_worker,public.begin_notification_delivery('reminder','f6000000-0000-4000-8000-000000000045',reminder_id,token)from intelligence_blocker_test.expiry_claim;" >"$blocker_results/expiry-race-$blocker_worker.log" 2>&1 &
+ blocker_pids+=("$!")
+done
+for blocker_pid in "${blocker_pids[@]}";do if ! wait "$blocker_pid";then cat "$blocker_results"/expiry-race-*.log >&2;exit 1;fi;done
+blocker_psql -c "begin;set local role service_role;select public.academic_intelligence_service('f6000000-0000-4000-8000-000000000046','review_policy',args)from intelligence_blocker_test.policy_claim;insert into intelligence_blocker_test.policy_results values('review','accepted',null);select pg_sleep(0.5);commit;" >"$blocker_results/policy-review-race.log" 2>&1 &
+blocker_review_pid="$!"
+blocker_psql -c "begin;set local role service_role;insert into intelligence_blocker_test.policy_results select 'delivery','authorized',public.begin_notification_delivery('reminder','f6000000-0000-4000-8000-000000000046',reminder_id,token)from intelligence_blocker_test.policy_claim;select pg_sleep(0.5);commit;" >"$blocker_results/policy-begin-race.log" 2>&1 &
+blocker_begin_pid="$!"
+for blocker_pid in "$blocker_review_pid" "$blocker_begin_pid";do if ! wait "$blocker_pid";then cat "$blocker_results"/policy-*-race.log >&2;exit 1;fi;done
+if ! blocker_psql <"$blocker_root/scripts/academic-intelligence-test-fixtures/blocker-policy-race-assertions.sql" >"$blocker_results/policy-race-assertions.log" 2>&1;then tail -60 "$blocker_results/policy-race-assertions.log" >&2;exit 1;fi
+blocker_pids=()
+for blocker_worker in {1..2};do
+ blocker_psql -c "set role service_role;select intelligence_blocker_test.competing_review('cas$blocker_worker');" >"$blocker_results/policy-cas-$blocker_worker.log" 2>&1 &
+ blocker_pids+=("$!")
+done
+for blocker_pid in "${blocker_pids[@]}";do if ! wait "$blocker_pid";then cat "$blocker_results"/policy-cas-*.log >&2;exit 1;fi;done
+for blocker_case in race-assertions html-inventory;do
+ if ! blocker_psql <"$blocker_root/scripts/academic-intelligence-test-fixtures/blocker-$blocker_case.sql" >"$blocker_results/$blocker_case.log" 2>&1;then tail -60 "$blocker_results/$blocker_case.log" >&2;exit 1;fi
+done
 blocker_count="$(blocker_psql -c 'select count(*)from intelligence_blocker_test.proofs;')"
 printf 'PASS: all3 notification blocker contracts; %s assertions; no external sends\n' "$blocker_count"

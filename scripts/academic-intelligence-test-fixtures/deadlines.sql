@@ -77,6 +77,18 @@ do $$declare u uuid:='f6000000-0000-4000-8000-000000000001';c jsonb;changed json
   raise exception using errcode='ZX001',message='rollback_synthetic_retry';
  exception when sqlstate'ZX001'then null;end;
  perform intelligence_test.assert((select status='pending'and delivery_attempts=0 from public.reminders where id=rid),'synthetic retry probe rolled back without mutating base receipt');
+ begin
+  select claim_token into token from public.claim_due_reminders(clock_timestamp(),100)where id=rid and user_id=u;
+  -- Definite preparation failure happens BEFORE begin: attempts stay zero,
+  -- but a failure and retry timestamp still permanently forbid reprepare.
+  perform public.finish_notification_delivery('reminder',u,rid,token,'retry','preparation_failed',null,60);
+  update public.source_events set raw_json=raw_json||'{"course_title":"Synthetic preparation retry changed"}'::jsonb where user_id=u and id=(c->>'referenceId')::uuid;
+  perform public.plan_academic_notifications(u);
+  receipt_preserved:=exists(select from public.reminders where id=rid and status='cancelled'and delivery_attempts=0 and failure_count=1 and next_attempt_at is not null);
+  if not receipt_preserved then raise exception'legacy preparation failure receipt reset';end if;
+  raise exception using errcode='ZX001',message='rollback_synthetic_preparation_failure';
+ exception when sqlstate'ZX001'then null;end;
+ perform intelligence_test.assert(receipt_preserved,'preparation failure before begin preserves failure and retry budget across source revision');
  update public.source_events set due_at=due_at+interval'1 minute'where user_id=u and id=(c->>'referenceId')::uuid;
  perform intelligence_test.assert(not exists(select from public.reminders where id=rid and status in('pending','processing')),'due revision retires old prepared legacy deadline before revalidation');
  perform public.plan_academic_notifications(u);
