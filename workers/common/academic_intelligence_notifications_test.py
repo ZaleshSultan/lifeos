@@ -30,7 +30,7 @@ class IntelligencePreparationTests(unittest.TestCase):
         class Store:
             def request(self, method, table, query=None, body=None):
                 calls.append(table)
-                return [{"user_id": OWNER}] if table == "academic_intelligence_preferences" else [{"key": "grade:synthetic"}]
+                return [{"user_id": OWNER}] if table == "academic_intelligence_preferences" else [{"key": "grade:synthetic", "fingerprint": "a" * 64}]
         def failed(_): raise ValueError("unavailable")
         self.assertEqual(plan_intelligence_notifications(Store(), renderer=failed)["failed"], 1)
         self.assertNotIn("rpc/prepare_academic_intelligence_notification", calls)
