@@ -31,7 +31,7 @@ begin
  and a.score is not distinct from e.new_score and nullif(a.max_score,0)is not distinct from e.new_max_score
  and coalesce(a.raw_json->'_grade_visibility_unknown','false'::jsonb)<>'true'::jsonb)),'repro2 all six underlying groups meet the actual grade eligibility conditions');
  perform intelligence_blocker_test.assert(not exists(select from public.academic_intelligence_jobs where user_id=u and job_key=sixth_key),'repro2 sixth eligible group has no prior receipt or binding');
- 
+
  perform intelligence_blocker_test.assert((select count(*)=1 from public.academic_intelligence_planning_candidates(u,at_time)v where v->>'key'=sixth_key),'the unseen sixth grade plans after dedup with recovered hourly allowance');
  select v into c from public.academic_intelligence_planning_candidates(u,at_time)v where v->>'key'=sixth_key;
  perform intelligence_blocker_test.assert(public.prepare_academic_intelligence_notification(u,c->>'key',c->>'fingerprint','Synthetic newly eligible sixth grade','[]'),'keyed preparation accepts sixth grade independently of old handled candidates');

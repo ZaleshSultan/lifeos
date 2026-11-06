@@ -121,8 +121,14 @@ describe("academic notification preparation", () => {
         });
       const result = renderAcademicNotification(c, now);
       expect(result.message).toContain("Точный прогноз на 70 пока недоступен");
-      if (defect === "review") expect(result.message).toContain("необходимо подтвердить веса оценивания");
-      if (defect === "stale") expect(result.message).toContain("свежая успешная проверка Moodle не подтверждена");
+      if (defect === "review")
+        expect(result.message).toContain(
+          "необходимо подтвердить веса оценивания",
+        );
+      if (defect === "stale")
+        expect(result.message).toContain(
+          "свежая успешная проверка Moodle не подтверждена",
+        );
       expect(result.message).not.toContain("Заработано итоговых баллов");
     }
   });
@@ -133,7 +139,9 @@ describe("academic notification preparation", () => {
     const result = renderAcademicNotification(c, now);
     expect(result.message).toContain("сведения об оценках устарели");
     expect(result.message).not.toContain("Заработано итоговых баллов");
-    expect(result.message).not.toContain("необходимо подтвердить веса оценивания");
+    expect(result.message).not.toContain(
+      "необходимо подтвердить веса оценивания",
+    );
     expect(c.forecast.review.sourceRef).toBe("Current synthetic syllabus p2");
   });
   it("groups changes and omits pretend course analysis when mapping is unknown", () => {

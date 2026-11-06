@@ -65,7 +65,8 @@ export function renderAcademicNotification(candidate: unknown, now: string) {
       lines.push(`Ещё ${events.length - 5} изменений — в истории курса.`, "");
     const forecast = object(c.forecast);
     let confirmed = false;
-    let unavailable = "Получена новая оценка. Точный прогноз на 70 пока недоступен: необходимо подтвердить веса оценивания.";
+    let unavailable =
+      "Получена новая оценка. Точный прогноз на 70 пока недоступен: необходимо подтвердить веса оценивания.";
     if (
       courseId &&
       Array.isArray(forecast.records) &&
@@ -76,14 +77,26 @@ export function renderAcademicNotification(candidate: unknown, now: string) {
         courseId,
         now,
       } as unknown as CourseGradeTargetInput);
-      if (insight.observations.some((observation) => observation.status === "stale"))
-        unavailable = "Получена новая оценка. Точный прогноз на 70 пока недоступен: сведения об оценках устарели или время их проверки не подтверждено. Обнови данные Moodle.";
+      if (
+        insight.observations.some(
+          (observation) => observation.status === "stale",
+        )
+      )
+        unavailable =
+          "Получена новая оценка. Точный прогноз на 70 пока недоступен: сведения об оценках устарели или время их проверки не подтверждено. Обнови данные Moodle.";
       else {
         const lms = object(forecast.lms);
         const checked = Date.parse(String(lms.lastSuccessfulSyncAt ?? ""));
         const at = Date.parse(now);
-        if (lms.configured !== true || lms.stale !== false || !Number.isFinite(checked) || checked > at || at - checked > 6 * 3_600_000)
-          unavailable = "Получена новая оценка. Точный прогноз на 70 пока недоступен: свежая успешная проверка Moodle не подтверждена. Обнови источник.";
+        if (
+          lms.configured !== true ||
+          lms.stale !== false ||
+          !Number.isFinite(checked) ||
+          checked > at ||
+          at - checked > 6 * 3_600_000
+        )
+          unavailable =
+            "Получена новая оценка. Точный прогноз на 70 пока недоступен: свежая успешная проверка Moodle не подтверждена. Обнови источник.";
       }
       const bindings = object(forecast.bindings);
       const mappedVisibleEvents = events.every((event) => {

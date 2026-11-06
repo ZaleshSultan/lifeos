@@ -50,4 +50,3 @@ grant execute on all functions in schema intelligence_blocker_test to service_ro
 set role service_role;
 select public.academic_intelligence_service('f6000000-0000-4000-8000-000000000041','preferences','{"expectedRevision":0,"expectedAcademicRevision":0,"preferences":{"gradeAlertsEnabled":true,"assignmentAlertsEnabled":false,"quizAlertsEnabled":false,"assignmentOffsetsMinutes":[4320,1440],"quizOffsetsMinutes":[4320,1440],"quietStart":"00:00","quietEnd":"00:00"}}');
 select public.academic_intelligence_service('f6000000-0000-4000-8000-000000000042','preferences','{"expectedRevision":0,"expectedAcademicRevision":0,"preferences":{"gradeAlertsEnabled":true,"assignmentAlertsEnabled":false,"quizAlertsEnabled":false,"assignmentOffsetsMinutes":[4320,1440],"quizOffsetsMinutes":[4320,1440],"quietStart":"00:00","quietEnd":"00:00"}}');
-
