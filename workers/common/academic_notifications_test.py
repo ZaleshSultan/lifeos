@@ -35,6 +35,24 @@ class AcademicPlanningTest(unittest.TestCase):
         self.assertEqual(academic.plan_notifications(store, owner_limit=2), {"queued": 2, "cancelled": 0, "failed": 0})
         self.assertEqual([c[3]["p_user_id"] for c in store.calls if c[0] == "POST"], ["f0000000-0000-4000-8000-000000000001", "f0000000-0000-4000-8000-000000000002"])
 
+    def test_legacy_assignments_are_planned_under_both_history_flag_states(self):
+        for enabled in (False, True):
+            with self.subTest(history_enabled=enabled):
+                calls = []
+                class Store:
+                    def request(self, method, path, query=None, body=None):
+                        calls.append((method, path, body))
+                        if path == "academic_notification_preferences":
+                            return [{"user_id": "f0000000-0000-4000-8000-000000000001", "preferences": {"assignmentAlertsEnabled": True}}]
+                        if path == "rpc/plan_academic_notifications":
+                            return {"queued": 1, "cancelled": 0}
+                        raise AssertionError("unexpected transport")
+                with patch("common.academic_grade_events.grade_events_enabled", return_value=enabled), patch("common.academic_intelligence_notifications.plan_intelligence_notifications", return_value={"queued": 0, "cancelled": 0, "failed": 0}) as v6:
+                    result = academic.plan_notifications(Store())
+                self.assertEqual(result, {"queued": 1, "cancelled": 0, "failed": 0})
+                self.assertEqual([path for method, path, _ in calls if method == "POST"], ["rpc/plan_academic_notifications"])
+                self.assertEqual(v6.call_count, int(enabled))
+
     def test_owner_parse_failure_cannot_become_an_unscoped_plan(self):
         class Store:
             def request(self, method, path, query=None, body=None):

@@ -12,7 +12,7 @@ set role service_role;
 do $$declare
  u uuid:='f6000000-0000-4000-8000-000000000043';course_uuid uuid:='f6430000-0000-4000-8000-000000000043';
  definition_text text;config jsonb;scenarios jsonb:='{}';scenario text;score_value int;course_at timestamptz;
- event_id uuid;rid uuid;before_plan jsonb;after_plan jsonb;token uuid;recipient bigint;consent_before jsonb;consent_after jsonb;review jsonb;
+ event_id uuid;rid uuid;before_plan jsonb;after_plan jsonb;token uuid;recipient bigint;quiz jsonb;quiz_after jsonb;quiz_id uuid;quiz_token uuid;assignment_id uuid;assignment_token uuid;consent_before jsonb;consent_after jsonb;review jsonb;
 begin
  definition_text:='{"version":1,"sourceName":"Reviewed synthetic syllabus p2","attestationThreshold":25,"fields":[{"id":"a","label":"ATT1","period":"att1","weightPercent":100},{"id":"b","label":"ATT2","period":"att2","weightPercent":100},{"id":"exam","label":"Exam","period":"exam","weightPercent":100}]}';
  foreach scenario in array array['pessimistic','realistic','optimistic']loop
@@ -56,6 +56,47 @@ begin
  perform intelligence_blocker_test.assert((select count(*)=1 from public.academic_intelligence_deadline_candidates(u,clock_timestamp())v where v->>'kind'='assignment'),'assignment remains source-eligible for the shared stricter checks');
  perform intelligence_blocker_test.assert(not exists(select from public.academic_intelligence_planning_candidates(u,clock_timestamp())v where v->>'kind'='assignment'),'enabling V6 preparation cannot duplicate the authoritative legacy assignment route');
  perform intelligence_blocker_test.assert(not exists(select from public.academic_intelligence_jobs where user_id=u),'policy review creates no second assignment job');
+ -- A later quiz opt-in enables only its own category. The assignment and quiet
+ -- subset is identical, so the legacy revision/queued rights must remain stable.
+ perform public.academic_intelligence_service(u,'preferences',jsonb_build_object('expectedRevision',1,'expectedAcademicRevision',1,'preferences',
+ '{"gradeAlertsEnabled":false,"assignmentAlertsEnabled":true,"quizAlertsEnabled":true,"assignmentOffsetsMinutes":[30],"quizOffsetsMinutes":[180],"quietStart":"00:00","quietEnd":"00:00"}'::jsonb));
+ insert into public.source_events(user_id,source_key,external_id,event_type,title,status,due_at,last_synced_at,source_url,raw_json)
+ values(u,'university_platform','activity:moodle:42:quiz:4302','task','Synthetic policy unaffected quiz','active',clock_timestamp()+interval'179 minutes',clock_timestamp(),
+ 'https://lms.astanait.edu.kz/mod/quiz/view.php?id=4302',jsonb_build_object('moodle_course_id','42','moodle_cmid','4302','module_type','quiz','course_title','Synthetic course','submission_status','not_submitted','parser_warnings','[]'::jsonb,'closes_at',clock_timestamp()+interval'179 minutes'))returning id into quiz_id;
+ -- One exact authoritative timestamp defines both due and verified close.
+ update public.source_events set raw_json=raw_json||jsonb_build_object('closes_at',due_at)where user_id=u and id=quiz_id;
+ insert into public.source_events(user_id,source_key,external_id,event_type,title,status,due_at,last_synced_at,source_url,raw_json)
+ values(u,'university_platform','activity:moodle:42:assign:4303','task','Synthetic retained assignment','active',clock_timestamp()+interval'29 minutes',clock_timestamp(),
+ 'https://lms.astanait.edu.kz/mod/assign/view.php?id=4303','{"moodle_course_id":"42","moodle_cmid":"4303","module_type":"assign","submission_status":"not_submitted","parser_warnings":[]}'::jsonb)returning id into assignment_id;
+ perform public.plan_academic_notifications(u);
+ select reminder_id into assignment_id from public.academic_notification_jobs where user_id=u and reference_id=assignment_id and kind='assignment';
+ select v into quiz from public.academic_intelligence_planning_candidates(u,clock_timestamp())v where v->>'kind'='quiz';
+ perform intelligence_blocker_test.assert(quiz is not null and public.prepare_academic_intelligence_notification(u,quiz->>'key',quiz->>'fingerprint','Synthetic current quiz','[]'),'separate quiz opt-in prepares one current quiz');
+ select reminder_id into quiz_id from public.academic_intelligence_jobs where user_id=u and job_key=quiz->>'key';
+ select claim_token into quiz_token from public.claim_due_reminders(clock_timestamp(),100)where user_id=u and id=quiz_id;
+ select claim_token into assignment_token from public.reminders where user_id=u and id=assignment_id;
+ perform public.academic_intelligence_service(u,'review_policy',jsonb_build_object('expectedRevision',2,'courseId',course_uuid,'courseUpdatedAt',course_at,'review',review));
+ begin
+  perform public.academic_intelligence_service(u,'review_policy',jsonb_build_object('expectedRevision',2,'courseId',course_uuid,'courseUpdatedAt',course_at,'review',review));
+  raise exception'stale concurrent policy review accepted';
+ exception when serialization_failure then null;end;
+ perform public.academic_intelligence_service(u,'preferences',jsonb_build_object('expectedRevision',3,'expectedAcademicRevision',1,'preferences',
+ '{"gradeAlertsEnabled":true,"assignmentAlertsEnabled":true,"quizAlertsEnabled":true,"assignmentOffsetsMinutes":[30],"quizOffsetsMinutes":[180],"quietStart":"00:00","quietEnd":"00:00"}'::jsonb));
+ select public.academic_intelligence_candidate(u,quiz->>'key',clock_timestamp())into quiz_after;
+ perform intelligence_blocker_test.assert(quiz_after->>'fingerprint'=quiz->>'fingerprint'and exists(select from public.reminders where id=quiz_id and status='processing'and claim_token=quiz_token),'policy and grade-only preference edits preserve unrelated quiz fingerprint and claim');
+ perform intelligence_blocker_test.assert((select revision=1 and preferences=consent_before from public.academic_notification_preferences where user_id=u)and exists(select from public.reminders where id=assignment_id and status='processing'and claim_token=assignment_token),'grade-only preference save preserves legacy revision and queued assignment claim');
+ begin
+  recipient:=public.begin_notification_delivery('reminder',u,assignment_id,assignment_token);
+  if recipient<>760043 or recipient is null then raise exception'grade-only edit removed legacy delivery rights';end if;
+  raise exception using errcode='ZX001',message='rollback_synthetic_legacy_begin';
+ exception when sqlstate'ZX001'then null;end;
+ perform intelligence_blocker_test.assert(public.begin_notification_delivery('reminder',u,quiz_id,quiz_token)=760043,'queued quiz keeps real final delivery rights after policy-only changes');
+ perform public.finish_notification_delivery('reminder',u,quiz_id,quiz_token,'unknown','synthetic_no_send',null,null);
+ perform public.academic_intelligence_service(u,'preferences',jsonb_build_object('expectedRevision',4,'expectedAcademicRevision',1,'preferences',
+ '{"gradeAlertsEnabled":true,"assignmentAlertsEnabled":false,"quizAlertsEnabled":true,"assignmentOffsetsMinutes":[30],"quizOffsetsMinutes":[180],"quietStart":"00:00","quietEnd":"00:00"}'::jsonb));
+ perform intelligence_blocker_test.assert(public.begin_notification_delivery('reminder',u,assignment_id,assignment_token)is null and exists(select from public.reminders where id=assignment_id and status='cancelled'and delivery_attempts=0),'real assignment consent revocation still cancels and fences queued delivery');
+ perform intelligence_blocker_test.assert((select count(*)=2 from public.reminders where user_id=u and status='unknown'and delivery_attempts=1),'policy and consent edits preserve both synthetic closed delivery receipts');
+
 end;$$;
 
 reset role;

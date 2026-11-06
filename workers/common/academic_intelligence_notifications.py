@@ -64,13 +64,20 @@ def plan_intelligence_notifications(store: Any, *, owner_limit: int = 1000, rend
                 if not isinstance(candidates, list) or len(candidates) > 10:
                     raise ValueError("academic_candidates_invalid")
                 for candidate in candidates:
-                    prepared = renderer(candidate)
-                    acknowledged = store.request("POST", "rpc/prepare_academic_intelligence_notification", body={
-                        "p_user_id": owner, "p_key": candidate["key"], "p_fingerprint": candidate["fingerprint"],
-                        "p_message": prepared["message"], "p_links": prepared["links"]})
-                    if type(acknowledged) is not bool:
-                        raise ValueError("academic_prepare_invalid")
-                    total["queued"] += int(acknowledged)
+                    try:
+                        if not isinstance(candidate, dict) or not isinstance(candidate.get("key"), str) or not 1 <= len(candidate["key"]) <= 256 or not isinstance(candidate.get("fingerprint"), str) or re.fullmatch(r"[a-f0-9]{64}", candidate["fingerprint"]) is None:
+                            raise ValueError("academic_candidate_invalid")
+                        prepared = renderer(candidate)
+                        acknowledged = store.request("POST", "rpc/prepare_academic_intelligence_notification", body={
+                            "p_user_id": owner, "p_key": candidate["key"], "p_fingerprint": candidate["fingerprint"],
+                            "p_message": prepared["message"], "p_links": prepared["links"]})
+                        if type(acknowledged) is not bool:
+                            raise ValueError("academic_prepare_invalid")
+                        total["queued"] += int(acknowledged)
+                    except Exception:
+                        # One transient render/prepare failure must not hide the
+                        # remaining bounded groups. Its unbound key retries next poll.
+                        total["failed"] += 1
             except Exception:
                 total["failed"] += 1
         if len(rows) < int(query["limit"]):
