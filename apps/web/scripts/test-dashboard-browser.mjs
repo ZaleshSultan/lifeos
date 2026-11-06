@@ -2224,6 +2224,20 @@ try {
       test,
       prefix: `Web ${width}px`,
       open: () => page.goto(`${origin}/web/capture`),
+      roundTripSections: async () => {
+        const navigation = v6BrowserDriver(page, "web", origin);
+        await navigation.section("Здоровье");
+        await navigation.section("Главная");
+        await page
+          .getByRole("navigation", {
+            name: /^(?:Внутри|Модули) раздела «Главная»$/,
+          })
+          .getByRole("link", { name: "Входящие", exact: true })
+          .click();
+        await page
+          .getByRole("region", { name: "Просмотр записи", exact: true })
+          .waitFor();
+      },
     });
     await captureScreenshot(page, {
       path: resolve(artifacts, `web-capture-${width}.png`),

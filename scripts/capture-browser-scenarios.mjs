@@ -6,6 +6,7 @@ export async function captureBrowserScenarios({
   fixture,
   open,
   test,
+  roundTripSections,
   prefix = "capture",
 }) {
   const detail = () =>
@@ -133,6 +134,26 @@ export async function captureBrowserScenarios({
       .filter({ hasText: /недоступны|недоступна/ })
       .waitFor();
     assert.equal(await time.inputValue(), "2026-11-04T16:00");
+    const declinedCancel = page.waitForEvent("dialog").then(async (dialog) => {
+      assert.match(dialog.message(), /несохранённые изменения/);
+      await dialog.dismiss();
+    });
+    await Promise.all([
+      detail()
+        .getByRole("button", { name: "Отменить редактирование", exact: true })
+        .click(),
+      declinedCancel,
+    ]);
+    assert.equal(await time.inputValue(), "2026-11-04T16:00");
+    if (roundTripSections) {
+      const revisionBefore = fixture.captures.get(taskId).revision;
+      const writesBefore = fixture.domainWrites.length;
+      await roundTripSections();
+      await time.waitFor();
+      assert.equal(await time.inputValue(), "2026-11-04T16:00");
+      assert.equal(fixture.captures.get(taskId).revision, revisionBefore);
+      assert.equal(fixture.domainWrites.length, writesBefore);
+    }
     await detail()
       .getByRole("button", { name: "Сохранить предложение", exact: true })
       .click();
@@ -236,6 +257,18 @@ export async function captureBrowserScenarios({
     await page
       .getByRole("button", { name: "Память по выбору", exact: true })
       .click();
+    assert.equal(
+      await memory().getByLabel("Ключ памяти", { exact: true }).inputValue(),
+      "",
+      "a successfully prepared memory form must not restore its old key",
+    );
+    assert.equal(
+      await memory()
+        .getByLabel("Что явно запомнить", { exact: true })
+        .inputValue(),
+      "",
+      "a successfully prepared memory form must not restore stale content",
+    );
     await memory()
       .getByRole("button", { name: "Редактировать память", exact: true })
       .click();
