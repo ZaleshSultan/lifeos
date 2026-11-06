@@ -5,16 +5,30 @@ set -euo pipefail
 blocker_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 blocker_container="lifeos-notification-blockers-${RANDOM}-$$"
 blocker_results="$(mktemp -d)"
-cleanup(){ docker rm -f "$blocker_container" >/dev/null 2>&1 || true; rm -rf -- "$blocker_results"; }
+blocker_container_id=""
+blocker_created=false
+cleanup(){
+ if [[ "$blocker_created" == true && "$blocker_container_id" =~ ^[a-f0-9]{64}$ ]];then
+  # A failed name collision grants no ownership. Remove only the successful
+  # run's immutable ID after checking this fixture's unique label and network.
+  blocker_identity="$(docker inspect -f '{{index .Config.Labels "lifeos.notification-blocker-fixture"}}|{{.HostConfig.NetworkMode}}' "$blocker_container_id" 2>/dev/null || true)"
+  if [[ "$blocker_identity" == "$blocker_container|none" ]];then docker rm -f -- "$blocker_container_id" >/dev/null 2>&1 || true;fi
+ fi
+ rm -rf -- "$blocker_results"
+}
 trap cleanup EXIT
-docker run --rm --pull=never -d --network none --log-driver none --memory 256m --cpus 1 --pids-limit 96 --name "$blocker_container" --tmpfs /var/lib/postgresql/data:rw,size=256m -e POSTGRES_HOST_AUTH_METHOD=trust postgres:17 >/dev/null
+if ! blocker_container_id="$(docker run --rm --pull=never -d --network none --log-driver none --memory 256m --cpus 1 --pids-limit 96 --name "$blocker_container" --label "lifeos.notification-blocker-fixture=$blocker_container" --tmpfs /var/lib/postgresql/data:rw,size=256m -e POSTGRES_HOST_AUTH_METHOD=trust postgres:17)";then
+ printf 'Notification fixture creation failed; no container ownership acquired\n' >&2;exit 1
+fi
+if [[ ! "$blocker_container_id" =~ ^[a-f0-9]{64}$ ]];then printf 'Notification fixture did not return an immutable container ID\n' >&2;exit 1;fi
+blocker_created=true
 blocker_ready=false
 for blocker_attempt in {1..90};do
- if docker exec "$blocker_container" pg_isready -h127.0.0.1 -U postgres >/dev/null 2>&1;then blocker_ready=true;break;fi
+ if docker exec "$blocker_container_id" pg_isready -h127.0.0.1 -U postgres >/dev/null 2>&1;then blocker_ready=true;break;fi
  sleep 1
 done
 if [[ "$blocker_ready" != true ]];then printf 'Notification regression PostgreSQL unavailable\n' >&2;exit 1;fi
-blocker_psql(){ docker exec -i "$blocker_container" psql -h127.0.0.1 -X -qAt -U postgres -vON_ERROR_STOP=1 "$@"; }
+blocker_psql(){ docker exec -i "$blocker_container_id" psql -h127.0.0.1 -X -qAt -U postgres -vON_ERROR_STOP=1 "$@"; }
 if ! {
  cat "$blocker_root/scripts/security-test-fixtures/setup.sql"
  for blocker_migration in "$blocker_root"/supabase/migrations/*.sql;do cat "$blocker_migration";printf '\n';done
