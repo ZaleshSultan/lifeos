@@ -840,7 +840,7 @@ const startedAtUtc = new Date().toISOString();
 const caseResults = [];
 const screenshots = [];
 const pageErrors = [];
-const expectedCases = process.env.LIFEOS_WEB_BROWSER_LOGOUT_ONLY ? 2 : 78;
+const expectedCases = process.env.LIFEOS_WEB_BROWSER_LOGOUT_ONLY ? 2 : 82;
 async function checkpoint() {
   const path = resolve(artifacts, "checkpoint.json");
   await writeFile(
@@ -1030,6 +1030,67 @@ try {
       });
     }
   });
+  for (const width of [320, 360, 390, 430]) {
+    await test(`four primary sections preserve planner drafts and course/day context at ${width}px`, async () => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto(
+        `${origin}/web/planner?courseId=fixture-course&date=2026-01-02`,
+      );
+      const primary = page.getByRole("navigation", {
+        name: "Основные разделы LifeOS",
+        exact: true,
+      });
+      assert.equal(await primary.getByRole("link").count(), 4);
+      await page
+        .getByRole("textbox", { name: "Название", exact: true })
+        .fill(`Unfinished fixture ${width}`);
+      await primary
+        .getByRole("link", { name: "Здоровье", exact: true })
+        .click();
+      await page
+        .getByRole("heading", {
+          name: "Здоровье и восстановление",
+          exact: true,
+        })
+        .waitFor();
+      assert.equal(
+        await primary.locator('[aria-current="page"]').innerText(),
+        "Здоровье",
+      );
+      await primary
+        .getByRole("link", { name: "Настройки", exact: true })
+        .click();
+      await page.locator("h1").waitFor();
+      await primary.getByRole("link", { name: "Главная", exact: true }).click();
+      await page
+        .getByRole("navigation", {
+          name: "Внутри раздела «Главная»",
+          exact: true,
+        })
+        .getByRole("link", { name: "Задачи и план", exact: true })
+        .click();
+      assert.equal(
+        await page
+          .getByRole("textbox", { name: "Название", exact: true })
+          .inputValue(),
+        `Unfinished fixture ${width}`,
+      );
+      const route = new URL(page.url());
+      assert.equal(route.searchParams.get("courseId"), "fixture-course");
+      assert.equal(route.searchParams.get("date"), "2026-01-02");
+      assert.ok(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      );
+      await captureScreenshot(page, {
+        path: resolve(artifacts, `web-navigation-${width}.png`),
+      });
+      await page
+        .getByRole("textbox", { name: "Название", exact: true })
+        .fill("");
+    });
+  }
   await test("Ideal Human saves once and persists after reloading", async () => {
     await openFixtureJournal(page);
     await page.getByLabel("Утренний вес, кг", { exact: true }).fill("51.7");
@@ -1076,6 +1137,28 @@ try {
     assert.ok(remoteDay);
     remoteDay.revision++;
     remoteDay.notes = "Fixture remote edit";
+    await page
+      .getByRole("navigation", { name: "Основные разделы LifeOS", exact: true })
+      .getByRole("link", { name: "Здоровье", exact: true })
+      .click();
+    await page
+      .getByRole("heading", { name: "Здоровье и восстановление", exact: true })
+      .waitFor();
+    await page
+      .getByRole("navigation", { name: "Основные разделы LifeOS", exact: true })
+      .getByRole("link", { name: "Главная", exact: true })
+      .click();
+    await page
+      .getByRole("navigation", {
+        name: "Модули раздела «Главная»",
+        exact: true,
+      })
+      .getByRole("link", { name: "Дневник и съёмка", exact: true })
+      .click();
+    assert.equal(
+      await page.getByLabel("Утренний вес, кг", { exact: true }).inputValue(),
+      "52",
+    );
     await page
       .getByRole("button", { name: "Сохранить день", exact: true })
       .click();
@@ -1744,19 +1827,35 @@ try {
     await page.setViewportSize({ width: 1440, height: 1000 });
     page.off("dialog", acceptDialog);
     let navigationDialog = false;
-    page.once("dialog", (dialog) => {
+    const rejectUnexpectedDialog = (dialog) => {
       navigationDialog = true;
       return dialog.dismiss();
-    });
+    };
+    page.on("dialog", rejectUnexpectedDialog);
     try {
       await page
-        .getByRole("navigation", { name: "Разделы LifeOS", exact: true })
-        .getByRole("link", { name: "Задачи и план", exact: true })
+        .getByRole("navigation", {
+          name: "Основные разделы LifeOS",
+          exact: true,
+        })
+        .getByRole("link", { name: "Главная", exact: true })
         .click();
-      assert.equal(navigationDialog, true);
+      await page
+        .getByRole("heading", { name: `Сегодня · ${fixtureDisplayName("A")}` })
+        .waitFor();
+      await page
+        .getByRole("navigation", {
+          name: "Основные разделы LifeOS",
+          exact: true,
+        })
+        .getByRole("link", { name: "Настройки", exact: true })
+        .click();
+      await region.waitFor();
+      assert.equal(navigationDialog, false);
       assert.equal(new URL(page.url()).pathname, "/web/settings");
       assert.equal(await requestLimit.inputValue(), "0.02");
     } finally {
+      page.off("dialog", rejectUnexpectedDialog);
       page.on("dialog", acceptDialog);
     }
     const reloaded = page.waitForResponse(

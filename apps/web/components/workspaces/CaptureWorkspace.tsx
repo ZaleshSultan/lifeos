@@ -1,4 +1,5 @@
 "use client";
+import { useDraftRetention } from "../../../tma/src/lib/retained-draft";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type {
@@ -29,7 +30,8 @@ export function CaptureWorkspace({
   const transport = useMemo(() => captureTransport(webRequest), []);
   const [dirty, setDirty] = useState(false);
   const router = useRouter();
-  useUnsavedGuard(dirty);
+  const retained = useDraftRetention("capture:workspace", dirty);
+  useUnsavedGuard(dirty, retained);
   return (
     <SectionPanel title="Входящие и подтверждения" eyebrow="Nighthawk">
       <CaptureInbox
@@ -42,6 +44,7 @@ export function CaptureWorkspace({
         onNavigate={(destination) => {
           if (
             dirty &&
+            !retained &&
             !window.confirm(
               "Есть несохранённые изменения. Открыть другой раздел и отменить их?",
             )

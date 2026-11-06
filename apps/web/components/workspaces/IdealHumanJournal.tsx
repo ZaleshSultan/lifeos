@@ -1,4 +1,8 @@
 "use client";
+import {
+  useDraftState,
+  useDraftRetention,
+} from "../../../tma/src/lib/retained-draft";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
@@ -45,20 +49,23 @@ export function IdealHumanJournal({
         ? idealHumanDate(30)
         : today;
   const data = useWebResource<IdealHumanDay[]>("ideal-human/days", initial);
-  const [date, setDate] = useState(initialDate);
-  const [day, setDay] = useState(
+  const [date, setDate] = useDraftState("journal", "date", initialDate);
+  const [day, setDay] = useDraftState(
+    "journal",
+    "day",
     () =>
       initial?.find((record) => record.date === initialDate) ??
       emptyIdealHumanDay(initialDate),
   );
-  const [dirty, setDirty] = useState(false);
+  const [dirty, setDirty] = useDraftState("journal", "dirty", false);
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState(false);
   const saving = useRef(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [conflict, setConflict] = useState(false);
+  const [conflict, setConflict] = useDraftState("journal", "conflict", false);
   useEffect(() => setReady(true), []);
-  useUnsavedGuard(dirty || busy);
+  const retained = useDraftRetention("journal", dirty);
+  useUnsavedGuard(dirty || busy, retained && !busy);
   const stats = idealHumanStats(data.data ?? []);
   function change<K extends keyof IdealHumanDay>(
     key: K,

@@ -6,6 +6,10 @@ export class WebApiError extends Error {
     super(code);
   }
 }
+function sessionRejected() {
+  if (typeof window !== "undefined")
+    window.dispatchEvent(new Event("lifeos:session-rejected"));
+}
 export async function webRequest<T>(
   resource: string,
   options: RequestInit = {},
@@ -20,15 +24,28 @@ export async function webRequest<T>(
     response.redirected ||
     (!response.headers.get("content-type")?.includes("application/json") &&
       response.status !== 204)
-  )
+  ) {
+    sessionRejected();
     throw new WebApiError(401, "invalid_web_session");
+  }
   if (response.status === 204) return undefined as T;
   const body = (await response.json().catch(() => null)) as {
     data?: T;
     error?: string;
   } | null;
-  if (!response.ok)
+  if (!response.ok) {
+    if (
+      response.status === 401 ||
+      (response.status === 403 &&
+        [
+          "telegram_user_blocked",
+          "telegram_user_pending",
+          "telegram_user_not_linked",
+        ].includes(body?.error ?? ""))
+    )
+      sessionRejected();
     throw new WebApiError(response.status, body?.error ?? "request_failed");
+  }
   return body && "data" in body ? (body.data as T) : (body as T);
 }
 export function webErrorMessage(error: unknown): string {

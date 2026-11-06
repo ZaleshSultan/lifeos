@@ -1,4 +1,5 @@
 "use client";
+import { useDraftState, useDraftRetention } from "../../lib/retained-draft";
 import { useState } from "react";
 import type { AssistantMemoryCategory } from "../../../../../packages/core/src/assistant.js";
 import {
@@ -38,11 +39,19 @@ export function CaptureMemoryPanel({
   onPrepare: (text: string) => Promise<void>;
   onDirtyChange: (dirty: boolean) => void;
 }) {
-  const [key, setKey] = useState("");
-  const [category, setCategory] =
-    useState<AssistantMemoryCategory>("preference");
-  const [content, setContent] = useState("");
-  const [editing, setEditing] = useState(false);
+  const [key, setKey] = useDraftState("capture:memory", "key", "");
+  const [category, setCategory] = useDraftState<AssistantMemoryCategory>(
+    "capture:memory",
+    "category",
+    "preference",
+  );
+  const [content, setContent] = useDraftState("capture:memory", "content", "");
+  const [editing, setEditing] = useDraftState(
+    "capture:memory",
+    "editing",
+    false,
+  );
+  useDraftRetention("capture:memory", Boolean(key || content || editing));
   const [formError, setFormError] = useState<string | null>(null);
   async function prepare(action: MemoryAction) {
     if (

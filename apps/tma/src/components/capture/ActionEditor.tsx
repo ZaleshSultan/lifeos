@@ -1,4 +1,9 @@
 "use client";
+import {
+  useDraftState,
+  useDraftRetention,
+  useDiscardDraft,
+} from "../../lib/retained-draft";
 import { useState, type ChangeEvent, type ReactNode } from "react";
 import type { TaskWorkspaceItem } from "../../../../../packages/core/src/daily-life.js";
 import type {
@@ -41,10 +46,16 @@ export function CaptureActionEditor({
   onCancel: () => void;
   onDirtyChange: (dirty: boolean) => void;
 }) {
-  const [draft, setDraft] = useState<CaptureActionPayload>({
-    kind: action.kind,
-    args: { ...action.args },
-  } as CaptureActionPayload);
+  const [draft, setDraft] = useDraftState<CaptureActionPayload>(
+    `capture:action:${action.id}`,
+    "draft",
+    {
+      kind: action.kind,
+      args: { ...action.args },
+    } as CaptureActionPayload,
+  );
+  useDraftRetention(`capture:action:${action.id}`, true);
+  const discard = useDiscardDraft(`capture:action:${action.id}`);
   const [error, setError] = useState<string | null>(null);
   const args = draft.args as unknown as Record<string, unknown>;
   function change(key: string, value: unknown) {
@@ -491,7 +502,9 @@ export function CaptureActionEditor({
         event.preventDefault();
         try {
           const parsed = parseCaptureActionPayload(draft);
-          void onSave(parsed).catch(() => {});
+          void onSave(parsed)
+            .then(discard)
+            .catch(() => {});
         } catch {
           setError(
             "Проверь поля, даты и значения. Пароли, cookies и ключи нельзя сохранять в памяти.",

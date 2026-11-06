@@ -13,12 +13,21 @@ export default async function DashboardLayout({
     lifeosApi<WebSessionStatus>("/api/tma/session"),
   ]);
 
-  if (!session || session.state !== "active") {
+  if (
+    !session ||
+    session.state !== "active" ||
+    !Number.isSafeInteger(session.telegramUserId) ||
+    session.telegramUserId <= 0
+  ) {
     redirect("/access");
   }
 
   return (
-    <AppShell systemStatus={systemStatus} userName={session.displayName}>
+    <AppShell
+      systemStatus={systemStatus}
+      userName={session.displayName}
+      draftOwner={session.telegramUserId}
+    >
       {children}
     </AppShell>
   );

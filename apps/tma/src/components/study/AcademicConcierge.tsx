@@ -1,4 +1,9 @@
 "use client";
+import {
+  useDraftState,
+  useDraftRetention,
+  useDiscardDraft,
+} from "../../lib/retained-draft";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Bell, CalendarDays, GraduationCap, RefreshCw } from "lucide-react";
 import {
@@ -39,7 +44,8 @@ const tabs = [
   ["settings", "Уведомления"],
   ["import", "Импорт"],
 ] as const;
-type Tab = (typeof tabs)[number][0];
+export type AcademicConciergeTab = (typeof tabs)[number][0];
+type Tab = AcademicConciergeTab;
 function requestedAcademicTab(): Tab {
   const value =
     typeof window === "undefined"
@@ -72,12 +78,15 @@ function moodleAssignmentUrl(value: string | null): string | null {
 export function AcademicConcierge({
   transport,
   initial,
+  initialTab,
   errorMessage,
   onSnapshot,
   onDirtyChange,
 }: {
   transport: AcademicTransport;
   initial: AcademicSnapshot | null;
+  /** Web passes the server-validated tab; TMA can initialize from its CSR URL. */
+  initialTab?: AcademicConciergeTab;
   errorMessage: (error: unknown) => string;
   onSnapshot?: (snapshot: AcademicSnapshot) => void;
   onDirtyChange?: (dirty: boolean) => void;
@@ -85,16 +94,22 @@ export function AcademicConcierge({
   const [snapshot, setSnapshot] = useState(initial);
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<Tab>(requestedAcademicTab);
+  const [tab, setTab] = useState<Tab>(
+    () => initialTab ?? requestedAcademicTab(),
+  );
   const [now, setNow] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [parts, setParts] = useState({
+  const [parts, setParts] = useDraftState("academic:concierge", "parts", {
     settings: false,
     schedule: false,
     import: false,
   });
-  const [editing, setEditing] = useState<AcademicEvent | null>(null);
+  const [editing, setEditing] = useDraftState<AcademicEvent | null>(
+    "academic:concierge",
+    "editing",
+    null,
+  );
   const [decision, setDecision] = useState<{
     event: AcademicEvent;
     action: "confirm" | "cancel";
@@ -108,6 +123,19 @@ export function AcademicConcierge({
     parts.import ||
     editing !== null ||
     decision !== null;
+  useDraftRetention("academic:concierge", dirty);
+  const discardPreferences = useDiscardDraft("academic:preferences");
+  const discardSchedule = useDiscardDraft("academic:schedule-verification");
+  const discardImport = useDiscardDraft("academic:import");
+  const discardEvent = useDiscardDraft(
+    `academic:event:${editing?.sourceKey}:${editing?.key}`,
+  );
+  function discardChildren() {
+    discardPreferences();
+    discardSchedule();
+    discardImport();
+    discardEvent();
+  }
   const settingsDirty = useCallback(
     (value: boolean) =>
       setParts((p) => (p.settings === value ? p : { ...p, settings: value })),
@@ -197,6 +225,7 @@ export function AcademicConcierge({
     try {
       const value = await work(() => transport.overview());
       apply(value);
+      discardChildren();
       setEditing(null);
       setDecision(null);
       setParts({ settings: false, schedule: false, import: false });
@@ -217,6 +246,7 @@ export function AcademicConcierge({
     )
       return false;
     if (tab !== value) {
+      discardChildren();
       setEditing(null);
       setDecision(null);
       setParts({ settings: false, schedule: false, import: false });
@@ -680,6 +710,7 @@ export function AcademicConcierge({
                     const value = await work(() =>
                       transport.preferences(preferences),
                     );
+                    discardPreferences();
                     apply(value);
                     setMessage(
                       "Предпочтения сохранены. Доставка дополнительно проверяет разрешения сервера, тихие часы и актуальность источника.",
@@ -692,7 +723,11 @@ export function AcademicConcierge({
                   busy={locked}
                   onDirtyChange={scheduleDirty}
                   onSave={async (input) => {
-                    apply(await work(() => transport.verifySchedule(input)));
+                    const value = await work(() =>
+                      transport.verifySchedule(input),
+                    );
+                    discardSchedule();
+                    apply(value);
                     setMessage(
                       "Проверка обычного расписания сохранена. Предпочтения доставки не включались автоматически.",
                     );
@@ -732,6 +767,7 @@ export function AcademicConcierge({
                     confirmed: true,
                   }),
                 );
+                discardEvent();
                 apply(overview);
                 setEditing(null);
                 setMessage(

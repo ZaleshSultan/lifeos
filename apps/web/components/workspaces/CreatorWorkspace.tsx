@@ -1,4 +1,8 @@
 "use client";
+import {
+  useDraftState,
+  useDraftRetention,
+} from "../../../tma/src/lib/retained-draft";
 import { useState } from "react";
 import Link from "next/link";
 import {
@@ -12,6 +16,7 @@ import {
   buttonClass,
   inputClass,
   rowClass,
+  useUnsavedGuard,
 } from "@/components/WorkspaceUI";
 export function CreatorWorkspace({
   capabilities,
@@ -20,11 +25,17 @@ export function CreatorWorkspace({
   capabilities: CreatorCapabilities | null;
   days: IdealHumanDay[] | null;
 }) {
-  const [company, setCompany] = useState("");
-  const [questions, setQuestions] = useState("");
-  const [draft, setDraft] = useState<{ subject: string; body: string } | null>(
-    null,
+  const [company, setCompany] = useDraftState("creator", "company", "");
+  const [questions, setQuestions] = useDraftState("creator", "questions", "");
+  const [draft, setDraft] = useDraftState<{
+    subject: string;
+    body: string;
+  } | null>("creator", "draft", null);
+  const retained = useDraftRetention(
+    "creator",
+    Boolean(company || questions || draft),
   );
+  useUnsavedGuard(Boolean(company || questions || draft), retained);
   const [error, setError] = useState<string | null>(null);
   return (
     <div className="space-y-5">

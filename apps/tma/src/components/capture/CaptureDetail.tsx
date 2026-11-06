@@ -1,4 +1,9 @@
 "use client";
+import {
+  useDraftState,
+  useDraftRetention,
+  useDiscardDraft,
+} from "../../lib/retained-draft";
 import { useEffect, useRef, useState } from "react";
 import type { TaskWorkspaceItem } from "../../../../../packages/core/src/daily-life.js";
 import type {
@@ -80,13 +85,31 @@ export function CaptureDetail({
   onDirtyChange: (dirty: boolean) => void;
 }) {
   const [selected, setSelected] = useState<string[]>([]);
-  const [editing, setEditing] = useState<string | null>(null);
-  const [editDirty, setEditDirty] = useState(false);
-  const [instruction, setInstruction] = useState("");
+  const [editing, setEditing] = useDraftState<string | null>(
+    `capture:detail:${capture.id}:${capture.revision}`,
+    "editing",
+    null,
+  );
+  const [editDirty, setEditDirty] = useDraftState(
+    `capture:detail:${capture.id}:${capture.revision}`,
+    "editDirty",
+    false,
+  );
+  const [instruction, setInstruction] = useDraftState(
+    `capture:detail:${capture.id}:${capture.revision}`,
+    "instruction",
+    "",
+  );
   const [externalDirty, setExternalDirty] = useState(false);
   const [consentGeneration, setConsentGeneration] = useState(0);
-  const [transcript, setTranscript] = useState(capture.transcript ?? "");
-  const [transcriptOpen, setTranscriptOpen] = useState(
+  const [transcript, setTranscript] = useDraftState(
+    `capture:detail:${capture.id}:${capture.revision}`,
+    "transcript",
+    capture.transcript ?? "",
+  );
+  const [transcriptOpen, setTranscriptOpen] = useDraftState(
+    `capture:detail:${capture.id}:${capture.revision}`,
+    "transcriptOpen",
     capture.state === "awaiting_transcript",
   );
   const [now, setNow] = useState(Date.now);
@@ -94,8 +117,13 @@ export function CaptureDetail({
     null,
   );
   const transcriptDirty = transcript !== (capture.transcript ?? "");
+  const discardAction = useDiscardDraft(`capture:action:${editing}`);
   const correctionDirty = Boolean(instruction.trim());
   const reviewDirty = transcriptDirty || correctionDirty || externalDirty;
+  useDraftRetention(
+    `capture:detail:${capture.id}:${capture.revision}`,
+    editDirty || transcriptDirty || correctionDirty,
+  );
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 15_000);
     return () => clearInterval(timer);
@@ -127,6 +155,7 @@ export function CaptureDetail({
     if (!(editDirty || reviewDirty)) return true;
     if (!window.confirm("Есть несохранённые изменения. Отменить их?"))
       return false;
+    discardAction();
     setTranscript(capture.transcript ?? "");
     setInstruction("");
     setEditing(null);
@@ -484,6 +513,7 @@ export function CaptureDetail({
                   }}
                   onCancel={() => {
                     if (discardDrafts()) {
+                      discardAction();
                       setEditing(null);
                       setEditDirty(false);
                     }

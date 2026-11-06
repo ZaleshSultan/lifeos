@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { WebApiError, webErrorMessage } from "./web-client.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { WebApiError, webErrorMessage, webRequest } from "./web-client.js";
+afterEach(() => vi.unstubAllGlobals());
 
 describe("web AI routing policy errors", () => {
   it("explains saved policy denials without sending the owner through login again", () => {
@@ -24,5 +25,39 @@ describe("web AI routing policy errors", () => {
     expect(
       webErrorMessage(new WebApiError(401, "ai_router_blocked")),
     ).toContain("/web");
+  });
+});
+describe("authenticated draft invalidation", () => {
+  it("clears retained memory when the authenticated session is rejected", async () => {
+    const events = new EventTarget();
+    let rejected = 0;
+    events.addEventListener("lifeos:session-rejected", () => rejected++);
+    vi.stubGlobal("window", events);
+    vi.stubGlobal(
+      "fetch",
+      async () =>
+        new Response(JSON.stringify({ error: "invalid_web_session" }), {
+          status: 401,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    await expect(webRequest("tasks")).rejects.toMatchObject({ status: 401 });
+    expect(rejected).toBe(1);
+  });
+  it("preserves drafts after a model-policy denial within a valid session", async () => {
+    const events = new EventTarget();
+    let rejected = 0;
+    events.addEventListener("lifeos:session-rejected", () => rejected++);
+    vi.stubGlobal("window", events);
+    vi.stubGlobal(
+      "fetch",
+      async () =>
+        new Response(JSON.stringify({ error: "ai_router_blocked" }), {
+          status: 403,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    await expect(webRequest("ai/chat")).rejects.toMatchObject({ status: 403 });
+    expect(rejected).toBe(0);
   });
 });

@@ -1,4 +1,9 @@
 "use client";
+import {
+  useDraftState,
+  useDraftRetention,
+  useDraftRef,
+} from "../../../tma/src/lib/retained-draft";
 import { MealPhotoReview } from "./MealPhotoReview";
 import { useRef, useState } from "react";
 import Link from "next/link";
@@ -32,20 +37,37 @@ export function NutritionWorkspace({
   date: string;
 }) {
   const [hydration, setHydration] = useState(summary?.hydration ?? null);
-  const [day, setDay] = useState(
+  const [day, setDay] = useDraftState(
+    `nutrition:${date}`,
+    "day",
     () =>
       days?.find((entry) => entry.date === date) ??
       (idealHumanDayNumber(date) ? emptyIdealHumanDay(date) : null),
   );
-  const [custom, setCustom] = useState("");
+  const [custom, setCustom] = useDraftState(`nutrition:${date}`, "custom", "");
   const [busy, setBusy] = useState(false);
-  const [dirty, setDirty] = useState(false);
-  const [photoDirty, setPhotoDirty] = useState(false);
+  const [dirty, setDirty] = useDraftState(`nutrition:${date}`, "dirty", false);
+  const [photoDirty, setPhotoDirty] = useDraftState(
+    `nutrition:${date}`,
+    "photoDirty",
+    false,
+  );
   const [error, setError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<string | null>(null);
   const inflight = useRef(false);
-  const pending = useRef<{ amountMl: number; requestId: string } | null>(null);
-  useUnsavedGuard(dirty || photoDirty || busy);
+  const pending = useDraftRef<{ amountMl: number; requestId: string } | null>(
+    `nutrition:${date}`,
+    "pendingWater",
+    null,
+  );
+  const retained = useDraftRetention(
+    `nutrition:${date}`,
+    dirty || photoDirty || Boolean(custom),
+  );
+  useUnsavedGuard(
+    dirty || photoDirty || busy || Boolean(custom),
+    retained && !busy,
+  );
   function change<K extends keyof IdealHumanDay>(
     key: K,
     value: IdealHumanDay[K],
@@ -227,6 +249,7 @@ export function NutritionWorkspace({
       </SectionPanel>
       {day ? (
         <MealPhotoReview
+          draftScope={`nutrition:photo:${date}`}
           disabled={busy}
           onDirtyChange={setPhotoDirty}
           onConfirm={async (meals) => {

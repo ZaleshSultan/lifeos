@@ -1,4 +1,10 @@
 "use client";
+import {
+  useDraftState,
+  useDraftRetention,
+  useDraftRef,
+  useDiscardDraft,
+} from "../../lib/retained-draft";
 import { useEffect, useRef, useState } from "react";
 import { Inbox, Mic, Plus, Search, ShieldCheck } from "lucide-react";
 import type { TaskWorkspaceItem } from "../../../../../packages/core/src/daily-life.js";
@@ -52,12 +58,17 @@ export function CaptureInbox({
   onDirtyChange,
   onNavigate,
 }: CaptureInboxProps) {
+  const discardPreparedMemory = useDiscardDraft("capture:memory");
   const [ready, setReady] = useState(false);
   const [capabilities, setCapabilities] = useState(initialCapabilities);
   const [history, setHistory] = useState<CaptureSearchResult | null>(
     initialHistory,
   );
-  const [selected, setSelected] = useState<CaptureView | null>(null);
+  const [selected, setSelected] = useDraftState<CaptureView | null>(
+    "capture:inbox",
+    "selected",
+    null,
+  );
   const [loading, setLoading] = useState(
     initialHistory === null || initialCapabilities === null,
   );
@@ -66,17 +77,45 @@ export function CaptureInbox({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [text, setText] = useState("");
-  const [inputType, setInputType] = useState<"text" | "link">("text");
-  const [retentionDays, setRetentionDays] = useState<7 | 30 | 90 | null>(null);
-  const [query, setQuery] = useState("");
-  const [filterState, setFilterState] = useState<CaptureState | "">("");
-  const [includeArchived, setIncludeArchived] = useState(false);
-  const [tab, setTab] = useState<"inbox" | "memory">("inbox");
+  const [text, setText] = useDraftState("capture:inbox", "text", "");
+  const [inputType, setInputType] = useDraftState<"text" | "link">(
+    "capture:inbox",
+    "inputType",
+    "text",
+  );
+  const [retentionDays, setRetentionDays] = useDraftState<7 | 30 | 90 | null>(
+    "capture:inbox",
+    "retentionDays",
+    null,
+  );
+  const [query, setQuery] = useDraftState("capture:inbox", "query", "");
+  const [filterState, setFilterState] = useDraftState<CaptureState | "">(
+    "capture:inbox",
+    "filterState",
+    "",
+  );
+  const [includeArchived, setIncludeArchived] = useDraftState(
+    "capture:inbox",
+    "includeArchived",
+    false,
+  );
+  const [tab, setTab] = useDraftState<"inbox" | "memory">(
+    "capture:inbox",
+    "tab",
+    "inbox",
+  );
   const [voiceHelp, setVoiceHelp] = useState(false);
-  const [detailDirty, setDetailDirty] = useState(false);
+  const [detailDirty, setDetailDirty] = useDraftState(
+    "capture:inbox",
+    "detailDirty",
+    false,
+  );
   const [detailGeneration, setDetailGeneration] = useState(0);
-  const [memoryDirty, setMemoryDirty] = useState(false);
+  const [memoryDirty, setMemoryDirty] = useDraftState(
+    "capture:inbox",
+    "memoryDirty",
+    false,
+  );
   const [memories, setMemories] = useState<CaptureMemoryView[] | null>(null);
   const [memoryLoading, setMemoryLoading] = useState(false);
   const [memoryError, setMemoryError] = useState<string | null>(null);
@@ -90,17 +129,20 @@ export function CaptureInbox({
   const detailControl = useRef<AbortController | null>(null);
   const memorySequence = useRef(0);
   const memoryControl = useRef<AbortController | null>(null);
-  const composeIdentity = useRef<{ payload: string; requestId: string } | null>(
-    null,
-  );
-  const memoryIdentity = useRef<{ payload: string; requestId: string } | null>(
-    null,
-  );
+  const composeIdentity = useDraftRef<{
+    payload: string;
+    requestId: string;
+  } | null>("capture:inbox", "composeIdentity", null);
+  const memoryIdentity = useDraftRef<{
+    payload: string;
+    requestId: string;
+  } | null>("capture:inbox", "memoryIdentity", null);
   const appliedSearch = useRef<CaptureSearchInput>(defaultSearch);
   const composeInput = useRef<HTMLTextAreaElement>(null);
   const detailRegion = useRef<HTMLDivElement>(null);
   const dirty = Boolean(text.trim()) || detailDirty || memoryDirty || busy;
 
+  useDraftRetention("capture:inbox", dirty);
   useEffect(() => {
     mounted.current = true;
     setReady(true);
@@ -179,7 +221,8 @@ export function CaptureInbox({
     loadGeneration,
   ]);
   useEffect(() => {
-    if (!initialCaptureId) return;
+    if (!initialCaptureId || (selected?.id === initialCaptureId && detailDirty))
+      return;
     const control = new AbortController();
     const sequence = ++detailSequence.current;
     detailControl.current?.abort();
@@ -451,6 +494,9 @@ export function CaptureInbox({
       if (!mounted.current) return;
       accept(saved);
       identity.current = null;
+      // The preview unmounts the memory form. Clear its retained draft at the
+      // server acknowledgement, before unmount or a later processing failure.
+      if (memory) discardPreparedMemory();
       if (!memory) setText("");
       setTab("inbox");
       setMemoryDirty(false);

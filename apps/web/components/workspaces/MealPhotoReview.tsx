@@ -6,6 +6,7 @@ export function MealPhotoReview(props: {
   disabled: boolean;
   onConfirm: (meals: IdealHumanMeal[]) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
+  draftScope?: string;
 }) {
   return (
     <SharedMealPhotoReview
