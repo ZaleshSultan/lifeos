@@ -9,6 +9,7 @@ import { CaptureService, readCaptureConfig } from "./capture-service.js";
 import { TelegramHttpClient } from "./telegram/client.js";
 import { handleCaptureRoute } from "./capture-routes.js";
 import { handleAcademicConciergeRoute } from "./academic-concierge-routes.js";
+import { handleAcademicIntelligenceRoute } from "./academic-intelligence-routes.js";
 import { createCaptureTelegramPort } from "./capture-telegram-adapter.js";
 import { CaptureTelegramIngestError, type CaptureTelegramPort } from "./telegram/capture.js";
 import { isMealPhotoMessage } from "./telegram/meal-photo.js";
@@ -154,6 +155,7 @@ export interface BotServerOptions {
       | "financeAiModel"
       | "financeAiEnabled"
       | "academicNotificationsEnabled"
+      | "academicGradeEventsEnabled"
       | "googleOAuthClientId"
       | "googleOAuthClientSecret"
       | "googleOAuthRedirectUri"
@@ -188,6 +190,7 @@ interface HealthResponse {
 
 interface ResolvedBotServerOptions {
   academicNotificationsEnabled: boolean;
+  academicGradeEventsEnabled: boolean;
   captures?: CaptureService;
   capture?: CaptureTelegramPort;
   aiGovernor?: AiGovernor;
@@ -2517,6 +2520,7 @@ async function handleRequest(
 
     if (await handleCaptureRoute({request,response,url:requestUrl,user:auth.user,captures:options.captures,readJsonBody,writeJson})) return;
     if (await handleAcademicConciergeRoute({request,response,url:requestUrl,user:auth.user,academic:store.academicConcierge,deliveryEnabled:options.academicNotificationsEnabled,readJsonBody,writeJson})) return;
+    if (await handleAcademicIntelligenceRoute({request,response,url:requestUrl,userId:auth.user.userId,academic:store.academicIntelligence,deliveryEnabled:options.academicNotificationsEnabled && options.academicGradeEventsEnabled,readJsonBody,writeJson})) return;
     if (await handleAiModelRouterRoute({request,response,url:requestUrl,userId:auth.user.userId,router:options.aiRouter,readJsonBody,writeJson})) return;
 
     if (await handleLmsRoute({
@@ -3706,6 +3710,7 @@ export function createBotServer(options: BotServerOptions = {}): Server {
     ? createCaptureTelegramPort(captures, options.store) : undefined);
   const resolvedOptions: ResolvedBotServerOptions = {
     academicNotificationsEnabled: options.config?.academicNotificationsEnabled ?? false,
+    academicGradeEventsEnabled: options.config?.academicGradeEventsEnabled ?? false,
     captures,
     capture,
     aiGovernor: options.aiGovernor,

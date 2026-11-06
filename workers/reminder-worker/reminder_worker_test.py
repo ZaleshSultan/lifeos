@@ -131,6 +131,31 @@ class Telegram:
 
 
 class ReminderWorkerTest(unittest.TestCase):
+    def test_bound_academic_buttons_use_original_durable_begin_before_the_single_send(self):
+        db = FakeDB()
+        links = [{"text": "Grades", "url": "https://lifeos.zalewko.me/tma/?screen=study&courseId=f1000000-0000-4000-8000-000000000001&studyTab=grades"}]
+        db.rows[0]["metadata_json"] = {"academic_concierge_kind": "grade", "academic_intelligence": True, "academic_links": links}
+        calls = []
+        class BoundTelegram:
+            def send_message(_self, chat, text, reply_markup=None):
+                self.assertEqual(db.rows[0]["status"], "sending")
+                self.assertEqual(db.rows[0]["delivery_attempts"], 1)
+                calls.append((chat, text, reply_markup))
+                return 42
+        summary = rw.process_due_reminders(replace(SETTINGS, academic_notifications_enabled=True), db, BoundTelegram(), now=NOW)
+        self.assertEqual(summary.sent, 1)
+        self.assertEqual(calls, [("100", "private synthetic note", {"inline_keyboard": [[links[0]]]})])
+        self.assertEqual(db.transitions[-1][1], "sent")
+
+    def test_invalid_academic_destination_never_crosses_send_boundary(self):
+        db = FakeDB()
+        db.rows[0]["metadata_json"] = {"academic_concierge_kind": "grade", "academic_intelligence": True, "academic_links": [{"text": "Open", "url": "https://evil.example/"}]}
+        telegram = Telegram()
+        rw.process_due_reminders(replace(SETTINGS, academic_notifications_enabled=True), db, telegram, now=NOW)
+        self.assertEqual(telegram.calls, [])
+        self.assertEqual(db.rows[0]["delivery_attempts"], 0)
+        self.assertEqual(db.transitions[-1][1:3], ("retry", "preparation_failed"))
+
     def test_success_uses_owner_ack_and_idempotent_poll(self):
         db = FakeDB(2)
         telegram = Telegram()

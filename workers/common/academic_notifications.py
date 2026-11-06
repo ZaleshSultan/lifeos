@@ -58,6 +58,12 @@ def plan_notifications(store: Any, *, owner_limit: int = 1000) -> dict[str, int]
                 total["failed"] += 1
         if len(rows) < int(query["limit"]):
             break
+    from common.academic_grade_events import grade_events_enabled
+    if grade_events_enabled():
+        from common.academic_intelligence_notifications import plan_intelligence_notifications
+        prepared = plan_intelligence_notifications(store, owner_limit=owner_limit)
+        for key in total:
+            total[key] += prepared[key]
     return total
 
 

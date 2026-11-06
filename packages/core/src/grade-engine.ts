@@ -55,9 +55,20 @@ export function calculateGrade(
     totalWeightPercent += assessment.weightPercent;
 
     if (assessment.status === "graded") {
+      // A status flag alone does not establish a score. Missing/invalid raw
+      // evidence stays in the remaining weight; only an explicit missed item
+      // establishes a zero without a numeric score.
+      if (
+        assessment.actualScore === null ||
+        !Number.isFinite(assessment.actualScore) ||
+        assessment.actualScore < 0 ||
+        (assessment.maxScore !== null &&
+          (!Number.isFinite(assessment.maxScore) || assessment.maxScore <= 0))
+      )
+        continue;
       completedWeightPercent += assessment.weightPercent;
 
-      const score = assessment.actualScore ?? 0;
+      const score = assessment.actualScore;
       let percentScore = 0;
       if (assessment.maxScore === null) {
         percentScore = score;

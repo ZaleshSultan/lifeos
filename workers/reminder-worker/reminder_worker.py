@@ -57,7 +57,7 @@ class SupabaseClientProtocol(Protocol):
 
 
 class TelegramClientProtocol(Protocol):
-    def send_message(self, chat_id: str, text: str) -> int: ...
+    def send_message(self, chat_id: str, text: str, reply_markup: dict | None = None) -> int: ...
 
 
 @dataclass(frozen=True)
@@ -580,6 +580,7 @@ def process_due_reminders(
             continue
         photo_url = None
         caption = None
+        academic_markup = None
         try:
             profile = supabase.resolve_reminder_recipient(reminder)
             if not profile:
@@ -611,6 +612,9 @@ def process_due_reminders(
             text = format_telegram_message(
                 reminder, context, recipient_settings.local_timezone
             )
+            if academic_metadata.get("academic_intelligence") is True:
+                from common.academic_intelligence_notifications import validated_links
+                academic_markup = validated_links(academic_metadata.get("academic_links"))
             if is_academic and callable(getattr(telegram, "send_photo", None)):
                 photo_url = room_photo(academic_metadata.get("academic_room"), academic_metadata.get("academic_concierge_kind"))
                 if photo_url:
@@ -637,7 +641,8 @@ def process_due_reminders(
             reminder.get("failure_count", 0),
         )
         try:
-            message_id = telegram.send_photo(recipient, photo_url, caption) if photo_url else telegram.send_message(recipient, text)
+            message_id = (telegram.send_photo(recipient, photo_url, caption) if photo_url else
+                          telegram.send_message(recipient, text, academic_markup) if academic_markup else telegram.send_message(recipient, text))
         except TelegramDeliveryError as exc:
             summary.send_failed += 1
             summary.unknown += int(exc.outcome == "unknown")
