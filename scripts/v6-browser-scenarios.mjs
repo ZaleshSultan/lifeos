@@ -400,7 +400,7 @@ export async function v6CourseAndHomeScenarios({
     });
     await home
       .locator("details")
-      .filter({ has: personalExam })
+      .filter({ hasText: "Synthetic personal theory event" })
       .locator("summary")
       .click();
     await personalExam.click();
