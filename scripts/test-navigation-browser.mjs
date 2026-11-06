@@ -16,6 +16,12 @@ import {
   v6CourseAndHomeScenarios,
   v6PolicyAndPreferenceScenarios,
 } from "./v6-browser-scenarios.mjs";
+import {
+  v6EditorBrowserFixture,
+  V6_EDITOR_VIEWPORTS,
+  V6_EDITOR_SCENARIO_COUNT,
+} from "./v6-editor-browser-fixtures.mjs";
+import { v6EditorBrowserScenarios } from "./v6-editor-browser-scenarios.mjs";
 
 if (!process.env.LIFEOS_TMA_DIST) throw new Error("Set LIFEOS_TMA_DIST.");
 const root = resolve(process.env.LIFEOS_TMA_DIST);
@@ -50,7 +56,8 @@ const origin = `http://127.0.0.1:${server.address().port}`;
 const errors = [],
   forbidden = [],
   checks = [],
-  syntheticStates = [];
+  syntheticStates = [],
+  editorStates = [];
 let browser;
 try {
   browser = await chromium.launch({
@@ -60,7 +67,7 @@ try {
   });
   for (const width of V6_VIEWPORTS) {
     const fixture = captureBrowserFixture();
-    const academic = academicBrowserFixture("A", {
+    let academic = academicBrowserFixture("A", {
       confirmedPersonalForHome: true,
     });
     const v6 = v6BrowserFixture();
@@ -76,10 +83,11 @@ try {
     // Full reloads in the legacy-link checks intentionally end the local draft.
     // Internal section switches must never show this dialog.
     let dialogs = 0;
-    page.on("dialog", async (dialog) => {
+    const acceptDialog = async (dialog) => {
       dialogs++;
       await dialog.accept();
-    });
+    };
+    page.on("dialog", acceptDialog);
     const chunks = [];
     await page.route("**/*", async (route) => {
       const request = route.request(),
@@ -98,9 +106,13 @@ try {
       }
       const resource = url.pathname.slice("/api/tma/".length);
       const allowedFixtureWrite =
-        request.method() === "PUT" &&
-        (resource === "study/academic-preferences" ||
-          /^study\/grade-policy\/[0-9a-f-]{36}$/.test(resource));
+        (request.method() === "PUT" &&
+          (resource === "study/academic-preferences" ||
+            /^study\/grade-policy\/[0-9a-f-]{36}$/.test(resource))) ||
+        (V6_EDITOR_VIEWPORTS.includes(width) &&
+          request.method() === "PATCH" &&
+          resource ===
+            `study/concierge/events/${academic.snapshot.events.find((event) => event.kind === "personal_exam")?.id}`);
       if (request.method() !== "GET" && !allowedFixtureWrite) {
         forbidden.push("unexpected_api_write");
         return route.abort();
@@ -290,6 +302,18 @@ try {
           test,
           prefix: `TMA V6 ${width}px`,
         });
+      if (V6_EDITOR_VIEWPORTS.includes(width)) {
+        academic = v6EditorBrowserFixture("A");
+        editorStates.push(academic);
+        await v6EditorBrowserScenarios({
+          page,
+          fixture: academic,
+          driver,
+          test,
+          prefix: `TMA V6 editor ${width}px`,
+          defaultDialogHandler: acceptDialog,
+        });
+      }
       await page.screenshot({
         path: resolve(artifacts, `tma-v6-${width}.png`),
         fullPage: true,
@@ -334,7 +358,10 @@ try {
     check: "rejected auth exposes no protected module or request",
     passed: true,
   });
-  assert.equal(checks.length, V6_VIEWPORTS.length * 3 + V6_SCENARIO_COUNT + 1);
+  assert.equal(
+    checks.length,
+    V6_VIEWPORTS.length * 3 + V6_SCENARIO_COUNT + V6_EDITOR_SCENARIO_COUNT + 1,
+  );
   assert.deepEqual(errors, []);
   assert.deepEqual(forbidden, []);
   console.log(
@@ -349,7 +376,21 @@ try {
     JSON.stringify(
       {
         checks,
-        expectedCases: V6_VIEWPORTS.length * 3 + V6_SCENARIO_COUNT + 1,
+        expectedCases:
+          V6_VIEWPORTS.length * 3 + V6_SCENARIO_COUNT + V6_EDITOR_SCENARIO_COUNT + 1,
+        editorFixtureCases: V6_EDITOR_SCENARIO_COUNT,
+        editorFixtureWrites: editorStates.reduce(
+          (sum, state) => ({
+            successful:
+              sum.successful +
+              state.browserWrites.filter((write) => write.status === 200).length,
+            rejected:
+              sum.rejected +
+              state.browserWrites.filter((write) => write.status === 409).length,
+            controls: sum.controls + state.controlWrites,
+          }),
+          { successful: 0, rejected: 0, controls: 0 },
+        ),
         errors,
         forbidden,
         viewports: V6_VIEWPORTS,

@@ -37,6 +37,12 @@ import {
   v6PolicyAndPreferenceScenarios,
 } from "../../../scripts/v6-browser-scenarios.mjs";
 import {
+  v6EditorBrowserFixture,
+  V6_EDITOR_VIEWPORTS,
+  V6_EDITOR_SCENARIO_COUNT,
+} from "../../../scripts/v6-editor-browser-fixtures.mjs";
+import { v6EditorBrowserScenarios } from "../../../scripts/v6-editor-browser-scenarios.mjs";
+import {
   freeRouterBrowserSnapshot,
   assertFreeRouterBrowserPanel,
 } from "../../../scripts/free-ai-router-browser-fixtures.mjs";
@@ -85,6 +91,7 @@ const v6Fixtures = new Map([
   ["B", v6BrowserFixture("B")],
 ]);
 const v6FixtureHistory = [...v6Fixtures.values()];
+const editorFixtureHistory = [];
 const routerSettings = new Map([
   ["A", { settings: defaultAiRouterSettings(), revision: 0 }],
   ["B", { settings: defaultAiRouterSettings(), revision: 0 }],
@@ -846,7 +853,7 @@ const blockedExternalRequests = [];
 let diagnosticPage;
 const expectedCases = process.env.LIFEOS_WEB_BROWSER_LOGOUT_ONLY
   ? 2
-  : 82 + (V6_VIEWPORTS.length - 4) + V6_SCENARIO_COUNT;
+  : 82 + (V6_VIEWPORTS.length - 4) + V6_SCENARIO_COUNT + V6_EDITOR_SCENARIO_COUNT;
 async function checkpoint() {
   const path = resolve(artifacts, "checkpoint.json");
   await writeFile(
@@ -1160,6 +1167,19 @@ try {
         test,
         prefix: `Web V6 ${width}px`,
       });
+    if (V6_EDITOR_VIEWPORTS.includes(width)) {
+      const editorFixture = v6EditorBrowserFixture("A");
+      academicFixtures.set("A", editorFixture);
+      editorFixtureHistory.push(editorFixture);
+      await v6EditorBrowserScenarios({
+        page,
+        fixture: editorFixture,
+        driver,
+        test,
+        prefix: `Web V6 editor ${width}px`,
+        defaultDialogHandler: acceptDialog,
+      });
+    }
     if (!process.env.LIFEOS_WEB_BROWSER_LOGOUT_ONLY)
       await captureScreenshot(page, {
         path: resolve(artifacts, `web-v6-${width}.png`),
@@ -2464,6 +2484,19 @@ try {
         pageErrorContexts,
         viewports: V6_VIEWPORTS,
         v6FixtureCases: V6_SCENARIO_COUNT,
+        editorFixtureCases: V6_EDITOR_SCENARIO_COUNT,
+        editorFixtureWrites: editorFixtureHistory.reduce(
+          (sum, fixture) => ({
+            successful:
+              sum.successful +
+              fixture.browserWrites.filter((write) => write.status === 200).length,
+            rejected:
+              sum.rejected +
+              fixture.browserWrites.filter((write) => write.status === 409).length,
+            controls: sum.controls + fixture.controlWrites,
+          }),
+          { successful: 0, rejected: 0, controls: 0 },
+        ),
         v6FixtureWrites: v6FixtureHistory.reduce(
           (sum, fixture) => ({
             preferences: sum.preferences + fixture.writes.preferences,
