@@ -38,6 +38,7 @@ interface HomeScreenProps {
   onOpenAcademicCourse?: (
     courseId: string | null,
     tab: "grades" | "calculator" | "work" | "concierge",
+    academicTab?: "exams" | "personal",
   ) => void;
   onOpenAi: (date: string) => void;
   session: TmaSessionStatus;
@@ -141,7 +142,7 @@ export function HomeScreen({
       <AcademicHomeBriefing
         onOpen={(row) =>
           onOpenAcademicCourse
-            ? onOpenAcademicCourse(row.courseId, row.tab)
+            ? onOpenAcademicCourse(row.courseId, row.tab, row.academicTab)
             : onOpenStudy()
         }
       />

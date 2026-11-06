@@ -18,6 +18,7 @@ export interface AcademicHomeRow {
   title: string;
   detail: string;
   tab: "grades" | "calculator" | "concierge" | "work";
+  academicTab?: "exams" | "personal";
 }
 /** UI-only references: never creates delivery jobs, receipts or read markers. */
 export function buildAcademicHome(input: {
@@ -120,6 +121,7 @@ export function buildAcademicHome(input: {
       title: event.title,
       detail: `${event.kind === "personal_exam" ? "Личный экзамен" : `Университетский экзамен (${event.sourceTypeCode})`} · ${dateTime(event.startsAt!)} (${ACADEMIC_TIMEZONE})${event.endsAt ? "" : " · длительность неизвестна"}`,
       tab: "concierge",
+      academicTab: event.kind === "personal_exam" ? "personal" : "exams",
     }));
   const risks: AcademicHomeRow[] = fresh
     ? input.risks

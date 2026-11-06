@@ -134,11 +134,15 @@ export default function App() {
   const openAcademicCourse = (
     courseId: string | null,
     studyTab: "grades" | "calculator" | "work" | "concierge",
+    academicTab?: "exams" | "personal",
   ) => {
     const url = new URL(window.location.href);
     if (courseId) url.searchParams.set("courseId", courseId);
     else url.searchParams.delete("courseId");
     url.searchParams.set("studyTab", studyTab);
+    if (studyTab === "concierge")
+      url.searchParams.set("academicTab", academicTab ?? "exams");
+    else url.searchParams.delete("academicTab");
     window.history.replaceState(null, "", url);
     setScreen("study");
   };

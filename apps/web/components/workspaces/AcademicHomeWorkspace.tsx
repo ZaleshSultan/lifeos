@@ -15,7 +15,8 @@ export function AcademicHomeWorkspace({
       onOpen={(row) => {
         const query = new URLSearchParams({ studyTab: row.tab });
         if (row.courseId) query.set("courseId", row.courseId);
-        if (row.tab === "concierge") query.set("academicTab", "exams");
+        if (row.tab === "concierge")
+          query.set("academicTab", row.academicTab ?? "exams");
         router.push(
           `/study?${query}${row.tab === "concierge" ? "#academic-calendar" : row.tab === "work" ? "#study-work" : ""}`,
         );

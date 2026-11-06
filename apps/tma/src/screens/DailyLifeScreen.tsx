@@ -106,6 +106,7 @@ export function DailyLifeScreen({
   onOpenAcademicCourse?: (
     courseId: string | null,
     tab: AcademicHomeRow["tab"],
+    academicTab?: AcademicHomeRow["academicTab"],
   ) => void;
 }) {
   const [today, setToday] = useState(() => idealHumanLocalDate(new Date()));
@@ -358,7 +359,9 @@ export function DailyLifeScreen({
           <Briefing view={data.data.morning}>
             {onOpenAcademicCourse ? (
               <AcademicHomeBriefing
-                onOpen={(row) => onOpenAcademicCourse(row.courseId, row.tab)}
+                onOpen={(row) =>
+                  onOpenAcademicCourse(row.courseId, row.tab, row.academicTab)
+                }
               />
             ) : null}
           </Briefing>

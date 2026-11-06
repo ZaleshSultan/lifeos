@@ -135,6 +135,7 @@ describe("read-only academic Home briefing", () => {
       requiredRemainingAverage: 120,
       confirmed: true,
     };
+    const before = structuredClone(concierge);
     const view = buildAcademicHome({
       feed: feed(),
       concierge,
@@ -143,8 +144,26 @@ describe("read-only academic Home briefing", () => {
     });
     expect(view.risks.map((r) => r.courseId)).toEqual(["course"]);
     expect(view.exams).toHaveLength(2);
+    expect(
+      view.exams.map(({ key, courseId, tab, academicTab }) => ({
+        key,
+        courseId,
+        tab,
+        academicTab,
+      })),
+    ).toEqual([
+      { key: "exam", courseId: null, tab: "concierge", academicTab: "exams" },
+      {
+        key: "personal",
+        courseId: null,
+        tab: "concierge",
+        academicTab: "personal",
+      },
+    ]);
     expect(view.exams[0]!.detail).toContain("examfx");
     expect(view.exams[1]!.detail).toContain("Личный экзамен");
     expect(view.exams[0]!.detail).toContain("длительность неизвестна");
+    expect(view.exams[1]!.detail).toContain("длительность неизвестна");
+    expect(concierge).toEqual(before);
   });
 });
