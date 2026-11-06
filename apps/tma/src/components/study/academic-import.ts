@@ -41,6 +41,7 @@ export function localAcademicInput(
 export function academicInputTimestamp(
   value: string,
   timezone: string,
+  unchangedInstant?: string | null,
 ): string {
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value))
     throw new Error("academic_import_time");
@@ -53,11 +54,33 @@ export function academicInputTimestamp(
     Number(value.slice(14)) > 59
   )
     throw new Error("academic_import_time");
+  // A title/location edit must not round seconds or reinterpret an already
+  // explicit instant during a repeated hour in this minute-resolution input.
+  if (unchangedInstant && localAcademicInput(unchangedInstant, zone) === value)
+    return academicTimestamp(unchangedInstant);
   let instant = wanted;
   for (let i = 0; i < 3; i++) {
     const displayed = localAcademicInput(new Date(instant).toISOString(), zone);
     const difference = Date.parse(displayed + ":00Z") - wanted;
-    if (!difference) return academicTimestamp(new Date(instant).toISOString());
+    if (!difference) {
+      // The surrounding days expose both offsets at a clock rollback,
+      // including half-hour changes. A bare local clock cannot choose one.
+      for (const shift of [-86400000, 86400000]) {
+        const probe = instant + shift;
+        const offset =
+          Date.parse(
+            localAcademicInput(new Date(probe).toISOString(), zone) + ":00Z",
+          ) - probe;
+        const alternative = wanted - offset;
+        if (
+          alternative !== instant &&
+          localAcademicInput(new Date(alternative).toISOString(), zone) ===
+            value
+        )
+          throw new Error("academic_import_time_ambiguous");
+      }
+      return academicTimestamp(new Date(instant).toISOString());
+    }
     instant -= difference;
   }
   throw new Error("academic_import_time");
