@@ -1159,9 +1159,11 @@ def sync_grades(
                 earlier_analysis = previous_raw.get("_lifeos_grade_analysis")
                 if isinstance(earlier_analysis, dict):
                     academic_raw_json["_lifeos_grade_analysis"] = earlier_analysis
-            if notify_grade:
+            if notify_grade or retry_pending:
                 # The academic row is written before the reminder. If a later
                 # write fails, the next sync can still retry the notification.
+                # A temporarily hidden score must preserve that earlier intent;
+                # notify_grade still prevents sending until a score is visible.
                 academic_raw_json["_grade_notification_pending"] = True
 
             academic_payload: dict[str, Any] = {
