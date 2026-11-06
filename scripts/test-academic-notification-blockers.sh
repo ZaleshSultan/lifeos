@@ -3,6 +3,10 @@
 # Each case is a separate psql transaction/session; report all failures before exit.
 set -euo pipefail
 blocker_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+blocker_node="$(command -v node || true)"
+if [[ "$blocker_node" != /* || ! -x "$blocker_node" ]];then
+ printf 'Notification fixture requires an installed Node executable\n' >&2;exit 1
+fi
 blocker_container="lifeos-notification-blockers-${RANDOM}-$$"
 blocker_results="$(mktemp -d)"
 blocker_container_id=""
@@ -63,7 +67,7 @@ if [[ "$blocker_failed" -ne 0 ]];then printf 'FAIL: %s/3 intended notification c
 # Verify the real credential-free renderer on the persisted before/after inputs.
 for blocker_label in before after;do
  blocker_psql -c "select input::text from intelligence_blocker_test.render_inputs where label='$blocker_label';" >"$blocker_results/render-$blocker_label-input.json"
- if ! (cd "$blocker_root" && env -i PATH=/usr/local/bin:/usr/bin:/bin LANG=C.UTF-8 NODE_ENV=production /usr/bin/node --max-old-space-size=128 --import tsx scripts/render-academic-notification.ts) <"$blocker_results/render-$blocker_label-input.json" >"$blocker_results/render-$blocker_label-output.json";then exit 1;fi
+ if ! (cd "$blocker_root" && env -i PATH=/usr/local/bin:/usr/bin:/bin LANG=C.UTF-8 NODE_ENV=production "$blocker_node" --max-old-space-size=128 --import tsx scripts/render-academic-notification.ts) <"$blocker_results/render-$blocker_label-input.json" >"$blocker_results/render-$blocker_label-output.json";then exit 1;fi
 done
 python3 - "$blocker_results" <<'PY_CHECK'
 import json,sys
