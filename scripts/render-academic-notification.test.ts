@@ -120,11 +120,29 @@ describe("academic notification preparation", () => {
           _grade_visibility_unknown: true,
         });
       const result = renderAcademicNotification(c, now);
-      expect(result.message).toContain(
-        "необходимо подтвердить веса оценивания",
-      );
+      expect(result.message).toContain("Точный прогноз на 70 пока недоступен");
+      if (defect === "review")
+        expect(result.message).toContain(
+          "необходимо подтвердить веса оценивания",
+        );
+      if (defect === "stale")
+        expect(result.message).toContain(
+          "свежая успешная проверка Moodle не подтверждена",
+        );
       expect(result.message).not.toContain("Заработано итоговых баллов");
     }
+  });
+  it("withholds exact analysis and names stale evidence while preserving the reviewed policy", () => {
+    const c = candidate();
+    const stale = "2026-11-04T09:59:59Z";
+    c.forecast.records[0].updatedAt = stale;
+    const result = renderAcademicNotification(c, now);
+    expect(result.message).toContain("сведения об оценках устарели");
+    expect(result.message).not.toContain("Заработано итоговых баллов");
+    expect(result.message).not.toContain(
+      "необходимо подтвердить веса оценивания",
+    );
+    expect(c.forecast.review.sourceRef).toBe("Current synthetic syllabus p2");
   });
   it("groups changes and omits pretend course analysis when mapping is unknown", () => {
     const c = candidate();
