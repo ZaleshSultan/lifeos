@@ -27,6 +27,7 @@ jobs:
       - run: bash scripts/test-universal-capture-migration.sh
       - run: bash scripts/test-academic-concierge-migration.sh
       - run: bash scripts/test-academic-intelligence.sh
+      - run: bash scripts/test-academic-notification-blockers.sh
       - run: bash scripts/test-daily-life-migration.sh
       - run: pnpm --filter @lifeos/tma build
         env:

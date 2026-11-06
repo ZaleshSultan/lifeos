@@ -30,10 +30,53 @@ class IntelligencePreparationTests(unittest.TestCase):
         class Store:
             def request(self, method, table, query=None, body=None):
                 calls.append(table)
-                return [{"user_id": OWNER}] if table == "academic_intelligence_preferences" else [{"key": "grade:synthetic"}]
+                return [{"user_id": OWNER}] if table == "academic_intelligence_preferences" else [{"key": "grade:synthetic", "fingerprint": "a" * 64}]
         def failed(_): raise ValueError("unavailable")
         self.assertEqual(plan_intelligence_notifications(Store(), renderer=failed)["failed"], 1)
         self.assertNotIn("rpc/prepare_academic_intelligence_notification", calls)
+
+    def test_one_render_or_prepare_failure_does_not_hide_later_groups_and_retries_resume(self):
+        for failure in ("render", "prepare"):
+            with self.subTest(failure=failure):
+                class Store:
+                    def __init__(self): self.bound = set(); self.fail = True
+                    def request(self, method, table, query=None, body=None):
+                        if table == "academic_intelligence_preferences": return [{"user_id": OWNER}]
+                        if table == "rpc/academic_intelligence_planning_candidates":
+                            return [{"key": key, "fingerprint": "a" * 64} for key in ("grade:first", "grade:second") if key not in self.bound]
+                        if table == "rpc/prepare_academic_intelligence_notification":
+                            if failure == "prepare" and self.fail and body["p_key"] == "grade:first": raise TimeoutError("synthetic uncertain acknowledgement")
+                            self.bound.add(body["p_key"]); return True
+                        raise AssertionError("unexpected operation")
+                store = Store()
+                def render(candidate):
+                    if failure == "render" and store.fail and candidate["key"] == "grade:first": raise ValueError("synthetic renderer failure")
+                    return {"message": "Synthetic", "links": []}
+                self.assertEqual(plan_intelligence_notifications(store, renderer=render), {"queued": 1, "cancelled": 0, "failed": 1})
+                self.assertEqual(store.bound, {"grade:second"})
+                store.fail = False
+                self.assertEqual(plan_intelligence_notifications(store, renderer=render), {"queued": 1, "cancelled": 0, "failed": 0})
+                self.assertEqual(store.bound, {"grade:first", "grade:second"})
+                self.assertEqual(plan_intelligence_notifications(store, renderer=render)["queued"], 0)
+
+    def test_owner_pagination_and_bounded_group_failures_keep_owner_scope(self):
+        owners = [f"f6000000-0000-4000-8000-{i:012d}" for i in range(1, 103)]
+        seen = []
+        pages = []
+        class Store:
+            def request(self, method, table, query=None, body=None):
+                if table == "academic_intelligence_preferences":
+                    after = (query.get("user_id") or "gt.")[3:]
+                    rows = [owner for owner in owners if owner > after][:int(query["limit"])]
+                    pages.append((after, len(rows)))
+                    return [{"user_id": owner} for owner in rows]
+                if table == "rpc/academic_intelligence_planning_candidates":
+                    seen.append(body["p_user_id"])
+                    return []
+                raise AssertionError("unexpected write")
+        self.assertEqual(plan_intelligence_notifications(Store(), owner_limit=102), {"queued": 0, "cancelled": 0, "failed": 0})
+        self.assertEqual(seen, owners)
+        self.assertEqual(pages, [("", 100), (owners[99], 2)])
 
     def test_closed_links_allow_only_actual_fixed_origins_and_supported_navigation(self):
         markup = validated_links([{"text": "Study", "url": "https://lifeos.zalewko.me/tma/?screen=study&courseId=f1000000-0000-4000-8000-000000000001&studyTab=grades"}])

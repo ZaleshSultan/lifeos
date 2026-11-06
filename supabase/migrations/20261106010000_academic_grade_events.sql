@@ -6,6 +6,7 @@ create table public.academic_intelligence_preferences (
  user_id uuid primary key references auth.users(id) on delete cascade,
  grade_alerts_enabled boolean not null default false,
  grade_consent_revision integer not null default 0 check(grade_consent_revision>=0),
+ notification_revision integer not null default 0 check(notification_revision>=0),
  quiz_alerts_enabled boolean not null default false,
  quiz_offsets_minutes jsonb not null default '[4320,1440]',
  course_reviews jsonb not null default '{}' check(jsonb_typeof(course_reviews)='object'),
@@ -278,7 +279,7 @@ $$;
 
 create function public.academic_intelligence_service(p_user_id uuid,p_operation text,p_args jsonb default'{}')returns jsonb
 language plpgsql security invoker set search_path='' as $$
-declare i public.academic_intelligence_preferences;a public.academic_notification_preferences;v jsonb;r jsonb;c public.study_courses;
+declare i public.academic_intelligence_preferences;a public.academic_notification_preferences;v jsonb;r jsonb;c public.study_courses;academic_preferences jsonb;
 begin
  if p_operation='feed'then return public.academic_intelligence_feed(p_user_id);end if;
  if p_operation not in('preferences','review_policy')or jsonb_typeof(p_args)is distinct from'object'then raise exception'academic_intelligence_invalid_input'using errcode='22023';end if;
@@ -309,8 +310,12 @@ begin
     or not public.academic_validate_preferences(a.preferences||jsonb_build_object('assignmentAlertsEnabled',v->'assignmentAlertsEnabled','assignmentOffsetsMinutes',v->'assignmentOffsetsMinutes','quietStart',v->'quietStart','quietEnd',v->'quietEnd'))
     or not public.academic_validate_preferences(a.preferences||jsonb_build_object('assignmentOffsetsMinutes',v->'quizOffsetsMinutes'))
   then raise exception'academic_intelligence_invalid_input'using errcode='22023';end if;
-  update public.academic_notification_preferences set preferences=preferences||jsonb_build_object('assignmentAlertsEnabled',v->'assignmentAlertsEnabled','assignmentOffsetsMinutes',v->'assignmentOffsetsMinutes','quietStart',v->'quietStart','quietEnd',v->'quietEnd'),revision=revision+1,updated_at=clock_timestamp()where user_id=p_user_id;
-  update public.academic_intelligence_preferences set grade_consent_revision=grade_consent_revision+case when grade_alerts_enabled is distinct from(v->>'gradeAlertsEnabled')::boolean then 1 else 0 end,grade_alerts_enabled=(v->>'gradeAlertsEnabled')::boolean,quiz_alerts_enabled=(v->>'quizAlertsEnabled')::boolean,quiz_offsets_minutes=v->'quizOffsetsMinutes',revision=revision+1,updated_at=clock_timestamp()where user_id=p_user_id;
+  academic_preferences:=a.preferences||jsonb_build_object('assignmentAlertsEnabled',v->'assignmentAlertsEnabled','assignmentOffsetsMinutes',v->'assignmentOffsetsMinutes','quietStart',v->'quietStart','quietEnd',v->'quietEnd');
+  -- A grade/quiz-only save does not revise or cancel unchanged assignment work.
+  if academic_preferences is distinct from a.preferences then
+   update public.academic_notification_preferences set preferences=academic_preferences,revision=revision+1,updated_at=clock_timestamp()where user_id=p_user_id;
+  end if;
+  update public.academic_intelligence_preferences set notification_revision=notification_revision+case when quiz_alerts_enabled is distinct from(v->>'quizAlertsEnabled')::boolean or quiz_offsets_minutes is distinct from v->'quizOffsetsMinutes' then 1 else 0 end,grade_consent_revision=grade_consent_revision+case when grade_alerts_enabled is distinct from(v->>'gradeAlertsEnabled')::boolean then 1 else 0 end,grade_alerts_enabled=(v->>'gradeAlertsEnabled')::boolean,quiz_alerts_enabled=(v->>'quizAlertsEnabled')::boolean,quiz_offsets_minutes=v->'quizOffsetsMinutes',revision=revision+1,updated_at=clock_timestamp()where user_id=p_user_id;
  end if;
  return public.academic_intelligence_feed(p_user_id);
 end;$$;
@@ -321,31 +326,52 @@ create function public.academic_intelligence_quiet(p_user_id uuid,p_at timestamp
  select coalesce((select case when first=last then false when first<last then clock>=first and clock<last else clock>=first or clock<last end from t),true);
 $$;
 
+-- Match the pure renderer's finite/nonfuture temporal predicates. Millisecond
+-- precision matches JavaScript Date.parse; raw successful-refresh times are not
+-- themselves semantic changes while their eligibility stays unchanged.
+create function public.academic_intelligence_timestamp_current(value text,p_at timestamptz,max_age interval)returns boolean
+language sql stable set search_path='' as $$
+ select case when isfinite(p_at)and coalesce(public.academic_valid_timestamp(value),false)then
+ date_trunc('milliseconds',value::timestamptz)between date_trunc('milliseconds',p_at)-max_age and date_trunc('milliseconds',p_at)else false end;
+$$;
 create function public.academic_intelligence_forecast_key(f jsonb,p_at timestamptz)returns jsonb language sql stable set search_path='' as $$
  select(f-array['records','lms','calculator'])||jsonb_build_object(
  'calculator',case when jsonb_typeof(f->'calculator')='object'then(f->'calculator')-'values'else'null'::jsonb end,
- 'records',coalesce((select jsonb_agg(r-'updatedAt'order by r->>'id')from jsonb_array_elements(coalesce(f->'records','[]'::jsonb))r),'[]'::jsonb),
- 'sourceEligible',f->'lms'->'configured'='true'::jsonb and f->'lms'->'stale'='false'::jsonb,
- 'reviewCurrent',coalesce((f->'review'->>'reviewedAt')::timestamptz between p_at-interval'90 days'and p_at,false),
- 'enrollmentCurrent',(f->>'courseStartsOn'is null or(f->>'courseStartsOn')::date<=(p_at at time zone'Asia/Almaty')::date)
- and(f->>'courseEndsOn'is null or(f->>'courseEndsOn')::date>=(p_at at time zone'Asia/Almaty')::date));
+ 'records',coalesce((select jsonb_agg((r-'updatedAt')||jsonb_build_object('evidenceCurrent',public.academic_intelligence_timestamp_current(r->>'updatedAt',p_at,interval'48 hours'))order by r->>'id')
+ from jsonb_array_elements(case when jsonb_typeof(f->'records')='array'then f->'records'else'[]'::jsonb end)r),'[]'::jsonb),
+ 'sourceEligible',coalesce(f->'lms'->'configured'='true'::jsonb and f->'lms'->'stale'='false'::jsonb,false)
+ and public.academic_intelligence_timestamp_current(f->'lms'->>'lastSuccessfulSyncAt',p_at,interval'6 hours'),
+ 'reviewCurrent',public.academic_intelligence_timestamp_current(f->'review'->>'reviewedAt',p_at,interval'90 days'),
+ 'enrollmentCurrent',case when f->>'courseStartsOn'is null then true when public.academic_valid_date(f->>'courseStartsOn')then(f->>'courseStartsOn')::date<=(p_at at time zone'Asia/Almaty')::date else false end
+ and case when f->>'courseEndsOn'is null then true when public.academic_valid_date(f->>'courseEndsOn')then(f->>'courseEndsOn')::date>=(p_at at time zone'Asia/Almaty')::date else false end);
 $$;
 
-create function public.academic_intelligence_grade_candidates(p_user_id uuid,p_at timestamptz)returns setof jsonb
-language sql stable set search_path='' as $$
- with eligible as(
+-- Lightweight eligibility can be grouped before payload construction. A keyed
+-- delivery check never depends on the current planning page or hourly quota.
+create function public.academic_intelligence_grade_eligible_events(p_user_id uuid,p_at timestamptz,p_key text default null)
+returns setof public.academic_grade_events language sql stable set search_path='' as $$
  select e.* from public.academic_grade_events e
  join public.academic_intelligence_preferences pref on pref.user_id=e.user_id and pref.grade_alerts_enabled and pref.grade_consent_revision=e.consent_revision
  join public.academic_grade_observations o on o.user_id=e.user_id and o.moodle_course_id=e.moodle_course_id and o.moodle_item_id=e.moodle_item_id and o.revision=e.revision
  join public.sync_runs r on r.id=e.sync_run_id and r.user_id=e.user_id and r.status='success'
- where e.user_id=p_user_id and e.observed_at between p_at-interval'24 hours'and p_at
+ where e.user_id=p_user_id and(p_key is null or p_key='grade:'||e.sync_run_id||':'||e.moodle_course_id)and e.observed_at between p_at-interval'24 hours'and p_at
  and o.last_verified_at between p_at-interval'6 hours'and p_at+interval'5 minutes'
  and public.academic_intelligence_lms_status(p_user_id,p_at)->'stale'='false'::jsonb
  and not public.academic_intelligence_quiet(p_user_id,p_at)
  and exists(select from public.source_events s join public.academic_records a on a.user_id=s.user_id and a.source_event_id=s.id
  where s.user_id=e.user_id and s.external_id='academic:moodle:'||e.moodle_course_id||':'||e.moodle_item_id
  and a.score is not distinct from e.new_score and nullif(a.max_score,0)is not distinct from e.new_max_score
- and coalesce(a.raw_json->'_grade_visibility_unknown','false'::jsonb)<>'true'::jsonb)),
+ and coalesce(a.raw_json->'_grade_visibility_unknown','false'::jsonb)<>'true'::jsonb);
+$$;
+create function public.academic_intelligence_grade_group_keys(p_user_id uuid,p_at timestamptz)
+returns table(job_key text,observed_at timestamptz)language sql stable set search_path='' as $$
+ select 'grade:'||e.sync_run_id||':'||e.moodle_course_id,max(e.observed_at)
+ from public.academic_intelligence_grade_eligible_events(p_user_id,p_at)e group by e.sync_run_id,e.moodle_course_id;
+$$;
+create function public.academic_intelligence_grade_candidates_for_keys(p_user_id uuid,p_at timestamptz,p_keys text[])
+returns setof jsonb language sql stable set search_path='' as $$
+ with eligible as(select e.*from(select distinct key from unnest(p_keys)key where key is not null and cardinality(p_keys)between 1 and 10)requested
+ cross join lateral public.academic_intelligence_grade_eligible_events(p_user_id,p_at,requested.key)e),
  groups as(select sync_run_id,moodle_course_id,max(observed_at)observed_at,array_agg(id order by id)event_ids,
  jsonb_agg(jsonb_build_object('id',id,'kind',kind,'moodleCourseId',moodle_course_id,'moodleItemId',moodle_item_id,'itemTitle',item_title,'oldScore',old_score,'oldMaxScore',old_max_score,'newScore',new_score,'newMaxScore',new_max_score,'sourceUrl',source_url)order by id)events,
  min(course_title)course_title from eligible group by sync_run_id,moodle_course_id),
@@ -369,15 +395,31 @@ language sql stable set search_path='' as $$
  'preferencesRevision',revision,'academicRevision',academic_revision,'dueAt',observed_at,'targetAt',observed_at+interval'24 hours',
  'fingerprint',public.academic_hash(jsonb_build_object('events',events,'preferencesRevision',revision,'academicRevision',academic_revision,
  'forecast',public.academic_intelligence_forecast_key(forecast,p_at))))
- from payloads order by observed_at,sync_run_id,moodle_course_id limit 5;
+ from payloads order by observed_at,sync_run_id,moodle_course_id;
 $$;
 
+create function public.academic_intelligence_grade_candidates(p_user_id uuid,p_at timestamptz)returns setof jsonb
+language sql stable set search_path='' as $$
+ select *from public.academic_intelligence_grade_candidates_for_keys(p_user_id,p_at,
+ array(select k.job_key from public.academic_intelligence_grade_group_keys(p_user_id,p_at)k order by k.observed_at,k.job_key limit 5));
+$$;
+create function public.academic_intelligence_candidate_keys(p_user_id uuid,p_at timestamptz)
+returns table(job_key text,kind text,reference_key text,due_at timestamptz,target_at timestamptz,source_fingerprint text)
+language sql stable set search_path='' as $$
+ select k.job_key,'grade',split_part(k.job_key,':',3),k.observed_at,k.observed_at+interval'24 hours',null::text
+ from public.academic_intelligence_grade_group_keys(p_user_id,p_at)k;
+$$;
+create function public.academic_intelligence_candidate(p_user_id uuid,p_key text,p_at timestamptz)returns jsonb
+language sql stable set search_path='' as $$
+ select v from public.academic_intelligence_grade_candidates_for_keys(p_user_id,p_at,array[p_key])v where v->>'key'=p_key limit 1;
+$$;
+create function public.academic_intelligence_remaining_quota(p_user_id uuid,p_at timestamptz)returns integer
+language sql stable set search_path='' as $$
+ select greatest(0,5-count(*)::int)from public.academic_intelligence_jobs j join public.reminders r on r.id=j.reminder_id and r.user_id=j.user_id
+ where j.user_id=p_user_id and r.created_at>p_at-interval'1 hour';
+$$;
 create function public.academic_intelligence_candidates(p_user_id uuid,p_at timestamptz)returns setof jsonb
 language sql stable set search_path='' as $$select *from public.academic_intelligence_grade_candidates(p_user_id,p_at);$$;
-
-create function public.academic_intelligence_planning_candidates(p_user_id uuid,p_at timestamptz)returns setof jsonb
-language sql stable set search_path='' as $$select c from public.academic_intelligence_candidates(p_user_id,p_at)c
- where not exists(select from public.academic_intelligence_jobs j where j.user_id=p_user_id and j.job_key=c->>'key')limit 10;$$;
 
 create function public.prepare_academic_intelligence_notification(p_user_id uuid,p_key text,p_fingerprint text,p_message text,p_links jsonb)
 returns boolean language plpgsql security invoker set search_path='' as $$
@@ -388,9 +430,10 @@ begin
  or(l->>'url')!~'^https://(lifeos\.zalewko\.me/tma/\?screen=(study|settings)(&[A-Za-z]+=[A-Za-z0-9_-]+)*|lms\.astanait\.edu\.kz/(course/view|mod/(assign|quiz)/view)\.php\?id=[1-9][0-9]{0,15})$')
  then raise exception'academic_intelligence_invalid_input'using errcode='22023';end if;
  perform 1 from public.profiles where user_id=p_user_id and status='active'for update;if not found then return false;end if;
- select v into c from public.academic_intelligence_candidates(p_user_id,clock_timestamp())v where v->>'key'=p_key and v->>'fingerprint'=p_fingerprint;
+ c:=public.academic_intelligence_candidate(p_user_id,p_key,clock_timestamp());
+ if c->>'fingerprint'is distinct from p_fingerprint then c:=null;end if;
  if c is null or exists(select from public.academic_intelligence_jobs where user_id=p_user_id and job_key=p_key)
- or(select count(*)from public.academic_intelligence_jobs j join public.reminders r on r.id=j.reminder_id and r.user_id=j.user_id where j.user_id=p_user_id and r.created_at>clock_timestamp()-interval'1 hour')>=5 then return false;end if;
+ or public.academic_intelligence_remaining_quota(p_user_id,clock_timestamp())=0 then return false;end if;
  select coalesce(array_agg(x::uuid),'{}')into ids from jsonb_array_elements_text(coalesce(c->'eventIds','[]'::jsonb))x;
  insert into public.reminders(user_id,channel,remind_at,message,metadata_json)
  values(p_user_id,'telegram',clock_timestamp(),p_message,jsonb_build_object('academic_concierge_kind',c->>'kind','academic_intelligence',true,'academic_intelligence_key',p_key,
@@ -418,12 +461,18 @@ language sql stable set search_path='' as $$
  and public.academic_hash(jsonb_build_object('message',r.message,'links',r.metadata_json->'academic_links'))=j.render_fingerprint,false);
 $$;
 
-create or replace function public.academic_intelligence_planning_candidates(p_user_id uuid,p_at timestamptz)returns setof jsonb
+create function public.academic_intelligence_planning_candidates(p_user_id uuid,p_at timestamptz)returns setof jsonb
 language sql stable set search_path='' as $$
- select c from public.academic_intelligence_candidates(p_user_id,p_at)c
- where not exists(select from public.academic_intelligence_jobs j where j.user_id=p_user_id and j.job_key=c->>'key')
- or exists(select from public.academic_intelligence_jobs j join public.reminders r on r.user_id=j.user_id and r.id=j.reminder_id
-  where j.user_id=p_user_id and j.job_key=c->>'key'and public.academic_intelligence_job_repreparable(j,r,c))limit 10;
+ with eligible as(
+ select k.*,j.job_key is not null existing from public.academic_intelligence_candidate_keys(p_user_id,p_at)k
+ left join public.academic_intelligence_jobs j on j.user_id=p_user_id and j.job_key=k.job_key
+ left join public.reminders r on r.user_id=j.user_id and r.id=j.reminder_id
+ where j.job_key is null or public.academic_intelligence_job_repreparable(j,r,jsonb_build_object('key',k.job_key,'kind',k.kind,
+ 'referenceKey',k.reference_key,'targetAt',k.target_at,'fingerprint',k.source_fingerprint))),
+ ranked as(select e.*,sum(case when existing then 0 else 1 end)over(order by due_at,job_key rows unbounded preceding)new_position from eligible e),
+ selected as materialized(select job_key,due_at from ranked where existing or new_position<=public.academic_intelligence_remaining_quota(p_user_id,p_at)order by due_at,job_key limit 10),
+ resolved as materialized(select selected.*,public.academic_intelligence_candidate(p_user_id,job_key,p_at)candidate from selected)
+ select candidate from resolved where candidate is not null order by due_at,job_key;
 $$;
 
 alter function public.prepare_academic_intelligence_notification(uuid,text,text,text,jsonb)rename to prepare_academic_intelligence_notification_before_reprepare;
@@ -448,7 +497,8 @@ begin
  select *into r from public.reminders where user_id=p_user_id and id=j.reminder_id for update;
  if not found then return false;end if;
  select *into j from public.academic_intelligence_jobs where user_id=p_user_id and job_key=p_key for update;
- select v into c from public.academic_intelligence_candidates(p_user_id,clock_timestamp())v where v->>'key'=p_key and v->>'fingerprint'=p_fingerprint;
+ c:=public.academic_intelligence_candidate(p_user_id,p_key,clock_timestamp());
+ if c->>'fingerprint'is distinct from p_fingerprint then c:=null;end if;
  if c is null or not public.academic_intelligence_job_repreparable(j,r,c)then return false;end if;
  update public.reminders set message=p_message,remind_at=clock_timestamp(),status='pending',claim_token=null,lease_expires_at=null,claimed_at=null,last_error_code=null,
   metadata_json=metadata_json||jsonb_build_object('academic_concierge_kind',c->>'kind','academic_intelligence',true,'academic_intelligence_key',p_key,
@@ -462,10 +512,19 @@ begin
  return true;
 end;$$;
 
-create function public.academic_intelligence_cancel_preference_jobs()returns trigger language plpgsql security definer set search_path='' as $$begin
+create function public.academic_intelligence_cancel_preference_jobs()returns trigger language plpgsql security definer set search_path='' as $$
+declare grade_changed boolean:=true;quiz_changed boolean:=true;begin
  if TG_TABLE_SCHEMA<>'public'or TG_TABLE_NAME not in('academic_intelligence_preferences','academic_notification_preferences','profiles')then raise exception'invalid_intelligence_trigger'using errcode='42501';end if;
+ if TG_TABLE_NAME='profiles'then
+  if new.timezone is not distinct from old.timezone then return new;end if;
+ end if;
+ if TG_TABLE_NAME='academic_intelligence_preferences'then
+  grade_changed:=new.revision is distinct from old.revision or new.grade_alerts_enabled is distinct from old.grade_alerts_enabled or new.grade_consent_revision is distinct from old.grade_consent_revision or new.course_reviews is distinct from old.course_reviews;
+  quiz_changed:=new.notification_revision is distinct from old.notification_revision or new.quiz_alerts_enabled is distinct from old.quiz_alerts_enabled or new.quiz_offsets_minutes is distinct from old.quiz_offsets_minutes;
+ end if;
  update public.reminders r set status='cancelled',claim_token=null,lease_expires_at=null,claimed_at=null,last_error_code='academic_source_or_consent_changed'
- from public.academic_intelligence_jobs j where j.user_id=new.user_id and r.user_id=new.user_id and r.id=j.reminder_id and r.status in('pending','processing');
+ from public.academic_intelligence_jobs j where j.user_id=new.user_id and r.user_id=new.user_id and r.id=j.reminder_id and r.status in('pending','processing')
+ and((j.kind='grade'and grade_changed)or(j.kind in('assignment','quiz')and quiz_changed));
  return new;
 end;$$;
 create trigger intelligence_preferences_jobs after update on public.academic_intelligence_preferences for each row execute function public.academic_intelligence_cancel_preference_jobs();
@@ -475,15 +534,15 @@ create trigger intelligence_timezone_jobs after update of timezone on public.pro
 alter function public.begin_notification_delivery(text,uuid,uuid,uuid)rename to begin_notification_delivery_before_v6_grade;
 create function public.begin_notification_delivery(p_kind text,p_user_id uuid,p_id uuid,p_claim_token uuid)returns bigint
 language plpgsql security invoker set search_path='' as $$
-declare j public.academic_intelligence_jobs;r public.reminders;valid boolean;
+declare j public.academic_intelligence_jobs;r public.reminders;c jsonb;valid boolean;
 begin
  if p_kind='reminder'then
   perform 1 from public.profiles where user_id=p_user_id and status='active'for update;if not found then return null;end if;
   select *into r from public.reminders where user_id=p_user_id and id=p_id for update;
   select *into j from public.academic_intelligence_jobs where user_id=p_user_id and reminder_id=p_id for share;
   if found then
-   select exists(select from public.academic_intelligence_candidates(p_user_id,clock_timestamp())c where c->>'key'=j.job_key and c->>'fingerprint'=j.source_fingerprint
-    and(c->>'preferencesRevision')::int=j.preferences_revision and(c->>'academicRevision')::int=j.academic_revision)into valid;
+   c:=public.academic_intelligence_candidate(p_user_id,j.job_key,clock_timestamp());
+   valid:=coalesce(c->>'fingerprint'=j.source_fingerprint and(c->>'preferencesRevision')::int=j.preferences_revision and(c->>'academicRevision')::int=j.academic_revision,false);
    if not valid or r.metadata_json->>'academic_intelligence_key'is distinct from j.job_key or r.metadata_json->>'academic_intelligence_fingerprint'is distinct from j.source_fingerprint
     or public.academic_hash(jsonb_build_object('message',r.message,'links',r.metadata_json->'academic_links'))<>j.render_fingerprint then
     update public.reminders set status='cancelled',claim_token=null,lease_expires_at=null,claimed_at=null,last_error_code='academic_source_or_consent_changed'where id=p_id and user_id=p_user_id and claim_token=p_claim_token and status='processing';return null;
