@@ -24,6 +24,14 @@ Zero model pricing does not lower an existing operator accounting floor. A posit
 
 A normalized 429 persists its quota-domain cooldown before fallback. Both integer seconds and an HTTP `Retry-After` date are honored; missing/invalid values use a conservative wait. Very long valid waits require owner/operator review rather than truncation. All keys/models in the exhausted provider are skipped for that request. Only a distinct, already permitted provider can be tried after policy-revision and capability/privacy/cost checks. There is no timed automatic retry. A rejected 401 can use another explicitly scoped key within the same quota; 403, ambiguous acceptance, malformed output, cancellation or revoked consent stops dispatch. Free requests use explicit one-model HTTP attempts for auditable quota accounting rather than hidden OpenRouter model chains.
 
+Consent revision, cancellation and the selected key/model's current eligibility
+are checked again after the durable quota claim, immediately before dispatch.
+This closes the window where the database wait could outlast consent or the
+24-hour evidence lifetime. A blocked dispatch retains its conservative quota
+reservation. A positive reported free-model cost pauses the domain for review
+even when the generated text fails its JSON contract; no usable result or
+automatic fallback is returned.
+
 ## Protected reference example
 
 The following is a non-activated example for `LIFEOS_AI_ROUTER_CREDENTIALS_JSON`. Replace the UUID only in protected server configuration. These are five references, not key values or five allowances. The small numeric values are chosen application safety caps, not assertions about the account's actual provider quota. Missing `freeTier` evidence deliberately leaves these routes blocked.
@@ -105,7 +113,7 @@ The following is a non-activated example for `LIFEOS_AI_ROUTER_CREDENTIALS_JSON`
 
 After explicit approval and actual eligibility/terms checks, a protected reference may receive `freeTier:{eligibility:'verified_free',verifiedAt:<actual ISO verification time>,source:<official HTTPS page>,dataPolicy:'public_only'|'no_training_zdr'}`. This is a trusted operator attestation, not an automatically queried provider status. Both this evidence and the free model metadata expire after 24 hours. Never invent an account verification time from the public catalog time. A paid Gemini project cannot be labelled a free project merely because the same model has a free price tier.
 
-A free model row additionally needs `freeCosts:{request:0,image:0|null,audio:0|null}` from reviewed evidence. Unknown costs stay null and block any modality that uses them. Vision capability requires a verified zero image cost; audio capability requires verified zero audio cost. Current free-profile code does not implement audio transport. OpenRouter candidates must be fixed `:free` IDs, have a reviewed nonempty `providerOnly` shortlist and keep `requireZdr:true`. Transport requests also require supported parameters, deny data collection, ZDR and zero request/token price ceilings. If no compliant endpoint exists, manual processing remains available; privacy is not relaxed to get a response.
+A free model row additionally needs `freeCosts:{request:0,image:0|null,audio:0|null}` from reviewed evidence. Unknown costs stay null and block any modality that uses them. Vision capability requires a verified zero image cost; audio capability requires verified zero audio cost. Current free-profile code does not implement audio transport. OpenRouter candidates must be fixed `:free` IDs, have a reviewed nonempty `providerOnly` shortlist and keep `requireZdr:true`. Transport requests also require supported parameters, deny data collection, ZDR and zero request/token price ceilings. Free vision additionally sends `provider.max_price.image:0`, the documented [image-price ceiling](https://openrouter.ai/docs/guides/routing/provider-selection#max-price). If no compliant endpoint exists, manual processing remains available; privacy is not relaxed to get a response.
 
 Before a private-data trial, verify that the protected OpenRouter account or
 guardrail uses ZDR only, including `allow_safety_retention_google=false` and
@@ -116,6 +124,13 @@ separately. Public catalog metadata cannot establish these account settings.
 Keep privacy eligibility unverified until an explicitly consented review is
 complete. See [OpenRouter ZDR](https://openrouter.ai/docs/guides/features/zdr) and
 [response caching](https://openrouter.ai/docs/guides/features/response-caching).
+
+The November 6 public-documentation review also found that OpenRouter's
+[ZDR policy](https://openrouter.ai/docs/guides/features/zdr) announces CSAM screening
+and related legal-retention exceptions. ZDR is not an unconditional promise that
+content can never be retained. Its [cache policy](https://openrouter.ai/docs/guides/features/response-caching)
+states that per-request ZDR does not disable response caching; account-level ZDR
+does. These public documents do not verify an owner's actual account settings.
 
 ## Private-data and language limits
 
@@ -142,6 +157,32 @@ The existing paid native OpenAI STT adapter remains separate and OFF. Gemini 3.5
 Existing MealPhotoReview remains the only food-photo flow, with consent, editable estimated calories/macros and separate confirmation. A free image-capable model is preparation metadata, not a live vision result or nutritional measurement. Health-image consent and compliant endpoint/privacy evidence are required before a trial.
 
 ## Public evidence and verification
+
+The November 6 offline safety audit reproduced and fixed three gaps using mocked
+transports: consent/evidence expiry while a quota claim waits, the missing free
+image-price ceiling, and a positive-cost review pause skipped by malformed
+generated JSON. The focused router/provider/governor/core run passed **249 tests
+across 10 files** with external sockets blocked. Broader exact-head CI remains a
+release gate; these results establish neither production behavior nor provider,
+language or nutrition quality. No account/key diagnostic or inference was run.
+
+Before any separately authorized bounded trial:
+
+1. Verify the installed release/schema and the normal backup, restore and rollback
+   gates. Keep every new provider, voice, extraction and photo gate off meanwhile.
+2. Obtain explicit approval for the provider, data categories and one operation.
+   Unpaid Gemini stays restricted to server-owned public probes under the reviewed
+   [unpaid-data terms](https://aistudio.google.com/docs/terms#data-use-unpaid).
+3. Review actual account eligibility, strict endpoint/privacy settings, logging,
+   caching and current terms. Record fresh protected attestations; public metadata
+   and key presence cannot supply them.
+4. Verify fixed model capabilities and every applicable zero price, pin endpoints,
+   and share quota aliases across keys. [Gemini limits](https://aistudio.google.com/docs/rate-limits)
+   apply per project with Pacific-day resets; [OpenRouter limits](https://openrouter.ai/docs/api_reference/limits)
+   are not multiplied by extra accounts or keys. Preserve existing accounting floors.
+5. After explicit activation approval, permit only the reviewed bounded operation.
+   Verify actual output and receipts, then stop. A quota, privacy or billing failure
+   does not authorize account cycling, paid fallback or broader data disclosure.
 
 The public OpenRouter catalog was fetched without credentials on November 4, 2026 at 07:57:29 UTC: 455 entries, 14 fixed `:free` entries with zero prompt/completion prices. Prepared candidates include `xingchen-agi/xing4.0-29b-a4b:free` for structured text and `nvidia/nemotron-3.5-super-vl:free` for structured vision. Their endpoint metadata did not establish ZDR/privacy policy. Example metadata never binds a key or authorizes use. Source hashes and full research remain private operational evidence.
 

@@ -826,6 +826,18 @@ export class AiModelRouter {
                     : "ai_budget_unavailable",
                 );
               }
+              // The durable quota claim can wait on another transaction. Recheck
+              // consent and this exact key after that wait, before dispatch.
+              // An unused quota reservation remains conservative accounting.
+              const dispatchPolicy = await this.saved(input.userId);
+              if (signal.aborted) throw new AiGovernorError("ai_cancelled");
+              if (dispatchPolicy.revision !== saved.revision)
+                throw new AiRouterError("ai_router_consent_changed", 403);
+              if (
+                !freeCredentialPermits(key, publicInput, this.now()) ||
+                freeModelReason(row, [key], this.now()) !== null
+              )
+                throw new AiRouterError("ai_router_model_unavailable");
             }
             attempts++;
             Object.assign(routing, {
@@ -875,24 +887,6 @@ export class AiModelRouter {
                   "ai_provider_unavailable",
                   "ai_invalid_response",
                 );
-              if (
-                this.config.freeProfileEnabled &&
-                response.reportedCostMicros !== null &&
-                response.reportedCostMicros !== 0
-              ) {
-                await this.dependencies.governor!.cooldownProviderQuota(
-                  {
-                    userId: input.userId,
-                    requestId,
-                    provider: key.provider as "gemini" | "openrouter",
-                    quotaDomain: key.quota!.domain,
-                    retryAt: null,
-                    reviewRequired: true,
-                  },
-                  signal,
-                );
-                throw new RouterProviderError("invalid_response", false, true);
-              }
               const observed =
                 response.reportedCostMicros ??
                 (response.usage
@@ -931,6 +925,25 @@ export class AiModelRouter {
               };
             } catch (error) {
               last = error;
+              if (
+                this.config.freeProfileEnabled &&
+                error instanceof RouterProviderError &&
+                error.code === "invalid_response" &&
+                error.quotaReviewRequired
+              ) {
+                await this.dependencies.governor!.cooldownProviderQuota(
+                  {
+                    userId: input.userId,
+                    requestId,
+                    provider: key.provider as "gemini" | "openrouter",
+                    quotaDomain: key.quota!.domain,
+                    retryAt: null,
+                    reviewRequired: true,
+                  },
+                  signal,
+                );
+                throw error;
+              }
               if (
                 this.config.freeProfileEnabled &&
                 error instanceof RouterProviderError &&

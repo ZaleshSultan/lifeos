@@ -155,6 +155,37 @@ describe("unified router provider transport", () => {
     expect(fake).toHaveBeenCalledOnce();
   });
 
+  it("enforces a zero image-price ceiling on free OpenRouter vision", async () => {
+    const fake = transport(
+      json(completion({ model: "fixture/model:free", usage: { cost: 0 } })),
+    );
+    await callAiRouterProvider(
+      input({
+        model: model({
+          model: "fixture/model:free",
+          capabilities: ["text", "vision"],
+          billing: "free",
+          inputCostMicrosPer1k: 0,
+          outputCostMicrosPer1k: 0,
+        }),
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "image_url", image_url: { url: pngUrl() } }],
+          },
+        ],
+      }),
+      fake,
+    );
+    const sent = JSON.parse(String(fake.mock.calls[0][1]?.body));
+    expect(sent.provider.max_price).toEqual({
+      prompt: 0,
+      completion: 0,
+      request: 0,
+      image: 0,
+    });
+  });
+
   it("cannot switch provider or billing path inside an OpenRouter fallback array", async () => {
     for (const secondary of [
       model({ provider: "gemini", model: "gemini-fixture" }),

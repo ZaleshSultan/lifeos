@@ -325,6 +325,9 @@ function bodyFor(
             prompt: Math.max(...prices.map((p) => p.input)) / 1000,
             completion: Math.max(...prices.map((p) => p.output)) / 1000,
             request: 0,
+            ...(primary.billing === "free" && hasImages(messages)
+              ? { image: 0 }
+              : {}),
           },
         },
       },
@@ -763,10 +766,23 @@ export async function callAiRouterProvider(
       throw new RouterProviderError("provider_unavailable", true, false);
     throw new RouterProviderError("invalid_response", false, true);
   }
-  const result = parsedResult(
-    await responseJson(response, input.signal),
-    request.models,
-  );
+  const data = await responseJson(response, input.signal);
+  // A billing violation must remain visible even if the generated text later
+  // fails its schema. Do not return provider diagnostics or a usable result.
+  if (
+    input.model.provider === "openrouter" &&
+    input.model.billing === "free" &&
+    (observedCost(data.usage) ?? 0) > 0
+  )
+    throw new RouterProviderError(
+      "invalid_response",
+      false,
+      true,
+      undefined,
+      null,
+      true,
+    );
+  const result = parsedResult(data, request.models);
   if (input.schemaKey && !validRouterJson(input.schemaKey, result.text))
     return badResponse();
   if (
