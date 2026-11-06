@@ -36,6 +36,14 @@ if ! {
  cat "$blocker_root/scripts/academic-intelligence-test-fixtures/deadlines.sql"
  cat "$blocker_root/scripts/academic-intelligence-test-fixtures/blocker-setup.sql"
 } | blocker_psql >"$blocker_results/setup.log" 2>&1;then tail -100 "$blocker_results/setup.log" >&2;exit 1;fi
+if [[ "${1:-all}" == legacy-assignment ]];then
+ blocker_legacy_failed=0
+ for blocker_case in html-inventory assignment-cap assignment-link;do
+  if blocker_psql <"$blocker_root/scripts/academic-intelligence-test-fixtures/blocker-$blocker_case.sql" >"$blocker_results/$blocker_case.log" 2>&1;then printf 'PASS: legacy assignment %s\n' "$blocker_case";else tail -60 "$blocker_results/$blocker_case.log" >&2;blocker_legacy_failed=$((blocker_legacy_failed+1));fi
+ done
+ if [[ "$blocker_legacy_failed" -ne 0 ]];then exit 1;fi
+ exit 0
+fi
 if [[ "${1:-all}" == html-inventory ]];then
  if ! blocker_psql <"$blocker_root/scripts/academic-intelligence-test-fixtures/blocker-html-inventory.sql" >"$blocker_results/html-inventory.log" 2>&1;then tail -60 "$blocker_results/html-inventory.log" >&2;exit 1;fi
  printf 'PASS: verified incomplete HTML inventory preserves assignment delivery\n';exit 0
@@ -103,7 +111,7 @@ for blocker_worker in {1..2};do
  blocker_pids+=("$!")
 done
 for blocker_pid in "${blocker_pids[@]}";do if ! wait "$blocker_pid";then cat "$blocker_results"/policy-cas-*.log >&2;exit 1;fi;done
-for blocker_case in race-assertions html-inventory;do
+for blocker_case in race-assertions html-inventory assignment-cap assignment-link;do
  if ! blocker_psql <"$blocker_root/scripts/academic-intelligence-test-fixtures/blocker-$blocker_case.sql" >"$blocker_results/$blocker_case.log" 2>&1;then tail -60 "$blocker_results/$blocker_case.log" >&2;exit 1;fi
 done
 blocker_count="$(blocker_psql -c 'select count(*)from intelligence_blocker_test.proofs;')"
