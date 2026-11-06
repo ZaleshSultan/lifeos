@@ -1464,7 +1464,7 @@ try {
     await page.getByText("Последняя запись воды отменена.").waitFor();
     assert.equal(hydration("A", shownDate).totalMl, 0);
   });
-  await test("meal photo is local until consent, draft remains unsaved, confirmation writes reviewed estimate", async () => {
+  await test("meal photo is local until consent, its draft survives section switches, confirmation writes reviewed estimate", async () => {
     const shownDate = await shownNutritionDate(page);
     const beforeDays = structuredClone(days.get("A"));
     const previous = structuredClone(
@@ -1508,19 +1508,41 @@ try {
     assert.deepEqual(days.get("A"), beforeDays);
     assert.equal(journalPuts, putsBefore);
     await page.getByLabel("Ккал", { exact: true }).fill("650");
-    page.off("dialog", acceptDialog);
-    const guard = page.waitForEvent("dialog").then(async (dialog) => {
-      assert.match(dialog.message(), /несохранённые изменения/);
-      await dialog.dismiss();
-    });
-    await page.locator('a[href="/web/planner"]').first().click();
-    await guard;
-    page.on("dialog", acceptDialog);
+    let navigationDialogs = 0;
+    const countNavigationDialog = () => navigationDialogs++;
+    page.on("dialog", countNavigationDialog);
+    try {
+      const navigation = v6BrowserDriver(page, "web", origin);
+      await navigation.section("Главная");
+      await page
+        .getByRole("navigation", {
+          name: /^(?:Внутри|Модули) раздела «Главная»$/,
+        })
+        .getByRole("link", { name: "Задачи и план", exact: true })
+        .click();
+      await page
+        .getByRole("textbox", { name: "Название", exact: true })
+        .waitFor();
+      await navigation.section("Здоровье");
+      await page
+        .getByRole("navigation", {
+          name: /^(?:Внутри|Модули) раздела «Здоровье»$/,
+        })
+        .getByRole("link", { name: "Еда и вода", exact: true })
+        .click();
+      await page.getByLabel("Ккал", { exact: true }).waitFor();
+    } finally {
+      page.off("dialog", countNavigationDialog);
+    }
+    assert.equal(navigationDialogs, 0);
     assert.equal(new URL(page.url()).pathname, "/web/nutrition");
     assert.equal(
       await page.getByLabel("Ккал", { exact: true }).inputValue(),
       "650",
     );
+    assert.deepEqual(days.get("A"), beforeDays);
+    assert.equal(journalPuts, putsBefore);
+    assert.equal(analyses, 1);
     journalFail = true;
     const failedSave = page.waitForResponse(
       (response) =>
