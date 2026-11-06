@@ -38,8 +38,24 @@ def assert_isolated(info: dict, *, container: str, identifier: str, database: st
             raise OpsError("restore_unexpected_host_mount")
 
 
-def restore_drill(config: dict, manifest_path: Path | None = None, *, verification_sql_files=()) -> dict:
+def restore_drill(config: dict, manifest_path: Path | None = None, *, verification_sql_files=(),
+                  verification_user: str | None = None, expected_verification_role: dict | None = None) -> dict:
     from lifeos_backup import PostgresClient, assert_archive_data, ram_directory, verify_backup
+
+    verification_sql_files = tuple(verification_sql_files)
+    if verification_sql_files:
+        # Database dumps preserve object ownership/ACLs, not cluster IAM. Never
+        # present administrator execution as a rehearsal of a production caller.
+        if verification_user is None or expected_verification_role is None:
+            raise OpsError("verification_caller_required")
+        if not isinstance(verification_user, str) or not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", verification_user):
+            raise OpsError("verification_user_invalid")
+        if (not isinstance(expected_verification_role, dict)
+                or set(expected_verification_role) != {"superuser", "bypassrls", "inherit"}
+                or any(type(value) is not bool for value in expected_verification_role.values())):
+            raise OpsError("verification_role_invalid")
+    elif verification_user is not None or expected_verification_role is not None:
+        raise OpsError("verification_profile_without_sql")
 
     state = private_dir(Path(config["state_dir"]))
     if manifest_path is None:
@@ -63,12 +79,14 @@ def restore_drill(config: dict, manifest_path: Path | None = None, *, verificati
         info = json.loads(command(["docker", "inspect", container], timeout=15))[0]
         assert_isolated(info, container=container, identifier=identity, database=database)
 
-    def psql(sql: str, db=database):
+    def psql(sql: str, db=database, user="supabase_admin"):
         guard()
         if db not in {database, "postgres"}:
             raise OpsError("restore_database_name_rejected")
+        if user not in {"supabase_admin", verification_user}:
+            raise OpsError("restore_database_user_rejected")
         return command(["docker", "exec", "-i", container, "psql", "-h", "127.0.0.1",
-                        "-U", "supabase_admin", "-d", db, "-XqAt", "-v", "ON_ERROR_STOP=1"],
+                        "-U", user, "-d", db, "-XqAt", "-v", "ON_ERROR_STOP=1"],
                        input=sql.encode(), timeout=60)
 
     with lock(state / "restore-drill.lock"):
@@ -122,8 +140,24 @@ def restore_drill(config: dict, manifest_path: Path | None = None, *, verificati
                 # Release tests may additionally validate reviewed migrations on
                 # this disposable restored copy. The scheduled drill supplies no
                 # SQL files, and the public CLI exposes no arbitrary SQL option.
+                if verification_sql_files:
+                    raw_identity = psql("""select jsonb_build_object(
+                      'current_user',current_user,'session_user',session_user,
+                      'superuser',rolsuper,'bypassrls',rolbypassrls,'inherit',rolinherit)
+                      from pg_catalog.pg_roles where rolname=current_user;""", user=verification_user)
+                    try:
+                        verification_identity = json.loads(raw_identity)
+                    except (ValueError, TypeError):
+                        raise OpsError("verification_identity_invalid") from None
+                    expected_identity = {"current_user": verification_user, "session_user": verification_user,
+                                         **expected_verification_role}
+                    if verification_identity != expected_identity:
+                        raise OpsError("verification_role_mismatch")
+                    result["release_verification"] = verification_identity
                 for sql_file in verification_sql_files:
-                    psql(Path(sql_file).read_text())
+                    # Direct authentication keeps session_user equal to the
+                    # declared caller; SET ROLE from the restorer would not.
+                    psql(Path(sql_file).read_text(), user=verification_user)
                 if verification_sql_files:
                     result["isolated_release_sql_checks"] = [Path(path).name for path in verification_sql_files]
                 result.update(counts=counts, canonical_owner_verified=True, row_counts_match_archive=True,
