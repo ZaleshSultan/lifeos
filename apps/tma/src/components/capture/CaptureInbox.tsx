@@ -3,6 +3,7 @@ import {
   useDraftState,
   useDraftRetention,
   useDraftRef,
+  useDiscardDraft,
 } from "../../lib/retained-draft";
 import { useEffect, useRef, useState } from "react";
 import { Inbox, Mic, Plus, Search, ShieldCheck } from "lucide-react";
@@ -57,6 +58,7 @@ export function CaptureInbox({
   onDirtyChange,
   onNavigate,
 }: CaptureInboxProps) {
+  const discardPreparedMemory = useDiscardDraft("capture:memory");
   const [ready, setReady] = useState(false);
   const [capabilities, setCapabilities] = useState(initialCapabilities);
   const [history, setHistory] = useState<CaptureSearchResult | null>(
@@ -492,6 +494,9 @@ export function CaptureInbox({
       if (!mounted.current) return;
       accept(saved);
       identity.current = null;
+      // The preview unmounts the memory form. Clear its retained draft at the
+      // server acknowledgement, before unmount or a later processing failure.
+      if (memory) discardPreparedMemory();
       if (!memory) setText("");
       setTab("inbox");
       setMemoryDirty(false);

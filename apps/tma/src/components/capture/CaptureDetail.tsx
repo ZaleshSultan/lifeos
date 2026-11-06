@@ -513,6 +513,7 @@ export function CaptureDetail({
                   }}
                   onCancel={() => {
                     if (discardDrafts()) {
+                      discardAction();
                       setEditing(null);
                       setEditDirty(false);
                     }

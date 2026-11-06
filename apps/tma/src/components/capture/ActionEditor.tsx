@@ -552,10 +552,7 @@ export function CaptureActionEditor({
           <button
             type="button"
             className={captureButtonClass}
-            onClick={() => {
-              discard();
-              onCancel();
-            }}
+            onClick={onCancel}
           >
             Отменить редактирование
           </button>
