@@ -76,6 +76,11 @@ export function academicError(
   error: unknown,
   fallback: (error: unknown) => string,
 ): string {
+  if (
+    error instanceof Error &&
+    error.message === "academic_import_time_ambiguous"
+  )
+    return "Это местное время повторяется при переводе часов. Укажи точный UTC или смещение в нормализованном JSON либо UTC-время в ICS. Изменения не сохранены.";
   const status =
     error && typeof error === "object" && "status" in error
       ? Number(error.status)

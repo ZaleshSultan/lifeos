@@ -5,7 +5,7 @@ import {
   academicOffsetsInput,
   localAcademicInput,
 } from "./academic-import";
-import { academicCountdown } from "./academic-ui";
+import { academicCountdown, academicError } from "./academic-ui";
 import type {
   AcademicEventInput,
   AcademicSourceInput,
@@ -164,6 +164,74 @@ describe("academic local preview and clocks", () => {
     expect(() =>
       academicInputTimestamp("2030-11-12T25:00", "Asia/Almaty"),
     ).toThrow();
+  });
+
+  it("rejects repeated personal wall clocks instead of choosing an offset", async () => {
+    for (const [value, zone] of [
+      ["2026-11-01T01:30", "America/New_York"],
+      ["2026-04-05T01:45", "Australia/Lord_Howe"],
+    ]) {
+      expect(() => academicInputTimestamp(value, zone)).toThrow(
+        "academic_import_time_ambiguous",
+      );
+    }
+    await expect(
+      academicFilePreview(
+        "date,start_local,course\n2026-11-01,01:30,Synthetic personal fold",
+        { ...options, kind: "personal_exam", timezone: "America/New_York" },
+      ),
+    ).rejects.toThrow("academic_import_time_ambiguous");
+    expect(
+      academicError(new Error("academic_import_time_ambiguous"), () => "Other"),
+    ).toContain("повторяется при переводе часов");
+  });
+
+  it("preserves unchanged exact instants when the minute editor cannot show their offset or seconds", () => {
+    for (const instant of [
+      "2026-11-01T05:30:12.345Z",
+      "2026-11-01T06:30:56.789Z",
+    ]) {
+      expect(
+        academicInputTimestamp(
+          localAcademicInput(instant, "America/New_York"),
+          "America/New_York",
+          instant,
+        ),
+      ).toBe(instant);
+      expect(() =>
+        academicInputTimestamp("2026-11-01T01:31", "America/New_York", instant),
+      ).toThrow("academic_import_time_ambiguous");
+    }
+    expect(
+      academicInputTimestamp(
+        "2030-11-12T09:01",
+        "Asia/Almaty",
+        "2030-11-12T04:00:12.345Z",
+      ),
+    ).toBe("2030-11-12T04:01:00.000Z");
+  });
+
+  it("keeps explicit-offset JSON and UTC ICS usable during a repeated hour", async () => {
+    const zone = "America/New_York";
+    const precise = {
+      ...event,
+      startsAt: "2026-11-01T01:30:12-05:00",
+      timezone: zone,
+    };
+    const json = await academicFilePreview(
+      JSON.stringify({ sources: [source], events: [precise] }),
+      { ...options, kind: "personal_exam", format: "json", timezone: zone },
+    );
+    expect(json.events[0].startsAt).toBe("2026-11-01T06:30:12.000Z");
+    const ics = await academicFilePreview(
+      "BEGIN:VCALENDAR\nBEGIN:VEVENT\nDTSTART:20261101T063000Z\nSUMMARY:Synthetic personal fold\nEND:VEVENT\nEND:VCALENDAR",
+      { ...options, kind: "personal_exam", format: "ics", timezone: zone },
+    );
+    expect(ics.events[0].startsAt).toBe("2026-11-01T06:30:00.000Z");
+    expect(ics.events[0].endsAt).toBeNull();
+    expect(academicInputTimestamp("2026-11-01T01:30", "Asia/Almaty")).toBe(
+      "2026-10-31T20:30:00.000Z",
+    );
   });
 
   it("uses event-local days for countdowns and never invents a passed exam result", () => {

@@ -201,6 +201,80 @@ export async function academicBrowserScenarios({
     await page.reload();
     await tab("Личные экзамены").click();
     await app().getByText("Отменено", { exact: true }).waitFor();
+
+    // An explicit later occurrence stays exact when only the title is edited.
+    const original = "2026-11-01T06:30:12.345Z";
+    fixture.setPersonalClock(original, "America/New_York");
+    await app()
+      .getByRole("button", { name: "Обновить учебные события", exact: true })
+      .click();
+    await app()
+      .getByRole("button", { name: "Править событие", exact: true })
+      .click();
+    const foldEditor = app().getByRole("form", {
+      name: "Правка учебного события",
+      exact: true,
+    });
+    await foldEditor
+      .getByRole("textbox", { name: "Название", exact: true })
+      .fill("Synthetic personal event corrected");
+    assert.equal(
+      await foldEditor
+        .locator('input[type="datetime-local"]')
+        .first()
+        .inputValue(),
+      "2026-11-01T01:30",
+    );
+    await foldEditor
+      .getByRole("button", { name: "Сохранить ручную правку", exact: true })
+      .click();
+    await foldEditor.waitFor({ state: "hidden" });
+    assert.equal(
+      fixture.snapshot.events.find((e) => e.kind === "personal_exam").startsAt,
+      original,
+    );
+    await app()
+      .getByRole("button", { name: "Править событие", exact: true })
+      .click();
+    const beforeAmbiguous = fixture.requests.filter(
+      (r) => r.method === "PATCH",
+    ).length;
+    await foldEditor
+      .locator('input[type="datetime-local"]')
+      .first()
+      .fill("2026-11-01T01:31");
+    await foldEditor
+      .getByRole("button", { name: "Сохранить ручную правку", exact: true })
+      .click();
+    await foldEditor
+      .getByRole("alert")
+      .filter({ hasText: "повторяется при переводе часов" })
+      .waitFor();
+    assert.equal(
+      fixture.requests.filter((r) => r.method === "PATCH").length,
+      beforeAmbiguous,
+    );
+    assert.equal(
+      fixture.snapshot.events.find((e) => e.kind === "personal_exam").startsAt,
+      original,
+    );
+    await overflow();
+    await foldEditor
+      .locator('input[type="datetime-local"]')
+      .first()
+      .fill("2026-11-01T02:15");
+    await foldEditor
+      .getByRole("button", { name: "Сохранить ручную правку", exact: true })
+      .click();
+    await foldEditor.waitFor({ state: "hidden" });
+    assert.equal(
+      fixture.snapshot.events.find((e) => e.kind === "personal_exam").startsAt,
+      "2026-11-01T07:15:00.000Z",
+    );
+    assert.equal(
+      fixture.snapshot.events.find((e) => e.kind === "personal_exam").endsAt,
+      null,
+    );
     await overflow();
   });
   await test(`${prefix} inclusive three-trimester calendar preserves overlapping periods and genuine assignment status`, async () => {

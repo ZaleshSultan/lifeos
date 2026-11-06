@@ -17,6 +17,7 @@ import {
   academicCalendarDate,
   academicCountdown,
   academicDateTime,
+  academicError,
   academicInput,
   academicKindLabel,
   academicPanel,
@@ -122,35 +123,34 @@ export function AcademicEventEditor({
   onSave: (patch: AcademicEventRevisionInput["patch"]) => Promise<void>;
   onCancel: () => void;
 }) {
-  const [title, setTitle] = useDraftState(
-    `academic:event:${event.sourceKey}:${event.key}`,
-    "title",
-    event.title,
-  );
+  const draftScope = `academic:event:${event.sourceKey}:${event.key}`;
+  // Inputs show minutes, while the reviewed source carries an exact instant.
+  // Keep their original anchor with the draft instead of rebasing it on a
+  // background refresh that happens to display the same local minute.
+  const [base] = useDraftState(draftScope, "base", () => ({ ...event }));
+  const [title, setTitle] = useDraftState(draftScope, "title", base.title);
   const [location, setLocation] = useDraftState(
-    `academic:event:${event.sourceKey}:${event.key}`,
+    draftScope,
     "location",
-    event.location ?? "",
+    base.location ?? "",
   );
   const [start, setStart] = useDraftState(
-    `academic:event:${event.sourceKey}:${event.key}`,
+    draftScope,
     "start",
-    localAcademicInput(event.startsAt, event.timezone),
+    localAcademicInput(base.startsAt, base.timezone),
   );
   const [end, setEnd] = useDraftState(
-    `academic:event:${event.sourceKey}:${event.key}`,
+    draftScope,
     "end",
-    localAcademicInput(event.endsAt, event.timezone),
+    localAcademicInput(base.endsAt, base.timezone),
   );
-  useDraftRetention(`academic:event:${event.sourceKey}:${event.key}`, true);
-  const discardDraft = useDiscardDraft(
-    `academic:event:${event.sourceKey}:${event.key}`,
-  );
-  const [invalid, setInvalid] = useState(false);
-  const timed = event.startsAt !== null;
+  useDraftRetention(draftScope, true);
+  const discardDraft = useDiscardDraft(draftScope);
+  const [invalid, setInvalid] = useState<string | null>(null);
+  const timed = base.startsAt !== null;
   async function submit(e: FormEvent) {
     e.preventDefault();
-    setInvalid(false);
+    setInvalid(null);
     try {
       if (!title.trim()) throw new Error();
       const patch: AcademicEventRevisionInput["patch"] = {
@@ -158,14 +158,26 @@ export function AcademicEventEditor({
         location: location.trim() || null,
       };
       if (timed) {
-        patch.startsAt = academicInputTimestamp(start, event.timezone);
-        patch.endsAt = end ? academicInputTimestamp(end, event.timezone) : null;
+        patch.startsAt = academicInputTimestamp(
+          start,
+          base.timezone,
+          base.startsAt,
+        );
+        patch.endsAt = end
+          ? academicInputTimestamp(end, base.timezone, base.endsAt)
+          : null;
         if (patch.endsAt && patch.endsAt <= patch.startsAt) throw new Error();
       }
       await onSave(patch);
       discardDraft();
-    } catch {
-      setInvalid(true);
+    } catch (error) {
+      setInvalid(
+        academicError(
+          error,
+          () =>
+            "Проверь название и порядок времени. Если сервер недоступен или версия изменилась, правки остались в форме.",
+        ),
+      );
     }
   }
   return (
@@ -176,12 +188,11 @@ export function AcademicEventEditor({
     >
       <p className="text-sm text-zinc-300">
         Ручная правка сохранится отдельно от обновлений исходного документа.
-        Время указано в {event.timezone}.
+        Время указано в {base.timezone}.
       </p>
       {invalid ? (
         <p role="alert" className="mt-2 text-sm text-amber-100">
-          Проверь название и порядок времени. Если сервер недоступен или версия
-          изменилась, правки остались в форме.
+          {invalid}
         </p>
       ) : null}
       <fieldset disabled={busy} className="mt-3 min-w-0 space-y-3">
@@ -207,7 +218,7 @@ export function AcademicEventEditor({
         {timed ? (
           <div className="grid min-w-0 gap-3 sm:grid-cols-2">
             <label className="block min-w-0 text-sm text-zinc-300">
-              Начало · {event.timezone}
+              Начало · {base.timezone}
               <input
                 className={academicInput}
                 type="datetime-local"

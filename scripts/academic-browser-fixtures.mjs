@@ -229,6 +229,14 @@ export function academicBrowserFixture(
       overview.lms.stale = true;
       overview.warnings = ["lms_stale_or_reconnect_required"];
     },
+    setPersonalClock(instant, timezone) {
+      const personal = overview.events.find(
+        (row) => row.kind === "personal_exam",
+      );
+      personal.startsAt = instant;
+      personal.timezone = timezone;
+      personal.revision++;
+    },
     async response(path, method, body = {}) {
       if (!path.startsWith("study/concierge")) return null;
       requests.push({ path, method, body: structuredClone(body) });
