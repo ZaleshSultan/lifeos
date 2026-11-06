@@ -6,6 +6,12 @@ import { ErrorPanel, LoadingPanel } from "./components/AsyncState";
 import { HomeScreen } from "./screens/HomeScreen";
 import { OnboardingStatusScreen } from "./screens/OnboardingStatusScreen";
 import type { ScreenId } from "./types";
+import {
+  resolveTmaLocation,
+  sectionForScreen,
+  tmaNavigationUrl,
+  type PrimarySection,
+} from "./lib/navigation";
 import { DraftOwnerContext } from "./lib/session-draft";
 import { ScreenLoadBoundary } from "./components/ScreenLoadBoundary";
 
@@ -93,74 +99,91 @@ const LmsConnectionScreen = lazy(() =>
   })),
 );
 
-const SCREENS: ScreenId[] = [
-  "home",
-  "capture",
-  "ai",
-  "study",
-  "dashboard",
-  "lms",
-  "workout",
-  "ideal-human",
-  "daily-life",
-  "health",
-  "focus",
-  "finance",
-  "sources",
-  "reminders",
-  "mode",
-];
-
-function initialScreen(): ScreenId {
-  const params = new URLSearchParams(window.location.search);
-  const requestedScreen = params.get("screen");
-
-  if (requestedScreen && SCREENS.includes(requestedScreen as ScreenId)) {
-    return requestedScreen as ScreenId;
-  }
-
-  return params.has("workoutId") ? "workout" : "home";
+const SettingsScreen = lazy(() =>
+  import("./screens/SettingsScreen").then((module) => ({
+    default: module.SettingsScreen,
+  })),
+);
+function initialLocation() {
+  return resolveTmaLocation(new URLSearchParams(window.location.search));
 }
 
 export default function App() {
-  const [screen, setRawScreen] = useState<ScreenId>(initialScreen);
+  const [location, setLocation] = useState(initialLocation);
+  const { screen, section } = location;
+  const [visited, setVisited] = useState<ScreenId[]>(() => [location.screen]);
   const [idealHumanDirty, setIdealHumanDirty] = useState(false);
+  const [dailyLifeDirty, setDailyLifeDirty] = useState(false);
   const [aiRouterDirty, setAiRouterDirty] = useState(false);
   const [captureDirty, setCaptureDirty] = useState(false);
   const [academicDirty, setAcademicDirty] = useState(false);
-  const setScreen = (next: ScreenId) => {
-    if (
-      next !== screen &&
-      (((screen === "ideal-human" || screen === "daily-life") &&
-        idealHumanDirty) ||
-        (screen === "ai" && aiRouterDirty) ||
-        (screen === "capture" && captureDirty) ||
-        (screen === "study" && academicDirty)) &&
-      !window.confirm(
-        "Есть несохранённые изменения. Открыть другой раздел и отменить их?",
-      )
-    )
-      return;
-    setIdealHumanDirty(false);
-    setAiRouterDirty(false);
-    setCaptureDirty(false);
-    setAcademicDirty(false);
-    setRawScreen(next);
+  const [settingsDirty, setSettingsDirty] = useState(false);
+  const setScreen = (next: ScreenId, nextSection = sectionForScreen(next)) => {
+    const url = tmaNavigationUrl(window.location.href, {
+      screen: next,
+      section: nextSection,
+    });
+    window.history.pushState(null, "", url);
+    setLocation(resolveTmaLocation(new URL(url).searchParams));
+    setVisited((previous) =>
+      previous.includes(next) ? previous : [...previous, next],
+    );
+    window.dispatchEvent(new Event("lifeos:navigation"));
+    window.scrollTo({ top: 0, behavior: "auto" });
   };
+  const openAcademicCourse = (
+    courseId: string,
+    studyTab: "grades" | "calculator" | "work" | "academic",
+  ) => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("courseId", courseId);
+    url.searchParams.set("studyTab", studyTab);
+    window.history.replaceState(null, "", url);
+    setScreen("study");
+  };
+  const hasDrafts =
+    idealHumanDirty ||
+    dailyLifeDirty ||
+    aiRouterDirty ||
+    captureDirty ||
+    academicDirty ||
+    settingsDirty;
+  useEffect(() => {
+    if (!hasDrafts) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [hasDrafts]);
   const [aiDate, setAiDate] = useState<string>();
   const sessionQuery = useSessionQuery();
 
   useEffect(() => {
-    const url = new URL(window.location.href);
-    url.searchParams.set("screen", screen);
-    window.history.replaceState(null, "", url);
-  }, [screen]);
+    window.history.replaceState(
+      null,
+      "",
+      tmaNavigationUrl(window.location.href, initialLocation()),
+    );
+    const restore = () => {
+      const next = initialLocation();
+      setLocation(next);
+      setVisited((previous) =>
+        previous.includes(next.screen) ? previous : [...previous, next.screen],
+      );
+      window.dispatchEvent(new Event("lifeos:navigation"));
+    };
+    window.addEventListener("popstate", restore);
+    return () => window.removeEventListener("popstate", restore);
+  }, []);
 
   if (sessionQuery.isLoading) {
     return (
       <AppShell
         onScreenChange={setScreen}
         screen={screen}
+        section={section}
         showNavigation={false}
         statusLabel="Session"
       >
@@ -174,6 +197,7 @@ export default function App() {
       <AppShell
         onScreenChange={setScreen}
         screen={screen}
+        section={section}
         showNavigation={false}
         statusLabel="Offline"
       >
@@ -191,6 +215,7 @@ export default function App() {
       <AppShell
         onScreenChange={setScreen}
         screen={screen}
+        section={section}
         showNavigation={false}
         statusLabel="Session"
       >
@@ -207,6 +232,7 @@ export default function App() {
       <AppShell
         onScreenChange={setScreen}
         screen={screen}
+        section={section}
         showNavigation={false}
         statusLabel={sessionQuery.data.state}
       >
@@ -223,88 +249,115 @@ export default function App() {
       key={sessionQuery.data.telegramUserId}
       value={sessionQuery.data.telegramUserId}
     >
-      <AppShell onScreenChange={setScreen} screen={screen}>
-        <ScreenLoadBoundary key={screen}>
-          <Suspense fallback={<LoadingPanel title="Загружаем раздел…" />}>
-            {screen === "home" ? (
-              <HomeScreen
-                onOpenCapture={() => setScreen("capture")}
-                onOpenScholarship={() => setScreen("dashboard")}
-                onOpenWorkout={() => setScreen("workout")}
-                onOpenIdealHuman={() => setScreen("ideal-human")}
-                onOpenDailyLife={() => setScreen("daily-life")}
-                onOpenStudy={() => setScreen("study")}
-                onOpenAi={(date) => {
-                  setAiDate(date);
-                  setScreen("ai");
-                }}
-                session={sessionQuery.data}
-              />
-            ) : null}
-            {screen === "capture" ? (
-              <CaptureScreen
-                onDirtyChange={setCaptureDirty}
-                onNavigate={setScreen}
-              />
-            ) : null}
-            {screen === "ai" ? (
-              <AiScreen
-                date={aiDate}
-                onBack={() => setScreen("home")}
-                onDirtyChange={setAiRouterDirty}
-              />
-            ) : null}
-            {screen === "workout" ? <WorkoutScreen /> : null}
-            {screen === "daily-life" ? (
-              <DailyLifeScreen
-                onOpenIdealHuman={() => setScreen("ideal-human")}
-                onOpenReminders={() => setScreen("reminders")}
-                onDirtyChange={setIdealHumanDirty}
-              />
-            ) : null}
-            {screen === "ideal-human" ? (
-              <IdealHumanScreen
-                onOpenWorkout={() => setScreen("workout")}
-                onOpenHealth={() => setScreen("health")}
-                onOpenStudy={() => setScreen("study")}
-                onOpenReminders={() => setScreen("reminders")}
-                onDirtyChange={setIdealHumanDirty}
-              />
-            ) : null}
-            {screen === "dashboard" ? (
-              <StudyDashboardScreen
-                onOpenStudy={() => setScreen("study")}
-                onOpenLms={() => setScreen("lms")}
-                onOpenCalculator={(courseId) => {
-                  const url = new URL(window.location.href);
-                  url.searchParams.set("studyTab", "calculator");
-                  url.searchParams.set("courseId", courseId);
-                  window.history.replaceState(null, "", url);
-                  setScreen("study");
-                }}
-              />
-            ) : null}
-            {screen === "study" ? (
-              <StudyScreen
-                onOpenLms={() => setScreen("lms")}
-                onDirtyChange={setAcademicDirty}
-              />
-            ) : null}
-            {screen === "lms" ? (
-              <Suspense
-                fallback={<LoadingPanel title="Загружаем подключение LMS…" />}
-              >
-                <LmsConnectionScreen onBack={() => setScreen("study")} />
+      <AppShell onScreenChange={setScreen} screen={screen} section={section}>
+        {visited.map((view) => (
+          <section
+            key={view}
+            hidden={screen !== view}
+            aria-label={screen === view ? undefined : "Сохранённая форма"}
+          >
+            <ScreenLoadBoundary>
+              <Suspense fallback={<LoadingPanel title="Загружаем раздел…" />}>
+                {view === "home" ? (
+                  <HomeScreen
+                    {...{ onOpenAcademicCourse: openAcademicCourse }}
+                    onOpenCapture={() => setScreen("capture")}
+                    onOpenScholarship={() => setScreen("dashboard")}
+                    onOpenWorkout={() => setScreen("workout")}
+                    onOpenIdealHuman={() => setScreen("ideal-human")}
+                    onOpenDailyLife={() => setScreen("daily-life")}
+                    onOpenStudy={() => setScreen("study")}
+                    onOpenAi={(date) => {
+                      setAiDate(date);
+                      setScreen("ai");
+                    }}
+                    session={sessionQuery.data}
+                  />
+                ) : null}
+                {view === "capture" ? (
+                  <CaptureScreen
+                    onDirtyChange={setCaptureDirty}
+                    onNavigate={setScreen}
+                  />
+                ) : null}
+                {view === "ai" ? (
+                  <AiScreen
+                    date={aiDate}
+                    onBack={() => setScreen("home")}
+                    onDirtyChange={setAiRouterDirty}
+                  />
+                ) : null}
+                {view === "workout" ? <WorkoutScreen /> : null}
+                {view === "daily-life" ? (
+                  <DailyLifeScreen
+                    onOpenIdealHuman={() => setScreen("ideal-human")}
+                    onOpenReminders={() => setScreen("reminders")}
+                    onDirtyChange={setDailyLifeDirty}
+                  />
+                ) : null}
+                {view === "ideal-human" ? (
+                  <IdealHumanScreen
+                    onOpenWorkout={() => setScreen("workout")}
+                    onOpenHealth={() => setScreen("health")}
+                    onOpenStudy={() => setScreen("study")}
+                    onOpenReminders={() => setScreen("reminders")}
+                    onDirtyChange={setIdealHumanDirty}
+                  />
+                ) : null}
+                {view === "dashboard" ? (
+                  <StudyDashboardScreen
+                    onOpenStudy={() => setScreen("study")}
+                    onOpenLms={() => setScreen("lms")}
+                    onOpenCalculator={(courseId) => {
+                      const url = new URL(window.location.href);
+                      url.searchParams.set("studyTab", "calculator");
+                      url.searchParams.set("courseId", courseId);
+                      window.history.replaceState(null, "", url);
+                      setScreen("study");
+                    }}
+                  />
+                ) : null}
+                {view === "study" ? (
+                  <StudyScreen
+                    onOpenLms={() => setScreen("lms")}
+                    onDirtyChange={setAcademicDirty}
+                  />
+                ) : null}
+                {view === "lms" ? (
+                  <Suspense
+                    fallback={
+                      <LoadingPanel title="Загружаем подключение LMS…" />
+                    }
+                  >
+                    <LmsConnectionScreen onBack={() => setScreen("study")} />
+                  </Suspense>
+                ) : null}
+                {view === "health" ? <HealthScreen /> : null}
+                {view === "focus" ? <FocusScreen /> : null}
+                {view === "finance" ? <FinanceScreen /> : null}
+                {view === "sources" ? <SourcesScreen /> : null}
+                {view === "reminders" ? <RemindersScreen /> : null}
+                {view === "mode" ? <ModeScreen /> : null}
+                {view === "settings" ? (
+                  <SettingsScreen
+                    onNavigate={(next) =>
+                      setScreen(
+                        next,
+                        next === "sources" ||
+                          next === "lms" ||
+                          next === "reminders" ||
+                          next === "mode"
+                          ? "settings"
+                          : sectionForScreen(next),
+                      )
+                    }
+                    onDirtyChange={setSettingsDirty}
+                  />
+                ) : null}
               </Suspense>
-            ) : null}
-            {screen === "health" ? <HealthScreen /> : null}
-            {screen === "focus" ? <FocusScreen /> : null}
-            {screen === "finance" ? <FinanceScreen /> : null}
-            {screen === "sources" ? <SourcesScreen /> : null}
-            {screen === "reminders" ? <RemindersScreen /> : null}
-            {screen === "mode" ? <ModeScreen /> : null}
-          </Suspense>
-        </ScreenLoadBoundary>
+            </ScreenLoadBoundary>
+          </section>
+        ))}
       </AppShell>
     </DraftOwnerContext.Provider>
   );

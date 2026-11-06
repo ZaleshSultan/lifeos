@@ -13,4 +13,5 @@ export type ScreenId =
   | "finance"
   | "sources"
   | "reminders"
-  | "mode";
+  | "mode"
+  | "settings";
