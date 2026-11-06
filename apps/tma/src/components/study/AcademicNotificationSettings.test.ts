@@ -26,7 +26,7 @@ describe("academic notification consent presentation", () => {
         onSave: save,
       }),
     );
-    expect(html).toContain("Доставка отключена на сервере");
+    expect(html).toContain("о новых оценках и тестах пока не активированы");
     expect(html).toContain('value="1440, 180, 30"');
     expect(html).toContain("Это подсказка, не согласие");
     expect(html).not.toContain(" checked=");
@@ -45,6 +45,21 @@ describe("academic notification consent presentation", () => {
     expect((html.match(/checked=""/g) ?? []).length).toBe(1);
     expect(html).toMatch(/type="submit" disabled=""/);
     expect(html).toContain("Подтверждаю выбранные категории");
+    expect(save).not.toHaveBeenCalled();
+  });
+  it("preserves saved assignment consent when the new grade and quiz categories are inactive", () => {
+    const save = vi.fn();
+    const html = renderToStaticMarkup(
+      createElement(AcademicNotificationSettings, {
+        preferences: { ...preferences, assignmentAlertsEnabled: true },
+        deliveryEnabled: false,
+        onSave: save,
+      }),
+    );
+    expect((html.match(/checked=""/g) ?? []).length).toBe(1);
+    expect(html).toContain("о новых оценках и тестах пока не активированы");
+    expect(html).toContain("Напоминания о заданиях сохраняют свои настройки");
+    expect(html).toMatch(/type="submit" disabled=""/);
     expect(save).not.toHaveBeenCalled();
   });
 });
