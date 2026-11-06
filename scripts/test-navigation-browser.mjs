@@ -377,16 +377,21 @@ try {
       {
         checks,
         expectedCases:
-          V6_VIEWPORTS.length * 3 + V6_SCENARIO_COUNT + V6_EDITOR_SCENARIO_COUNT + 1,
+          V6_VIEWPORTS.length * 3 +
+          V6_SCENARIO_COUNT +
+          V6_EDITOR_SCENARIO_COUNT +
+          1,
         editorFixtureCases: V6_EDITOR_SCENARIO_COUNT,
         editorFixtureWrites: editorStates.reduce(
           (sum, state) => ({
             successful:
               sum.successful +
-              state.browserWrites.filter((write) => write.status === 200).length,
+              state.browserWrites.filter((write) => write.status === 200)
+                .length,
             rejected:
               sum.rejected +
-              state.browserWrites.filter((write) => write.status === 409).length,
+              state.browserWrites.filter((write) => write.status === 409)
+                .length,
             controls: sum.controls + state.controlWrites,
           }),
           { successful: 0, rejected: 0, controls: 0 },

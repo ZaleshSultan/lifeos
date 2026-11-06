@@ -2,7 +2,7 @@
 
 Candidate development only. No production migration, deployment, LMS reconnection, provider call or new Telegram category activation is authorized by this work.
 
-The remediated integration is **PARTIAL**, with full exact-head CI and the final browser matrix pending. [Blocker remediation](LIFEOS_V6_BLOCKER_REMEDIATION.md) supersedes the original candidate's notification-readiness claims and records the corrected migration seals.
+The remediated source integration is **READY_FOR_MERGE** at `2a168935be08469ae2e05d7350ba363323d71dff`: [fresh hosted CI](https://github.com/ZaleshSultan/lifeos/actions/runs/42194894235) passed full suites/builds, 109 blocker assertions and 43-TMA/108-web browser cases. Retain green checks at the final documentation-bearing PR head before merging. Production remains **PREPARED_NOT_ACTIVATED**. [Blocker remediation](LIFEOS_V6_BLOCKER_REMEDIATION.md) supersedes original readiness claims and records the corrected migration seals and merge dependencies.
 
 ## Baseline and gaps
 
@@ -41,7 +41,7 @@ Stable Moodle course/item identifiers establish identity. First observations are
 
 Grade consent has a separate epoch: changing another preference does not invalidate an authorized event, while disabling and later enabling grade alerts cannot replay old captured events. Grade groups display at most five changes and retain a history link. Planning excludes handled durable jobs before selecting bounded payloads against the owner's actual remaining five-new-jobs-per-hour allowance, with deterministic ordering. A failed group does not hide other groups. Notification formatting invokes the same pure TypeScript forecast engine through a bounded local stdin process; it makes no provider call and has no database credentials. Unmapped or unreviewed courses get an honest forecast-unavailable explanation.
 
-At the existing durable `begin` boundary, the database resolves the exact bound key independently of the planning/display page and hourly preparation quota. It checks the owned source, recipient, consent epoch, render/link fingerprint, freshness, quiet time and delivery window again. The semantic forecast key includes every record's finite, nonfuture, 48-hour eligibility, source freshness, review age and enrollment eligibility; harmless fresh timestamps and hypothetical scores do not change it. An expired numeric render is refused and can be replaced with honest uncertainty only before any attempt or failure. Sent, attempted and ambiguous receipts remain closed. New workers refuse legacy unbound academic jobs rather than bypass this fence.
+At the existing durable `begin` boundary, the database resolves the exact bound key independently of the planning/display page and hourly preparation quota. It checks the owned source, recipient, consent epoch, render/link fingerprint, freshness, quiet time and delivery window again. The semantic forecast key includes every record's finite, nonfuture, 48-hour eligibility, source freshness, review age and enrollment eligibility; harmless fresh timestamps and hypothetical scores do not change it. An expired numeric render is refused and can be replaced with honest uncertainty only before any attempt or failure. Re-preparation cannot reset sent, attempted, failed/retry or ambiguous receipts; established definite-rejection retries still follow their existing budgets. New workers refuse legacy unbound academic jobs rather than bypass this fence.
 
 ## Deadlines and preferences
 

@@ -853,7 +853,10 @@ const blockedExternalRequests = [];
 let diagnosticPage;
 const expectedCases = process.env.LIFEOS_WEB_BROWSER_LOGOUT_ONLY
   ? 2
-  : 82 + (V6_VIEWPORTS.length - 4) + V6_SCENARIO_COUNT + V6_EDITOR_SCENARIO_COUNT;
+  : 82 +
+    (V6_VIEWPORTS.length - 4) +
+    V6_SCENARIO_COUNT +
+    V6_EDITOR_SCENARIO_COUNT;
 async function checkpoint() {
   const path = resolve(artifacts, "checkpoint.json");
   await writeFile(
@@ -2489,10 +2492,12 @@ try {
           (sum, fixture) => ({
             successful:
               sum.successful +
-              fixture.browserWrites.filter((write) => write.status === 200).length,
+              fixture.browserWrites.filter((write) => write.status === 200)
+                .length,
             rejected:
               sum.rejected +
-              fixture.browserWrites.filter((write) => write.status === 409).length,
+              fixture.browserWrites.filter((write) => write.status === 409)
+                .length,
             controls: sum.controls + fixture.controlWrites,
           }),
           { successful: 0, rejected: 0, controls: 0 },
