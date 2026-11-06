@@ -114,5 +114,20 @@ for blocker_pid in "${blocker_pids[@]}";do if ! wait "$blocker_pid";then cat "$b
 for blocker_case in race-assertions html-inventory assignment-cap assignment-link;do
  if ! blocker_psql <"$blocker_root/scripts/academic-intelligence-test-fixtures/blocker-$blocker_case.sql" >"$blocker_results/$blocker_case.log" 2>&1;then tail -60 "$blocker_results/$blocker_case.log" >&2;exit 1;fi
 done
+if ! blocker_psql <"$blocker_root/scripts/academic-intelligence-test-fixtures/blocker-source-race-setup.sql" >"$blocker_results/source-race-setup.log" 2>&1;then tail -60 "$blocker_results/source-race-setup.log" >&2;exit 1;fi
+blocker_psql -c "begin;set local role service_role;select e.id from public.source_events e join intelligence_blocker_test.source_race_claim c on c.source_id=e.id where e.user_id='f6000000-0000-4000-8000-000000000050'for update of e;select pg_advisory_xact_lock(64504650);select pg_sleep(2);update public.source_events set status='completed',raw_json=raw_json||'{\"submission_status\":\"submitted\"}'::jsonb where user_id='f6000000-0000-4000-8000-000000000050'and id=(select source_id from intelligence_blocker_test.source_race_claim);commit;" >"$blocker_results/source-update-race.log" 2>&1 &
+blocker_source_pid="$!"
+blocker_source_locked=false
+for blocker_probe in {1..50};do
+ # Probe connections immediately close/release any lock they acquire. A false
+ # reply means the updater holds the source row and its transaction-local gate.
+ if [[ "$(blocker_psql -c 'select pg_try_advisory_lock(64504650);')" == f ]];then blocker_source_locked=true;break;fi
+ sleep 0.05
+done
+if [[ "$blocker_source_locked" != true ]];then wait "$blocker_source_pid" || true;cat "$blocker_results/source-update-race.log" >&2;exit 1;fi
+blocker_psql -c "set role service_role;insert into intelligence_blocker_test.source_race_results select public.begin_notification_delivery('reminder','f6000000-0000-4000-8000-000000000050',reminder_id,token)from intelligence_blocker_test.source_race_claim;" >"$blocker_results/source-begin-race.log" 2>&1 &
+blocker_source_begin_pid="$!"
+for blocker_pid in "$blocker_source_pid" "$blocker_source_begin_pid";do if ! wait "$blocker_pid";then cat "$blocker_results"/source-*-race.log >&2;exit 1;fi;done
+if ! blocker_psql <"$blocker_root/scripts/academic-intelligence-test-fixtures/blocker-source-race-assertions.sql" >"$blocker_results/source-race-assertions.log" 2>&1;then tail -60 "$blocker_results/source-race-assertions.log" >&2;exit 1;fi
 blocker_count="$(blocker_psql -c 'select count(*)from intelligence_blocker_test.proofs;')"
 printf 'PASS: all3 notification blocker contracts; %s assertions; no external sends\n' "$blocker_count"

@@ -103,13 +103,70 @@ language sql stable set search_path='' as $$
  union all select v from public.academic_intelligence_deadline_candidates(p_user_id,p_at)v where v->>'kind'='quiz'limit 10;
 $$;
 
--- Existing assignment consent, offsets and quiet hours remain authoritative.
--- Grade policy review never cuts assignments over to a flag-dependent planner.
+-- Notification selection is independent of the UI's history/completed-row cap.
+-- For valid unchanged facts these are the exact58 binding, fingerprint and text;
+-- only a noncanonical source URL is omitted and invalidates its old unsafe text.
+create function public.academic_intelligence_legacy_assignment_candidates(p_user_id uuid,p_at timestamptz,p_reference uuid default null)
+returns setof jsonb language sql stable set search_path='' as $$
+ with context as(select p.user_id,p.timezone,a.preferences from public.profiles p join public.academic_notification_preferences a on a.user_id=p.user_id
+ where p.user_id=p_user_id and p.status='active'and p.telegram_user_id is not null and exists(select from pg_catalog.pg_timezone_names where name=p.timezone)
+ and a.preferences->'assignmentAlertsEnabled'='true'::jsonb and not public.academic_intelligence_quiet(p.user_id,p_at)),
+ rows as(select c.*,v,e.id,e.due_at target,lead_time.position,lead_time.value::text::int offset_minutes,
+ e.due_at-make_interval(mins=>lead_time.value::text::int)due,
+ public.academic_hash(jsonb_build_object('id',e.id,'dueAt',e.due_at,'status',e.status,'module',e.raw_json->'module_type','title',left(trim(e.title),500),
+ 'courseTitle',e.raw_json->'course_title','sourceUrl',v->'sourceUrl','submission',e.raw_json->'submission_status','score',e.raw_json->'score','grade',e.raw_json->'related_grade_external_id','parserWarnings',e.raw_json->'parser_warnings'))fingerprint
+ from context c cross join lateral public.academic_intelligence_deadline_rows_for_id(p_user_id,p_at,p_reference)v
+ join public.source_events e on e.user_id=c.user_id and e.id=(v->>'id')::uuid
+ cross join lateral jsonb_array_elements(c.preferences->'assignmentOffsetsMinutes')with ordinality lead_time(value,position)where v->>'kind'='assignment')
+ select jsonb_build_object('kind','assignment','timezone',timezone,'referenceId',id,'referenceKey',v->>'key','offset',offset_minutes,
+ 'targetAt',target,'dueAt',due,'fingerprint',fingerprint,'message','⏰ Задание Moodle: '||(v->>'title')||E'\nКурс: '||coalesce(v->>'courseTitle','не указан')||E'\nСдать до: '||to_char(target at time zone timezone,'DD.MM.YYYY HH24:MI')||' ('||timezone||E')\nСтатус последней проверки: не сдано.'||case when v->>'sourceUrl'is not null then E'\n'||(v->>'sourceUrl')else''end)
+ from rows where due<=p_at and p_at<least(target,due+interval'5 minutes')order by target,id,position;
+$$;
+
+-- Other established class/exam/stale-warning policy is inherited unchanged.
 alter function public.academic_candidate_rows(uuid,timestamptz)rename to academic_candidate_rows_before_v6_deadlines;
 create function public.academic_candidate_rows(p_user_id uuid,p_at timestamptz)returns setof jsonb language sql stable set search_path='' as $$
- select v from public.academic_candidate_rows_before_v6_deadlines(p_user_id,p_at)v
- where v->>'kind'<>'assignment'or exists(select from public.academic_intelligence_deadline_rows_for_id(p_user_id,p_at,(v->>'referenceId')::uuid)d where d->>'id'=v->>'referenceId');
+ with inherited as materialized(select v,ordinal from public.academic_candidate_rows_before_v6_deadlines(p_user_id,p_at)with ordinality t(v,ordinal)where v->>'kind'<>'assignment'),
+ combined as(select v,case when v->>'kind'='lms_stale'then 2 else 0 end section,ordinal from inherited
+ union all select v,1,ordinal from public.academic_intelligence_legacy_assignment_candidates(p_user_id,p_at)with ordinality t(v,ordinal))
+ select v from combined order by section,ordinal;
 $$;
+
+-- Exact bound-assignment validation must not depend on a planning/UI page.
+-- Lock the source BEFORE the reminder: source UPDATE already holds that row
+-- when its cancellation trigger needs the reminder. The reverse order deadlocks.
+alter function public.begin_notification_delivery(text,uuid,uuid,uuid)rename to begin_notification_delivery_before_v6_assignments;
+create function public.begin_notification_delivery(p_kind text,p_user_id uuid,p_id uuid,p_claim_token uuid)returns bigint
+language plpgsql security invoker set search_path='' as $$
+declare j public.academic_notification_jobs;pref public.academic_notification_preferences;r public.reminders;c jsonb;tz text;valid boolean;begin
+ if p_kind='reminder'then
+  select timezone into tz from public.profiles where user_id=p_user_id and status='active'for update;if not found then return null;end if;
+  select *into j from public.academic_notification_jobs where user_id=p_user_id and reminder_id=p_id and kind='assignment'for share;
+  if found and not exists(select from public.academic_intelligence_jobs where user_id=p_user_id and reminder_id=p_id)then
+   perform 1 from public.source_events where user_id=p_user_id and id=j.reference_id for share;
+   perform 1 from public.user_lms_settings where user_id=p_user_id and platform_type='aitu_moodle'for share;
+   select *into pref from public.academic_notification_preferences where user_id=p_user_id for share;
+   select *into r from public.reminders where user_id=p_user_id and id=p_id for update;
+   select v into c from public.academic_intelligence_legacy_assignment_candidates(p_user_id,clock_timestamp(),j.reference_id)v
+   where v->>'referenceKey'=j.reference_key and(v->>'offset')::int=j.offset_minutes;
+   valid:=coalesce(pref.revision=j.preferences_revision and tz=j.timezone and c is not null
+   and c->>'fingerprint'=j.source_fingerprint and(c->>'dueAt')::timestamptz=j.due_at and(c->>'targetAt')::timestamptz=j.target_at
+   and r.message=c->>'message'and r.metadata_json->'academic_room'is not distinct from coalesce(c->'room','null'::jsonb)
+   and r.metadata_json->'academic_title'is not distinct from coalesce(c->'title','null'::jsonb)
+   and(r.metadata_json->>'academic_start')::timestamptz=(c->>'targetAt')::timestamptz,false);
+   if not valid then
+    update public.reminders set status='cancelled',claim_token=null,lease_expires_at=null,claimed_at=null,last_error_code='academic_source_or_consent_changed'
+    where id=p_id and user_id=p_user_id and claim_token=p_claim_token and status='processing';return null;
+   end if;
+   -- The same original DailyLife/active-recipient/token/lease/attempt boundary
+   -- follows the exact academic validation, with no second queue or sender.
+   return public.begin_notification_delivery_before_academic(p_kind,p_user_id,p_id,p_claim_token);
+  end if;
+ end if;
+ return public.begin_notification_delivery_before_v6_assignments(p_kind,p_user_id,p_id,p_claim_token);
+end;$$;
+revoke all on function public.begin_notification_delivery(text,uuid,uuid,uuid),public.begin_notification_delivery_before_v6_assignments(text,uuid,uuid,uuid)from public,anon,authenticated;
+grant execute on function public.begin_notification_delivery(text,uuid,uuid,uuid),public.begin_notification_delivery_before_v6_assignments(text,uuid,uuid,uuid)to service_role;
 
 alter function public.academic_intelligence_feed(uuid)rename to academic_intelligence_feed_before_deadlines;
 create function public.academic_intelligence_feed(p_user_id uuid)returns jsonb language sql stable set search_path='' as $$

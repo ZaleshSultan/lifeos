@@ -33,6 +33,7 @@ do $$declare u uuid:='f6000000-0000-4000-8000-000000000001';c jsonb;refreshed js
  exception when sqlstate'ZX001'then null;end;
  perform intelligence_test.assert(recipient=760001 and(select status='processing'and delivery_attempts=0 from public.reminders where id=rid),'unchanged refreshed legacy deadline passes real send fence without retaining synthetic attempt');
  update public.source_events set status='completed',raw_json=raw_json||'{"submission_status":"submitted"}'::jsonb where user_id=u and id=(c->>'referenceId')::uuid;
+ perform intelligence_test.assert((select status='cancelled'and delivery_attempts=0 from public.reminders where id=rid and user_id=u),'submitted source trigger cancels pending legacy job before begin');
  perform intelligence_test.assert(public.begin_notification_delivery('reminder',u,rid,token)is null,'no legacy send after verified submission');
 end;$$;
 do $$declare u uuid:='f6000000-0000-4000-8000-000000000001';c jsonb;changed jsonb;probe jsonb;rid uuid;token uuid;recipient bigint;job_count bigint;original_row jsonb;outcome text;receipt_preserved boolean;begin

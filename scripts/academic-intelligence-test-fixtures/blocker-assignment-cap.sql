@@ -19,6 +19,12 @@ do $$declare u uuid:='f6000000-0000-4000-8000-000000000048';eid uuid;rid uuid;cl
  perform intelligence_blocker_test.assert(public.plan_academic_notifications(u)->>'queued'='1','actual planner prepares current task beyond completed row cap');
  select reminder_id into rid from public.academic_notification_jobs where user_id=u and reference_id=eid;
  select claim_token into claim from public.claim_due_reminders(clock_timestamp(),100)where user_id=u and id=rid;
+ -- New earlier eligible tasks can move this existing binding outside a
+ -- bounded planning page without changing any of its own verified facts.
+ insert into public.source_events(user_id,source_key,external_id,event_type,title,status,due_at,last_synced_at,source_url,raw_json)
+ select u,'university_platform','activity:moodle:42:assign:'||(480000+n),'task','Synthetic earlier current task '||n,'active',clock_timestamp()+interval'28 minutes',clock_timestamp(),
+ 'https://lms.astanait.edu.kz/mod/assign/view.php?id='||(480000+n),jsonb_build_object('moodle_course_id','42','moodle_cmid',(480000+n)::text,'module_type','assign','submission_status','not_submitted','parser_warnings','[]'::jsonb)from generate_series(1,101)n;
+ perform intelligence_blocker_test.assert(not exists(select from public.academic_candidate_rows(u,clock_timestamp())v where v->>'kind'='assignment'and v->>'referenceId'=eid::text),'current bound assignment is demonstrably outside bounded planning page');
  perform intelligence_blocker_test.assert(public.begin_notification_delivery('reminder',u,rid,claim)=760048,'current assignment beyond history cap keeps actual delivery rights');
  perform public.finish_notification_delivery('reminder',u,rid,claim,'unknown','synthetic_no_send',null,null);
 end;$$;
