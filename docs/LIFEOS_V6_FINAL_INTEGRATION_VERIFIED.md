@@ -65,7 +65,7 @@ Fresh checks at 06:15:09 UTC found:
 All three actual process commands bind to those environments. Their packaged
 bundle SHA-256 is `bbc7e9c01d7551bb8a159b5dedd989b8ee3ce105aff522b68eb1b01bf854cab0`.
 The unchanged host default SSL context also contains the affected fingerprint.
-Google uses the Requests transport, the legacy parser creates verified Requests
+Google credential refresh uses the Requests transport, the legacy parser creates verified Requests
 sessions, and the mirror's HTTP path uses stdlib urlopen. No effective mitigation
 for these remaining active configurations was established. These are runtime
 configuration/bundle findings, not proof of intercepted traffic or inspection of
