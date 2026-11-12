@@ -485,6 +485,19 @@ async function resolveUser(
     return null;
   }
 
+  if (
+    runtime.voiceCommandOwner &&
+    (user.userId !== runtime.voiceCommandOwner.userId ||
+      user.timezone !== runtime.voiceCommandOwner.timezone ||
+      user.telegramUserId !== message.from.id)
+  ) {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "Профиль или часовой пояс изменился. Отправь голосовое заново.",
+    });
+    return null;
+  }
+
   if (user.status === "pending") {
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
@@ -530,7 +543,7 @@ async function createEntityAndQueueSync(
   } catch (error) {
     console.error(
       "[ERROR] Atomic life entity + Obsidian sync queue creation failed:",
-      error instanceof Error ? error.message : error,
+      { errorType: error instanceof Error ? "Error" : typeof error },
     );
     throw error;
   }
@@ -1539,7 +1552,7 @@ async function createFinanceEntry(
       runtime.telegram,
       user.userId,
       occurredOn,
-    ).catch(console.error);
+    ).catch(() => console.error("[telegram] finance alert failed"));
   }
 
   return transaction;
@@ -2569,7 +2582,7 @@ async function handleWeatherCommand(
   } catch (error) {
     console.warn("weather_command_failed", {
       userId: user?.userId,
-      error: error instanceof Error ? error.message : String(error),
+      errorType: error instanceof Error ? "Error" : typeof error,
     });
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
@@ -3108,7 +3121,7 @@ async function handleReminderCommand(
     } catch (error) {
       console.warn("google_calendar_cancel_failed", {
         reminderId: reminder.id,
-        error: error instanceof Error ? error.message : String(error),
+        errorType: error instanceof Error ? "Error" : typeof error,
       });
     }
     await runtime.telegram.sendMessage({
@@ -3169,9 +3182,19 @@ async function handleStudyTodaySchedule(
   message: TelegramMessage,
   runtime: TelegramBotRuntime,
   user: TelegramUserRecord,
+  requestedDate?: string,
 ): Promise<void> {
   const timezone = user.timezone || LOCAL_TIMEZONE;
-  const now = DateTime.fromJSDate(runtime.now?.() ?? new Date()).setZone(timezone);
+  const now = requestedDate
+    ? DateTime.fromISO(requestedDate, { zone: timezone })
+    : DateTime.fromJSDate(runtime.now?.() ?? new Date()).setZone(timezone);
+  if (!now.isValid || (requestedDate && now.toISODate() !== requestedDate)) {
+    await runtime.telegram.sendMessage({
+      chatId: message.chat.id,
+      text: "Укажите корректную дату: /study schedule YYYY-MM-DD.",
+    });
+    return;
+  }
   const dayKey = STUDY_WEEKDAYS[now.weekday - 1]!;
   const workspace = await runtime.store!.getTmaStudySummary(user.userId, timezone);
   const slots = workspace.courses
@@ -3196,8 +3219,8 @@ async function handleStudyTodaySchedule(
   await runtime.telegram.sendMessage({
     chatId: message.chat.id,
     text: lines.length
-      ? [`<b>Пары сегодня · ${escapeHtml(now.toFormat("dd.MM.yyyy"))}</b>`, ...lines].join("\n")
-      : `Сегодня (${escapeHtml(now.toFormat("dd.MM.yyyy"))}) пар по расписанию нет.`,
+      ? [`<b>${requestedDate ? "Пары" : "Пары сегодня"} · ${escapeHtml(now.toFormat("dd.MM.yyyy"))}</b>`, ...lines].join("\n")
+      : `${requestedDate ? "На" : "Сегодня"} (${escapeHtml(now.toFormat("dd.MM.yyyy"))}) пар по расписанию нет.`,
     replyMarkup: {
       inline_keyboard: campusMapUrl
         ? [
@@ -3223,6 +3246,12 @@ async function handleCourseCommand(
   const today = localDateString(now, user!.timezone);
   const trimmed = args.trim();
   const normalized = trimmed.toLowerCase();
+
+  const scheduleDate = normalized.match(/^schedule\s+(\d{4}-\d{2}-\d{2})$/);
+  if (scheduleDate) {
+    await handleStudyTodaySchedule(message, runtime, user!, scheduleDate[1]);
+    return;
+  }
 
   if (normalized === "deadlines") {
     await handleDeadlinesCommand("", message, runtime, user);
@@ -4100,7 +4129,7 @@ function makeFinanceStatusHandler(
           runtime.telegram,
           user!.userId,
           today,
-        ).catch(console.error);
+        ).catch(() => console.error("[telegram] finance alert failed"));
       }
     } catch (error) {
       await runtime.telegram.sendMessage({
@@ -4152,7 +4181,7 @@ async function handleFinanceFixCommand(
         runtime.telegram,
         user!.userId,
         today,
-      ).catch(console.error);
+      ).catch(() => console.error("[telegram] finance alert failed"));
     }
   } catch (error) {
     await runtime.telegram.sendMessage({
@@ -4395,7 +4424,7 @@ async function handleBudgetCommand(
   } catch (error) {
     console.error(
       "[CRITICAL] /budget command failed:",
-      error instanceof Error ? error.message : error,
+      { errorType: error instanceof Error ? "Error" : typeof error },
     );
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
@@ -4454,7 +4483,7 @@ async function handleBudgetSetCommand(
   } catch (error) {
     console.error(
       "[CRITICAL] /budget_set command failed:",
-      error instanceof Error ? error.message : error,
+      { errorType: error instanceof Error ? "Error" : typeof error },
     );
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
@@ -4545,7 +4574,7 @@ async function handleBankCommand(
     } catch (error) {
       console.error(
         "[CRITICAL] /bank unmatched command failed:",
-        error instanceof Error ? error.message : error,
+        { errorType: error instanceof Error ? "Error" : typeof error },
       );
       await runtime.telegram.sendMessage({
         chatId: message.chat.id,
@@ -4584,7 +4613,7 @@ async function handleBankCommand(
     } catch (error) {
       console.error(
         "[CRITICAL] /bank match command failed:",
-        error instanceof Error ? error.message : error,
+        { errorType: error instanceof Error ? "Error" : typeof error },
       );
       await runtime.telegram.sendMessage({
         chatId: message.chat.id,
@@ -4940,7 +4969,7 @@ async function handlePhotoUpload(
   } catch (error) {
     console.error(
       "[CRITICAL] Photo upload receipt processing failed:",
-      error instanceof Error ? error.message : error,
+      { errorType: error instanceof Error ? "Error" : typeof error },
     );
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
@@ -4960,6 +4989,7 @@ export async function handleTelegramUpdate(
   update: TelegramUpdate,
   runtime: TelegramBotRuntime,
 ): Promise<void> {
+  if (await runtime.voice?.handleUpdate(update, runtime, handleTelegramUpdate)) return;
   if (update.callback_query) {
     await handleTelegramCallbackQuery(update.callback_query, runtime);
     return;
@@ -4970,6 +5000,8 @@ export async function handleTelegramUpdate(
   if (!message) {
     return;
   }
+
+  if (runtime.voiceCommandOwner && !(await resolveUser(message, runtime))) return;
 
   const menuCommand =
     message.chat?.type === "private" &&

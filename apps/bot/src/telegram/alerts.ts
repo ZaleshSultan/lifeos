@@ -23,6 +23,8 @@ export async function triggerFinanceAlerts(
       }
     }
   } catch (error) {
-    console.error("[finance] failed to process push alerts", error);
+    console.error("[finance] failed to process push alerts", {
+      errorType: error instanceof Error ? "Error" : typeof error,
+    });
   }
 }

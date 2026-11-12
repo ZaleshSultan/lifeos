@@ -47,10 +47,9 @@ export class TelegramHttpClient implements TelegramClient {
     );
 
     if (!response.ok) {
-      const body = await response.text();
-      throw new Error(
-        `Telegram sendMessage failed: ${response.status} ${body}`,
-      );
+      // Telegram can echo private text in an error; never let it enter caller logs.
+      void response.body?.cancel().catch(() => {});
+      throw new Error(`Telegram sendMessage failed: ${response.status}`);
     }
   }
 
@@ -71,10 +70,8 @@ export class TelegramHttpClient implements TelegramClient {
     );
 
     if (!response.ok) {
-      const body = await response.text();
-      throw new Error(
-        `Telegram answerCallbackQuery failed: ${response.status} ${body}`,
-      );
+      void response.body?.cancel().catch(() => {});
+      throw new Error(`Telegram answerCallbackQuery failed: ${response.status}`);
     }
   }
 

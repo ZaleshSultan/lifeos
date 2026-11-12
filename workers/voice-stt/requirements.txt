@@ -1,0 +1,2 @@
+# CPU only; PyAV and Silero VAD/ONNX are transitive dependencies. No PyTorch.
+faster-whisper==1.2.1

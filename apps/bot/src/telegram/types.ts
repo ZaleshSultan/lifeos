@@ -3,6 +3,7 @@ import type { LifeOSStore } from "@lifeos/db";
 import type { AssistantBrain } from "../assistant/brain.js";
 import type { CaptureTelegramPort } from "./capture.js";
 import type { TelegramVoiceAudio } from "./voice.js";
+import type { LocalVoiceService } from "./local-voice.js";
 
 export interface TelegramPhotoSize {
   file_id: string;
@@ -27,6 +28,12 @@ export interface TelegramVoice {
   file_size?: number;
 }
 
+export interface TelegramAudio extends TelegramVoice {
+  file_name?: string;
+  title?: string;
+  performer?: string;
+}
+
 export interface TelegramChat {
   id: number;
   type: "private" | "group" | "supergroup" | "channel" | string;
@@ -41,8 +48,9 @@ export interface TelegramMessage {
   caption?: string;
   photo?: TelegramPhotoSize[];
   voice?: TelegramVoice;
-  /** Unsupported attachments are admitted only for safe, no-download guidance. */
+  /** Validated as TelegramAudio at the voice boundary; webhook JSON is untrusted. */
   audio?: unknown;
+  /** Unsupported attachments are admitted only for safe, no-download guidance. */
   document?: unknown;
   web_app_data?: {
     data: string;
@@ -107,6 +115,9 @@ export interface TelegramClient {
 }
 
 export interface TelegramBotRuntime {
+  voice?: LocalVoiceService;
+  /** Internal constraint for synthetic voice commands; never read from Telegram JSON. */
+  voiceCommandOwner?: { userId: string; timezone: string };
   capture?: CaptureTelegramPort;
   mealVision?: MealVisionService;
   assistant?: AssistantBrain;

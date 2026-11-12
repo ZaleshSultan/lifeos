@@ -8,6 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 TEST_FILES = (
+    ROOT / "voice-stt" / "voice_stt_worker_test.py",
     ROOT / "common" / "notification_delivery_test.py",
     ROOT / "common" / "notification_time_test.py",
     ROOT / "common" / "daily_life_notifications_test.py",

@@ -685,6 +685,17 @@ describe("SupabaseLifeOSStore tenant isolation", () => {
     ).toBe(false);
   });
 
+  it("does not log private voice command arguments on reconciliation failure", async () => {
+    const client = new FakeSupabaseClient();
+    client.transactions = [{ id: txA, user_id: "user-a", status: "draft" }];
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await expect(storeWith(client).reconcileBankLine("user-a", txA, "PRIVATE VOICE")).rejects.toThrow("No receipt matches ID for this user");
+      expect(logged).toHaveBeenCalledWith("[CRITICAL] reconcileBankLine failed:", { errorType: "Error" });
+      expect(JSON.stringify(logged.mock.calls)).not.toContain("PRIVATE VOICE");
+    } finally { logged.mockRestore(); }
+  });
+
   it("rejects bank reconciliation for another user's draft transaction", async () => {
     const client = new FakeSupabaseClient();
     client.transactions = [{ id: txA, user_id: "user-b", status: "draft" }];

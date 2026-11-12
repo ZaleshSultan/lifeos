@@ -1,7 +1,9 @@
 import { validateBotSecurity } from "./security-config.js";
 import { integerEnv, optionalEnv, type EnvSource } from "@lifeos/core";
+import { readLocalVoiceConfig, type LocalVoiceConfig } from "./telegram/local-voice.js";
 
 export interface BotConfig {
+  voice?: LocalVoiceConfig;
   nodeEnv: string;
   corsAllowedOrigins: string[];
   host: string;
@@ -97,6 +99,7 @@ export function loadBotConfig(source: EnvSource = process.env): BotConfig {
   validateBotSecurity({ nodeEnv, telegramWebhookSecret, allowUnsafeTmaDevAuth });
 
   return {
+    voice: readLocalVoiceConfig(source),
     nodeEnv,
     academicNotificationsEnabled: booleanEnv(source, "LIFEOS_ACADEMIC_NOTIFICATIONS_ENABLED", false),
     corsAllowedOrigins: (optionalEnv(source, "LIFEOS_CORS_ALLOWED_ORIGINS") ?? "").split(",").map(value => value.trim()).filter(Boolean),

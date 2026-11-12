@@ -53,6 +53,7 @@ import type { LifeOSStore, TelegramUserRecord } from "@lifeos/db";
 import { StudyWorkspaceError } from "@lifeos/db";
 import type { BotConfig } from "./config.js";
 import { handleTelegramUpdate } from "./telegram/commands.js";
+import { LocalVoiceService, readLocalVoiceConfig } from "./telegram/local-voice.js";
 import type { TelegramClient, TelegramUpdate } from "./telegram/types.js";
 import { triggerFinanceAlerts } from "./telegram/alerts.js";
 import {
@@ -122,6 +123,7 @@ interface TmaSessionStatus {
 }
 
 export interface BotServerOptions {
+  voice?: LocalVoiceService;
   captures?: CaptureService;
   capture?: CaptureTelegramPort;
   aiGovernor?: AiGovernor;
@@ -136,6 +138,7 @@ export interface BotServerOptions {
     Pick<
       BotConfig,
       | "nodeEnv"
+      | "voice"
       | "corsAllowedOrigins"
       | "telegramWebhookPath"
       | "telegramWebhookSecret"
@@ -187,6 +190,7 @@ interface HealthResponse {
 }
 
 interface ResolvedBotServerOptions {
+  voice: LocalVoiceService;
   academicNotificationsEnabled: boolean;
   captures?: CaptureService;
   capture?: CaptureTelegramPort;
@@ -1542,6 +1546,7 @@ async function handleTelegramWebhook(
     }
 
     await handleTelegramUpdate(update as TelegramUpdate, {
+      voice: options.voice,
       capture: options.capture,
       assistant: options.assistant,
       mealVision: options.mealVision,
@@ -3705,6 +3710,7 @@ export function createBotServer(options: BotServerOptions = {}): Server {
   const capture = options.capture ?? (captures?.capabilities().enabled && options.store
     ? createCaptureTelegramPort(captures, options.store) : undefined);
   const resolvedOptions: ResolvedBotServerOptions = {
+    voice: options.voice ?? new LocalVoiceService(options.config?.voice ?? readLocalVoiceConfig({})),
     academicNotificationsEnabled: options.config?.academicNotificationsEnabled ?? false,
     captures,
     capture,
@@ -3771,6 +3777,7 @@ export function createBotServer(options: BotServerOptions = {}): Server {
     });
   });
   server.on("close", () => resolvedOptions.lmsSessions.close());
+  server.on("close", () => resolvedOptions.voice.close());
   server.on("listening", () => captures?.start());
   server.on("close", () => captures?.stop());
   return server;

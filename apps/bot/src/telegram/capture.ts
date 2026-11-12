@@ -182,7 +182,10 @@ export async function handleCaptureTelegramUpdate(
   if (
     !user ||
     user.status !== "active" ||
-    user.telegramUserId !== message.from.id
+    user.telegramUserId !== message.from.id ||
+    (runtime.voiceCommandOwner &&
+      (user.userId !== runtime.voiceCommandOwner.userId ||
+        user.timezone !== runtime.voiceCommandOwner.timezone))
   ) {
     await reply(
       runtime,

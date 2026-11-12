@@ -4,6 +4,16 @@ import type { TelegramClient } from "./types.js";
 import type { LifeOSStore } from "@lifeos/db";
 
 describe("Telegram push alerts integration", () => {
+  it("does not log speech text or token-bearing diagnostics from downstream errors", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const store = { processFinanceAlerts: vi.fn().mockRejectedValue(new Error("PRIVATE VOICE https://api.telegram.org/botsecret-token")) } as unknown as LifeOSStore;
+      await triggerFinanceAlerts(store, {} as TelegramClient, "owner", "2026-11-12");
+      expect(logged).toHaveBeenCalledWith("[finance] failed to process push alerts", { errorType: "Error" });
+      expect(JSON.stringify(logged.mock.calls)).not.toContain("PRIVATE VOICE");
+      expect(JSON.stringify(logged.mock.calls)).not.toContain("secret-token");
+    } finally { logged.mockRestore(); }
+  });
   it("should send telegram message for each alert when telegram user ID is found", async () => {
     const sentMessages: any[] = [];
     const mockTelegram: TelegramClient = {

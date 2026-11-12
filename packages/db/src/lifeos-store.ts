@@ -10907,7 +10907,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
         if (updateError) {
           console.error(
             "[finance] failed to update budget metadata in alerts check",
-            updateError,
+            { errorType: "database_error" },
           );
         }
       }
@@ -10958,7 +10958,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
             if (updateSettingsError) {
               console.error(
                 "[finance] failed to update user settings in anomalies check",
-                updateSettingsError,
+                { errorType: "database_error" },
               );
             }
           }
@@ -10967,7 +10967,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     } catch (anomalyError) {
       console.error(
         "[finance] anomaly checking failed in alerts check",
-        anomalyError,
+        { errorType: anomalyError instanceof Error ? "Error" : typeof anomalyError },
       );
     }
 
@@ -11267,7 +11267,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     } catch (err) {
       console.error(
         "[CRITICAL] listUnmatchedBankLines failed:",
-        err instanceof Error ? err.message : err,
+        { errorType: err instanceof Error ? "Error" : typeof err },
       );
       throw err;
     }
@@ -11334,7 +11334,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     } catch (err) {
       console.error(
         "[CRITICAL] reconcileBankLine failed:",
-        err instanceof Error ? err.message : err,
+        { errorType: err instanceof Error ? "Error" : typeof err },
       );
       throw err;
     }
@@ -11428,7 +11428,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     } catch (err) {
       console.error(
         "[CRITICAL] getActiveBudgetsWithPeriods failed:",
-        err instanceof Error ? err.message : err,
+        { errorType: err instanceof Error ? "Error" : typeof err },
       );
       throw err;
     }
@@ -11610,7 +11610,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     } catch (err) {
       console.error(
         "[CRITICAL] updateBudgetLimit failed:",
-        err instanceof Error ? err.message : err,
+        { errorType: err instanceof Error ? "Error" : typeof err },
       );
       throw err;
     }

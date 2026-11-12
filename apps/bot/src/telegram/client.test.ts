@@ -4,6 +4,11 @@ import { TelegramHttpClient } from "./client.js";
 afterEach(() => vi.useRealTimers());
 
 describe("TelegramHttpClient button methods", () => {
+  it("suppresses Telegram error bodies that echo private speech or credentials", async () => {
+    const client = new TelegramHttpClient("synthetic-token", async () => new Response("PRIVATE TRANSCRIPT botsecret-token", { status: 400 }));
+    await expect(client.sendMessage({ chatId: 30, text: "PRIVATE TRANSCRIPT" })).rejects.toThrow("Telegram sendMessage failed: 400");
+    await expect(client.answerCallbackQuery({ callbackQueryId: "callback" })).rejects.toThrow("Telegram answerCallbackQuery failed: 400");
+  });
   it("sends answerCallbackQuery with the Telegram callback id", async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
     const fetchImpl: typeof fetch = async (input, init) => {
