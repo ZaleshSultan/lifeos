@@ -42,7 +42,83 @@ def grade_value_text(cell: Any) -> str:
     return value_cell.get_text(" ", strip=True)
 
 
-def parse_report(soup: Any, course_id: int, course_title: str) -> list[dict[str, Any]]:
+def _course_total(course_id: int, item_id: Any, score: Any, maximum: Any) -> dict | None:
+    if not re.fullmatch(r"[1-9]\d*", str(item_id)):
+        return None
+    try:
+        return {"source": "moodle_course_total", "moodle_course_id": str(course_id),
+                "moodle_item_id": str(item_id), "score": number(score), "max_score": number(maximum)}
+    except SyncError:
+        return None
+
+
+def attach_course_total(records: list[dict], total: dict | None) -> None:
+    # An aggregate is metadata on the same course's registers, never an extra assessment.
+    # Each import builds a fresh raw object. An unavailable total cannot inherit an old score.
+    for record in records:
+        raw = record["raw"]
+        raw.pop("lifeos_course_total", None)
+        title = normalize_title(record["title"]).removeprefix("calculated grade ")
+        if raw.get("moodle_module") or raw.get("itemtype") == "mod":
+            continue
+        if total and str(record["course_id"]) == total["moodle_course_id"] and title in {
+            "register midterm", "register endterm", "register final", "register term",
+        }:
+            raw["lifeos_course_total"] = total.copy()
+
+
+def ws_course_total(items: list[dict], course_id: int) -> dict | None:
+    candidates = [item for item in items if item.get("itemtype") == "course"]
+    if len(candidates) != 1:
+        return None
+    item = candidates[0]
+    if any(item.get(key) not in (None, False, 0, "0") for key in
+           ("hidden", "ishidden", "gradehidden", "gradeishidden", "gradehiddenbydate")):
+        return None
+    if "courseid" in item and str(item["courseid"]) != str(course_id):
+        return None
+    displayed = item.get("gradeformatted")
+    score = item.get("graderaw")
+    if displayed is not None and not re.fullmatch(r"[\d.,]+(?:\s*%)?", str(displayed).strip()):
+        score = None
+    return _course_total(course_id, item.get("id"), score, item.get("grademax"))
+
+
+def html_course_total(table: Any, course_id: int, user_id: int | None) -> dict | None:
+    candidates = []
+    for row in table.select("tr"):
+        item = row.select_one("th.column-itemname, td.column-itemname, th.item, td.item")
+        if item is None:
+            continue
+        classes = set(item.get("class", [])) | set(row.get("class", []))
+        top_aggregate = classes & {"courseitem", "coursetotal"} or (
+            "level1" in classes and classes & {"baggt", "baggb"})
+        title = normalize_title(item.get_text(" ", strip=True)).removeprefix("calculated grade ")
+        if top_aggregate and title in {"course total", "итог курса", "итоговая оценка за курс", "итого за курс"}:
+            candidates.append((row, item))
+    if len(candidates) != 1:
+        return None
+    row, item = candidates[0]
+    grade = row.select_one("td.grade, td.column-grade")
+    grade_range = row.select_one("td.range, td.column-range")
+    identity = re.fullmatch(r"row_([1-9]\d*)_([1-9]\d*)", item.get("id") or row.get("id") or "")
+    if grade is None or not identity:
+        return None
+    if user_id is not None and identity.group(2) != str(user_id):
+        return None
+    for element in (row, item, grade):
+        if re.search(r"(?:display\s*:\s*none|visibility\s*:\s*hidden)", element.get("style", ""), re.I):
+            return None
+        if element.has_attr("hidden") or element.get("aria-hidden") == "true" or set(element.get("class", [])) & {
+                "hidden", "dimmed", "dimmed_text", "gradehidden", "text-muted"}:
+            return None
+    value = grade_value_text(grade)
+    displayed_range = grade_range.get_text(" ", strip=True) if grade_range else ""
+    bounds = re.fullmatch(r"[\d.,]+\s*[-–—]\s*([\d.,]+)", displayed_range)
+    return _course_total(course_id, identity.group(1), value, bounds.group(1) if bounds else None)
+
+
+def parse_report(soup: Any, course_id: int, course_title: str, user_id: int | None = None) -> list[dict[str, Any]]:
     table = soup.select_one("table.user-grade") or soup.select_one("table.generaltable")
     if table is None:
         raise SyncError(f"Moodle grade table missing for course {course_id}; refusing an empty snapshot")
@@ -129,4 +205,5 @@ def parse_report(soup: Any, course_id: int, course_title: str) -> list[dict[str,
             "item_id": identity, "title": title, "score": score, "max_score": maximum,
             "raw": raw,
         })
+    attach_course_total(records, html_course_total(table, course_id, user_id))
     return records

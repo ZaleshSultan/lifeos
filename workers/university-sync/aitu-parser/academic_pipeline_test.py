@@ -123,6 +123,43 @@ class ActualMoodleLayoutTest(unittest.TestCase):
         self.assertEqual([r["score"] for r in records], [None, 0, 8.5])
         self.assertEqual([r["max_score"] for r in records], [10, 20, 10])
 
+    registers = '''
+      <tr><th class="item" id="row_811_55">Calculated grade Register Midterm</th><td class="grade">62</td></tr>
+      <tr><th class="item" id="row_812_55">Calculated grade Register Term</th><td class="grade">64</td></tr>
+      <tr><th class="item" id="row_813_55"><a href="/mod/quiz/view.php?id=15">Register Final</a></th><td class="grade">80</td></tr>'''
+    total = '''
+      <tr><th class="level1 baggt column-itemname" id="row_900_55">Calculated grade Course total</th>
+        <td class="column-grade">0,00</td><td class="column-range">0–100</td></tr>'''
+
+    def test_course_total_is_distinct_from_term_and_does_not_add_an_assessment(self):
+        nested = self.total.replace("level1", "level2").replace("0,00", "99")
+        for display, expected in (("0,00", 0), ("81,50", 81.5), ("-", None)):
+            with self.subTest(display=display):
+                records = self.parse(self.registers + nested + self.total.replace("0,00", display))
+                self.assertEqual([r["score"] for r in records], [62, 64, 80])
+                marker = {"source": "moodle_course_total", "moodle_course_id": "42",
+                          "moodle_item_id": "900", "score": expected, "max_score": 100}
+                self.assertEqual([r["raw"].get("lifeos_course_total") for r in records], [marker, marker, None])
+
+    def test_missing_hidden_ambiguous_or_invalid_html_total_removes_stored_value(self):
+        for total in ("", self.total * 2, self.total.replace("level1", "level2"),
+                      self.total.replace("row_900_55", "row_missing"), self.total.replace("<tr>", "<tr hidden>"),
+                      self.total.replace("<tr>", '<tr style="display:none">'), self.total.replace("0,00", "NaN")):
+            with self.subTest(total=total):
+                db = MemoryDb()
+                for rows in (self.registers + self.total, self.registers + total):
+                    records = [{**r, "record_type": scraper.classify_record_type(r["title"])} for r in self.parse(rows)]
+                    scraper.sync_grades(db, SETTINGS, records, "normal", False)
+                self.assertEqual(len(db.tables["academic_records"]), 3)
+                for table in ("academic_records", "source_events", "assessment_items"):
+                    self.assertTrue(all("lifeos_course_total" not in r["raw_json"] for r in db.tables[table]))
+
+    def test_course_total_belongs_to_requested_student(self):
+        soup = scraper._bs4_parse('<table class="user-grade">' + self.registers + self.total + '</table>')
+        for student, found in ((55, True), (99, False)):
+            records = parse_report(soup, 42, "Test", student)
+            self.assertEqual("lifeos_course_total" in records[0]["raw"], found)
+
     def test_unicode_fallback_is_stable_and_distinct(self):
         records = self.parse('<tr><td>Задание 1</td><td>-</td><td>2</td><td>-</td></tr><tr><td>Задание 2</td><td>-</td><td>4</td><td>-</td></tr>')
         self.assertNotEqual(records[0]["item_id"], records[1]["item_id"])
@@ -304,6 +341,44 @@ class ActualMoodleLayoutTest(unittest.TestCase):
         ]):
             records = client.fetch_via_ws()
         self.assertEqual([r["score"] for r in records], [None, 0])
+
+    def test_ws_total_is_unique_visible_and_scoped_to_a_course(self):
+        client = scraper.MoodleClient(SETTINGS)
+        register = {"id": 61, "itemtype": "manual", "itemname": "Register Endterm", "graderaw": 34,
+                    "lifeos_course_total": {"score": 99}}
+        official = {"id": 89, "itemtype": "course", "graderaw": 0, "grademax": 100}
+        cases = [
+            ([official, {"itemtype": "category", "graderaw": 74}], 0),
+            ([{**official, "graderaw": 45, "gradeformatted": "-"}], None),
+            ([{**official, "graderaw": 45, "gradeformatted": "Hidden"}], None),
+            ([{**official, "graderaw": None}], None),
+            ([{**official, "gradeishidden": 1}], "absent"),
+            ([{**official, "courseid": 22}], "absent"),
+            ([official, {**official, "id": 90}], "absent"),
+        ]
+        for totals, expected in cases:
+            with self.subTest(totals=totals):
+                with (
+                    patch.object(client, "_ws_get_userid", return_value=55),
+                    patch.object(client, "_ws_get_enrolled_courses", return_value=[{"id": 42}, {"id": 43}]),
+                    patch.object(client, "_ws_get_grade_items", side_effect=[[register, *totals], [register]]),
+                ):
+                    records = client.fetch_via_ws()
+                self.assertEqual([r["score"] for r in records], [34, 34])
+                self.assertNotIn("lifeos_course_total", records[1]["raw"])
+                if expected == "absent":
+                    self.assertNotIn("lifeos_course_total", records[0]["raw"])
+                else:
+                    self.assertEqual(records[0]["raw"]["lifeos_course_total"],
+                                     {"source": "moodle_course_total", "moodle_course_id": "42",
+                                      "moodle_item_id": "89", "score": expected, "max_score": 100})
+
+    def test_ws_rejects_grade_report_for_another_user_or_course(self):
+        client = scraper.MoodleClient(SETTINGS)
+        for user, course in ((23, 42), (55, 43)):
+            data = {"usergrades": [{"userid": user, "courseid": course, "gradeitems": []}]}
+            with patch.object(client, "_ws_call", return_value=data), self.assertRaises(SyncError):
+                client._ws_get_grade_items(42, 55)
 
     def test_partial_ws_is_failure(self):
         client = scraper.MoodleClient(SETTINGS)

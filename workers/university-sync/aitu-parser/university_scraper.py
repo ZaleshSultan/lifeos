@@ -62,7 +62,7 @@ from common.lifeos_sync import (  # noqa: E402
 )
 
 from common.academic_sync import load_courses, match_course, sync_assessment, mark_missing_grades, link_course
-from common.moodle_grades import normalize_title, number, parse_report
+from common.moodle_grades import attach_course_total, normalize_title, number, parse_report, ws_course_total
 from common.lms_sync_lease import LmsSyncLease, guard_lms_client
 from moodle_session_security import MoodleSessionError, SsoDiagnostics, safe_url, secure_request, valid_sso_cookie, MOODLE_HOST, MICROSOFT_HOST
 from moodle_activities import AssignmentSnapshot, GradeSnapshot, UnsupportedMoodlePage, activity_links, parse_activity
@@ -381,9 +381,12 @@ class MoodleClient:
         )
         # Response: {"usergrades": [{"courseid":…, "gradeitems":[…]}]}
         usergrades = data.get("usergrades", [])
-        if not usergrades or "gradeitems" not in usergrades[0]:
+        if len(usergrades) != 1 or "gradeitems" not in usergrades[0]:
             raise SyncError(f"Moodle WS grade report missing for course {course_id}")
-        return usergrades[0]["gradeitems"]
+        report = usergrades[0]
+        if str(report.get("courseid", course_id)) != str(course_id) or str(report.get("userid", user_id)) != str(user_id):
+            raise SyncError("Moodle WS grade report scope mismatch")
+        return report["gradeitems"]
 
     def _ws_get_assignments(self, courses: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Read a complete assignment snapshot for the enrolled courses."""
@@ -456,6 +459,7 @@ class MoodleClient:
             cid = int(course["id"])
             ctitle = str(course.get("fullname") or course.get("shortname") or f"course_{cid}")
             items = self._ws_get_grade_items(cid, user_id)
+            course_records = []
             for item in items:
                 itype = str(item.get("itemtype", ""))
                 imodule = str(item.get("itemmodule") or "")
@@ -465,7 +469,7 @@ class MoodleClient:
                     continue
                 grade_raw = item.get("graderaw")
                 grade_max = item.get("grademax")
-                records.append({
+                course_records.append({
                     "course_id": str(cid),
                     "course_title": ctitle,
                     "item_id": str(item.get("id", slugify(iname))),
@@ -473,8 +477,10 @@ class MoodleClient:
                     "record_type": classify_record_type(iname),
                     "score": number(grade_raw),
                     "max_score": number(grade_max),
-                    "raw": item,
+                    "raw": dict(item),
                 })
+            attach_course_total(course_records, ws_course_total(items, cid))
+            records.extend(course_records)
         return records
 
     # ── Strategy 2: Session login + HTML scraping ─────────────────────────────
@@ -645,7 +651,7 @@ class MoodleClient:
         r.raise_for_status()
         soup = _bs4_parse(r.text)
 
-        records = parse_report(soup, course_id, course_title)
+        records = parse_report(soup, course_id, course_title, self._moodle_user_id)
         for record in records:
             record["record_type"] = classify_record_type(record["title"])
         return records
