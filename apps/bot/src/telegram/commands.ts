@@ -62,6 +62,7 @@ import {
   type WeatherSnapshot,
 } from "../weather.js";
 import { AssistantError } from "../assistant/registry.js";
+import { gradeRegisterRows } from "./grade-registers.js";
 import { handleCaptureTelegramUpdate } from "./capture.js";
 import { assistantPrivateRequest } from "../assistant/brain.js";
 import { issueWebLoginToken } from "../web-session.js";
@@ -3344,11 +3345,19 @@ async function handleCourseCommand(
     if (tab === "grades" && runtime.telegram.sendTable &&
         message.chat.type === "private" && message.from?.id === user!.telegramUserId &&
         message.chat.id === user!.telegramUserId) {
-      const rows = gradeRows(await runtime.store!.listAcademicRecords(user!.userId), user!.userId);
+      const records = await runtime.store!.listAcademicRecords(user!.userId);
+      const rows = gradeRows(records, user!.userId);
+      const registers = gradeRegisterRows(records, user!.userId);
       if (rows.length) {
         await runtime.telegram.sendTable({ chatId: message.chat.id,
           title: "Оценки, сохранённые в LifeOS", headers: ["Предмет", "Работа", "Оценка"], rows, replyMarkup });
-      } else {
+      }
+      if (registers.length) {
+        await runtime.telegram.sendTable({ chatId: message.chat.id,
+          title: "Оценки за период и курс",
+          note: "Сохранённые данные Moodle. Прочерк означает, что значение не подтверждено. Ноль взят из ведомости. Пока Final не выставлен, Total предварительный.",
+          headers: ["Предмет", "RegMid", "RegEnd", "Final", "Total"], rows: registers, replyMarkup });
+      } else if (!rows.length) {
         await runtime.telegram.sendMessage({ chatId: message.chat.id,
           text: "В LifeOS пока нет доступных записей с оценкой. Полнота загрузки из LMS не подтверждена.", replyMarkup });
       }

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { TelegramHttpClient } from "./client.js";
-import { plainTable, tablePages } from "./rich-table.js";
+import { plainTable, richTable, tablePages } from "./rich-table.js";
 
 const table = {
   chatId: 42,
@@ -15,6 +15,11 @@ const table = {
 };
 
 describe("outgoing rich tables", () => {
+  it("keeps register coverage notes for both display formats", () => {
+    const summary = { ...table, note: "Пока Final не выставлен, Total предварительный." };
+    expect(richTable(summary, table.rows).blocks.at(-1)).toEqual({ type: "paragraph", text: summary.note });
+    expect([...plainTable(summary, table.rows)].join("")).toContain(summary.note);
+  });
   it("sends raw cells as literal text, including access to the mini app", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response("{}"));
     await new TelegramHttpClient("test", fetcher).sendTable(table);

@@ -107,6 +107,7 @@ export interface SendMessageInput {
 export interface SendTableInput {
   chatId: number;
   title: string;
+  note?: string;
   headers: string[];
   rows: string[][];
   replyMarkup?: TelegramInlineKeyboardMarkup;

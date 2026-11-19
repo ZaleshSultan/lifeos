@@ -181,6 +181,50 @@ describe("dated Telegram study schedule", () => {
     );
   });
 
+  it("sends a per-course register table alongside the existing detailed grades", async () => {
+    const f = fixture();
+    const sendTable = vi.fn().mockResolvedValue(undefined);
+    f.runtime.telegram.sendTable = sendTable;
+    const row = (course: string, id: string, title: string, score: number | null, raw = {}) => ({
+      userId: user.userId, sourceEventId: "active-source-" + id, courseTitle: course, title, score,
+      maxScore: 100, rawJson: { moodle_course_id: course, moodle_item_id: id, item_name: title, ...raw },
+    });
+    const total = (courseId: string, score: number) => ({
+      lifeos_course_total: { source: "moodle_course_total", moodle_course_id: courseId, moodle_item_id: "500", score, max_score: 100 },
+    });
+    f.runtime.store!.listAcademicRecords = vi.fn().mockResolvedValue([
+      row("DLD", "1", "Calculated grade Register Midterm", 0, total("DLD", 74.8)),
+      row("DLD", "2", "Register Endterm", 84, total("DLD", 74.8)),
+      row("DLD", "3", "Register Final", 90),
+      row("DLD", "4", "Register Term", 42),
+      row("DLD", "5", "Quiz: Midterm", 55),
+      row("OS", "6", "Register Midterm", 75, total("foreign", 94)),
+      row("OS", "7", "Register Final", 99, { _grade_visibility_unknown: true, ...total("OS", 95) }),
+      row("OS", "8", "Register Endterm", 90),
+      row("OS", "9", "Register Endterm", 81),
+      row("OS", "10", "Register Term", 60),
+      row("OS", "11", "Final exam", 85),
+      { ...row("secret", "12", "Register Final", 90), userId: "foreign" },
+      row("mock", "13", "Register Final", 99, { _is_mocked: true }),
+      { ...row("manual", "14", "Register Final", 91), sourceEventId: null },
+      row("empty", "15", "Register Final", null),
+      row("conflict", "21", "Register Midterm", 33, total("conflict", 89)),
+      row("conflict", "22", "Register Final", 82, total("conflict", 91)),
+    ]);
+    await handleTelegramUpdate(f.update("/study grades"), f.runtime);
+    expect(sendTable).toHaveBeenCalledTimes(2);
+    expect(sendTable.mock.calls[0][0].rows).toContainEqual(["DLD", "Quiz: Midterm", "55/100"]);
+    expect(sendTable.mock.calls[1][0]).toMatchObject({
+      headers: ["Предмет", "RegMid", "RegEnd", "Final", "Total"],
+      rows: [
+        ["conflict", "33/100", "—", "82/100", "—"],
+        ["DLD", "0/100", "84/100", "90/100", "74.8/100"],
+        ["empty", "—", "—", "—", "—"],
+        ["OS", "75/100", "—", "—", "—"],
+      ],
+    });
+  });
+
   it("routes existing deadlines to an inline table", async () => {
     const f = fixture();
     const sendTable = vi.fn().mockResolvedValue(undefined);

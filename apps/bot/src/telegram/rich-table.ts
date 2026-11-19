@@ -2,7 +2,7 @@ import type { SendTableInput } from "./types.js";
 
 // Keep each row intact and each page inside both Telegram's block and text limits.
 export function* tablePages(table: SendTableInput): Generator<string[][]> {
-  const overhead = table.title.length + table.headers.join("").length;
+  const overhead = table.title.length + table.headers.join("").length + (table.note?.length ?? 0);
   let rows: string[][] = [];
   let size = overhead;
   for (const row of table.rows) {
@@ -32,6 +32,7 @@ export function richTable(table: SendTableInput, rows: string[][]) {
           ...rows.map((row) => row.map(cell)),
         ],
       },
+      ...(table.note ? [{ type: "paragraph", text: table.note }] : []),
     ],
   };
 }
@@ -43,6 +44,7 @@ export function* plainTable(table: SendTableInput, rows: string[][]) {
     ...rows.map((row) =>
       row.map((v, i) => table.headers[i] + ": " + v).join("\n"),
     ),
+    ...(table.note ? [table.note] : []),
   ];
   let page = "";
   for (const record of records) {
