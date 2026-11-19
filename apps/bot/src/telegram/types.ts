@@ -104,8 +104,17 @@ export interface SendMessageInput {
   replyMarkup?: TelegramInlineKeyboardMarkup | TelegramReplyKeyboardMarkup;
 }
 
+export interface SendTableInput {
+  chatId: number;
+  title: string;
+  headers: string[];
+  rows: string[][];
+  replyMarkup?: TelegramInlineKeyboardMarkup;
+}
+
 export interface TelegramClient {
   sendMessage(input: SendMessageInput): Promise<void>;
+  sendTable?(input: SendTableInput): Promise<void>;
   answerCallbackQuery(input: AnswerCallbackQueryInput): Promise<void>;
   getFileUrl(fileId: string, signal?: AbortSignal): Promise<string>;
   downloadVoice?(

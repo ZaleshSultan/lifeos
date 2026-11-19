@@ -104,4 +104,107 @@ describe("dated Telegram study schedule", () => {
     expect(f.getTmaStudySummary).not.toHaveBeenCalled();
     expect(f.sendMessage.mock.calls[0]?.[0].text).toContain("blocked");
   });
+
+  it("sends schedule rows in the native table and preserves the map button", async () => {
+    const f = fixture();
+    const sendTable = vi.fn().mockResolvedValue(undefined);
+    f.runtime.telegram.sendTable = sendTable;
+    await handleTelegramUpdate(
+      f.update("/study schedule 2026-11-13"),
+      f.runtime,
+    );
+    expect(sendTable).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: expect.stringContaining("требует подтверждения"),
+        rows: [["09:00–10:00", "DBMS & security", "лекция", "A-1"]],
+        replyMarkup: {
+          inline_keyboard: [
+            [expect.objectContaining({ url: expect.any(String) })],
+          ],
+        },
+      }),
+    );
+  });
+
+  it("serves saved grades only to the owner in private and keeps the grades link", async () => {
+    const f = fixture();
+    f.runtime.tmaUrl = "https://example.org/tma";
+    const sendTable = vi.fn().mockResolvedValue(undefined);
+    f.runtime.telegram.sendTable = sendTable;
+    const row = {
+      userId: user.userId,
+      courseTitle: "Networks",
+      title: "Lab",
+      score: 0,
+      maxScore: 10,
+      percentage: null,
+    };
+    const list = vi
+      .fn()
+      .mockResolvedValue([
+        row,
+        { ...row, userId: "foreign" },
+        { ...row, rawJson: { _is_mocked: true } },
+        { ...row, rawJson: { _grade_visibility_unknown: true } },
+        {
+          ...row,
+          rawJson: {
+            assessment_id: 1,
+            course_id: 1,
+            score: null,
+            max_score: null,
+          },
+        },
+      ]);
+    f.runtime.store!.listAcademicRecords = list;
+    const group = f.update("/study grades");
+    group.message.chat = { id: -1000, type: "group" };
+    await handleTelegramUpdate(group, f.runtime);
+    expect(list).not.toHaveBeenCalled();
+    await handleTelegramUpdate(f.update("/study grades"), f.runtime);
+    expect(list).toHaveBeenCalledWith(user.userId);
+    expect(sendTable).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rows: [["Networks", "Lab", "0/10"]],
+        replyMarkup: {
+          inline_keyboard: [
+            [
+              expect.objectContaining({
+                web_app: {
+                  url: "https://example.org/tma?screen=study&studyTab=grades",
+                },
+              }),
+            ],
+          ],
+        },
+      }),
+    );
+  });
+
+  it("routes existing deadlines to an inline table", async () => {
+    const f = fixture();
+    const sendTable = vi.fn().mockResolvedValue(undefined);
+    f.runtime.telegram.sendTable = sendTable;
+    f.runtime.store!.listUpcomingAssignmentDeadlines = vi
+      .fn()
+      .mockResolvedValue({
+        upcoming: [
+          {
+            courseTitle: "Networks",
+            title: "Lab",
+            dueAt: "2026-11-13T05:00:00Z",
+            score: null,
+          },
+        ],
+        overdue: [],
+      });
+    await handleTelegramUpdate(f.update("/deadlines"), f.runtime);
+    expect(sendTable.mock.calls[0]?.[0].rows[0]).toEqual([
+      "Networks",
+      "Lab",
+      "13.11.2026 10:00",
+      expect.any(String),
+      "ещё не оценено",
+    ]);
+  });
 });

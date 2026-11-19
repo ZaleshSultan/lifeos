@@ -1,8 +1,10 @@
 import type {
   AnswerCallbackQueryInput,
   SendMessageInput,
+  SendTableInput,
   TelegramClient,
 } from "./types.js";
+import { plainTable, richTable, tablePages } from "./rich-table.js";
 import { downloadTelegramVoice, type TelegramVoiceAudio } from "./voice.js";
 
 interface TelegramSendMessagePayload {
@@ -27,6 +29,41 @@ export class TelegramHttpClient implements TelegramClient {
     private readonly token: string,
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
+
+  async sendTable(table: SendTableInput): Promise<void> {
+    let useRich = true;
+    for (const rows of tablePages(table)) {
+      if (useRich) {
+        const response = await this.fetchImpl(
+          `https://api.telegram.org/bot${this.token}/sendRichMessage`,
+          {
+            method: "POST",
+            redirect: "error",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              chat_id: table.chatId,
+              rich_message: richTable(table, rows),
+              reply_markup: table.replyMarkup,
+            }),
+          },
+        );
+        void response.body?.cancel().catch(() => {});
+        if (response.ok) continue;
+        // Only definitive rejections get another representation. A timeout or 5xx
+        // may mean the first send was delivered.
+        if (response.status !== 400 && response.status !== 404)
+          throw new Error(`Telegram sendRichMessage failed: ${response.status}`);
+        useRich = false;
+      }
+      for (const text of plainTable(table, rows)) {
+        await this.sendMessage({
+          chatId: table.chatId,
+          text: text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;"),
+          replyMarkup: table.replyMarkup,
+        });
+      }
+    }
+  }
 
   async sendMessage(input: SendMessageInput): Promise<void> {
     const payload: TelegramSendMessagePayload = {

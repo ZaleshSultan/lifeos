@@ -1954,7 +1954,7 @@ function runtime(store = new FakeStore()): TelegramBotRuntime & {
 describe("Telegram persistent menu with capture enabled", () => {
   const menuCases = [
     ["Сегодня", "/today", "На сегодня записей пока нет"],
-    ["Дедлайны", "/deadlines", "Ближайших дедлайнов нет"],
+    ["Дедлайны", "/deadlines", "В LifeOS не найдено заданий с датой сдачи"],
     ["Учёба", "/study", "Курс:"],
     ["Напоминания", "/reminders", "Предстоящих напоминаний нет"],
     ["Тренировки", "/workout_menu", "Активной тренировки нет"],
@@ -3297,7 +3297,7 @@ describe("Telegram commands", () => {
     ).toBe("https://yuujiso.github.io/aitumap/");
 
     await handleTelegramUpdate(update("/study today"), context);
-    expect(context.sent.at(-1)?.text).toContain("пар по расписанию нет");
+    expect(context.sent.at(-1)?.text).toContain("В недельном шаблоне");
   });
 
   it("updates active study course progress", async () => {
@@ -3350,7 +3350,7 @@ describe("Telegram commands", () => {
 
     await handleTelegramUpdate(update("/deadlines"), context);
 
-    expect(context.sent.at(-1)?.text).toBe("Ближайших дедлайнов нет.");
+    expect(context.sent.at(-1)?.text).toBe("В LifeOS не найдено заданий с датой сдачи в этом периоде. У заданий без даты срок неизвестен.");
   });
 
   it("lists deadlines with local time, subject, completion percentage, and overdue block", async () => {

@@ -19,6 +19,7 @@ import {
 } from "@lifeos/core";
 import { validateObsidianVaultPath } from "@lifeos/obsidian";
 import type {
+  AcademicRecord,
   AssignmentDeadlineRecord,
   BankLineRecord,
   BudgetSummaryPayload,
@@ -3216,12 +3217,7 @@ async function handleStudyTodaySchedule(
   const campusMapUrl = runtime.tmaUrl
     ? buildStudyScreenUrl(runtime.tmaUrl, "map")
     : null;
-  await runtime.telegram.sendMessage({
-    chatId: message.chat.id,
-    text: lines.length
-      ? [`<b>${requestedDate ? "Пары" : "Пары сегодня"} · ${escapeHtml(now.toFormat("dd.MM.yyyy"))}</b>`, ...lines].join("\n")
-      : `${requestedDate ? "На" : "Сегодня"} (${escapeHtml(now.toFormat("dd.MM.yyyy"))}) пар по расписанию нет.`,
-    replyMarkup: {
+  const replyMarkup = {
       inline_keyboard: campusMapUrl
         ? [
             [
@@ -3232,8 +3228,51 @@ async function handleStudyTodaySchedule(
             ],
           ]
         : [[{ text: "Карта главного корпуса", url: AITU_MAIN_CAMPUS_MAP_URL }]],
-    },
+  };
+  const date = now.toFormat("dd.MM.yyyy");
+  if (slots.length && runtime.telegram.sendTable) {
+    await runtime.telegram.sendTable({
+      chatId: message.chat.id,
+      title: `Расписание на ${date} по недельному шаблону · требует подтверждения`,
+      headers: ["Время", "Предмет", "Занятие", "Аудитория"],
+      rows: slots.map(({ course, slot }) => [
+        slot.startTime.slice(0, 5) + "–" + slot.endTime.slice(0, 5), course.title,
+        STUDY_SESSION_LABELS[slot.sessionType ?? ""] ?? slot.sessionType ?? "—", slot.room || "—",
+      ]),
+      replyMarkup,
+    });
+    return;
+  }
+  await runtime.telegram.sendMessage({
+    chatId: message.chat.id,
+    text: lines.length
+      ? [`<b>Недельный шаблон · ${date}</b>`, ...lines].join("\n")
+      : `В недельном шаблоне на ${date} нет записей. Расписание на эту дату требует подтверждения.`,
+    replyMarkup,
   });
+}
+
+function gradeRows(records: AcademicRecord[], owner: string): string[][] {
+  const asNumber = (value: unknown): number | null =>
+    (typeof value === "number" || typeof value === "string" && value.trim() !== "") &&
+      Number.isFinite(Number(value)) ? Number(value) : null;
+  const rows: string[][] = [];
+  for (const record of records) {
+    const raw = record.rawJson && typeof record.rawJson === "object" && !Array.isArray(record.rawJson) ? record.rawJson : {};
+    if (record.userId !== owner || raw._is_mocked === true || raw._grade_visibility_unknown === true) continue;
+    // Legacy Platonus imports substitute zero and ten for missing source fields.
+    const platonus = "assessment_id" in raw && "course_id" in raw;
+    const score = asNumber(platonus ? raw.score : record.score);
+    const max = asNumber(platonus ? raw.max_score : record.maxScore);
+    const percent = asNumber(platonus ? raw.percentage : record.percentage);
+    const label = record.valueText?.trim() ?? "";
+    const letter = /^(?:[ABCDEF][+-]?|FX|P|NP|pass(?:ed)?|fail(?:ed)?|satisfactory|unsatisfactory|зач[её]т|незач[её]т|зачтено|не зачтено|өтті|өтпеді|есептелді|есептелмеді)$/iu.test(label) ? label : "";
+    if (score === null && percent === null && !letter) continue;
+    const value = [score === null ? "" : max === null ? String(score) : `${score}/${max}`,
+      percent === null ? "" : `${percent}%`, letter].filter(Boolean).join(" · ");
+    rows.push([record.courseTitle, record.title, value]);
+  }
+  return rows;
 }
 
 async function handleCourseCommand(
@@ -3299,18 +3338,28 @@ async function handleCourseCommand(
       syllabi: "Силабусы",
     } as const;
 
+    const replyMarkup = studyUrl ? {
+      inline_keyboard: [[{ text: `Открыть: ${labels[tab]}`, web_app: { url: studyUrl } }]],
+    } : undefined;
+    if (tab === "grades" && runtime.telegram.sendTable &&
+        message.chat.type === "private" && message.from?.id === user!.telegramUserId &&
+        message.chat.id === user!.telegramUserId) {
+      const rows = gradeRows(await runtime.store!.listAcademicRecords(user!.userId), user!.userId);
+      if (rows.length) {
+        await runtime.telegram.sendTable({ chatId: message.chat.id,
+          title: "Оценки, сохранённые в LifeOS", headers: ["Предмет", "Работа", "Оценка"], rows, replyMarkup });
+      } else {
+        await runtime.telegram.sendMessage({ chatId: message.chat.id,
+          text: "В LifeOS пока нет доступных записей с оценкой. Полнота загрузки из LMS не подтверждена.", replyMarkup });
+      }
+      return;
+    }
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
       text: studyUrl
         ? `Открываю раздел «${labels[tab]}».`
         : `Раздел «${labels[tab]}» доступен в Mini App. Ссылка Mini App не настроена.`,
-      replyMarkup: studyUrl
-        ? {
-            inline_keyboard: [
-              [{ text: `Открыть: ${labels[tab]}`, web_app: { url: studyUrl } }],
-            ],
-          }
-        : undefined,
+      replyMarkup,
     });
     return;
   }
@@ -3639,12 +3688,28 @@ async function handleDeadlinesCommand(
   if (result.upcoming.length === 0 && result.overdue.length === 0) {
     await runtime.telegram.sendMessage({
       chatId: message.chat.id,
-      text: "Ближайших дедлайнов нет.",
+      text: "В LifeOS не найдено заданий с датой сдачи в этом периоде. У заданий без даты срок неизвестен.",
     });
     return;
   }
 
   const blocks: string[] = [];
+
+  if (runtime.telegram.sendTable) {
+    const sections = [
+      { title: "Ближайшие дедлайны", items: result.upcoming },
+      { title: "Просроченные без оценки за 7 дней", items: result.overdue },
+    ];
+    for (const { title, items } of sections) {
+      if (items.length) await runtime.telegram.sendTable({
+        chatId: message.chat.id, title,
+        headers: ["Предмет", "Задание", "Срок", "До сдачи", "Оценка"],
+        rows: items.map(item => [item.courseTitle, item.title, formatDeadlineDate(item.dueAt, timezone),
+          formatTimeRemaining(item.dueAt, now), formatCompletedStatus(item)]),
+      });
+    }
+    return;
+  }
 
   if (result.upcoming.length > 0) {
     const upcomingLines = result.upcoming.map((item, index) =>
