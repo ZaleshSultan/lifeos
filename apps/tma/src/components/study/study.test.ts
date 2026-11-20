@@ -418,6 +418,6 @@ describe("study synced grades", () => {
     );
     expect(html).toContain("Ещё не оценено");
     expect(html).toContain("0 / 10");
-    expect(html).toContain("Значения калькулятора сохраняются отдельно");
+    expect(html).toContain("Детализация (2)");
   });
 });

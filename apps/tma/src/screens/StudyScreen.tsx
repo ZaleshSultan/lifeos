@@ -5,6 +5,7 @@ import {
   CalendarDays,
   GraduationCap,
   MapPinned,
+  Menu,
   RefreshCw,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -181,28 +182,52 @@ export function StudyScreen({
     <div className="min-w-0 space-y-4">
       <header className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-[26px] font-semibold text-white">Учёба</h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            {data.courses.length} курсов · {data.records.length} оценочных
-            записей
-          </p>
+          <h1 className="text-[26px] font-semibold text-white">
+            {tab === "grades" ? "Оценки" : "Учёба"}
+          </h1>
+          {tab !== "grades" && (
+            <p className="mt-1 text-sm text-zinc-400">
+              {data.courses.length} курсов · {data.records.length} оценочных
+              записей
+            </p>
+          )}
         </div>
-        <button
-          type="button"
-          onClick={() => void query.refetch()}
-          disabled={
-            query.isFetching ||
-            save.isPending ||
-            configure.isPending ||
-            syllabi.pending
-          }
-          aria-label="Обновить учёбу"
-          className="grid min-h-11 min-w-11 shrink-0 place-items-center rounded-lg border border-white/[0.08] text-zinc-300 hover:bg-white/[0.05] active:scale-[0.98] disabled:opacity-50"
-        >
-          <RefreshCw className="h-5 w-5" aria-hidden="true" />
-        </button>
+        <div className="flex items-center gap-1">
+          {tab === "grades" && (
+            <label className="relative grid h-11 w-11 place-items-center rounded-lg text-zinc-300 focus-within:ring-2 focus-within:ring-blue-400">
+              <Menu size={22} aria-hidden="true" />
+              <select
+                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                aria-label="Разделы учёбы"
+                value={tab}
+                onChange={(event) =>
+                  selectStudyTab(event.target.value as StudyTabId)
+                }
+              >
+                {tabs.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <button
+            type="button"
+            onClick={() => void query.refetch()}
+            disabled={
+              query.isFetching ||
+              save.isPending ||
+              configure.isPending ||
+              syllabi.pending
+            }
+            aria-label="Обновить учёбу"
+            className="grid min-h-11 min-w-11 shrink-0 place-items-center rounded-lg border border-white/[0.08] text-zinc-300 hover:bg-white/[0.05] active:scale-[0.98] disabled:opacity-50"
+          >
+            <RefreshCw className="h-5 w-5" aria-hidden="true" />
+          </button>
+        </div>
       </header>
-      <StudyLmsOverview key="lms-overview" onOpenConnection={onOpenLms} />
       {syllabi.pending ? (
         <p role="status" className="text-xs text-emerald-200">
           Сохраняем формулы из силабусов для найденных предметов…
@@ -242,48 +267,53 @@ export function StudyScreen({
           хранения.
         </p>
       ) : null}
-      <div
-        className="grid grid-cols-3 gap-1 rounded-xl border border-white/[0.08] bg-white/[0.03] p-1 sm:grid-cols-6"
-        role="tablist"
-        aria-label="Разделы учёбы"
-      >
-        {tabs.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            id={`study-tab-${id}`}
-            type="button"
-            role="tab"
-            aria-selected={tab === id}
-            aria-controls="study-panel"
-            tabIndex={tab === id ? 0 : -1}
-            onKeyDown={(event) => {
-              if (event.key !== "ArrowRight" && event.key !== "ArrowLeft")
-                return;
-              event.preventDefault();
-              const next =
-                tabs[
-                  (tabs.findIndex((item) => item.id === tab) +
-                    (event.key === "ArrowRight" ? 1 : tabs.length - 1)) %
-                    tabs.length
-                ];
-              if (selectStudyTab(next.id))
-                document.getElementById(`study-tab-${next.id}`)?.focus();
-            }}
-            onClick={() => selectStudyTab(id)}
-            className={cx(
-              "flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-lg px-0.5 py-2 text-[10px] font-semibold transition-colors hover:bg-white/[0.06] active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400",
-              tab === id ? "bg-cyan-400/10 text-cyan-200" : "text-zinc-400",
-            )}
-          >
-            <Icon className="h-4 w-4" aria-hidden="true" />
-            {label}
-          </button>
-        ))}
+      {tab !== "grades" && (
+        <div
+          className="grid grid-cols-3 gap-1 rounded-xl border border-white/[0.08] bg-white/[0.03] p-1 sm:grid-cols-6"
+          role="tablist"
+          aria-label="Разделы учёбы"
+        >
+          {tabs.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              id={`study-tab-${id}`}
+              type="button"
+              role="tab"
+              aria-selected={tab === id}
+              aria-controls="study-panel"
+              tabIndex={tab === id ? 0 : -1}
+              onKeyDown={(event) => {
+                if (event.key !== "ArrowRight" && event.key !== "ArrowLeft")
+                  return;
+                event.preventDefault();
+                const next =
+                  tabs[
+                    (tabs.findIndex((item) => item.id === tab) +
+                      (event.key === "ArrowRight" ? 1 : tabs.length - 1)) %
+                      tabs.length
+                  ];
+                if (selectStudyTab(next.id))
+                  document.getElementById(`study-tab-${next.id}`)?.focus();
+              }}
+              onClick={() => selectStudyTab(id)}
+              className={cx(
+                "flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-lg px-0.5 py-2 text-[10px] font-semibold transition-colors hover:bg-white/[0.06] active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400",
+                tab === id ? "bg-cyan-400/10 text-cyan-200" : "text-zinc-400",
+              )}
+            >
+              <Icon className="h-4 w-4" aria-hidden="true" />
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+      <div hidden={tab === "grades"}>
+        <StudyLmsOverview key="lms-overview" onOpenConnection={onOpenLms} />
       </div>
       <div
         id="study-panel"
-        role="tabpanel"
-        aria-labelledby={`study-tab-${tab}`}
+        role={tab === "grades" ? undefined : "tabpanel"}
+        aria-labelledby={tab === "grades" ? undefined : `study-tab-${tab}`}
       >
         {tab === "schedule" ? (
           <StudySchedule courses={data.courses} timezone={data.timezone} />
@@ -296,7 +326,9 @@ export function StudyScreen({
             }}
           />
         ) : null}
-        {tab === "grades" ? <StudyGrades records={data.records} /> : null}
+        {tab === "grades" ? (
+          <StudyGrades records={data.records} courses={data.courses} />
+        ) : null}
         {tab === "syllabi" ? <StudySyllabi courses={data.courses} /> : null}
         {tab === "map" ? <StudyCampusMap /> : null}
         {tab === "calculator" ? (

@@ -1,0 +1,136 @@
+.grades-list {
+  display: grid;
+  gap: 14px;
+  color: #f1f1f3;
+  font-variant-numeric: tabular-nums;
+}
+.grade-card,
+.grades-empty {
+  min-width: 0;
+  padding: clamp(14px, 4vw, 19px);
+  border: 1px solid #28282d;
+  border-radius: 18px;
+  background: #151517;
+}
+.grade-head,
+.grade-result,
+.grade-chips,
+.grade-details summary {
+  display: flex;
+}
+.grade-head {
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.grade-head > div:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.grade-head h2 {
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+.grade-instructor {
+  margin-top: 3px;
+  color: #a3a3ae;
+  font-size: 14px;
+}
+.grade-result {
+  align-items: center;
+  gap: 8px;
+}
+.grade-result strong {
+  font-size: 28px;
+  font-weight: 750;
+  line-height: 1.12;
+  letter-spacing: -0.05em;
+  white-space: nowrap;
+}
+.grade-result span {
+  border-radius: 9px;
+  padding: 4px 8px;
+  background: #1e2333;
+  color: #82a5ff;
+  font-size: 14px;
+  font-weight: 700;
+}
+.grade-chips {
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 15px;
+}
+.grade-chips li {
+  border-radius: 99px;
+  background: #202023;
+  border: 1px solid #303034;
+  color: #c0c0c8;
+  font-size: 13px;
+  font-weight: 650;
+  padding: 4px 10px;
+}
+.grade-chips [data-attendance="partial"] {
+  background: #30291f;
+  color: #f2bc68;
+  border-color: transparent;
+}
+.grade-chips [data-attendance="full"] {
+  background: #162d25;
+  color: #69d9aa;
+  border-color: transparent;
+}
+.grade-details {
+  margin-top: 15px;
+  border-top: 1px solid #28282d;
+}
+.grade-details summary {
+  min-height: 44px;
+  cursor: pointer;
+  list-style: none;
+  align-items: center;
+  gap: 4px;
+  color: #82a5ff;
+  font-weight: 600;
+  font-size: 15px;
+}
+.grade-details summary::-webkit-details-marker {
+  display: none;
+}
+.grade-details summary:focus-visible {
+  outline: 2px solid #82a5ff;
+  outline-offset: 2px;
+}
+.grade-details[open] summary svg {
+  transform: rotate(90deg);
+}
+.grade-details dl {
+  display: grid;
+  gap: 10px;
+}
+.grade-details dl > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: baseline;
+  font-size: 15px;
+  line-height: 1.4;
+}
+.grade-details dt {
+  overflow-wrap: anywhere;
+  color: #aaaab4;
+}
+.grade-details dd {
+  font-weight: 650;
+  text-align: right;
+}
+.grade-details abbr {
+  text-decoration: none;
+}
+.grade-details small {
+  display: block;
+  color: #f2bc68;
+}
+.grade-card:has(.grade-details:not([open])) {
+  padding-bottom: 4px;
+}

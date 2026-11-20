@@ -31,15 +31,15 @@ describe("AcademicGrades", () => {
         ],
       }),
     );
-    expect(html).toContain("Not graded");
+    expect(html).toContain("Ещё не оценено");
     expect(html).toContain("0 / 10");
-    expect(html).toContain("Demo data");
+    expect(html).toContain("Демонстрационные данные");
   });
 
   it("shows an honest empty state", () => {
     const html = renderToStaticMarkup(
       createElement(AcademicGrades, { records: [] }),
     );
-    expect(html).toContain("No grades synced yet.");
+    expect(html).toContain("Оценок пока нет.");
   });
 });
