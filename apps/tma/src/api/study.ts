@@ -55,9 +55,13 @@ export interface ConfigureStudyCalculatorInput {
   expectedState?: StudyCalculatorState | null;
 }
 
-export function useStudyQuery({ refreshOnOpen = false } = {}) {
+export function useStudyQuery({
+  refreshOnOpen = false,
+  initialData,
+}: { refreshOnOpen?: boolean; initialData?: StudyWorkspace } = {}) {
   return useQuery({
     queryKey: studyQueryKey,
+    initialData,
     refetchInterval: 60_000,
     refetchOnMount: refreshOnOpen ? "always" : true,
     refetchOnWindowFocus: true,
@@ -71,17 +75,25 @@ export function useSaveStudyCalculatorMutation() {
     mutationFn: ({
       courseId,
       state,
+      expectedState,
     }: {
       courseId: string;
       state: StudyCalculatorState;
-    }) =>
-      request<StudyCalculatorState>(
-        `/api/tma/study/courses/${encodeURIComponent(courseId)}/calculator`,
+      expectedState?: StudyCalculatorState | null;
+    }) => {
+      const resource = expectedState !== undefined ? "syllabus" : "calculator";
+      const body =
+        expectedState !== undefined
+          ? { ...state, expectedState }
+          : { values: state.values, target: state.target };
+      return request<StudyCalculatorState>(
+        `/api/tma/study/courses/${encodeURIComponent(courseId)}/${resource}`,
         {
           method: "PUT",
-          body: JSON.stringify({ values: state.values, target: state.target }),
+          body: JSON.stringify(body),
         },
-      ),
+      );
+    },
     async onMutate() {
       await queryClient.cancelQueries({ queryKey: studyQueryKey });
     },

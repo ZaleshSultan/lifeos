@@ -1,3 +1,15 @@
+import { financeMutationBodyError, financeResources } from "./finance-bridge-policy";
+import { studyCourseMutation, studyMutationBodyError } from "./study-bridge-policy";
+
+export function bridgeMutationBodyError(path: string, payload: unknown) {
+  if (path === "monthly-review") {
+    return payload !== null && typeof payload === "object" && !Array.isArray(payload) && Object.keys(payload).length === 0
+      ? null
+      : "invalid_monthly_review_request";
+  }
+  return studyMutationBodyError(path, payload) ?? financeMutationBodyError(path, payload);
+}
+
 /** Explicit backend resources only: never forward a caller-supplied URL or identity. */
 const resources: Array<{ pattern: RegExp; methods: readonly string[] }> = [
   {
@@ -5,7 +17,14 @@ const resources: Array<{ pattern: RegExp; methods: readonly string[] }> = [
       /^(session|home|health|finance|study|academic|sources|today|ai\/status|daily-life\/summary)$/,
     methods: ["GET"],
   },
+  { pattern: /^monthly-review$/, methods: ["GET", "POST"] },
+  { pattern: /^focus$/, methods: ["GET"] },
+  { pattern: /^mode$/, methods: ["GET", "POST", "DELETE"] },
+  { pattern: /^course\/active$/, methods: ["GET"] },
+  { pattern: /^course\/active\/progress$/, methods: ["POST"] },
   { pattern: /^lms\/(work|connection)$/, methods: ["GET"] },
+  ...financeResources,
+  { pattern: studyCourseMutation, methods: ["PUT"] },
   { pattern: /^study\/concierge$/, methods: ["GET"] },
   { pattern: /^study\/concierge\/preferences$/, methods: ["PUT"] },
   { pattern: /^study\/concierge\/(import\/(preview|confirm)|schedule\/verify)$/, methods: ["POST"] },
@@ -56,7 +75,8 @@ export function bridgeResourceAllowed(path: string, method: string) {
     (rule) => rule.pattern.test(path) && rule.methods.includes(method),
   );
 }
-export function bridgeQuery(search: URLSearchParams): string | null {
+export function bridgeQuery(search: URLSearchParams, path?: string): string | null {
+  if (path === "monthly-review" && search.size > 0) return null;
   const entries = [...search.entries()];
   if (
     entries.some(

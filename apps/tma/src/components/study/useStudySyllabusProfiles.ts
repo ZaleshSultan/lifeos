@@ -15,7 +15,10 @@ import {
 // Share in-flight upgrades across screen changes and StrictMode effect replays.
 const inFlight = new WeakMap<QueryClient, Map<string, Promise<unknown>>>();
 
-export function useStudySyllabusProfiles(data?: StudyWorkspace) {
+export function useStudySyllabusProfiles(
+  data?: StudyWorkspace,
+  applyOnOpen = true,
+) {
   const queryClient = useQueryClient();
   const { mutateAsync: configure } = useConfigureStudyCalculatorMutation();
   const attempted = useRef(new Set<string>());
@@ -31,8 +34,8 @@ export function useStudySyllabusProfiles(data?: StudyWorkspace) {
     [data],
   );
   const applications = useMemo(
-    () => studySyllabusApplications(data?.courses ?? []),
-    [data],
+    () => (applyOnOpen ? studySyllabusApplications(data?.courses ?? []) : []),
+    [applyOnOpen, data],
   );
 
   useEffect(() => {

@@ -18,6 +18,10 @@ import {
 } from "../../../packages/core/src/ideal-human.ts";
 import { DEFAULT_DAILY_LIFE_PREFERENCES } from "../../../packages/core/src/daily-life.ts";
 import {
+  builtinStudyCalculatorState,
+  syllabusProfiles,
+} from "../../../packages/core/src/study-syllabi.ts";
+import {
   AI_ROUTER_PROVIDERS,
   defaultAiRouterSettings,
   parseAiRouterSettings,
@@ -30,7 +34,7 @@ import {
   freeRouterBrowserSnapshot,
   assertFreeRouterBrowserPanel,
 } from "../../../scripts/free-ai-router-browser-fixtures.mjs";
-const { chromium } = await import(
+const { chromium, firefox } = await import(
   process.env.LIFEOS_PLAYWRIGHT_MODULE || "playwright"
 );
 const workspace = resolve(new URL("../../..", import.meta.url).pathname);
@@ -280,6 +284,73 @@ const dailyPlan = {
   warnings: [],
 };
 const trace = [];
+function studyFixture(owner) {
+  if (owner !== "A")
+    return { timezone: "Asia/Almaty", courses: [], records: [] };
+  const courses = syllabusProfiles
+    .filter((p) => ["networks", "os"].includes(p.id))
+    .map((p) => ({
+      id:
+        p.id === "os"
+          ? "00000000-0000-4000-8000-000000000501"
+          : "00000000-0000-4000-8000-000000000502",
+      title: p.title,
+      code: p.courseCode,
+      externalCourseKey: p.id === "os" ? "moodle:501" : "moodle:502",
+      // Opening a built-in syllabus without a saved calculator must be read-only.
+      calculator:
+        p.id === "os" ? null : builtinStudyCalculatorState(p.courseCode),
+      scholarship: null,
+      startsOn: null,
+      endsOn: null,
+      schedules: [],
+    }));
+  const records = [];
+  for (const course of courses) {
+    const complete = course.externalCourseKey === "moodle:502";
+    const grades = [
+      ...Array.from({ length: complete ? 8 : 5 }, (_, i) => [
+        "Assignment " + (i + 1),
+        complete ? 75 : 80,
+        "mod",
+      ]),
+      ["Midterm", complete ? 75 : 85, "mod"],
+    ];
+    if (complete)
+      grades.push(
+        ["Endterm", 77, "mod"],
+        ["Cisco certificate", 75, "mod"],
+        ["Final exam", 76, "mod"],
+        ["Calculated grade Register Endterm", 75.6, "manual"],
+        ["Calculated grade Register Final", 76, "manual"],
+        ["Course total", 76, "course"],
+      );
+    for (const [i, [title, score, itemtype]] of grades.entries()) {
+      records.push({
+        id: course.id + "-" + i,
+        sourceEventId: "event-" + course.id + "-" + i,
+        userId: "fixture-owner-A",
+        courseTitle: course.title,
+        recordType: "grade",
+        title,
+        valueText: null,
+        score,
+        maxScore: 100,
+        percentage: score,
+        dueAt: null,
+        occursAt: null,
+        createdAt: "2026-10-11T00:00:00Z",
+        updatedAt: "2026-10-11T00:00:00Z",
+        rawJson: {
+          moodle_course_id: course.externalCourseKey.slice(7),
+          moodle_item_id: String(i + 1),
+          itemtype,
+        },
+      });
+    }
+  }
+  return { timezone: "Asia/Almaty", courses, records };
+}
 const backend = createServer(async (req, res) => {
   try {
     const url = new URL(req.url, "http://fixture");
@@ -568,32 +639,9 @@ const backend = createServer(async (req, res) => {
       workout = null;
       return json(res, fixtureHistory[0]);
     }
-    if (path === "/api/tma/study")
-      return json(res, {
-        timezone: "Asia/Almaty",
-        courses: [
-          {
-            id: "fixture-course",
-            title: "Fixture cybersecurity",
-            code: "FIXTURE",
-            startsOn: null,
-            endsOn: null,
-            externalCourseKey: null,
-            calculator: null,
-            schedules: [],
-          },
-        ],
-        records: [
-          {
-            id: "fixture-grade",
-            courseTitle: "Fixture cybersecurity",
-            title: "Fixture assignment",
-            score: 75,
-            maxScore: 100,
-            dueAt: null,
-          },
-        ],
-      });
+    if (path === "/api/tma/study") return json(res, studyFixture(owner));
+    if (path === "/api/tma/monthly-review" && req.method === "GET")
+      return json(res, { latest: null });
     if (path === "/api/tma/lms/connection")
       return json(res, {
         configured: false,
@@ -635,6 +683,7 @@ const backend = createServer(async (req, res) => {
         sources: [],
         missingMetrics: { sleep: true },
       });
+    if (path === "/api/tma/finance/categories") return json(res, []);
     if (path === "/api/tma/finance")
       return json(res, {
         currency: "KZT",
@@ -804,7 +853,13 @@ const frontend = createHttpsServer(
     }
   },
 );
-await new Promise((done) => frontend.listen(0, "127.0.0.1", done));
+await new Promise((done) =>
+  frontend.listen(
+    Number(process.env.LIFEOS_WEB_BROWSER_PORT || 0),
+    "127.0.0.1",
+    done,
+  ),
+);
 const origin = `https://127.0.0.1:${frontend.address().port}`;
 let logs = "";
 const app = spawn(
@@ -818,7 +873,8 @@ const app = spawn(
     String(port),
   ],
   {
-    cwd: resolve(workspace, "apps/web"),
+    cwd:
+      process.env.LIFEOS_WEB_BROWSER_APP_DIR || resolve(workspace, "apps/web"),
     env: {
       PATH: process.env.PATH,
       NODE_ENV: "production",
@@ -840,7 +896,11 @@ const startedAtUtc = new Date().toISOString();
 const caseResults = [];
 const screenshots = [];
 const pageErrors = [];
-const expectedCases = process.env.LIFEOS_WEB_BROWSER_LOGOUT_ONLY ? 2 : 78;
+const logoutOnly = Boolean(process.env.LIFEOS_WEB_BROWSER_LOGOUT_ONLY);
+const navigationOnly = Boolean(process.env.LIFEOS_WEB_BROWSER_NAV_ONLY);
+const sharedScenarioWidths =
+  logoutOnly || navigationOnly ? [] : [320, 390, 768, 1440];
+const expectedCases = logoutOnly ? 2 : navigationOnly ? 3 : 79;
 async function checkpoint() {
   const path = resolve(artifacts, "checkpoint.json");
   await writeFile(
@@ -892,10 +952,8 @@ async function captureScreenshot(page, options) {
   }
 }
 async function test(name, fn) {
-  if (
-    process.env.LIFEOS_WEB_BROWSER_LOGOUT_ONLY &&
-    !/unauthenticated|logout/.test(name)
-  )
+  if (logoutOnly && !/unauthenticated|logout/.test(name)) return;
+  if (navigationOnly && !/unauthenticated|primary navigation|logout/.test(name))
     return;
   currentCase = name;
   await checkpoint();
@@ -926,15 +984,24 @@ try {
     if (i === 99) throw new Error("Next fixture server did not start");
     await new Promise((r) => setTimeout(r, 300));
   }
-  browser = await chromium.launch({
+  const engine = process.env.LIFEOS_WEB_BROWSER_ENGINE || "chromium";
+  assert.ok(
+    ["chromium", "firefox"].includes(engine),
+    "Unsupported browser engine",
+  );
+  browser = await (engine === "firefox" ? firefox : chromium).launch({
     headless: true,
-    executablePath: process.env.LIFEOS_CHROMIUM_EXECUTABLE,
-    args: [
-      "--no-sandbox",
-      "--renderer-process-limit=1",
-      "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost",
-      "--no-proxy-server",
-    ],
+    executablePath:
+      engine === "firefox" ? undefined : process.env.LIFEOS_CHROMIUM_EXECUTABLE,
+    args:
+      engine === "firefox"
+        ? []
+        : [
+            "--no-sandbox",
+            "--renderer-process-limit=1",
+            "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost",
+            "--no-proxy-server",
+          ],
     timeout: 120000,
   });
   async function isolatedContext(options) {
@@ -994,25 +1061,171 @@ try {
     await page.goto(`${origin}/web/today`);
     await page.getByRole("heading", { name: "Твой LifeOS Web" }).waitFor();
     await page.goto(`${origin}/web/login?token=fixture-login-A`);
-    await page.waitForTimeout(1000);
-
-    await page
-      .getByRole("heading", { name: `Сегодня · ${fixtureDisplayName("A")}` })
-      .waitFor();
+    await page.getByRole("heading", { name: "Сегодня", exact: true }).waitFor();
     assert.ok(!page.url().includes("token="));
     const cookie = (await context.cookies()).find(
       (c) => c.name === "lifeos_web_session",
     );
-    assert.ok(cookie?.httpOnly && cookie.secure);
+    assert.ok(
+      cookie?.httpOnly &&
+        cookie.secure &&
+        cookie.sameSite === "Lax" &&
+        cookie.path === "/",
+    );
+    assert.equal(
+      await page.evaluate(() =>
+        document.cookie.includes("lifeos_web_session="),
+      ),
+      false,
+    );
+  });
+  await test("primary navigation keeps the session and distinguishes completed courses from weighted forecasts", async () => {
+    const start = trace.length;
+    const subject = page.getByRole("combobox", {
+      name: "Предмет",
+      exact: true,
+    });
+    const remaining = page.locator('output[aria-label="Нужный средний балл"]');
+    const result = page.locator('output[aria-label="Итог по предмету"]');
+    const plan = page.getByRole("region", {
+      name: "План по работам",
+      exact: true,
+    });
+    const checkScore = async (field, expected) => {
+      await field.waitFor();
+      assert.equal(
+        Number((await field.innerText()).trim().replace(",", ".")),
+        expected,
+      );
+    };
+    for (const width of [390, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      const nav = page.getByRole("navigation", {
+        name: width === 390 ? "Быстрая навигация" : "Разделы LifeOS",
+        exact: true,
+      });
+      await nav.getByRole("link", { name: "Учёба", exact: true }).click();
+      await page.waitForURL((u) => u.pathname === "/web/study");
+      await page.getByRole("heading", { name: "Учёба", exact: true }).waitFor();
+      const studyNav = page.getByRole("navigation", {
+        name: "Разделы учёбы",
+        exact: true,
+      });
+      const openSection = async (id) => {
+        const link = studyNav.locator(`a[href*="studyTab=${id}"]`);
+        if (!(await link.isVisible()))
+          await studyNav.locator("summary").click();
+        await link.click();
+      };
+      await openSection("map");
+      await page
+        .getByRole("heading", {
+          name: "Карта главного корпуса AITU",
+          exact: true,
+        })
+        .waitFor();
+      await openSection("calculator");
+      await subject.selectOption("00000000-0000-4000-8000-000000000501");
+      await page.getByLabel("Результат сценария", { exact: true }).waitFor();
+      await nav.getByRole("link", { name: "Стипендия", exact: true }).click();
+      await page.waitForURL((u) => u.pathname === "/web/scholarship");
+      await subject.selectOption({ label: "Computer Networks" });
+      await checkScore(result, 76);
+      await page
+        .getByRole("region", { name: "Полученные оценки", exact: true })
+        .waitFor();
+      assert.equal(await remaining.count(), 0);
+      assert.equal(await plan.count(), 0);
+      await subject.selectOption({ label: "Operating Systems" });
+      await checkScore(remaining, 63.91);
+      const endterm = plan.getByLabel("Прогноз: Endterm", { exact: true });
+      await endterm.fill("80");
+      await checkScore(
+        page.locator('output[aria-label="За остальные работы"]'),
+        62.25,
+      );
+      await checkScore(plan.getByTestId("work-target-final_exam"), 62.25);
+      await page.reload();
+      await subject.selectOption({ label: "Operating Systems" });
+      assert.equal(await endterm.inputValue(), "80");
+      await plan
+        .getByRole("button", { name: "Сбросить прогнозы", exact: true })
+        .click();
+      await checkScore(remaining, 63.91);
+      let sections = nav;
+      if (width === 390) {
+        await nav
+          .getByRole("button", { name: "Все разделы", exact: true })
+          .click();
+        sections = page.getByRole("dialog", {
+          name: "Все разделы",
+          exact: true,
+        });
+      }
+      await sections
+        .getByRole("link", { name: "Настройки", exact: true })
+        .click();
+      await page.waitForURL((u) => u.pathname === "/web/settings");
+      await nav.getByRole("link", { name: "Сегодня", exact: true }).click();
+      await page
+        .getByRole("heading", { name: "Сегодня", exact: true })
+        .waitFor();
+      await page.locator("summary").filter({ hasText: "Итоги месяца" }).click();
+      await page.getByText("Отчёта пока нет.", { exact: true }).waitFor();
+      assert.ok(
+        trace.some(
+          (item) =>
+            item.path === "/api/tma/monthly-review" && item.method === "GET",
+        ),
+      );
+      assert.equal(
+        trace
+          .slice(start)
+          .some(
+            (item) =>
+              item.path === "/api/tma/monthly-review" && item.method === "POST",
+          ),
+        false,
+      );
+      assert.ok(
+        (await context.cookies(origin)).some(
+          (c) => c.name === "lifeos_web_session",
+        ),
+      );
+    }
+    assert.equal(
+      trace.slice(start).some((item) => item.path === "/api/web/auth/logout"),
+      false,
+      "navigation must keep the session",
+    );
+    assert.equal(
+      trace
+        .slice(start)
+        .some(
+          (item) =>
+            item.method === "PUT" &&
+            /\/(?:syllabus|calculator)$/.test(item.path),
+        ),
+      false,
+      "opening a course without a saved schema must not write the calculator or syllabus",
+    );
+    assert.equal(
+      trace
+        .slice(start)
+        .some(
+          (item) => item.path.includes("/scholarship") && item.method === "PUT",
+        ),
+      false,
+      "trying forecasts must not save facts",
+    );
   });
   await test("long profile names remain readable without clipping at 320px tablet and desktop", async () => {
     for (const width of [320, 768, 1440]) {
       await page.setViewportSize({ width, height: 900 });
       await page.goto(`${origin}/web/today`);
-      const heading = page.getByRole("heading", {
-        name: `Сегодня · ${fixtureDisplayName("A")}`,
-        exact: true,
-      });
+      const heading = page
+        .getByText(fixtureDisplayName("A"), { exact: true })
+        .filter({ visible: true });
       await heading.waitFor();
       const geometry = await heading.evaluate((element) => ({
         viewport: innerWidth,
@@ -2035,7 +2248,7 @@ try {
     assert.equal(current.tomorrowPlan, "Retain tomorrow's draft");
   });
   page.off("dialog", acceptDialog);
-  for (const width of [320, 390, 768, 1440]) {
+  for (const width of sharedScenarioWidths) {
     captureFixtures.set("A", captureBrowserFixture("A"));
     await page.setViewportSize({ width, height: 900 });
     await captureBrowserScenarios({
@@ -2050,7 +2263,7 @@ try {
       fullPage: true,
     });
   }
-  for (const width of [320, 390, 768, 1440]) {
+  for (const width of sharedScenarioWidths) {
     academicFixtures.set("A", academicBrowserFixture("A"));
     await page.setViewportSize({ width, height: 900 });
     await academicBrowserScenarios({
@@ -2058,7 +2271,7 @@ try {
       fixture: academicFixtures.get("A"),
       prefix: `Web academic ${width}px`,
       test,
-      open: () => page.goto(`${origin}/web/study`),
+      open: () => page.goto(`${origin}/web/study?studyTab=concierge`),
     });
     await captureScreenshot(page, {
       path: resolve(artifacts, `web-academic-${width}.png`),
@@ -2095,7 +2308,7 @@ try {
         .count(),
       0,
     );
-    await p.goto(`${origin}/web/study`);
+    await p.goto(`${origin}/web/study?studyTab=concierge`);
     const academic = p.getByLabel("Учебный консьерж", { exact: true });
     await academic
       .getByRole("heading", {
@@ -2140,6 +2353,7 @@ try {
         "planner",
         "calendar",
         "study",
+        "scholarship",
         "workouts",
         "health",
         "nutrition",
@@ -2153,6 +2367,40 @@ try {
       ]) {
         await page.goto(`${origin}/web/${path}`);
         await page.locator("h1").waitFor();
+        assert.equal(new URL(page.url()).pathname, "/web/" + path);
+        if (path === "finance" && width === 320) {
+          await page
+            .getByText("Сохранённых чеков пока нет.", { exact: true })
+            .waitFor();
+          const before = trace.length;
+          await page
+            .getByRole("button", { name: "Добавить расход", exact: true })
+            .click();
+          await page
+            .getByRole("button", { name: "Сохранить расход", exact: true })
+            .waitFor();
+          await page
+            .getByRole("button", {
+              name: "Свернуть форму расхода",
+              exact: true,
+            })
+            .click();
+          assert.ok(
+            trace.some(
+              (r) =>
+                r.path === "/api/tma/finance/categories" && r.method === "GET",
+            ),
+          );
+          assert.equal(
+            trace
+              .slice(before)
+              .some(
+                (r) =>
+                  r.path.startsWith("/api/tma/finance") && r.method !== "GET",
+              ),
+            false,
+          );
+        }
         assert.ok(
           await page.evaluate(
             () => document.documentElement.scrollWidth <= window.innerWidth,

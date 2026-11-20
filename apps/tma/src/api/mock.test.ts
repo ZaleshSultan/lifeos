@@ -24,7 +24,7 @@ describe("TMA mock data policy", () => {
 
   it("uses live monthly review API instead of screen-level mock data", async () => {
     const screen = await readFile(
-      new URL("../screens/HomeScreen.tsx", import.meta.url),
+      new URL("../components/MonthlyReviewSection.tsx", import.meta.url),
       "utf8",
     );
     const client = await readFile(

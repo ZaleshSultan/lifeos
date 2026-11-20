@@ -1,17 +1,20 @@
 import { BookText, Plus, Save, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type {
   StudyCalculatorDefinition,
   StudyCalculatorField,
 } from "../../../../../packages/core/src/study.js";
 import {
   useConfigureStudyCalculatorMutation,
+  studyQueryKey,
   type StudyWorkspaceCourse,
 } from "../../api/study";
 
 type EditablePeriod = "att1" | "att2";
 
 type SyllabusDraft = {
+  base: StudyWorkspaceCourse["calculator"];
   sourceName: string;
   attestationThreshold: string;
   fields: StudyCalculatorField[];
@@ -27,12 +30,14 @@ function draftForCourse(course: StudyWorkspaceCourse): SyllabusDraft {
   const definition = course.calculator?.definition;
   if (definition) {
     return {
+      base: course.calculator,
       sourceName: definition.sourceName,
       attestationThreshold: String(definition.attestationThreshold),
       fields: definition.fields.map((field) => ({ ...field })),
     };
   }
   return {
+    base: course.calculator,
     sourceName: `Ручной силабус: ${course.code || course.title}`,
     attestationThreshold: "25",
     fields: [
@@ -73,12 +78,15 @@ function periodWeight(fields: StudyCalculatorField[], period: EditablePeriod) {
 
 export function StudySyllabi({ courses, initialCourseId }: { courses: StudyWorkspaceCourse[]; initialCourseId?: string | null }) {
   const configure = useConfigureStudyCalculatorMutation();
+  const client = useQueryClient();
   const [courseId, setCourseId] = useState(initialCourseId ?? courses[0]?.id ?? "");
   const course = courses.find((item) => item.id === courseId) ?? courses[0];
   const [draft, setDraft] = useState<SyllabusDraft | null>(
     course ? draftForCourse(course) : null,
   );
   const [saved, setSaved] = useState(false);
+  const edited = useRef(false);
+  const editingCourse = useRef(course?.id);
 
   useEffect(() => {
     if (!courses.some((item) => item.id === courseId))
@@ -86,13 +94,16 @@ export function StudySyllabi({ courses, initialCourseId }: { courses: StudyWorks
   }, [courseId, courses]);
 
   useEffect(() => {
+    if (editingCourse.current === course?.id && edited.current) return;
+    editingCourse.current = course?.id;
+    edited.current = false;
     if (!course) {
       setDraft(null);
       return;
     }
     setDraft(draftForCourse(course));
     setSaved(false);
-  }, [course?.id, course?.calculator?.definition]);
+  }, [course?.id, course?.calculator]);
 
   const validation = useMemo(() => {
     if (!draft) return { error: "Нет курса", att1: 0, att2: 0 };
@@ -133,11 +144,16 @@ export function StudySyllabi({ courses, initialCourseId }: { courses: StudyWorks
 
   if (!course || !draft) return null;
 
+  function markEdited() {
+    edited.current = true;
+    setSaved(false);
+  }
+
   const updateField = (
     id: string,
     patch: Partial<Pick<StudyCalculatorField, "label" | "weightPercent">>,
   ) => {
-    setSaved(false);
+    markEdited();
     setDraft((current) =>
       current
         ? {
@@ -151,7 +167,7 @@ export function StudySyllabi({ courses, initialCourseId }: { courses: StudyWorks
   };
 
   const addField = (period: EditablePeriod) => {
-    setSaved(false);
+    markEdited();
     setDraft((current) => {
       if (!current) return current;
       return {
@@ -172,7 +188,7 @@ export function StudySyllabi({ courses, initialCourseId }: { courses: StudyWorks
   const removeField = (id: string, period: EditablePeriod) => {
     if (draft.fields.filter((field) => field.period === period).length <= 1)
       return;
-    setSaved(false);
+    markEdited();
     setDraft((current) =>
       current
         ? { ...current, fields: current.fields.filter((field) => field.id !== id) }
@@ -195,17 +211,22 @@ export function StudySyllabi({ courses, initialCourseId }: { courses: StudyWorks
       {
         courseId: course.id,
         definition,
-        target: course.calculator?.target ?? 70,
+        target: draft.base?.target ?? 70,
+        expectedState: draft.base,
       },
       {
-        onSuccess: () => setSaved(true),
+        onSuccess: (state) => {
+          edited.current = false;
+          setDraft(draftForCourse({ ...course, calculator: state }));
+          setSaved(true);
+        },
         onError: () => setSaved(false),
       },
     );
   };
 
   return (
-    <div className="space-y-4">
+    <fieldset aria-label="Редактор силабуса" disabled={configure.isPending} className="min-w-0 space-y-4">
       <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
         <h2 className="flex items-center gap-2 font-semibold text-white">
           <BookText className="h-5 w-5 text-cyan-400" aria-hidden="true" />
@@ -244,7 +265,7 @@ export function StudySyllabi({ courses, initialCourseId }: { courses: StudyWorks
           <input
             value={draft.sourceName}
             onChange={(event) => {
-              setSaved(false);
+              markEdited();
               setDraft({ ...draft, sourceName: event.target.value });
             }}
             className="mt-2 min-h-11 w-full rounded-lg border border-white/[0.12] bg-graphite-900 px-3 py-2 text-base text-white"
@@ -262,7 +283,7 @@ export function StudySyllabi({ courses, initialCourseId }: { courses: StudyWorks
             inputMode="decimal"
             value={draft.attestationThreshold}
             onChange={(event) => {
-              setSaved(false);
+              markEdited();
               setDraft({ ...draft, attestationThreshold: event.target.value });
             }}
             className="mt-2 min-h-11 w-full rounded-lg border border-white/[0.12] bg-graphite-900 px-3 py-2 text-base text-white"
@@ -359,7 +380,19 @@ export function StudySyllabi({ courses, initialCourseId }: { courses: StudyWorks
         ) : null}
         {configure.isError ? (
           <p className="rounded-lg bg-rose-400/10 px-3 py-2 text-sm text-rose-200" role="alert">
-            Не удалось сохранить силабус. Обнови данные и попробуй ещё раз.
+            Не удалось сохранить силабус.
+            <button
+              type="button"
+              className="ml-2 min-h-11 underline"
+              onClick={() => {
+                edited.current = false;
+                setDraft(draftForCourse(course));
+                configure.reset();
+                void client.invalidateQueries({ queryKey: studyQueryKey });
+              }}
+            >
+              Загрузить сохранённую версию
+            </button>
           </p>
         ) : null}
         {saved ? (
@@ -378,6 +411,6 @@ export function StudySyllabi({ courses, initialCourseId }: { courses: StudyWorks
           {configure.isPending ? "Сохраняем…" : "Сохранить силабус"}
         </button>
       </section>
-    </div>
+    </fieldset>
   );
 }

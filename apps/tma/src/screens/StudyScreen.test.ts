@@ -1,3 +1,8 @@
+import {
+  createStudyDraft,
+  studyDraftHasBaseline,
+} from "../components/study/model";
+import { builtinStudyCalculatorState } from "../../../../packages/core/src/study-syllabi.js";
 import { createElement, type EffectCallback } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient } from "@tanstack/react-query";
@@ -183,4 +188,44 @@ describe("Study screen syllabus application", () => {
     );
     expect(html).not.toContain("Использовать формулу из силабуса");
   });
+});
+
+it("opens the requested course directly in the embedded web calculator without accessing the browser during server rendering", () => {
+  mocks.effects = [];
+  const items = courses();
+  items[1].calculator = builtinStudyCalculatorState("DLD52-EN");
+  const data = { timezone: "Asia/Almaty", courses: items, records: [] };
+  mocks.study.mockReturnValue({ data });
+  const html = renderToStaticMarkup(
+    createElement(StudyScreen, {
+      onOpenLms: vi.fn(),
+      embeddedCalculator: {
+        initial: data,
+        courseId: items[1].id,
+        onCourseChange: vi.fn(),
+      },
+    }),
+  );
+  expect(html).toContain('value="' + items[1].id + '" selected');
+  expect(html).toContain("Midterm");
+  expect(html).not.toContain('aria-label="Разделы учёбы"');
+  for (const effect of [...mocks.effects]) effect();
+  expect(mocks.configure).not.toHaveBeenCalled();
+});
+
+it("keeps the original baseline check independent of subsequently edited fields and refreshed grades", () => {
+  const state = builtinStudyCalculatorState("DLD52-EN")!;
+  const draft = createStudyDraft(state);
+  draft.inputs.assignment_1 = "90";
+  expect(studyDraftHasBaseline(draft, state)).toBe(true);
+  expect(
+    studyDraftHasBaseline(draft, { ...state, values: { assignment_1: 50 } }),
+  ).toBe(false);
+  expect(studyDraftHasBaseline(draft, { ...state, target: 0 })).toBe(false);
+  expect(
+    studyDraftHasBaseline(draft, {
+      ...state,
+      definition: { ...state.definition, sourceName: "Uploaded syllabus" },
+    }),
+  ).toBe(false);
 });

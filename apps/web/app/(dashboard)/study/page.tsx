@@ -1,234 +1,147 @@
-import {
-  BookOpenCheck,
-  CalendarDays,
-  Calculator,
-  GraduationCap,
-} from "lucide-react";
+import Link from "next/link";
 import { redirect } from "next/navigation";
-import { LmsStatus } from "@/components/LmsStatus";
-import { dashboardData, dateTime } from "@/lib/dashboard-data";
-import type { WebLmsConnection, WebLmsWork } from "@/lib/lms-contracts";
-import { MetricCard } from "@/components/MetricCard";
-import { PageHeader } from "@/components/PageHeader";
-import { SectionPanel } from "@/components/SectionPanel";
-import { lifeosApi, type WebStudySummary } from "@/lib/lifeos-api";
 import { AcademicWorkspace } from "@/components/workspaces/AcademicWorkspace";
+import {
+  StudyManualCalculator,
+  StudyScheduleView,
+  StudySyllabusEditor,
+} from "@/components/study/StudySections";
+import { LmsStatus } from "@/components/LmsStatus";
+import { WorkspaceRefresh } from "@/components/WorkspaceRefresh";
+import { dashboardData, dateTime } from "@/lib/dashboard-data";
+import { lifeosApi } from "@/lib/lifeos-api";
+import type { WebLmsConnection, WebLmsWork } from "@/lib/lms-contracts";
+import type { StudyWorkspace } from "../../../../tma/src/api/study";
 import type { AcademicSnapshot } from "../../../../tma/src/api/study-concierge";
+import { StudyCampusMap } from "../../../../tma/src/components/study/StudyCampusMap";
+import { StudyGrades } from "../../../../tma/src/components/study/StudyGrades";
 
-const dayOrder = [
-  "monday",
-  "tuesday",
-  "wednesday",
-  "thursday",
-  "friday",
-  "saturday",
-  "sunday",
-];
+const sections = [
+  ["grades", "Оценки"],
+  ["work", "Задания и LMS"],
+  ["schedule", "Расписание"],
+  ["concierge", "Экзамены"],
+  ["syllabi", "Силабус"],
+  ["calculator", "Калькулятор"],
+  ["map", "Карта"],
+] as const;
 
-const dayLabels: Record<string, string> = {
-  monday: "Пн",
-  tuesday: "Вт",
-  wednesday: "Ср",
-  thursday: "Чт",
-  friday: "Пт",
-  saturday: "Сб",
-  sunday: "Вс",
-};
-
-export default async function StudyPage() {
-  const [study, lmsConnection, lmsWork, academic] = await Promise.all([
-    lifeosApi<WebStudySummary>("/api/tma/study"),
+async function StudyWork() {
+  const [connection, work] = await Promise.all([
     dashboardData<WebLmsConnection>("/api/tma/lms/connection"),
     dashboardData<WebLmsWork>("/api/tma/lms/work"),
-    dashboardData<AcademicSnapshot>("/api/tma/study/concierge"),
+  ]);
+  return (
+    <div className="space-y-4">
+      <section className="rounded-[18px] border border-white/[0.08] bg-[#151517] p-4">
+        <h2 className="text-lg font-semibold">Работы и дедлайны</h2>
+        {!work || !work.items.length ? (
+          <p className="mt-2 text-sm text-zinc-400">
+            {work
+              ? "В сохранённом списке пока нет заданий."
+              : "Не удалось загрузить задания."}
+          </p>
+        ) : (
+          <ul className="mt-2 divide-y divide-white/[0.07]">
+            {work.items.map((item, index) => (
+              <li className="space-y-1 py-3 text-sm" key={index}>
+                <p className="break-words font-semibold">{item.title}</p>
+                <p className="break-words text-zinc-400">
+                  {[item.courseTitle, item.category, item.submissionStatus]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
+                <p className="text-zinc-300">
+                  {item.dueAt
+                    ? "Срок — " + dateTime(item.dueAt)
+                    : "Срок не указан"}
+                  {item.score !== null &&
+                    " · " +
+                      item.score +
+                      (item.maxScore === null ? "" : " / " + item.maxScore)}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+      <LmsStatus connection={connection} work={work} />
+    </div>
+  );
+}
+
+export default async function StudyPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const [params, study] = await Promise.all([
+    searchParams,
+    lifeosApi<StudyWorkspace>("/api/tma/study"),
   ]);
   if (!study) redirect("/access");
-
-  const scheduleCount = study.courses.reduce(
-    (total, course) => total + course.schedules.length,
-    0,
+  const tab = sections.find(([id]) => id === params.studyTab)?.[0] ?? "grades";
+  const courseId = study.courses.find(
+    (course) => course.id === params.courseId,
+  )?.id;
+  const sectionLink = ([id, name]: (typeof sections)[number]) => (
+    <Link
+      key={id}
+      aria-current={tab === id ? "page" : undefined}
+      href={{
+        pathname: "/study",
+        query: { studyTab: id, ...(courseId && { courseId }) },
+      }}
+      prefetch={false}
+      className={`inline-flex min-h-11 items-center rounded-xl px-3 text-sm font-semibold ${tab === id ? "bg-[#252c40] text-[#adc4ff]" : "text-zinc-400 hover:bg-white/[0.06] hover:text-white"}`}
+    >
+      {name}
+    </Link>
   );
-  const calculatorCount = study.courses.filter(
-    (course) => course.calculator !== null,
-  ).length;
-
   return (
-    <>
-      <PageHeader
-        kicker={study.timezone}
-        summary="Твои курсы, расписание и калькуляторы загружаются из того же LifeOS-профиля, который открыл /web."
-        title="Учёба"
-      />
-
-      <div className="dashboard-grid">
-        <MetricCard
-          detail="Активные предметы именно твоего аккаунта."
-          icon={GraduationCap}
-          label="Предметы"
-          tone="violet"
-          value={String(study.courses.length)}
-        />
-        <MetricCard
-          detail="Занятия из сохранённого расписания."
-          icon={CalendarDays}
-          label="Пары"
-          value={String(scheduleCount)}
-        />
-        <MetricCard
-          detail="Предметы с настроенной схемой силабуса."
-          icon={Calculator}
-          label="Калькуляторы"
-          tone="amber"
-          value={String(calculatorCount)}
-        />
-        <MetricCard
-          detail="Импортированные академические записи и оценки."
-          icon={BookOpenCheck}
-          label="Записи"
-          tone="mint"
-          value={String(study.records.length)}
-        />
-      </div>
-
-      <div className="mt-6">
-        <LmsStatus connection={lmsConnection} work={lmsWork} />
-      </div>
-      <div className="mt-6">
-        <AcademicWorkspace initial={academic} />
-      </div>
-      <p className="mt-4 text-sm text-amber-100">
-        Сохранённое расписание; проверь актуальность в AITU.
-      </p>
-      <div className="mt-6 grid gap-4 lg:grid-cols-2">
-        {study.courses.map((course) => {
-          const schedules = [...course.schedules].sort((left, right) => {
-            const dayDelta =
-              dayOrder.indexOf(left.dayOfWeek.toLowerCase()) -
-              dayOrder.indexOf(right.dayOfWeek.toLowerCase());
-            return dayDelta || left.startTime.localeCompare(right.startTime);
-          });
-
-          return (
-            <SectionPanel
-              key={course.id}
-              eyebrow={course.code || "Course"}
-              title={course.title}
-            >
-              {schedules.length ? (
-                <div className="space-y-2">
-                  {schedules.map((slot) => (
-                    <div
-                      key={slot.id}
-                      className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2.5 text-sm"
-                    >
-                      <div>
-                        <span className="font-medium text-zinc-200">
-                          {dayLabels[slot.dayOfWeek.toLowerCase()] ??
-                            slot.dayOfWeek}
-                          {" · "}
-                          {slot.startTime.slice(0, 5)}–
-                          {slot.endTime.slice(0, 5)}
-                        </span>
-                        <p className="mt-0.5 text-xs text-zinc-400">
-                          {[slot.sessionType, slot.instructorName]
-                            .filter(Boolean)
-                            .join(" · ") || "Занятие"}
-                        </p>
-                      </div>
-                      <span className="text-xs text-zinc-400">
-                        {slot.room || "—"}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-zinc-400">
-                  Расписание ещё не добавлено.
-                </p>
-              )}
-              <div className="mt-3 text-xs text-zinc-400">
-                {course.calculator
-                  ? "Калькулятор силабуса настроен"
-                  : "Калькулятор пока не настроен"}
-              </div>
-            </SectionPanel>
-          );
-        })}
-      </div>
-
-      <div className="mt-6 grid gap-4 lg:grid-cols-2">
-        <SectionPanel title="Работы и дедлайны">
-          <div className="space-y-3">
-            {lmsWork?.items.length ? (
-              lmsWork.items.slice(0, 40).map((item, index) => (
-                <article
-                  key={index}
-                  className="rounded-lg border border-white/[0.08] p-3"
-                >
-                  <p className="break-words text-sm font-semibold text-zinc-100">
-                    {item.title}
-                  </p>
-                  <p className="mt-1 break-words text-xs text-zinc-400">
-                    {item.courseTitle} · {item.category} ·{" "}
-                    {item.submissionStatus}
-                  </p>
-                  <p className="mt-2 text-xs text-zinc-300">
-                    Дедлайн: {dateTime(item.dueAt)}
-                    {item.score !== null
-                      ? ` · оценка ${item.score}${item.maxScore === null ? "" : `/${item.maxScore}`}`
-                      : ""}
-                  </p>
-                </article>
-              ))
-            ) : (
-              <p className="text-sm text-zinc-400">
-                Нет доступных подтверждённых работ. Это не означает отсутствие
-                заданий в LMS.
-              </p>
-            )}
+    <div className="mx-auto max-w-3xl space-y-4">
+      <header className="flex items-center justify-between gap-4">
+        <h1 className="text-[28px] font-bold leading-tight tracking-tight">
+          Учёба
+        </h1>
+        <WorkspaceRefresh label="Обновить учёбу" />
+      </header>
+      <nav aria-label="Разделы учёбы" className="flex flex-wrap gap-1">
+        {sections.slice(0, 5).map(sectionLink)}
+        <details className="relative" key={tab}>
+          <summary className="inline-flex min-h-11 cursor-pointer items-center rounded-xl px-3 text-sm font-semibold text-zinc-300">
+            {tab === "calculator"
+              ? "Калькулятор ▾"
+              : tab === "map"
+                ? "Карта ▾"
+                : "Ещё ▾"}
+          </summary>
+          <div className="absolute right-0 z-10 grid min-w-36 rounded-xl border border-white/10 bg-[#151517] p-1">
+            {sections.slice(5).map(sectionLink)}
           </div>
-        </SectionPanel>
-        <SectionPanel title="Сохранённые оценки">
-          <div className="space-y-3">
-            {study.records
-              .filter(
-                (record) => record.score !== null && record.score !== undefined,
-              )
-              .slice(0, 60)
-              .map((record, index) => (
-                <article
-                  key={record.id ?? index}
-                  className="rounded-lg border border-white/[0.08] p-3"
-                >
-                  <p className="break-words text-sm font-medium text-zinc-100">
-                    {record.title ?? "Оценка"}
-                  </p>
-                  <p className="mt-1 break-words text-xs text-zinc-400">
-                    {record.courseTitle ??
-                      record.courseCode ??
-                      "Курс не указан"}
-                  </p>
-                  <p className="mt-2 text-sm text-zinc-200">
-                    {record.score}
-                    {record.maxScore === null || record.maxScore === undefined
-                      ? ""
-                      : ` / ${record.maxScore}`}
-                  </p>
-                </article>
-              ))}
-          </div>
-        </SectionPanel>
-      </div>
-      {!study.courses.length && (
-        <div className="mt-6">
-          <SectionPanel eyebrow="Study" title="Пока нет предметов">
-            <p className="text-sm text-zinc-400">
-              Импортируй учебные данные через LifeOS — после этого они появятся
-              здесь только у твоего аккаунта.
-            </p>
-          </SectionPanel>
-        </div>
+        </details>
+      </nav>
+      {tab === "map" && <StudyCampusMap />}
+      {tab === "calculator" && (
+        <StudyManualCalculator initial={study} initialCourseId={courseId} />
       )}
-    </>
+      {tab === "grades" && (
+        <StudyGrades courses={study.courses} records={study.records} />
+      )}
+      {tab === "schedule" && (
+        <StudyScheduleView courses={study.courses} timezone={study.timezone} />
+      )}
+      {tab === "syllabi" && (
+        <StudySyllabusEditor initial={study} initialCourseId={courseId} />
+      )}
+      {tab === "work" && <StudyWork />}
+      {tab === "concierge" && (
+        <AcademicWorkspace
+          initial={await dashboardData<AcademicSnapshot>(
+            "/api/tma/study/concierge",
+          )}
+        />
+      )}
+    </div>
   );
 }

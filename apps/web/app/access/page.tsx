@@ -1,70 +1,39 @@
-import { KeyRound, Send, ShieldCheck } from "lucide-react";
+import { Send, Zap } from "lucide-react";
 
 export default async function AccessPage({
   searchParams,
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
-  const params = await searchParams;
-  const invalid = params.error === "invalid";
-
+  const invalid = (await searchParams).error === "invalid";
   return (
-    <main className="mx-auto flex min-h-screen max-w-lg items-center px-5 py-12">
-      <section className="w-full rounded-2xl border border-white/[0.08] bg-white/[0.03] p-6 shadow-2xl">
-        <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-cyan-400/20 bg-cyan-400/10 text-cyan-300">
-          <KeyRound className="h-5 w-5" />
-        </div>
-        <p className="mt-5 text-xs font-semibold uppercase tracking-[0.18em] text-cyan-400/80">
-          Personal access
-        </p>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight text-white">
+    <main className="mx-auto flex min-h-dvh max-w-md items-center px-5 py-12">
+      <section className="w-full rounded-2xl border border-white/10 bg-[#151517] p-6 sm:p-8">
+        <Zap size={24} aria-hidden="true" className="text-[#89aaff]" />
+        <h1 className="mt-4 text-3xl font-bold tracking-tight">
           Твой LifeOS Web
         </h1>
-        <p className="mt-3 text-sm leading-relaxed text-zinc-400">
-          Web-панель больше не общая: каждая сессия привязана к конкретному
-          LifeOS-пользователю и показывает только его задачи, погоду, учёбу и
-          интеграции.
+        <p className="mt-3 leading-relaxed text-zinc-300">
+          Отправь боту команду <code className="text-white">/web</code> и открой
+          личную ссылку в этом браузере.
         </p>
-
-        {invalid ? (
-          <div className="mt-5 rounded-xl border border-rose-400/20 bg-rose-400/[0.08] p-3 text-sm text-rose-200">
-            Ссылка истекла или недействительна. Получи новую через Telegram.
-          </div>
-        ) : null}
-
+        {invalid && (
+          <p
+            role="alert"
+            className="mt-4 rounded-lg bg-rose-950/50 p-3 text-sm text-rose-200"
+          >
+            Ссылка истекла или недействительна. Запроси новую в Telegram.
+          </p>
+        )}
         <a
           href="https://t.me/MYlifeeOS_bot"
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-5 inline-flex min-h-11 items-center rounded-lg border border-cyan-300/30 px-4 text-sm text-cyan-100"
+          className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-xl bg-[#28344d] px-4 font-semibold text-[#c6d7ff]"
         >
+          <Send size={16} aria-hidden="true" />
           Открыть бота LifeOS
         </a>
-        <div className="mt-6 space-y-3">
-          <div className="flex gap-3 rounded-xl border border-white/[0.07] bg-black/20 p-3">
-            <Send className="mt-0.5 h-4 w-4 shrink-0 text-cyan-300" />
-            <div>
-              <div className="text-sm font-medium text-zinc-100">
-                1. Открой бота
-              </div>
-              <div className="mt-1 text-xs text-zinc-400">
-                Отправь команду <code className="text-zinc-300">/web</code> или
-                нажми кнопку Web.
-              </div>
-            </div>
-          </div>
-          <div className="flex gap-3 rounded-xl border border-white/[0.07] bg-black/20 p-3">
-            <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
-            <div>
-              <div className="text-sm font-medium text-zinc-100">
-                2. Открой личную ссылку
-              </div>
-              <div className="mt-1 text-xs text-zinc-400">
-                Она создаст защищённую HttpOnly-сессию этого браузера.
-              </div>
-            </div>
-          </div>
-        </div>
       </section>
     </main>
   );

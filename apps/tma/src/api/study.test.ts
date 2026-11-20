@@ -5,6 +5,7 @@ import { resolveStudyCalculator } from "../../../../packages/core/src/study-syll
 import {
   studyQueryKey,
   useConfigureStudyCalculatorMutation,
+  useSaveStudyCalculatorMutation,
   type ConfigureStudyCalculatorInput,
   type StudyWorkspace,
   type StudyWorkspaceCourse,
@@ -154,4 +155,39 @@ describe("Study syllabus persistence", () => {
     expect(cached()[0].calculator).toEqual(manual);
     expect(mocks.hapticImpact).toHaveBeenCalledWith("light");
   });
+});
+
+it("carries the loaded baseline through a web calculator save and leaves the legacy endpoint compatible", async () => {
+  setup(syllabus);
+  useSaveStudyCalculatorMutation();
+  const mutation = mocks.options as {
+    mutationFn: (args: {
+      courseId: string;
+      state: StudyCalculatorState;
+      expectedState?: StudyCalculatorState | null;
+    }) => Promise<StudyCalculatorState>;
+  };
+  const edited = { ...syllabus, target: 75, values: { assignment_1: 0 } };
+  const input = { courseId: course.id, state: edited };
+  await mutation.mutationFn({ ...input, expectedState: syllabus });
+  expect(mocks.request).toHaveBeenLastCalledWith(
+    "/api/tma/study/courses/" + course.id + "/syllabus",
+    {
+      method: "PUT",
+      body: JSON.stringify({ ...edited, expectedState: syllabus }),
+    },
+  );
+  await mutation.mutationFn({ ...input, expectedState: null });
+  expect(mocks.request).toHaveBeenLastCalledWith(
+    "/api/tma/study/courses/" + course.id + "/syllabus",
+    { method: "PUT", body: JSON.stringify({ ...edited, expectedState: null }) },
+  );
+  await mutation.mutationFn(input);
+  expect(mocks.request).toHaveBeenLastCalledWith(
+    "/api/tma/study/courses/" + course.id + "/calculator",
+    {
+      method: "PUT",
+      body: JSON.stringify({ values: edited.values, target: edited.target }),
+    },
+  );
 });

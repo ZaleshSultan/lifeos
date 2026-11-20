@@ -12,7 +12,7 @@ export function SectionPanel({
   action,
 }: SectionPanelProps) {
   return (
-    <section className="min-w-0 rounded-xl border border-white/[0.08] bg-white/[0.02]">
+    <section className="min-w-0 rounded-2xl border border-graphite-700 bg-graphite-900">
       {/* Panel header */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] px-5 py-4">
         <div>
@@ -21,7 +21,7 @@ export function SectionPanel({
               {eyebrow}
             </p>
           ) : null}
-          <h2 className="text-sm font-semibold text-zinc-100">{title}</h2>
+          <h2 className="text-base font-bold text-zinc-100">{title}</h2>
         </div>
         {action ? <div>{action}</div> : null}
       </div>

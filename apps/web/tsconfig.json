@@ -12,7 +12,9 @@
     "moduleResolution": "bundler",
     "noEmit": true,
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      "@lifeos/core": ["../../packages/core/src/index.ts"],
+      "@lifeos/core/*": ["../../packages/core/src/*"]
     },
     "plugins": [
       {
@@ -21,6 +23,12 @@
     ],
     "resolveJsonModule": true
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    "../tma/src/vite-env.d.ts"
+  ],
   "exclude": ["node_modules"]
 }

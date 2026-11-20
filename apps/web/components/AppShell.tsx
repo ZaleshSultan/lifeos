@@ -1,21 +1,26 @@
 "use client";
+
 import {
-  BookOpenCheck,
+  Bell,
+  BookOpen,
+  Calculator,
   CalendarDays,
   CheckSquare,
-  CircleDollarSign,
-  Clapperboard,
-  Video,
+  Crosshair,
   Dumbbell,
   HeartPulse,
+  House,
   Inbox,
-  LayoutDashboard,
+  LayoutGrid,
+  ListChecks,
   LogOut,
-  Menu,
   MessageSquare,
-  Bell,
+  PlugZap,
   Settings,
+  Settings2,
   Utensils,
+  Video,
+  WalletCards,
   X,
   Zap,
   type LucideIcon,
@@ -23,8 +28,6 @@ import {
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { cx } from "@/lib/styles";
-import type { SystemStatus } from "@/lib/system-status";
 
 function SignOutButton({ mobile = false }: { mobile?: boolean }) {
   const [ready, setReady] = useState(false);
@@ -80,181 +83,164 @@ function SignOutButton({ mobile = false }: { mobile?: boolean }) {
   );
 }
 
-const navItems: Array<{ href: string; label: string; icon: LucideIcon }> = [
-  { href: "/today", label: "Сегодня", icon: LayoutDashboard },
-  { href: "/planner", label: "Задачи и план", icon: CheckSquare },
-  { href: "/calendar", label: "Календарь", icon: CalendarDays },
-  { href: "/study", label: "Учёба", icon: BookOpenCheck },
-  { href: "/workouts", label: "Тренировки", icon: Dumbbell },
-  { href: "/health", label: "Здоровье", icon: HeartPulse },
-  { href: "/nutrition", label: "Еда и вода", icon: Utensils },
-  { href: "/finance", label: "Финансы", icon: CircleDollarSign },
-  { href: "/ai", label: "AI помощник", icon: MessageSquare },
-  { href: "/capture", label: "Входящие", icon: Inbox },
-  { href: "/ideal-human", label: "Ideal Human", icon: Clapperboard },
-  { href: "/creator", label: "Creator", icon: Video },
-  { href: "/notifications", label: "Напоминания", icon: Bell },
-  { href: "/settings", label: "Настройки", icon: Settings },
+type Destination = { href: string; label: string; icon: LucideIcon };
+const primary: Destination[] = [
+  { href: "/today", label: "Сегодня", icon: House },
+  { href: "/study", label: "Учёба", icon: BookOpen },
+  { href: "/scholarship", label: "Стипендия", icon: Calculator },
 ];
-const mobileItems = navItems.filter((item) =>
-  ["/today", "/planner", "/study", "/ideal-human"].includes(item.href),
-);
+const sections: { title: string; items: Destination[] }[] = [
+  {
+    title: "Дела",
+    items: [
+      { href: "/capture", label: "Входящие", icon: Inbox },
+      { href: "/planner", label: "Задачи и план", icon: CheckSquare },
+      { href: "/calendar", label: "Календарь", icon: CalendarDays },
+      { href: "/notifications", label: "Напоминания", icon: Bell },
+      { href: "/focus", label: "Фокус", icon: Crosshair },
+      { href: "/mode", label: "Режим", icon: Settings2 },
+    ],
+  },
+  {
+    title: "Самочувствие",
+    items: [
+      { href: "/ideal-human", label: "Привычки", icon: ListChecks },
+      { href: "/nutrition", label: "Еда и вода", icon: Utensils },
+      { href: "/health", label: "Здоровье", icon: HeartPulse },
+      { href: "/workouts", label: "Тренировки", icon: Dumbbell },
+    ],
+  },
+  {
+    title: "Сервисы",
+    items: [
+      { href: "/ai", label: "AI-помощник", icon: MessageSquare },
+      { href: "/finance", label: "Финансы", icon: WalletCards },
+      { href: "/sources", label: "Интеграции", icon: PlugZap },
+      { href: "/creator", label: "Creator", icon: Video },
+      { href: "/settings", label: "Настройки", icon: Settings },
+    ],
+  },
+];
 
 export function AppShell({
   children,
-  systemStatus,
+  online,
   userName,
 }: {
   children: React.ReactNode;
-  systemStatus: SystemStatus;
+  online: boolean;
   userName?: string | null;
 }) {
   const pathname = usePathname().replace(/^\/web(?=\/|$)/, "") || "/today";
-  const [moreOpen, setMoreOpen] = useState(false);
-  const navigation = (mobile = false) =>
-    navItems.map(({ href, label, icon: Icon }) => (
+  const menu = useRef<HTMLDialogElement>(null);
+  const [open, setOpen] = useState(false);
+  function close() {
+    menu.current?.close();
+  }
+  useEffect(() => {
+    close();
+  }, [pathname]);
+  useEffect(() => {
+    const desktop = window.matchMedia("(min-width: 1024px)");
+    function onResize() {
+      if (desktop.matches) close();
+    }
+    desktop.addEventListener("change", onResize);
+    return () => desktop.removeEventListener("change", onResize);
+  }, []);
+  function link({ href, label, icon: Icon }: Destination) {
+    return (
       <Link
         key={href}
         href={href}
         prefetch={false}
-        aria-current={pathname === href ? "page" : undefined}
-        onClick={() => setMoreOpen(false)}
-        className={cx(
-          "flex min-h-11 min-w-0 items-center gap-3 rounded-lg px-3 text-sm transition-colors",
-          pathname === href
-            ? "bg-cyan-400/10 text-cyan-200"
-            : "text-zinc-300 hover:bg-white/[0.05] hover:text-white",
-          mobile && "border border-white/[0.06]",
-        )}
+        onClick={close}
+        aria-current={href === pathname ? "page" : undefined}
       >
-        <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
-        <span className="min-w-0 break-words">{label}</span>
+        <Icon size={18} aria-hidden="true" />
+        <span>{label}</span>
       </Link>
-    ));
+    );
+  }
+  const groupedLinks = sections.map(({ title, items }) => (
+    <section key={title} aria-label={title}>
+      <h2>{title}</h2>
+      <div className="web-links">{items.map(link)}</div>
+    </section>
+  ));
+  const brand = (
+    <Link href="/today" prefetch={false} className="web-brand">
+      <Zap size={19} aria-hidden="true" />
+      LifeOS
+    </Link>
+  );
   return (
-    <div className="min-h-screen">
-      <a
-        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-cyan-300 focus:p-3 focus:text-zinc-950"
-        href="#lifeos-main"
-      >
+    <div className="web-shell">
+      <a className="web-skip" href="#lifeos-main">
         К содержимому
       </a>
-      <aside className="fixed inset-y-0 left-0 hidden w-60 flex-col border-r border-white/[0.08] bg-graphite-950 px-3 py-5 xl:flex">
-        <Link
-          href="/today"
-          className="mb-5 flex min-h-11 items-center gap-3 px-3 text-lg font-semibold text-white"
-        >
-          <Zap className="h-6 w-6 text-cyan-300" />
-          LifeOS
-        </Link>
-        <nav
-          aria-label="Разделы LifeOS"
-          className="min-h-0 flex-1 space-y-1 overflow-y-auto"
-        >
-          {navigation()}
+      <aside className="web-sidebar">
+        {brand}
+        <nav aria-label="Разделы LifeOS">
+          <div className="web-links web-primary">{primary.map(link)}</div>
+          {groupedLinks}
         </nav>
-        <div className="mt-4 border-t border-white/[0.08] px-3 pt-4">
-          <p className="truncate text-sm text-zinc-100">
-            {userName || "Мой LifeOS"}
-          </p>
-          <p className="mt-1 text-xs text-zinc-400">{systemStatus.label}</p>
+        <div className="web-account">
+          <span>{userName || "LifeOS"}</span>
           <SignOutButton />
         </div>
       </aside>
-      <div className="xl:pl-60">
-        <header className="sticky top-0 z-30 flex min-h-16 items-center justify-between gap-3 border-b border-white/[0.08] bg-graphite-950/95 px-4 backdrop-blur-md xl:hidden">
-          <Link
-            href="/today"
-            className="flex items-center gap-2 font-semibold text-white"
-          >
-            <Zap className="h-5 w-5 text-cyan-300" />
-            LifeOS
-          </Link>
-          <span className="min-w-0 truncate text-xs text-zinc-300">
-            {userName}
-          </span>
-          <span
-            className={cx(
-              "shrink-0 rounded-full border px-2 py-1 text-[11px]",
-              systemStatus.online
-                ? "border-emerald-300/20 text-emerald-200"
-                : "border-amber-300/20 text-amber-200",
-            )}
-          >
-            {systemStatus.shortLabel}
-          </span>
-        </header>
-        <main
-          id="lifeos-main"
-          className="mx-auto min-h-screen max-w-7xl px-4 pb-32 pt-6 md:px-6 md:pt-8 xl:pb-12"
-        >
-          {children}
-        </main>
-        <nav
-          aria-label="Быстрая навигация"
-          onKeyDown={(event) => {
-            if (event.key === "Escape") setMoreOpen(false);
+      <header className="web-mobile-head">
+        {brand}
+        <span>{userName || ""}</span>
+      </header>
+      <main id="lifeos-main" className="web-main">
+        {children}
+        {!online && (
+          <p role="status" className="web-offline">
+            Нет связи с сервером
+          </p>
+        )}
+      </main>
+      <nav aria-label="Быстрая навигация" className="web-bottom">
+        {primary.map(link)}
+        <button
+          type="button"
+          aria-label="Все разделы"
+          aria-expanded={open}
+          aria-controls="web-more-nav"
+          aria-haspopup="dialog"
+          data-active={open || !primary.some((item) => item.href === pathname)}
+          onClick={() => {
+            menu.current?.showModal();
+            setOpen(true);
           }}
-          className="fixed inset-x-0 bottom-0 z-40 border-t border-white/[0.08] bg-graphite-950/95 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md xl:hidden"
         >
-          {moreOpen ? (
-            <section
-              id="web-more-nav"
-              className="max-h-[70vh] overflow-y-auto border-b border-white/[0.08] p-4"
-            >
-              <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-zinc-100">
-                  Все разделы
-                </h2>
-                <button
-                  aria-label="Закрыть разделы"
-                  type="button"
-                  className="grid h-11 w-11 place-items-center text-zinc-200"
-                  onClick={() => setMoreOpen(false)}
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-              <div className="grid grid-cols-2 gap-2">{navigation(true)}</div>
-              <SignOutButton mobile />
-            </section>
-          ) : null}
-          <div className="mx-auto grid max-w-xl grid-cols-5 px-2 pt-2">
-            {mobileItems.map(({ href, label, icon: Icon }) => (
-              <Link
-                key={href}
-                href={href}
-                prefetch={false}
-                aria-label={label}
-                aria-current={pathname === href ? "page" : undefined}
-                className={cx(
-                  "flex min-h-14 flex-col items-center justify-center gap-1 rounded-lg px-1 text-center text-[10px]",
-                  pathname === href
-                    ? "bg-cyan-300/10 text-cyan-200"
-                    : "text-zinc-400",
-                )}
-              >
-                <Icon className="h-5 w-5" aria-hidden="true" />
-                <span className="min-w-0 break-words">{label}</span>
-              </Link>
-            ))}
-            <button
-              type="button"
-              aria-label="Все разделы"
-              aria-controls="web-more-nav"
-              aria-expanded={moreOpen}
-              onClick={() => setMoreOpen(!moreOpen)}
-              className={cx(
-                "flex min-h-14 flex-col items-center justify-center gap-1 rounded-lg text-[10px]",
-                moreOpen ? "bg-white/10 text-white" : "text-zinc-400",
-              )}
-            >
-              <Menu className="h-5 w-5" />
-              <span>Ещё</span>
+          <LayoutGrid size={18} aria-hidden="true" />
+          <span>Ещё</span>
+        </button>
+      </nav>
+      <dialog
+        ref={menu}
+        id="web-more-nav"
+        aria-label="Все разделы"
+        className="web-menu"
+        onClick={(e) => {
+          if (e.currentTarget === e.target) close();
+        }}
+        onClose={() => setOpen(false)}
+      >
+        <div className="web-menu-body">
+          <div className="web-menu-head">
+            <h2>Ещё</h2>
+            <button aria-label="Закрыть разделы" type="button" onClick={close}>
+              <X size={20} />
             </button>
           </div>
-        </nav>
-      </div>
+          {groupedLinks}
+          <SignOutButton mobile />
+        </div>
+      </dialog>
     </div>
   );
 }

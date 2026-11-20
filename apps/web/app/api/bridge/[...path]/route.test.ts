@@ -1,3 +1,4 @@
+import { defaultScholarshipConfig } from "../../../../../../packages/core/src/scholarship.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { DELETE, GET, POST, PUT } from "./route";
@@ -40,6 +41,26 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe("private same-origin web bridge", () => {
+  it("reads and generates only the authenticated owner's monthly report", async () => {
+    const path = "monthly-review";
+    const cookie = "owner-fixture";
+    const response = () => Response.json({ data: { latest: null } });
+    fetchMock.mockImplementation(response);
+    expect((await GET(request(path, "GET", { cookie }), context(path))).status).toBe(200);
+    expect((await POST(request(path, "POST", {
+      cookie, origin, headers: { "content-type": "application/json" },
+    }), context(path))).status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const [url, init] of fetchMock.mock.calls) {
+      expect(url).toBe("http://127.0.0.1:9999/api/tma/monthly-review");
+      expect(init.headers.authorization).toBe("Bearer " + cookie);
+    }
+    expect((await GET(request(path + "?date=2026-11-03", "GET", { cookie }), context(path))).status).toBe(400);
+    expect((await POST(request(path, "POST", { cookie, origin, body: '{"userId":"other"}' }), context(path))).status).toBe(400);
+    expect((await POST(request(path, "POST", { cookie, origin: "https://other.invalid", body: "{}" }), context(path))).status).toBe(403);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("rejects absent sessions, arbitrary resource access, and forged mutation origins", async () => {
     expect(
       (await GET(request("ideal-human/days"), context("ideal-human/days")))
@@ -295,4 +316,27 @@ describe("private same-origin web bridge", () => {
     ).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
   });
+});
+
+it("validates a study plan before forwarding and returns a concurrent owner's edit conflict unchanged", async () => {
+  const path = "study/courses/00000000-0000-4000-8000-000000000001/scholarship";
+  const put = (payload: unknown) =>
+    PUT(
+      request(path, "PUT", {
+        cookie: "fixture-session",
+        origin,
+        body: JSON.stringify(payload),
+      }),
+      context(path),
+    );
+  expect((await put({ config: {} })).status).toBe(400);
+  expect(fetchMock).not.toHaveBeenCalled();
+  const config = defaultScholarshipConfig();
+  fetchMock.mockResolvedValue(
+    Response.json({ error: "study_calculator_conflict" }, { status: 409 }),
+  );
+  const response = await put({ config, expectedConfig: null });
+  expect(response.status).toBe(409);
+  expect(await response.json()).toEqual({ error: "study_calculator_conflict" });
+  expect(fetchMock).toHaveBeenCalledTimes(1);
 });

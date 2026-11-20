@@ -16,12 +16,23 @@ export async function webRequest<T>(
     cache: "no-store",
     headers: { "content-type": "application/json", ...options.headers },
   });
+  if (response.redirected && typeof window !== "undefined") {
+    const destination = new URL(response.url);
+    if (
+      destination.origin === window.location.origin &&
+      destination.pathname === "/web/access"
+    )
+      throw new WebApiError(401, "invalid_web_session");
+  }
   if (
     response.redirected ||
-    (!response.headers.get("content-type")?.includes("application/json") &&
-      response.status !== 204)
+    (response.status !== 204 &&
+      !response.headers.get("content-type")?.includes("application/json"))
   )
-    throw new WebApiError(401, "invalid_web_session");
+    throw new WebApiError(
+      response.ok ? 502 : response.status,
+      "invalid_api_response",
+    );
   if (response.status === 204) return undefined as T;
   const body = (await response.json().catch(() => null)) as {
     data?: T;

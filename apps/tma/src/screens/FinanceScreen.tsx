@@ -31,6 +31,7 @@ import {
   useBackfillMutation,
 } from "../api/hooks";
 import { telegram } from "../telegram";
+import { apiErrorMessage } from "../api/errors";
 import type {
   BudgetSummary,
   FinanceReceiptSummary,
@@ -50,8 +51,7 @@ function money(amount: number, currency: string): string {
 
 function currentMonthStart(): string {
   const date = new Date();
-  date.setDate(1);
-  return date.toISOString().slice(0, 10);
+  return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), "01"].join("-");
 }
 
 function receiptStatusClass(
@@ -77,8 +77,7 @@ function ReceiptRow({
   onClick?: () => void;
 }) {
   const clickable =
-    receipt.displayStatus === "needs_review" ||
-    receipt.displayStatus === "partial";
+    onClick && (receipt.displayStatus === "needs_review" || receipt.displayStatus === "partial");
 
   return (
     <div
@@ -91,7 +90,7 @@ function ReceiptRow({
     >
       <div className="min-w-0">
         <div className="text-sm font-semibold text-white">
-          {receipt.fileName || "Receipt"}
+          {receipt.fileName || "Чек"}
         </div>
         <div className="mt-1 text-xs text-zinc-500">
           {receipt.createdAt.slice(0, 10)}
@@ -211,7 +210,7 @@ function BudgetCard({
         {budget.isOverspent ? (
           <div className="flex items-center gap-1 rounded-full border border-red-400/20 bg-red-400/[0.08] px-2 py-1 text-[11px] font-semibold text-red-200">
             <AlertTriangle className="h-3 w-3" />
-            Overspent
+            Превышен лимит
           </div>
         ) : null}
       </div>
@@ -219,7 +218,7 @@ function BudgetCard({
       {editing ? (
         <div className="mt-4 space-y-3">
           <label className="block text-xs text-zinc-500">
-            Planned amount
+            Плановая сумма
             <input
               className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 text-sm text-white"
               inputMode="decimal"
@@ -250,7 +249,7 @@ function BudgetCard({
               }}
               type="button"
             >
-              Cancel
+              Отмена
             </button>
           </div>
         </div>
@@ -258,19 +257,19 @@ function BudgetCard({
         <>
           <div className="mt-4 grid grid-cols-3 gap-2">
             <div>
-              <div className="text-[11px] text-zinc-500">Planned</div>
+              <div className="text-[11px] text-zinc-500">План</div>
               <div className="text-sm font-semibold text-white">
                 {money(budget.planned, budget.currency)}
               </div>
             </div>
             <div>
-              <div className="text-[11px] text-zinc-500">Spent</div>
+              <div className="text-[11px] text-zinc-500">Потрачено</div>
               <div className="text-sm font-semibold text-white">
                 {money(budget.spent, budget.currency)}
               </div>
             </div>
             <div>
-              <div className="text-[11px] text-zinc-500">Remaining</div>
+              <div className="text-[11px] text-zinc-500">Остаток</div>
               <div
                 className={cx(
                   "text-sm font-semibold",
@@ -314,7 +313,7 @@ function BudgetCard({
               onClick={() => setEditing(true)}
               type="button"
             >
-              Edit
+              Изменить
             </button>
             <button
               className="rounded-lg border border-rose-400/20 bg-rose-400/[0.08] px-3 py-2 text-xs font-semibold text-rose-200 disabled:opacity-50"
@@ -322,7 +321,7 @@ function BudgetCard({
               onClick={onArchive}
               type="button"
             >
-              Archive
+              В архив
             </button>
           </div>
         </>
@@ -331,7 +330,8 @@ function BudgetCard({
   );
 }
 
-export function FinanceScreen() {
+export function FinanceScreen({ platform = "telegram" }: { platform?: "web" | "telegram" } = {}) {
+  const inTelegram = platform === "telegram";
   const query = useFinanceQuery();
   const categoriesQuery = useFinanceCategoriesQuery();
   const createTransaction = useCreateFinanceTransactionMutation();
@@ -366,21 +366,23 @@ export function FinanceScreen() {
     [categoriesQuery.data],
   );
 
-  if (query.isLoading) return <LoadingPanel title="Loading finance" />;
+  if (query.isLoading) return <LoadingPanel title="Загружаем финансы…" />;
   if (query.isError) {
     return (
       <ErrorPanel
-        detail={query.error.message}
+        detail={apiErrorMessage(query.error)}
         onRetry={() => void query.refetch()}
-        title="Finance unavailable"
+        title="Не удалось загрузить финансы"
       />
     );
   }
 
   const finance = query.data;
 
-  if (!finance) return <ErrorPanel title="Finance unavailable" />;
+  if (!finance) return <ErrorPanel title="Не удалось загрузить финансы" />;
 
+  const categories = expenseCategories.length || !inTelegram ? expenseCategories : [{id:"food",name:"Food"}];
+  const expenseCategory = categories.find((item) => item.name === category)?.name ?? categories[0]?.name ?? "";
   const activeBaseCurrency = selectedCurrency ?? finance.baseCurrency;
 
   const empty =
@@ -420,22 +422,22 @@ export function FinanceScreen() {
     }
   }
 
-  async function handleSaveBaseCurrency(event: FormEvent<HTMLFormElement>) {
+  function handleSaveBaseCurrency(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await saveFinanceSettings.mutateAsync({ baseCurrency: activeBaseCurrency });
+    saveFinanceSettings.mutate({ baseCurrency: activeBaseCurrency });
   }
 
-  async function handleCreateExpense(event: FormEvent<HTMLFormElement>) {
+  function handleCreateExpense(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const parsedAmount = Number(amount);
 
-    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0 || !expenseCategory) {
       return;
     }
 
-    await createTransaction.mutateAsync({
+    createTransaction.mutate({
       amount: parsedAmount,
-      category,
+      category: expenseCategory,
       description: description.trim() || null,
       merchant: merchant.trim() || null,
       tags: tags
@@ -443,16 +445,16 @@ export function FinanceScreen() {
         .map((tag) => tag.trim())
         .filter(Boolean),
       transactionType: "expense",
-    });
-
-    setAmount("");
-    setDescription("");
-    setMerchant("");
-    setTags("");
-    setShowExpenseForm(false);
+    }, { onSuccess: () => {
+      setAmount("");
+      setDescription("");
+      setMerchant("");
+      setTags("");
+      setShowExpenseForm(false);
+    }});
   }
 
-  async function handleCreateBudget(event: FormEvent<HTMLFormElement>) {
+  function handleCreateBudget(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const parsedAmount = Number(budgetAmount);
 
@@ -460,16 +462,16 @@ export function FinanceScreen() {
       return;
     }
 
-    await createBudget.mutateAsync({
+    createBudget.mutate({
       name: budgetName.trim() || null,
       amount: parsedAmount,
       period: "monthly",
       periodStart: currentMonthStart(),
-    });
-
-    setBudgetName("");
-    setBudgetAmount("");
-    setShowBudgetForm(false);
+    }, { onSuccess: () => {
+      setBudgetName("");
+      setBudgetAmount("");
+      setShowBudgetForm(false);
+    }});
   }
 
   return (
@@ -491,7 +493,7 @@ export function FinanceScreen() {
             </div>
           </div>
           <div>
-            <div className="text-[11px] text-zinc-500">Expense</div>
+            <div className="text-[11px] text-zinc-500">Расходы</div>
             <div className="mt-1 text-sm font-semibold text-white">
               {money(finance.monthlySummary.expense, finance.currency)}
             </div>
@@ -517,7 +519,7 @@ export function FinanceScreen() {
       <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
         <div className="flex items-center justify-between gap-3">
           <div className="text-sm font-semibold text-white">Чеки</div>
-          <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-cyan-400/20 bg-cyan-400/[0.08] px-3 py-2 text-xs font-semibold text-cyan-200">
+          {inTelegram && <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-cyan-400/20 bg-cyan-400/[0.08] px-3 py-2 text-xs font-semibold text-cyan-200">
             <Upload className="h-4 w-4" />
             {uploadReceipt.isPending ? "Processing..." : "Загрузить фото"}
             <input
@@ -527,7 +529,7 @@ export function FinanceScreen() {
               onChange={(event) => void handleReceiptUpload(event)}
               type="file"
             />
-          </label>
+          </label>}
         </div>
         {receiptUploadError ? (
           <div className="mt-3 text-sm text-rose-200">{receiptUploadError}</div>
@@ -538,13 +540,13 @@ export function FinanceScreen() {
               <ReceiptRow
                 key={receipt.id}
                 receipt={receipt}
-                onClick={() => setSelectedReceiptId(receipt.id)}
+                onClick={inTelegram ? () => setSelectedReceiptId(receipt.id) : undefined}
               />
             ))}
           </div>
         ) : (
           <div className="mt-3 text-sm text-zinc-500">
-            Upload a receipt photo to create a transaction automatically.
+            {inTelegram ? "Загрузи чек, чтобы добавить операцию." : "Сохранённых чеков пока нет."}
           </div>
         )}
       </section>
@@ -552,7 +554,7 @@ export function FinanceScreen() {
       {finance.anomalies.length ? (
         <section className="rounded-xl border border-rose-400/20 bg-rose-400/[0.04] p-4">
           <div className="text-sm font-semibold text-rose-200">
-            Anomaly alerts
+            Необычные расходы
           </div>
           <ul className="mt-2 space-y-2 text-sm text-zinc-300">
             {finance.anomalies.map((item) => (
@@ -581,7 +583,7 @@ export function FinanceScreen() {
               {money(period.amount, finance.currency)}
             </div>
             <div className="mt-1 text-[11px] text-zinc-600">
-              {period.count} expenses
+              Операций: {period.count}
             </div>
           </div>
         ))}
@@ -602,8 +604,10 @@ export function FinanceScreen() {
         </div>
         {showExpenseForm ? (
           <form className="mt-4 space-y-3" onSubmit={handleCreateExpense}>
+            {createTransaction.error && <p role="alert">{apiErrorMessage(createTransaction.error)}</p>}
+            {categoriesQuery.isError && <button type="button" onClick={() => void categoriesQuery.refetch()}>Повторить загрузку категорий</button>}
             <label className="block text-xs text-zinc-500">
-              Amount
+              Сумма
               <input
                 className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 text-sm text-white"
                 inputMode="decimal"
@@ -613,16 +617,14 @@ export function FinanceScreen() {
               />
             </label>
             <label className="block text-xs text-zinc-500">
-              Category
+              Категория
               <select
                 className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 text-sm text-white"
                 onChange={(event) => setCategory(event.target.value)}
-                value={category}
+                value={expenseCategory}
               >
-                {(expenseCategories.length
-                  ? expenseCategories
-                  : [{ id: "food", name: "Food", transactionType: "expense" }]
-                ).map((item) => (
+                {!categories.length && <option value="">Нет доступных категорий</option>}
+                {categories.map((item) => (
                   <option key={item.id} value={item.name}>
                     {item.name}
                   </option>
@@ -630,7 +632,7 @@ export function FinanceScreen() {
               </select>
             </label>
             <label className="block text-xs text-zinc-500">
-              Description
+              Описание
               <input
                 className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 text-sm text-white"
                 onChange={(event) => setDescription(event.target.value)}
@@ -638,7 +640,7 @@ export function FinanceScreen() {
               />
             </label>
             <label className="block text-xs text-zinc-500">
-              Merchant
+              Магазин
               <input
                 className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 text-sm text-white"
                 onChange={(event) => setMerchant(event.target.value)}
@@ -646,7 +648,7 @@ export function FinanceScreen() {
               />
             </label>
             <label className="block text-xs text-zinc-500">
-              Tags (comma separated)
+              Метки через запятую
               <input
                 className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 text-sm text-white"
                 onChange={(event) => setTags(event.target.value)}
@@ -656,10 +658,10 @@ export function FinanceScreen() {
             </label>
             <button
               className="w-full rounded-lg border border-emerald-400/20 bg-emerald-400/[0.08] px-3 py-2 text-sm font-semibold text-emerald-200 disabled:opacity-50"
-              disabled={createTransaction.isPending}
+              disabled={createTransaction.isPending || !expenseCategory}
               type="submit"
             >
-              Save expense
+              Сохранить расход
             </button>
           </form>
         ) : null}
@@ -668,7 +670,7 @@ export function FinanceScreen() {
       {finance.recommendations.length ? (
         <section className="rounded-xl border border-cyan-400/20 bg-cyan-400/[0.04] p-4">
           <div className="text-sm font-semibold text-cyan-200">
-            Recommendations
+            Рекомендации
           </div>
           <ul className="mt-2 space-y-2 text-sm text-zinc-300">
             {finance.recommendations.slice(0, 3).map((item) => (
@@ -682,10 +684,10 @@ export function FinanceScreen() {
         <section className="rounded-xl border border-dashed border-white/[0.1] px-5 py-8 text-center">
           <CircleDollarSign className="mx-auto h-6 w-6 text-zinc-600" />
           <h3 className="mt-3 text-sm font-semibold text-white">
-            No transactions yet
+            Пока нет операций
           </h3>
           <p className="mt-1 text-sm text-zinc-500">
-            Add an expense here or use /spend in Telegram.
+            Добавь первый расход.
           </p>
         </section>
       ) : null}
@@ -712,8 +714,9 @@ export function FinanceScreen() {
           >
             Сохранить
           </button>
+          {saveFinanceSettings.error && <p role="alert">{apiErrorMessage(saveFinanceSettings.error)}</p>}
         </form>
-        <div className="mt-3 flex items-center justify-between border-t border-white/[0.06] pt-3">
+        {inTelegram && <div className="mt-3 flex items-center justify-between border-t border-white/[0.06] pt-3">
           <span className="text-xs text-zinc-500">
             Пересчитать старые суммы в базовой валюте?
           </span>
@@ -725,20 +728,20 @@ export function FinanceScreen() {
           >
             {backfill.isPending ? "Backfilling..." : "Пересчитать"}
           </button>
-        </div>
+        </div>}
       </details>
 
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-3">
           <div className="text-sm font-semibold text-white">
-            Budget analytics
+            Бюджеты
           </div>
           <button
             className="rounded-lg border border-white/[0.08] px-3 py-1.5 text-xs font-semibold text-zinc-200"
             onClick={() => setShowBudgetForm((value) => !value)}
             type="button"
           >
-            {showBudgetForm ? "Close" : "New budget"}
+            {showBudgetForm ? "Закрыть" : "Новый бюджет"}
           </button>
         </div>
         {showBudgetForm ? (
@@ -748,7 +751,7 @@ export function FinanceScreen() {
           >
             <div className="space-y-3">
               <label className="block text-xs text-zinc-500">
-                Name
+                Название
                 <input
                   className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 text-sm text-white"
                   onChange={(event) => setBudgetName(event.target.value)}
@@ -756,7 +759,7 @@ export function FinanceScreen() {
                 />
               </label>
               <label className="block text-xs text-zinc-500">
-                Monthly limit
+                Лимит на месяц
                 <input
                   className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 text-sm text-white"
                   inputMode="decimal"
@@ -770,20 +773,23 @@ export function FinanceScreen() {
                 disabled={createBudget.isPending}
                 type="submit"
               >
-                Create budget
+                Создать бюджет
               </button>
             </div>
           </form>
         ) : null}
+        {(createBudget.error || updateBudget.error || archiveBudget.error) && (
+          <p role="alert">{apiErrorMessage(createBudget.error || updateBudget.error || archiveBudget.error)}</p>
+        )}
         {finance.budgets.length ? (
           finance.budgets.map((budget) => (
             <BudgetCard
               archivePending={archiveBudget.isPending}
               budget={budget}
               key={budget.budgetId}
-              onArchive={() => void archiveBudget.mutateAsync(budget.budgetId)}
+              onArchive={() => archiveBudget.mutate(budget.budgetId)}
               onSave={(input) =>
-                void updateBudget.mutateAsync({
+                updateBudget.mutate({
                   budgetId: budget.budgetId,
                   input,
                 })
@@ -793,7 +799,7 @@ export function FinanceScreen() {
           ))
         ) : (
           <div className="rounded-xl border border-dashed border-white/[0.1] px-5 py-6 text-center text-sm text-zinc-500">
-            No active budgets yet.
+            Пока нет активных бюджетов.
           </div>
         )}
       </section>
@@ -832,7 +838,7 @@ export function FinanceScreen() {
       {finance.recentIncome.length ? (
         <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
           <div className="mb-2 text-sm font-semibold text-white">
-            Recent income
+            Последние доходы
           </div>
           {finance.recentIncome.map((transaction) => (
             <TransactionRow key={transaction.id} transaction={transaction} />
@@ -843,7 +849,7 @@ export function FinanceScreen() {
       {finance.drafts.length ? (
         <section className="rounded-xl border border-amber-400/20 bg-amber-400/[0.04] p-4">
           <div className="mb-2 text-sm font-semibold text-amber-200">
-            Drafts needing review
+            Черновики на проверку
           </div>
           {finance.drafts.map((transaction) => (
             <TransactionRow key={transaction.id} transaction={transaction} />
@@ -854,7 +860,7 @@ export function FinanceScreen() {
       {finance.recentTransactions.length ? (
         <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
           <div className="mb-2 text-sm font-semibold text-white">
-            All recent transactions
+            Последние операции
           </div>
           {finance.recentTransactions.map((transaction) => (
             <TransactionRow key={transaction.id} transaction={transaction} />
@@ -862,7 +868,7 @@ export function FinanceScreen() {
         </section>
       ) : null}
 
-      {selectedReceiptId && (
+      {inTelegram && selectedReceiptId && (
         <ReceiptReviewModal
           receiptId={selectedReceiptId}
           onClose={() => setSelectedReceiptId(null)}

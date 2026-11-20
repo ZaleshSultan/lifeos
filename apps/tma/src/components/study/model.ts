@@ -107,6 +107,20 @@ export function studyDraftIsDirty(draft: StudyDraft): boolean {
   return draft.saved !== draftSignature(draft);
 }
 
+/** Compare the original saved values and formula, leaving the user's edits intact. */
+export function studyDraftHasBaseline(
+  draft: StudyDraft,
+  remote: StudyCalculatorState,
+) {
+  return (
+    draft.saved === createStudyDraft(remote).saved &&
+    studyCalculatorStatesMatch(
+      { ...remote, definition: draft.definition },
+      remote,
+    )
+  );
+}
+
 export function reconcileStudyDraft(
   draft: StudyDraft | undefined,
   remote: StudyCalculatorState,

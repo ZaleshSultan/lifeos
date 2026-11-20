@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bridgeQuery, bridgeResourceAllowed } from "./bridge-policy";
+import { bridgeMutationBodyError, bridgeQuery, bridgeResourceAllowed } from "./bridge-policy";
 describe("web resource boundary", () => {
   it("allows existing scoped workflows and rejects credential/admin/arbitrary destinations", () => {
     expect(bridgeResourceAllowed("ideal-human/days", "PUT")).toBe(true);
@@ -27,6 +27,30 @@ describe("web resource boundary", () => {
         expect(bridgeResourceAllowed(path, method)).toBe(false);
     expect(bridgeResourceAllowed("lms/connection", "POST")).toBe(false);
     expect(bridgeResourceAllowed("ideal-human/days", "DELETE")).toBe(false);
+  });
+  it("allows owner-scoped monthly reports without caller-selected identity or period", () => {
+    for (const method of ["GET", "POST", "PUT", "PATCH", "DELETE"])
+      expect(bridgeResourceAllowed("monthly-review", method)).toBe(["GET", "POST"].includes(method));
+    expect(bridgeResourceAllowed("monthly-review/other", "GET")).toBe(false);
+    expect(bridgeQuery(new URLSearchParams(), "monthly-review")).toBe("");
+    for (const query of ["date=2026-11-03", "user_id=other", "periodMonth=2026-11"])
+      expect(bridgeQuery(new URLSearchParams(query), "monthly-review")).toBeNull();
+    expect(bridgeMutationBodyError("monthly-review", {})).toBeNull();
+    for (const payload of [null, [], "", { userId: "other" }, { periodMonth: "2026-11" }])
+      expect(bridgeMutationBodyError("monthly-review", payload)).toBe("invalid_monthly_review_request");
+  });
+  it("supports focus and mode screens through their scoped methods", () => {
+    const allowed: Record<string, string[]> = {
+      focus: ["GET"],
+      mode: ["GET", "POST", "DELETE"],
+      "course/active": ["GET"],
+      "course/active/progress": ["POST"],
+    };
+    for (const [resource, methods] of Object.entries(allowed))
+      for (const method of ["GET", "POST", "PUT", "PATCH", "DELETE"])
+        expect(bridgeResourceAllowed(resource, method)).toBe(
+          methods.includes(method),
+        );
   });
   it("permits only one bounded date query and rejects identity or destination parameters", () => {
     expect(bridgeQuery(new URLSearchParams("date=2026-11-03"))).toBe(

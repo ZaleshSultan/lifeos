@@ -2,13 +2,13 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "LifeOS Dashboard",
-  description: "Personal LifeOS web dashboard.",
+  title: "LifeOS",
+  description: "Учёба, дела и личный план в LifeOS.",
 };
 
 export const viewport: Viewport = {
   colorScheme: "dark",
-  themeColor: "#05070b",
+  themeColor: "#0c0c0e",
 };
 
 export default function RootLayout({
@@ -17,7 +17,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="ru">
       <body>{children}</body>
     </html>
   );

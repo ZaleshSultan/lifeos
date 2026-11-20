@@ -5,6 +5,7 @@ import {
   useConfigureStudyCalculatorMutation,
   useSaveStudyCalculatorMutation,
   useStudyQuery,
+  type StudyWorkspace,
 } from "../api/study";
 import { ErrorPanel, LoadingPanel } from "../components/AsyncState";
 import { StudyCalculator } from "../components/study/StudyCalculator";
@@ -19,6 +20,7 @@ import {
   isStudyDrafts,
   reconcileStudyDraft,
   studyDraftIsDirty,
+  studyDraftHasBaseline,
   type StudyDraft,
 } from "../components/study/model";
 import {
@@ -55,16 +57,27 @@ function initialStudyTab(): StudyTabId {
 export function StudyScreen({
   onOpenLms,
   onDirtyChange,
+  embeddedCalculator,
 }: {
   onOpenLms: () => void;
   onDirtyChange?: (dirty: boolean) => void;
+  embeddedCalculator?: {
+    initial: StudyWorkspace;
+    courseId?: string;
+    onCourseChange: (courseId: string) => void;
+  };
 }) {
-  const query = useStudyQuery();
-  const syllabi = useStudySyllabusProfiles(query.data);
+  const query = useStudyQuery({
+    initialData: embeddedCalculator?.initial,
+    refreshOnOpen: Boolean(embeddedCalculator),
+  });
+  const syllabi = useStudySyllabusProfiles(query.data, !embeddedCalculator);
   const save = useSaveStudyCalculatorMutation();
   const configure = useConfigureStudyCalculatorMutation();
   const [pendingProfile, setPendingProfile] = useState<string | null>(null);
-  const [tab, setTab] = useState<StudyTabId>(initialStudyTab);
+  const [tab, setTab] = useState<StudyTabId>(() =>
+    embeddedCalculator ? "calculator" : initialStudyTab(),
+  );
   const [openedWork, setOpenedWork] = useState(tab === "work");
   const [academicDirty, setAcademicDirty] = useState(false);
   function selectStudyTab(next: StudyTabId) {
@@ -85,8 +98,15 @@ export function StudyScreen({
     return true;
   }
   const [courseId, setCourseId] = useState<string | null>(() =>
-    new URLSearchParams(window.location.search).get("courseId"),
+    embeddedCalculator
+      ? (embeddedCalculator.courseId ?? null)
+      : new URLSearchParams(window.location.search).get("courseId"),
   );
+  const isEmbedded = Boolean(embeddedCalculator);
+  const navigationCourseId = embeddedCalculator?.courseId;
+  useEffect(() => {
+    if (isEmbedded) setCourseId(navigationCourseId ?? null);
+  }, [isEmbedded, navigationCourseId]);
   const storageKey = useDraftStorageKey("study");
   const [drafts, setDrafts] = useState<Record<string, StudyDraft>>(
     () => readSessionDraft(storageKey, isStudyDrafts) ?? {},
@@ -105,12 +125,13 @@ export function StudyScreen({
   }, [storageKey, drafts]);
 
   useEffect(() => {
+    if (embeddedCalculator) return;
     const url = new URL(window.location.href);
     url.searchParams.set("screen", "study");
     url.searchParams.set("studyTab", tab);
     if (courseId) url.searchParams.set("courseId", courseId);
     window.history.replaceState(null, "", url);
-  }, [tab, courseId]);
+  }, [tab, courseId, embeddedCalculator]);
 
   useEffect(() => {
     setDrafts((current) => {
@@ -172,44 +193,46 @@ export function StudyScreen({
     : null;
   return (
     <div className="min-w-0 space-y-4">
-      <header className="flex items-start justify-between gap-3">
-        <h1 className="text-[26px] font-semibold text-white">
-          {tabs.find((item) => item.id === tab)?.label}
-        </h1>
-        <div className="flex items-center gap-1">
-          <label className="relative grid h-11 w-11 place-items-center rounded-lg text-zinc-300 focus-within:ring-2 focus-within:ring-blue-400">
-            <Menu size={22} aria-hidden="true" />
-            <select
-              className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-              aria-label="Разделы учёбы"
-              value={tab}
-              onChange={(event) =>
-                selectStudyTab(event.target.value as StudyTabId)
+      {!embeddedCalculator && (
+        <header className="flex items-start justify-between gap-3">
+          <h1 className="text-[26px] font-semibold text-white">
+            {tabs.find((item) => item.id === tab)?.label}
+          </h1>
+          <div className="flex items-center gap-1">
+            <label className="relative grid h-11 w-11 place-items-center rounded-lg text-zinc-300 focus-within:ring-2 focus-within:ring-blue-400">
+              <Menu size={22} aria-hidden="true" />
+              <select
+                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                aria-label="Разделы учёбы"
+                value={tab}
+                onChange={(event) =>
+                  selectStudyTab(event.target.value as StudyTabId)
+                }
+              >
+                {tabs.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={() => void query.refetch()}
+              disabled={
+                query.isFetching ||
+                save.isPending ||
+                configure.isPending ||
+                syllabi.pending
               }
+              aria-label="Обновить учёбу"
+              className="grid min-h-11 min-w-11 shrink-0 place-items-center rounded-lg border border-white/[0.08] text-zinc-300 hover:bg-white/[0.05] active:scale-[0.98] disabled:opacity-50"
             >
-              {tabs.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="button"
-            onClick={() => void query.refetch()}
-            disabled={
-              query.isFetching ||
-              save.isPending ||
-              configure.isPending ||
-              syllabi.pending
-            }
-            aria-label="Обновить учёбу"
-            className="grid min-h-11 min-w-11 shrink-0 place-items-center rounded-lg border border-white/[0.08] text-zinc-300 hover:bg-white/[0.05] active:scale-[0.98] disabled:opacity-50"
-          >
-            <RefreshCw className="h-5 w-5" aria-hidden="true" />
-          </button>
-        </div>
-      </header>
+              <RefreshCw className="h-5 w-5" aria-hidden="true" />
+            </button>
+          </div>
+        </header>
+      )}
       {syllabi.pending ? (
         <p role="status" className="text-xs text-emerald-200">
           Сохраняем формулы из силабусов для найденных предметов…
@@ -286,7 +309,10 @@ export function StudyScreen({
                 <select
                   className="mt-2 min-h-11 w-full min-w-0 max-w-full rounded-lg border border-white/[0.12] bg-graphite-900 px-3 py-3 text-base text-white"
                   value={course?.id}
-                  onChange={(event) => setCourseId(event.target.value)}
+                  onChange={(event) => {
+                    setCourseId(event.target.value);
+                    embeddedCalculator?.onCourseChange(event.target.value);
+                  }}
                 >
                   {data.courses.map((item) => (
                     <option key={item.id} value={item.id}>
@@ -374,7 +400,7 @@ export function StudyScreen({
             {course && draft ? (
               <StudyCalculator
                 key={course.id}
-                course={storedCourse ?? course}
+                course={embeddedCalculator ? course : (storedCourse ?? course)}
                 records={data.records}
                 draft={draft}
                 onChange={(next) => {
@@ -391,9 +417,29 @@ export function StudyScreen({
                   setErrors((current) => ({ ...current, [course.id]: null }));
                 }}
                 onSave={(state) => {
+                  const baseline = storedCourse?.calculator;
+                  if (
+                    embeddedCalculator &&
+                    (!storedCourse ||
+                      !course.calculator ||
+                      !studyDraftHasBaseline(draft, course.calculator))
+                  ) {
+                    setErrors((current) => ({
+                      ...current,
+                      [course.id]:
+                        "Данные изменились. Обнови курс и сбрось черновик, чтобы использовать сохранённые оценки.",
+                    }));
+                    return;
+                  }
                   setErrors((current) => ({ ...current, [course.id]: null }));
                   save.mutate(
-                    { courseId: course.id, state },
+                    {
+                      courseId: course.id,
+                      state,
+                      expectedState: embeddedCalculator
+                        ? (baseline ?? null)
+                        : undefined,
+                    },
                     {
                       onSuccess: (stored) => {
                         setDrafts((current) => ({
@@ -418,7 +464,9 @@ export function StudyScreen({
                   configure.isPending ||
                   Boolean(autoApplication && syllabi.pending)
                 }
-                syllabusUnpersisted={Boolean(autoApplication)}
+                syllabusUnpersisted={
+                  !embeddedCalculator && Boolean(autoApplication)
+                }
                 saved={savedCourse === course.id}
                 saveError={errors[course.id] ?? null}
                 onRefresh={() => void query.refetch()}

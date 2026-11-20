@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  bridgeMutationBodyError,
   bridgeQuery,
   bridgeResourceAllowed,
 } from "../../../../lib/bridge-policy";
@@ -21,7 +22,7 @@ async function handle(
   const path = parts.join("/");
   if (!bridgeResourceAllowed(path, request.method))
     return json({ error: "resource_not_allowed" }, 404);
-  const query = bridgeQuery(request.nextUrl.searchParams);
+  const query = bridgeQuery(request.nextUrl.searchParams, path);
   if (query === null) return json({ error: "invalid_query" }, 400);
   const token = request.cookies.get(WEB_SESSION_COOKIE)?.value;
   if (!token) return json({ error: "invalid_web_session" }, 401);
@@ -73,7 +74,8 @@ async function handle(
       body = new TextDecoder().decode(bytes);
     }
     try {
-      JSON.parse(body || "{}");
+      const error = bridgeMutationBodyError(path, JSON.parse(body || "{}"));
+      if (error) return json({ error }, 400);
     } catch {
       return json({ error: "invalid_json" }, 400);
     }
