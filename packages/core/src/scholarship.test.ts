@@ -657,3 +657,190 @@ it("links an upcoming Assignment deadline when the ungraded gradebook title has 
     p.actions.find((row) => row.fieldId === "assignment_5")!.priority,
   );
 });
+
+describe("one published Moodle result alongside empty gradebook activities", () => {
+  const c = course("DLD52-EN");
+  function item(title: string, score: number | null, module: string) {
+    return {
+      ...grade(c, title, score),
+      rawJson: { item_name: title, moodle_module: module },
+    };
+  }
+  it("uses a single published grade including zero, leaves papers and retakes out, and never counts registers as components", () => {
+    const records = [
+      item("Quiz Midterm XYZ", 78, "quiz"),
+      item("Assignment Midterm", null, "assign"),
+      item("Assignment Midterm 2", 95, "assign"),
+      item("Assignment Final exam", 0, "assign"),
+      item("Quiz Final test", null, "quiz"),
+      grade(c, "Quiz Final test FX", 99),
+      grade(c, "Calculated grade Register Midterm", 88),
+      grade(c, "Calculated grade Register Endterm", 67),
+      grade(c, "Calculated grade Register Final", 88),
+      grade(c, "Course total", 99),
+    ];
+    const plan = calculateScholarshipCourse(c, records);
+    expect(plan.evidence.find((row) => row.id === "midterm")?.confirmed).toBe(
+      78,
+    );
+    expect(
+      plan.evidence.find((row) => row.id === "final_exam")?.confirmed,
+    ).toBe(0);
+    expect(
+      plan.evidence.find((row) => row.id === "endterm")?.confirmed,
+    ).toBeNull();
+    expect(plan.confirmedCount).toBe(2);
+    expect(plan.minimum).toBeCloseTo(9.36, 8);
+  });
+  it("leaves a component open when two published activities compete", () => {
+    const p = calculateScholarshipCourse(c, [
+      item("Quiz Final test", 95, "quiz"),
+      item("Assignment Final exam", 80, "assign"),
+      item("Assignment Midterm", 77, "assign"),
+      item("Quiz Midterm XYZ", 77, "quiz"),
+    ]);
+    expect(p.confirmedCount).toBe(0);
+    expect(p.warnings.join(" ")).toContain("неоднозначные оценки Moodle");
+  });
+});
+
+describe("official Moodle Register Final fallback for a single final exam", () => {
+  function register(
+    c: ScholarshipCourseInput,
+    score: number | null = 90,
+  ): StudyGradeEvidence {
+    return {
+      ...grade(c, "Calculated grade Register Final", score, "official"),
+      sourceEventId: "synced",
+      rawJson: {
+        moodle_course_id: 7,
+        moodle_item_id: "500",
+        item_name: "Calculated grade Register Final",
+      },
+    };
+  }
+  const os = () => ({ ...course("OS52-EN"), externalCourseKey: "moodle:7" });
+  function exam(c: ScholarshipCourseInput, records: StudyGradeEvidence[]) {
+    return calculateScholarshipCourse(c, records).evidence.find(
+      (row) => row.period === "exam",
+    )?.confirmed;
+  }
+  it("fills only the final exam from an identifiable register and leaves the rest of the course open", () => {
+    const c = os();
+    const p = calculateScholarshipCourse(c, [
+      grade(c, "Assignment Final Exam", null),
+      register(c),
+    ]);
+    expect(
+      p.evidence
+        .filter((row) => row.confirmed !== null)
+        .map((row) => [row.id, row.confirmed]),
+    ).toEqual([["final_exam", 90]]);
+    expect(p.minimum).toBe(36);
+    expect(p.actions.length).toBeGreaterThan(1);
+    expect(exam({ ...c, externalCourseKey: null }, [register(c, 0)])).toBe(0);
+    expect(exam(c, [register(c, null)])).toBeNull();
+    expect(exam(c, [{ ...register(c, 9), maxScore: 10 }])).toBe(90);
+  });
+  it("keeps a graded activity over the register, and never resolves competing modules with it", () => {
+    const c = os();
+    const activity = (name: string, score: number) => ({
+      ...grade(c, name, score),
+      rawJson: {
+        moodle_course_id: "7",
+        moodle_module: "quiz",
+        item_name: name,
+      },
+    });
+    expect(exam(c, [register(c), activity("Quiz Final test", 0)])).toBe(0);
+    expect(
+      exam(c, [
+        register(c),
+        activity("Quiz Final test", 80),
+        activity("Quiz Final exam", 75),
+      ]),
+    ).toBeNull();
+  });
+  it("accepts repeat observations only when the same Moodle item and published points agree", () => {
+    const c = os(),
+      row = register(c);
+    const raw = row.rawJson as Record<string, unknown>;
+    expect(exam(c, [row, { ...row, id: "mirror" }])).toBe(90);
+    expect(exam(c, [row, { ...row, id: "mirror", score: 80 }])).toBeNull();
+    expect(exam(c, [row, { ...row, id: "mirror", maxScore: 120 }])).toBeNull();
+    expect(
+      exam(c, [
+        row,
+        { ...row, id: "new", rawJson: { ...raw, moodle_item_id: "501" } },
+      ]),
+    ).toBeNull();
+    expect(exam(c, [row, { ...row, id: "mirror", score: null }])).toBeNull();
+  });
+  it("requires a synced, visible, non-module register from the course; rejects incomplete or unrelated source data", () => {
+    const c = os(),
+      row = register(c);
+    const raw = row.rawJson as Record<string, unknown>;
+    for (const diff of [
+      { moodle_course_id: "8" },
+      { moodle_course_id: "" },
+      { moodle_item_id: "" },
+      { moodle_item_id: {} },
+      { _grade_visibility_unknown: true },
+      { _is_mocked: true },
+      { moodle_module: "assign" },
+      { itemmodule: "quiz" },
+      { itemtype: "mod" },
+      { itemtype: "course" },
+      { item_name: "Register Midterm" },
+      { item_name: "Register Endterm" },
+      { item_name: "Register Term" },
+      { item_name: "Register Final FX" },
+      { item_name: "Course total" },
+    ])
+      expect(exam(c, [{ ...row, rawJson: { ...raw, ...diff } }])).toBeNull();
+    expect(exam(c, [{ ...row, sourceEventId: null }])).toBeNull();
+    expect(exam(c, [{ ...row, score: 101 }])).toBeNull();
+    expect(exam(c, [{ ...row, maxScore: 0 }])).toBeNull();
+    expect(
+      exam({ ...c, externalCourseKey: null }, [
+        row,
+        { ...row, id: "section-2", rawJson: { ...raw, moodle_course_id: "8" } },
+      ]),
+    ).toBeNull();
+  });
+  it("does not use a mirror of a register already explicitly assigned to another component", () => {
+    const c = os(),
+      row = register(c);
+    c.scholarship!.bindings.assignment_1 = {
+      mode: "aggregate",
+      ruleConfirmed: true,
+      entries: [{ recordId: row.id, weight: 100 }],
+    };
+    const p = calculateScholarshipCourse(c, [row, { ...row, id: "mirror" }]);
+    expect(
+      p.evidence.find((field) => field.id === "assignment_1")?.confirmed,
+    ).toBe(90);
+    expect(
+      p.evidence.find((field) => field.id === "final_exam")?.confirmed,
+    ).toBeNull();
+  });
+  it("respects an explicit binding and never infers a register for a custom or split exam", () => {
+    const c = os();
+    c.scholarship!.bindings.final_exam = {
+      mode: "aggregate",
+      ruleConfirmed: true,
+      entries: [{ recordId: "manual-choice", weight: 100 }],
+    };
+    expect(exam(c, [register(c)])).toBeNull();
+    delete c.scholarship!.bindings.final_exam;
+    const field = c.calculator!.definition.fields.find(
+      (f) => f.period === "exam",
+    )!;
+    field.id = "presentation";
+    expect(exam(c, [register(c)])).toBeNull();
+    field.id = "final_exam";
+    field.weightPercent = 50;
+    c.calculator!.definition.fields.push({ ...field, id: "second_exam" });
+    expect(() => exam(c, [register(c)])).toThrow();
+  });
+});

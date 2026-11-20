@@ -266,9 +266,9 @@ const stable = (value: number) => Math.round(value * 1e10) / 1e10;
 const required = (value: number) =>
   Math.max(0, Math.ceil(value * 100 - 1e-8) / 100);
 
-function selectCourseEvidence(
+export function selectScholarshipCourseRecords<T extends StudyGradeEvidence>(
   course: ScholarshipCourseInput,
-  records: StudyGradeEvidence[],
+  records: T[],
 ) {
   const linked = course.externalCourseKey?.startsWith("moodle:")
     ? course.externalCourseKey
@@ -328,11 +328,66 @@ function selectCourseEvidence(
   return { own, skipped };
 }
 
+// Input is already filtered to a single course and visible, non-demo observations.
+function publishedFinalRegister(
+  records: StudyGradeEvidence[],
+  reserved: Set<string>,
+) {
+  const moodleId = (value: unknown) => {
+    if (typeof value === "number")
+      return Number.isSafeInteger(value) && value >= 0 ? String(value) : null;
+    return typeof value === "string" &&
+      /^[a-z0-9][a-z0-9_-]{0,99}$/iu.test(value.trim())
+      ? value.trim()
+      : null;
+  };
+  let registered:
+    | { course: string; item: string; record: StudyGradeEvidence }
+    | undefined;
+  for (const record of records) {
+    if (!record.sourceEventId?.trim()) continue;
+    const raw = record.rawJson;
+    if (
+      !object(raw) ||
+      raw.moodle_module ||
+      raw.itemmodule ||
+      raw.itemtype === "mod" ||
+      raw.itemtype === "course"
+    )
+      continue;
+    const name = raw.item_name ?? raw.itemname ?? record.title;
+    if (
+      typeof name !== "string" ||
+      !/^(?:calculated grade )?register final$/u.test(
+        name.normalize("NFKC").trim().toLowerCase().replace(/\s+/gu, " "),
+      )
+    )
+      continue;
+    const course = moodleId(raw.moodle_course_id);
+    const item = moodleId(raw.moodle_item_id);
+    if (course === null || item === null) continue;
+    // A bound observation and its Moodle mirrors represent the very same score.
+    if (reserved.has(record.id)) return undefined;
+    if (
+      registered &&
+      (registered.course !== course ||
+        registered.item !== item ||
+        registered.record.score !== record.score ||
+        registered.record.maxScore !== record.maxScore)
+    )
+      return undefined;
+    registered = { course, item, record };
+  }
+  return registered && studyEvidencePercent(registered.record) !== null
+    ? registered.record
+    : undefined;
+}
+
 function buildEvidence(
   course: ScholarshipCourseInput,
   state: StudyCalculatorState,
   config: ScholarshipConfig,
-  { own, skipped }: ReturnType<typeof selectCourseEvidence>,
+  { own, skipped }: ReturnType<typeof selectScholarshipCourseRecords>,
   work: ScholarshipWorkInput[],
 ) {
   const activeBindings = Object.entries(config.bindings).filter(
@@ -425,6 +480,34 @@ function buildEvidence(
           : null,
       dueAt: due && Number.isFinite(Date.parse(due)) ? due : null,
     });
+  };
+  const addMatched = (
+    field: StudyCalculatorField,
+    useFinalRegister = false,
+  ) => {
+    const matching = own.filter((row) =>
+      studyEvidenceMatchesField(field, row, course),
+    );
+    const candidates = matching.filter((row) => !reserved.has(row.id));
+    const published = candidates.filter(
+      (row) => studyEvidencePercent(row) !== null,
+    );
+    if (
+      useFinalRegister &&
+      matching.every((row) => studyEvidencePercent(row) === null)
+    ) {
+      const register = publishedFinalRegister(own, reserved);
+      if (register) {
+        add(field, field, register);
+        return;
+      }
+    }
+    const matches = published.length > 0 ? published : candidates;
+    add(field, field, matches.length === 1 ? matches[0] : undefined);
+    if (published.length > 1)
+      warnings.push(
+        field.label + ": неоднозначные оценки Moodle не подставлены.",
+      );
   };
   for (const period of ["att1", "att2"] as const) {
     const total = own.filter(
@@ -529,22 +612,14 @@ function buildEvidence(
             );
         }
       } else {
-        const candidates = own.filter(
-          (row) =>
-            !reserved.has(row.id) &&
-            studyEvidenceMatchesField(field, row, course),
-        );
-        add(field, field, candidates.length === 1 ? candidates[0] : undefined);
-        if (candidates.length > 1)
-          warnings.push(
-            field.label + ": неоднозначные оценки Moodle не подставлены.",
-          );
+        addMatched(field);
       }
     }
   }
-  for (const field of state.definition.fields.filter(
+  const exams = state.definition.fields.filter(
     (item) => item.period === "exam",
-  )) {
+  );
+  for (const field of exams) {
     const binding = config.bindings[field.id];
     if (binding?.mode === "aggregate") {
       const record = own.find(
@@ -555,11 +630,13 @@ function buildEvidence(
       add(field, field, record);
       continue;
     }
-    const candidates = own.filter(
-      (row) =>
-        !reserved.has(row.id) && studyEvidenceMatchesField(field, row, course),
+    addMatched(
+      field,
+      !binding &&
+        exams.length === 1 &&
+        field.id === "final_exam" &&
+        field.weightPercent === 100,
     );
-    add(field, field, candidates.length === 1 ? candidates[0] : undefined);
   }
   if (
     rows.some((row) => row.kind === "quiz" && row.confirmed === null) &&
@@ -588,7 +665,7 @@ export function scholarshipSyllabusEvidence(
     course,
     state,
     config,
-    selectCourseEvidence(course, records),
+    selectScholarshipCourseRecords(course, records),
     [],
   );
 }
@@ -779,7 +856,7 @@ export function calculateScholarshipCourse(
         "Нет подтверждённой схемы оценивания. Настройте формулу курса в калькуляторе.",
       ],
     };
-  const courseEvidence = selectCourseEvidence(course, records);
+  const courseEvidence = selectScholarshipCourseRecords(course, records);
   const { definition, rows, warnings } = buildEvidence(
     course,
     state,

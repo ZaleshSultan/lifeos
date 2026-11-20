@@ -112,6 +112,39 @@ describe("Scholarship syllabus worksheet", () => {
     expect(html).not.toContain("Учебные дашборды");
   });
 
+  it("shows stored points on first render even without a syllabus and omits private or simulated marks", () => {
+    const course = {
+      ...os(),
+      code: "custom",
+      title: "Other",
+      calculator: null,
+    };
+    data(
+      [course],
+      [
+        {
+          ...grade(course, "Lab measurement", 8),
+          maxScore: 10,
+          percentage: 80,
+        },
+        {
+          ...grade(course, "Hidden row", 50),
+          rawJson: { _grade_visibility_unknown: true },
+        },
+        {
+          ...grade(course, "Simulated row", 70),
+          rawJson: { _is_mocked: true },
+        },
+      ],
+    );
+    const html = render();
+    expect(html).toContain("Полученные оценки");
+    expect(html).toContain("Lab measurement");
+    expect(html).toContain("8 / 10");
+    expect(html).toContain("Нет схемы оценивания");
+    expect(html).not.toContain("Hidden row");
+    expect(html).not.toContain("Simulated row");
+  });
   it("uses the actual OS stage weights with eight assignments, five scored at 80 and a midterm of 85", () => {
     const course = os();
     course.scholarship!.scenarios.realistic.overrides = {

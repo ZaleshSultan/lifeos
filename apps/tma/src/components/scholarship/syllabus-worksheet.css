@@ -242,3 +242,50 @@
   background: transparent;
   font-size: 13px;
 }
+
+.saved-grades .saved-grade-register {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  margin: 12px 0;
+}
+.saved-grade-register div {
+  border-radius: 9px;
+  background: #202126;
+  padding: 6px 4px;
+  text-align: center;
+}
+.saved-grade-register dt {
+  font-size: 12px;
+  color: var(--lifeos-muted);
+  overflow-wrap: anywhere;
+}
+.saved-grade-register dd {
+  color: var(--lifeos-accent);
+  font-size: 17px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.saved-grade-rows > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--lo-border);
+  align-items: baseline;
+}
+.saved-grade-rows dt {
+  overflow-wrap: anywhere;
+  color: var(--lifeos-muted);
+  font-size: 14px;
+}
+.saved-grade-rows dd {
+  font-weight: 600;
+}
+.saved-grades dd {
+  font-variant-numeric: tabular-nums;
+}
+.saved-grades summary {
+  color: var(--lifeos-accent);
+  font-size: 14px;
+}

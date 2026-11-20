@@ -229,7 +229,7 @@ export function SyllabusWorksheet({
         {!invalid && (
           <dl className="syllabus-totals">
             <div>
-              <dt>Набрано</dt>
+              <dt>Набрано по силабусу</dt>
               <dd>{format(result.earnedFinalPoints)} / 100</dd>
             </div>
             <div>

@@ -55,10 +55,11 @@ export interface ConfigureStudyCalculatorInput {
   expectedState?: StudyCalculatorState | null;
 }
 
-export function useStudyQuery() {
+export function useStudyQuery({ refreshOnOpen = false } = {}) {
   return useQuery({
     queryKey: studyQueryKey,
     refetchInterval: 60_000,
+    refetchOnMount: refreshOnOpen ? "always" : true,
     refetchOnWindowFocus: true,
     queryFn: () => request<StudyWorkspace>("/api/tma/study"),
   });

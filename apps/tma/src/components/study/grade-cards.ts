@@ -1,9 +1,17 @@
+import { studyScoreLabel } from "./model";
 import type { AcademicRecord } from "../../api/types";
 import type { StudyWorkspaceCourse } from "../../api/study";
 import { studyEvidenceBelongsToCourse } from "../../../../../packages/core/src/study-evidence.js";
 
 type Points = { score: number | null; max: number | null };
 type Item = Points & { id: string; title: string; demo?: boolean };
+export function gradePointsLabel(item: Points) {
+  const score = studyScoreLabel(item.score);
+  return item.score !== null && item.max !== null && item.max !== 100
+    ? score + " / " + studyScoreLabel(item.max)
+    : score;
+}
+
 type Slot = "attendance" | "mid" | "end" | "final";
 
 const registerSlots = new Map<string, Slot>([

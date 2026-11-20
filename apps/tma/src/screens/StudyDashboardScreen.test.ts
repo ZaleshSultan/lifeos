@@ -48,7 +48,7 @@ describe("syllabus math on the public dashboard route", () => {
     state.target = 80;
     const { html, text } = render(c);
     expect(text).toContain("My course formula");
-    expect(text).toContain("Набрано 9 / 100");
+    expect(text).toContain("Набрано по силабусу 9 / 100");
     expect(text).toContain("Вес остатка 91%");
     expect(html).toContain("78,03");
     expect(html).toContain('value="80"');
@@ -83,7 +83,7 @@ describe("syllabus math on the public dashboard route", () => {
       },
     ]);
     expect(text).toContain("Подтверждённый итог ATT1");
-    expect(text).toContain("Набрано 21,63 / 100");
+    expect(text).toContain("Набрано по силабусу 21,63 / 100");
     expect(text).toContain("Вес остатка 70%");
     expect(text).toContain("69,1");
   });

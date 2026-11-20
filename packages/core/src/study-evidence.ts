@@ -11,6 +11,7 @@ export interface StudyGradeEvidence {
   updatedAt: string;
   dueAt?: string | null;
   rawJson?: unknown;
+  sourceEventId?: string | null;
 }
 export function normalizeStudyTitle(value: string): string {
   return value
@@ -94,7 +95,7 @@ export function studyEvidencePeriodTotal(
 export function studyAssessmentIsAmbiguous(title: string): boolean {
   const identities = [
     ...normalizeStudyTitle(title).matchAll(
-      /(?:^| )(?:assignment\s*\d+|асаймент\s*\d+|задание\s*\d+|lecture async\s*\d+|midterm|endterm|final exam|final test|итоговый экзамен|cisco certificate|quiz)(?= |$)/g,
+      /(?:^| )(?:assignment\s*\d+|асаймент\s*\d+|задание\s*\d+|lecture async\s*\d+|midterm|endterm|final exam|final test|итоговый экзамен|cisco (?:course )?certificate|quiz)(?= |$)/g,
     ),
   ];
   return (
@@ -116,6 +117,36 @@ export function studyEvidenceExternalAsyncField(
   );
   return match ? (match[1] === "1" ? "quiz_1" : "quiz_2") : null;
 }
+/** Moodle HTML includes the activity type inside the display name (e.g. "Quiz Assignment 6"). */
+function assessmentTitle(record: StudyGradeEvidence): string | null {
+  const raw = record.rawJson;
+  if (!raw || typeof raw !== "object") return record.title;
+  const module =
+    "moodle_module" in raw
+      ? raw.moodle_module
+      : "itemmodule" in raw
+        ? raw.itemmodule
+        : null;
+  if (module !== "assign" && module !== "quiz") return record.title;
+  const source =
+    "item_name" in raw
+      ? raw.item_name
+      : "itemname" in raw
+        ? raw.itemname
+        : null;
+  if (typeof source !== "string" || !source.trim()) return record.title;
+  const prefix = module === "assign" ? /^assignment\s+/iu : /^quiz\s+/iu;
+  const stripped = record.title.trim().replace(prefix, "");
+  const name = normalizeStudyTitle(source);
+  if (
+    name !== normalizeStudyTitle(record.title) &&
+    name !== normalizeStudyTitle(stripped)
+  )
+    return null;
+  // A plain "Assignment 1" already starts with the assessment's own name.
+  return /^\d/u.test(stripped) ? record.title : stripped;
+}
+
 /** Conservative matching, with the user-confirmed DBMS component totals as explicit exceptions. */
 export function studyEvidenceMatchesField(
   field: Pick<StudyCalculatorField, "id">,
@@ -123,7 +154,21 @@ export function studyEvidenceMatchesField(
   course?: { title: string; code: string },
   allowAmbiguous = false,
 ): boolean {
-  const title = normalizeStudyTitle(record.title);
+  const name = assessmentTitle(record);
+  if (!name) return false;
+  const title = normalizeStudyTitle(name);
+  if (
+    /(?:^| )(?:fx|resit|re sit|retake|re take|makeup|make up|reexam|re exam|retry|пересдач[а-яё]*)(?: |$)/u.test(
+      title,
+    ) ||
+    /(?:^| )(?:practice|mock|bonus) (?:midterm|endterm|final|assignment|quiz)(?: |$)|(?:^| )(?:midterm|endterm|final exam|final test) (?:practice|mock|bonus)(?: |$)/u.test(
+      title,
+    ) ||
+    /(?:^| )(?:second|repeat) attempt(?: |$)|(?:^| )(?:attempt|попытка) [2-9](?: |$)/u.test(
+      title,
+    )
+  )
+    return false;
   // Confirmed DBMS rubric: Async is the external platform's published total,
   // and "Quiz Midterm" is one assessment, not two overlapping components.
   if (
@@ -135,7 +180,18 @@ export function studyEvidenceMatchesField(
     if (title === "quiz midterm") return field.id === "midterm";
   }
   if (studyEvidenceIsAggregate(record)) return false;
-  if (!allowAmbiguous && studyAssessmentIsAmbiguous(record.title)) return false;
+  if (!allowAmbiguous && studyAssessmentIsAmbiguous(name)) return false;
+  if (
+    course &&
+    matchSyllabusProfile(course.title, course.code)?.id === "russian"
+  ) {
+    const item = /^(задание|рк|рубежный контроль) ([12])$/.exec(title);
+    if (item)
+      return (
+        field.id ===
+        "att" + item[2] + (item[1] === "задание" ? "_work" : "_control")
+      );
+  }
   const assignment = /^assignment_(\d+)$/.exec(field.id);
   if (assignment)
     return [
@@ -144,6 +200,12 @@ export function studyEvidenceMatchesField(
       ),
     ].some((match) => match[1] === assignment[1]);
   if (field.id === "quiz_1" || field.id === "quiz_2") return false;
+  if (
+    /^(?:midterm|endterm|final exam|final test) (?:test )?[2-9](?: |$)/u.test(
+      title,
+    )
+  )
+    return false;
   if (field.id === "midterm")
     return /(?:^| )midterm(?: |$)/.test(title) && !/assignment/.test(title);
   if (field.id === "endterm")
@@ -152,7 +214,8 @@ export function studyEvidenceMatchesField(
     return /(?:^| )(?:final exam|final test|итоговый экзамен)(?: |$)/.test(
       title,
     );
-  if (field.id === "cisco") return /cisco certificate/.test(title);
+  if (field.id === "cisco")
+    return /(?:^| )cisco (?:course )?certificate(?: |$)/.test(title);
   return false;
 }
 

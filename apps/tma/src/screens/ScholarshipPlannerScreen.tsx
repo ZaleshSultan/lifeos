@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useStudyQuery } from "../api/study";
 import { ErrorPanel, LoadingPanel } from "../components/AsyncState";
+import { SavedCourseGrades } from "../components/scholarship/SavedCourseGrades";
 import { SyllabusWorksheet } from "../components/scholarship/SyllabusWorksheet";
 
 export interface ScholarshipPlannerProps {
@@ -12,7 +13,7 @@ export function ScholarshipPlannerScreen({
   onOpenStudy,
   onOpenCalculator,
 }: ScholarshipPlannerProps) {
-  const query = useStudyQuery();
+  const query = useStudyQuery({ refreshOnOpen: true });
   const [selected, setSelected] = useState("");
   if (query.isLoading)
     return <LoadingPanel title="Загружаем оценки и силабусы…" />;
@@ -49,6 +50,11 @@ export function ScholarshipPlannerScreen({
               ))}
             </select>
           </label>
+          <SavedCourseGrades
+            key={"grades:" + course.id}
+            course={course}
+            records={records}
+          />
           <SyllabusWorksheet
             key={course.id}
             course={course}

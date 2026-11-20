@@ -1,16 +1,9 @@
 import { ChevronRight } from "lucide-react";
 import type { AcademicRecord } from "../../api/types";
 import type { StudyWorkspaceCourse } from "../../api/study";
-import { courseGradeCards, gradeLetter } from "./grade-cards";
+import { courseGradeCards, gradeLetter, gradePointsLabel } from "./grade-cards";
 import { studyScoreLabel } from "./model";
 import "./grades.css";
-
-function points(item: { score: number | null; max: number | null }) {
-  const score = studyScoreLabel(item.score);
-  return item.score !== null && item.max !== null && item.max !== 100
-    ? score + " / " + studyScoreLabel(item.max)
-    : score;
-}
 
 function BreakdownRows({
   rows,
@@ -31,7 +24,7 @@ function BreakdownRows({
                 —
               </abbr>
             ) : (
-              points(row)
+              gradePointsLabel(row)
             )}
           </dd>
         </div>
@@ -67,12 +60,20 @@ export function StudyGrades({
                 : studyScoreLabel(card.attendance) + "%",
             attendance: card.attendance,
           },
-          { label: "MT", full: "Midterm", value: card.mid && points(card.mid) },
-          { label: "ET", full: "Endterm", value: card.end && points(card.end) },
+          {
+            label: "MT",
+            full: "Midterm",
+            value: card.mid && gradePointsLabel(card.mid),
+          },
+          {
+            label: "ET",
+            full: "Endterm",
+            value: card.end && gradePointsLabel(card.end),
+          },
           {
             label: "Final",
             full: "Final",
-            value: card.final && points(card.final),
+            value: card.final && gradePointsLabel(card.final),
           },
         ].filter((chip) => chip.value !== null);
         return (
@@ -86,7 +87,7 @@ export function StudyGrades({
               </div>
               <div className="grade-result" aria-label="Итог курса">
                 <strong title="Итог Moodle">
-                  {card.total ? points(card.total) : "—"}
+                  {card.total ? gradePointsLabel(card.total) : "—"}
                 </strong>
                 {letter && <span title="По шкале AITU">{letter}</span>}
               </div>
