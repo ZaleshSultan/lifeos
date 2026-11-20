@@ -289,3 +289,26 @@
   color: var(--lifeos-accent);
   font-size: 14px;
 }
+
+.saved-grade-result {
+  display: grid;
+  gap: 3px;
+  padding-bottom: 15px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--lo-border);
+}
+.saved-grade-result p {
+  font-size: 15px;
+  font-weight: 600;
+}
+.saved-grade-result output {
+  color: var(--lifeos-accent);
+  font-size: 40px;
+  line-height: 1.15;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.saved-grade-result span {
+  color: var(--lifeos-muted);
+  font-size: 13px;
+}

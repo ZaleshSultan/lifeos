@@ -128,18 +128,18 @@ function seedPublishedGrades(data) {
     source: "moodle_course_total",
     moodle_course_id: "501",
     moodle_item_id: "99",
-    score: 82,
+    score: 81,
     max_score: 100,
   };
   data.records = [
-    grade(dbms, "501", "1", "Calculated grade Register Midterm", 78, {
+    grade(dbms, "501", "1", "Calculated grade Register Midterm", 70, {
       lifeos_course_total: total,
     }),
-    grade(dbms, "501", "2", "Calculated grade Register Endterm", 0, {
+    grade(dbms, "501", "2", "Calculated grade Register Endterm", 80, {
       lifeos_course_total: total,
     }),
     grade(dbms, "501", "3", "Calculated grade Register Final", 90),
-    grade(dbms, "501", "99", "Course total", 82, { itemtype: "course" }),
+    grade(dbms, "501", "99", "Course total", 81, { itemtype: "course" }),
     grade(dbms, "501", "4", "Assignment 1", 75, {
       itemtype: "mod",
       moodle_module: "assign",
@@ -153,6 +153,44 @@ function seedPublishedGrades(data) {
       moodle_module: "assign",
     }),
   ];
+}
+
+function seedCompletedCourse(data) {
+  const course = data.courses.find((item) => item.id === "networks");
+  course.externalCourseKey = "moodle:504";
+  const assignments = Array.from({ length: 8 }, (_, i) => [
+    "Assignment " + (i + 1),
+    i < 4 ? 76 : 78,
+    "mod",
+  ]);
+  const grades = [
+    ...assignments,
+    ["Midterm", 76, "mod"],
+    ["Endterm", 74, "mod"],
+    ["Cisco certificate", 80, "mod"],
+    ["Final exam", 73, "mod"],
+    ["Calculated grade Register Midterm", 76, "manual"],
+    ["Calculated grade Register Endterm", 77, "manual"],
+    ["Calculated grade Register Final", 73, "manual"],
+    // 30% of 76 + 30% of 77 + 40% of 73 = 75.1; Moodle publishes 75.
+    ["Course total", 75, "course"],
+  ];
+  data.records.push(
+    ...grades.map(([title, score, itemtype], i) => ({
+      ...data.records[0],
+      id: "record-504-" + i,
+      sourceEventId: "source-504-" + i,
+      courseTitle: course.title,
+      title,
+      score,
+      percentage: score,
+      rawJson: {
+        moodle_course_id: "504",
+        moodle_item_id: String(i + 1),
+        itemtype,
+      },
+    })),
+  );
 }
 
 function routerFixture(active = false) {
@@ -616,12 +654,12 @@ try {
         };
         await grades.waitFor();
         assert.equal(await course.inputValue(), "dbms");
-        await grade("Мидтерм", 78);
-        await grade("Эндтерм", 0);
+        await grade("Мидтерм", 70);
+        await grade("Эндтерм", 80);
         await grade("Финал", 90);
-        await grade("Итог курса", 82);
+        await grade("Итог курса", 81);
         assert.equal(
-          await grades.getByText("82", { exact: true }).count(),
+          await grades.getByText("81", { exact: true }).count(),
           1,
           "the course result embedded in register records and the standalone total must appear once",
         );
@@ -632,25 +670,20 @@ try {
           0,
           "verified Register Final supplies the only syllabus exam",
         );
-        await mkdir(artifact + "/browser", { recursive: true });
-        await page.screenshot({
-          path: artifact + `/browser/tma-published-grades-${width}.png`,
-          animations: "disabled",
-        });
         assert.equal(await grades.getByText("Оценка другой группы").count(), 0);
         const nav = page.getByRole("navigation", { name: "Разделы LifeOS" });
         await nav.getByRole("button", { name: "Учёба", exact: true }).click();
         const card = page
           .getByRole("article")
-          .filter({ has: page.getByLabel("Midterm: 78", { exact: true }) });
-        await card.getByLabel("Endterm: 0", { exact: true }).waitFor();
+          .filter({ has: page.getByLabel("Midterm: 70", { exact: true }) });
+        await card.getByLabel("Endterm: 80", { exact: true }).waitFor();
         await card.getByLabel("Final: 90", { exact: true }).waitFor();
         assert.equal(
           await card
             .getByLabel("Итог курса", { exact: true })
             .locator("strong")
             .innerText(),
-          "82",
+          "81",
         );
         await nav
           .getByRole("button", { name: "Стипендия", exact: true })
@@ -658,7 +691,7 @@ try {
         await course.selectOption("os");
         await grade("Assignment 2", 0);
         assert.equal(await term("Assignment 1").count(), 0);
-        assert.equal(await grades.getByText("82", { exact: true }).count(), 0);
+        assert.equal(await grades.getByText("81", { exact: true }).count(), 0);
         const published = await grades.innerText();
         const manual = page.getByLabel("Assignment 1", { exact: true });
         if (!(await manual.isVisible()))
@@ -674,9 +707,17 @@ try {
           "manual entries and forecasts must not appear as published grades",
         );
         await course.selectOption("dbms");
-        await grade("Мидтерм", 78);
-        await grade("Итог курса", 82);
+        await grade("Мидтерм", 70);
+        await grade("Итог курса", 81);
         assert.equal(await term("Assignment 2").count(), 0);
+        t.data.records = t.data.records.filter(
+          (r) => r.rawJson.itemtype !== "course",
+        );
+        for (const row of t.data.records)
+          delete row.rawJson.lifeos_course_total;
+        await page.reload();
+        await checkEarned(40.5);
+        assert.equal(await examForecast.count(), 0);
         // A register without a source event cannot supply the syllabus exam.
         const register = t.data.records.find(
           (record) => record.id === "record-501-3",
@@ -713,6 +754,66 @@ try {
         );
         assert.deepEqual(t.errors, []);
         await noOverflow(page);
+      } finally {
+        await t.context.close();
+      }
+    });
+  }
+  for (const width of [320, 390]) {
+    await test(`${width}px a completed syllabus shows the published course total and reopens the planner for a partial course`, async () => {
+      const t = await setup(width);
+      const { page } = t;
+      seedPublishedGrades(t.data);
+      seedCompletedCourse(t.data);
+      try {
+        await page.goto(origin + "/tma/?screen=dashboard");
+        const subject = page.getByRole("combobox", {
+          name: "Предмет",
+          exact: true,
+        });
+        const published = page.getByRole("region", {
+          name: "Полученные оценки",
+          exact: true,
+        });
+        const complete = page.locator('output[aria-label="Итог по предмету"]');
+        const needed = page.locator('output[aria-label="Нужный средний балл"]');
+        const plan = page.getByRole("region", {
+          name: "План по работам",
+          exact: true,
+        });
+        const gap = page.getByText("До цели", { exact: true });
+        const checkComplete = async () => {
+          await complete.waitFor();
+          assert.match(
+            (await complete.innerText()).trim(),
+            /^75(?:\s*\/\s*100)?$/,
+          );
+          await published.waitFor();
+          const endterm = published
+            .getByText("Эндтерм", { exact: true })
+            .locator("xpath=following-sibling::dd[1]");
+          assert.equal(await endterm.innerText(), "77");
+          assert.equal(await needed.count(), 0);
+          assert.equal(await plan.count(), 0);
+          assert.equal(await gap.count(), 0);
+          assert.equal(
+            await page.getByRole("textbox", { name: /^Прогноз:/ }).count(),
+            0,
+          );
+        };
+        await subject.selectOption("networks");
+        await checkComplete();
+        await noOverflow(page);
+        await subject.selectOption("dbms");
+        await published.getByText("Итог курса", { exact: true }).waitFor();
+        await needed.waitFor();
+        await gap.waitFor();
+        await plan.waitFor();
+        assert.equal(await complete.count(), 0);
+        await subject.selectOption("networks");
+        await checkComplete();
+        assert.equal(t.saves(), 0);
+        assert.deepEqual(t.errors, []);
       } finally {
         await t.context.close();
       }

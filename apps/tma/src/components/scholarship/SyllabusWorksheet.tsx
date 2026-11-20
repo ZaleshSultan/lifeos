@@ -3,7 +3,7 @@ import {
   calculateSyllabusMinimum,
   calculateSyllabusWorkPlan,
   scholarshipConfigsMatch,
-  scholarshipSyllabusEvidence,
+  type scholarshipSyllabusEvidence,
 } from "../../../../../packages/core/src/scholarship.js";
 import {
   matchSyllabusProfile,
@@ -14,7 +14,6 @@ import {
   useSaveScholarshipPlanMutation,
   type StudyWorkspaceCourse,
 } from "../../api/study";
-import type { AcademicRecord } from "../../api/types";
 import {
   readSessionDraft,
   useDraftStorageKey,
@@ -70,12 +69,12 @@ function forecastHeadline(plan: ReturnType<typeof calculateSyllabusWorkPlan>) {
 
 export function SyllabusWorksheet({
   course,
-  records,
+  evidence,
   onOpenCalculator,
   onRefresh,
 }: {
   course: StudyWorkspaceCourse;
-  records: AcademicRecord[];
+  evidence: ReturnType<typeof scholarshipSyllabusEvidence>;
   onOpenCalculator: () => void;
   onRefresh: () => void;
 }) {
@@ -103,10 +102,6 @@ export function SyllabusWorksheet({
   useEffect(
     () => writeSessionDraft(key, dirty ? draft : undefined),
     [key, dirty, draft],
-  );
-  const evidence = useMemo(
-    () => scholarshipSyllabusEvidence(course, records),
-    [course, records],
   );
   const config = draft.config;
   const result = useMemo(

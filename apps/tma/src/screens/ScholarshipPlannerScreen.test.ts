@@ -272,6 +272,127 @@ describe("Scholarship syllabus worksheet", () => {
   });
 });
 
+describe("result for a fully graded subject", () => {
+  function osGradebook() {
+    const course = courses().find((item) => item.id === "os")!;
+    course.externalCourseKey = "moodle:7";
+    const titles = [
+      ...Array.from(
+        { length: 8 },
+        (_, i) => "Assignment Assignment " + (i + 1),
+      ),
+      "Assignment Midterm",
+      "Assignment Endterm",
+      "Assignment Final exam",
+    ];
+    // All 75 except one real zero worth 6% of the final grade: syllabus total 70.5.
+    const modules = titles.map((title, index) => ({
+      ...grade(course, title, index === 0 ? 0 : 75),
+      sourceEventId: "source-" + index,
+      rawJson: {
+        moodle_course_id: "7",
+        moodle_item_id: String(index + 1),
+        moodle_module: "assign",
+        item_name: title,
+      },
+    }));
+    function register(total: number): AcademicRecord {
+      return {
+        ...grade(course, "Calculated grade Register Final", 75),
+        sourceEventId: "source-register",
+        rawJson: {
+          item_name: "Calculated grade Register Final",
+          moodle_course_id: "7",
+          moodle_item_id: "final-register",
+          lifeos_course_total: {
+            source: "moodle_course_total",
+            moodle_course_id: "7",
+            moodle_item_id: "course-total",
+            score: total,
+            max_score: 100,
+          },
+        },
+      };
+    }
+    return { course, modules, register };
+  }
+  function labeledOutput(html: string, label: string) {
+    return html.match(
+      new RegExp(
+        '<output[^>]*aria-label="' + label + '"[^>]*>([^<]*)</output>',
+      ),
+    )?.[1];
+  }
+
+  it.each([71, 0])(
+    "shows the official course total %s when every work has a published score",
+    (published) => {
+      const { course, modules, register } = osGradebook();
+      data([course], [...modules, register(published)]);
+      const html = render();
+      expect(labeledOutput(html, "Итог по предмету")).toBe(String(published));
+      expect(labeledOutput(html, "Итог по силабусу")).toBeUndefined();
+      expect(html).not.toContain("Цель по предмету");
+      expect(html).not.toContain("План по работам");
+    },
+  );
+
+  it("shows a distinctly labeled syllabus total when fully graded without an official Moodle total", () => {
+    const { course, modules } = osGradebook();
+    data([course], modules);
+    const html = render();
+    expect(labeledOutput(html, "Итог по силабусу")).toBe("70,5");
+    expect(labeledOutput(html, "Итог по предмету")).toBeUndefined();
+    expect(html).not.toContain("Цель по предмету");
+    expect(html).not.toContain("План по работам");
+  });
+
+  it.each(["missing", "mocked", "hidden"] as const)(
+    "retains the forecast alongside a published running total when a work is %s",
+    (kind) => {
+      const { course, modules, register } = osGradebook();
+      const [first, ...other] = modules;
+      const remaining =
+        kind === "missing"
+          ? other
+          : [
+              ...other,
+              {
+                ...first,
+                rawJson: {
+                  ...first.rawJson,
+                  [kind === "mocked"
+                    ? "_is_mocked"
+                    : "_grade_visibility_unknown"]: true,
+                },
+              },
+            ];
+      data([course], [...remaining, register(71)]);
+      const html = render();
+      expect(html).toContain("Ведомость Moodle");
+      expect(html).toContain("Итог курса");
+      expect(html).toContain("Цель по предмету");
+      expect(html).toContain("План по работам");
+      expect(labeledOutput(html, "Итог по предмету")).toBeUndefined();
+      expect(labeledOutput(html, "Итог по силабусу")).toBeUndefined();
+    },
+  );
+
+  it("keeps the editable plan when the only filled-in works are the student's manual values", () => {
+    const { course } = osGradebook();
+    const calculator = course.calculator!;
+    calculator.values = Object.fromEntries(
+      calculator.definition.fields.map((field) => [field.id, 85]),
+    );
+    data([course]);
+    const html = render();
+    expect(html).toContain("Цель по предмету");
+    expect(html).toContain("План по работам");
+    expect(labeledOutput(html, "Итог по силабусу")).toBeUndefined();
+    expect(labeledOutput(html, "Итог по предмету")).toBeUndefined();
+  });
+});
+
 it("keeps the score label stable and describes validation errors separately", () => {
   const html = renderToStaticMarkup(
     createElement(ScoreInput, {

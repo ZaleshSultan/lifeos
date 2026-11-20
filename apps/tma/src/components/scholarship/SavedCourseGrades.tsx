@@ -2,7 +2,12 @@ import { useMemo } from "react";
 import { selectScholarshipCourseRecords } from "../../../../../packages/core/src/scholarship.js";
 import type { StudyWorkspaceCourse } from "../../api/study";
 import type { AcademicRecord } from "../../api/types";
-import { courseGradeCards, gradePointsLabel } from "../study/grade-cards";
+import { studyScoreLabel } from "../study/model";
+import {
+  courseGradeCards,
+  gradePointsLabel,
+  gradePercent,
+} from "../study/grade-cards";
 
 type GradeCard = ReturnType<typeof courseGradeCards>[number];
 
@@ -19,7 +24,13 @@ function PublishedRows({ rows }: { rows: GradeCard["rows"] }) {
   );
 }
 
-function SavedGradeGroup({ card }: { card: GradeCard }) {
+function SavedGradeGroup({
+  card,
+  showTotalInHeader,
+}: {
+  card: GradeCard;
+  showTotalInHeader: boolean;
+}) {
   const slots = [
     ["Мидтерм", card.mid],
     ["Эндтерм", card.end],
@@ -27,6 +38,9 @@ function SavedGradeGroup({ card }: { card: GradeCard }) {
     ["Итог курса", card.total],
   ] as const;
   const summary = slots.filter(([, item]) => item && item.score !== null);
+  const registerSummary = showTotalInHeader
+    ? summary.filter(([, item]) => item !== card.total)
+    : summary;
   const shown = new Set(summary.map(([, item]) => item!.id));
   const unique = new Set<string>();
   const rows = [...card.assignments, ...card.rows].filter((row) => {
@@ -39,11 +53,11 @@ function SavedGradeGroup({ card }: { card: GradeCard }) {
   if (!rows.length && !summary.length) return null;
   return (
     <>
-      {summary.length > 0 && (
+      {registerSummary.length > 0 && (
         <div>
           <p className="syllabus-caption">Ведомость Moodle</p>
           <dl className="saved-grade-register" aria-label="Ведомость Moodle">
-            {summary.map(([label, item]) => (
+            {registerSummary.map(([label, item]) => (
               <div key={label}>
                 <dt>{label}</dt>
                 <dd>{gradePointsLabel(item!)}</dd>
@@ -66,9 +80,11 @@ function SavedGradeGroup({ card }: { card: GradeCard }) {
 export function SavedCourseGrades({
   course,
   records,
+  completedScore,
 }: {
   course: StudyWorkspaceCourse;
   records: AcademicRecord[];
+  completedScore: number | null;
 }) {
   const { cards, skipped } = useMemo(() => {
     const { own, skipped } = selectScholarshipCourseRecords(course, records);
@@ -79,14 +95,36 @@ export function SavedCourseGrades({
     );
     return { cards, skipped };
   }, [course, records]);
+  const totals = cards.flatMap((card) =>
+    card.total && gradePercent(card.total) !== null ? [card.total] : [],
+  );
+  const official = totals.length === 1 ? totals[0] : null;
+  const resultLabel = official ? "Итог по предмету" : "Итог по силабусу";
   return (
     <section
       className="syllabus-card saved-grades"
       aria-label="Полученные оценки"
     >
+      {completedScore !== null && (
+        <div className="saved-grade-result">
+          <p>{resultLabel}</p>
+          <output aria-label={resultLabel}>
+            {official
+              ? gradePointsLabel(official)
+              : studyScoreLabel(completedScore)}
+          </output>
+          <span>Все работы оценены</span>
+        </div>
+      )}
       <h2>Полученные оценки</h2>
       {cards.map((card) => (
-        <SavedGradeGroup card={card} key={card.key} />
+        <SavedGradeGroup
+          card={card}
+          key={card.key}
+          showTotalInHeader={
+            completedScore !== null && !!official && official === card.total
+          }
+        />
       ))}
       {skipped && (
         <p className="syllabus-caption">
