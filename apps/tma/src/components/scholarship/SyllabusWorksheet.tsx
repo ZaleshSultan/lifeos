@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   calculateSyllabusMinimum,
+  calculateSyllabusWorkPlan,
   scholarshipConfigsMatch,
   scholarshipSyllabusEvidence,
 } from "../../../../../packages/core/src/scholarship.js";
@@ -25,6 +26,7 @@ import {
   reconcileScholarshipDraft,
   scholarshipDraftDirty,
 } from "./model";
+import { WorkPlanCard, useWorkForecasts } from "./SyllabusWorkPlan";
 import { ScoreInput } from "./ScoreInput";
 import "./syllabus-worksheet.css";
 
@@ -33,6 +35,38 @@ const periods = [
   ["att2", "Вторая аттестация", 30],
   ["exam", "Финальный экзамен", 40],
 ] as const;
+
+function forecastHeadline(plan: ReturnType<typeof calculateSyllabusWorkPlan>) {
+  if (!plan.rows.some((row) => row.forecast !== null)) return null;
+  const free = plan.rows.filter((row) => row.forecast === null);
+  if (!free.length)
+    return {
+      heading: "Итог по прогнозу",
+      answer: format(plan.projectedFinal),
+      caption: plan.possible
+        ? "При таком прогнозе цель и пороги аттестаций будут достигнуты."
+        : "При таком прогнозе баллов для цели или порога аттестации недостаточно.",
+    };
+  const heading = "За остальные работы";
+  if (!plan.possible)
+    return {
+      heading,
+      answer: "Цель недостижима",
+      caption:
+        "Даже 100 за остальные работы не хватит для цели или порога аттестации.",
+    };
+  const targets = free.flatMap((row) =>
+    row.recommended === null ? [] : [row.recommended],
+  );
+  const low = Math.min(...targets);
+  const high = Math.max(...targets);
+  return {
+    heading,
+    answer: low === high ? format(low) : format(low) + "–" + format(high),
+    caption:
+      "Из 100 при заданном прогнозе. Баллы для каждой работы указаны ниже.",
+  };
+}
 
 export function SyllabusWorksheet({
   course,
@@ -74,7 +108,14 @@ export function SyllabusWorksheet({
     () => scholarshipSyllabusEvidence(course, records),
     [course, records],
   );
-  if (!evidence)
+  const config = draft.config;
+  const result = useMemo(
+    () => (evidence ? calculateSyllabusMinimum(evidence, config) : null),
+    [evidence, config],
+  );
+  const forecasts = useWorkForecasts(course.id, result?.values);
+  const gradesRef = useRef<HTMLDetailsElement>(null);
+  if (!evidence || !result)
     return (
       <section className="syllabus-card">
         <h2>Нет схемы оценивания</h2>
@@ -85,8 +126,11 @@ export function SyllabusWorksheet({
       </section>
     );
 
-  const config = draft.config;
-  const result = calculateSyllabusMinimum(evidence, config);
+  const workPlan = calculateSyllabusWorkPlan(
+    evidence,
+    config,
+    forecasts.scores,
+  );
   const profile = matchSyllabusProfile(course.title, course.code);
   const verifiedProfile =
     profile &&
@@ -100,15 +144,26 @@ export function SyllabusWorksheet({
     (save.error && "status" in save.error && save.error.status === 409);
   const blocked = result.stageMinima.some((stage) => stage.blocked);
   const achieved = result.shortfall < 1e-8;
-  const answer = invalid
-    ? "—"
-    : blocked
-      ? "Порог аттестации недостижим"
-      : achieved
-        ? "Цель достигнута"
-        : !result.targetPossible
-          ? "Цель недостижима"
-          : format(result.minimumAverage);
+  const forecast = forecastHeadline(workPlan);
+  const invalidScore = invalid || forecasts.invalid;
+  const baseAnswer = blocked
+    ? "Порог аттестации недостижим"
+    : achieved
+      ? "Цель достигнута"
+      : !result.targetPossible
+        ? "Цель недостижима"
+        : format(result.minimumAverage);
+  const answer = invalidScore ? "—" : (forecast?.answer ?? baseAnswer);
+  const heading = forecast?.heading ?? "Нужный средний балл";
+  const baseCaption = blocked
+    ? "Оставшегося веса недостаточно для порога из силабуса."
+    : achieved
+      ? "По введённым оценкам уже набрано достаточно баллов."
+      : !result.targetPossible
+        ? "Максимально возможный итог — " +
+          format(result.maximumFinal) +
+          " из 100."
+        : "Из 100 на оставшихся работах с учётом их веса.";
   const edit = (next: typeof config) => {
     setDraft({ ...draft, config: next });
     setSaved(false);
@@ -148,15 +203,11 @@ export function SyllabusWorksheet({
       <section className="syllabus-card syllabus-answer">
         <div className="syllabus-answer-head">
           <div>
-            <p>Нужный средний балл</p>
+            <p>{heading}</p>
             <output
-              aria-label="Нужный средний балл"
+              aria-label={heading}
               aria-live="polite"
-              className={
-                invalid || blocked || achieved || !result.targetPossible
-                  ? "syllabus-answer-text"
-                  : ""
-              }
+              className={answer.length > 8 ? "syllabus-answer-text" : undefined}
             >
               {answer}
             </output>
@@ -171,17 +222,9 @@ export function SyllabusWorksheet({
           </fieldset>
         </div>
         <p className="syllabus-caption">
-          {invalid
+          {invalidScore
             ? "Проверь введённые баллы."
-            : blocked
-              ? "Оставшегося веса недостаточно для порога из силабуса."
-              : achieved
-                ? "По введённым оценкам уже набрано достаточно баллов."
-                : !result.targetPossible
-                  ? "Максимально возможный итог — " +
-                    format(result.maximumFinal) +
-                    " из 100."
-                  : "Из 100 на оставшихся работах с учётом их веса."}
+            : (forecast?.caption ?? baseCaption)}
         </p>
         {!invalid && (
           <dl className="syllabus-totals">
@@ -200,6 +243,7 @@ export function SyllabusWorksheet({
           </dl>
         )}
         {!invalid &&
+          !forecast &&
           !blocked &&
           result.stageMinima
             .filter(
@@ -215,13 +259,27 @@ export function SyllabusWorksheet({
               </p>
             ))}
         {!invalid &&
+          !forecast &&
           result.attestationWarnings.map((text) => (
             <p key={text} className="syllabus-warning">
               {text}
             </p>
           ))}
       </section>
-      <details className="syllabus-card syllabus-fields" open>
+      <WorkPlanCard
+        evidence={evidence}
+        plan={workPlan}
+        forecasts={forecasts}
+        invalidGrades={invalid}
+        onOpenGrades={() => {
+          const details = gradesRef.current;
+          if (!details) return;
+          details.open = true;
+          details.querySelector("summary")?.focus({ preventScroll: true });
+          details.scrollIntoView({ block: "start" });
+        }}
+      />
+      <details ref={gradesRef} className="syllabus-card syllabus-fields" open>
         <summary>Оценки и веса</summary>
         <p className="syllabus-caption">
           {verifiedProfile

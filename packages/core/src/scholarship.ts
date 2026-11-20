@@ -593,12 +593,13 @@ export function scholarshipSyllabusEvidence(
   );
 }
 
+type SyllabusEvidence = NonNullable<
+  ReturnType<typeof scholarshipSyllabusEvidence>
+>;
+
 /** Only individual, explicit inputs count. Scenario defaults never supply missing grades. */
-export function calculateSyllabusMinimum(
-  evidence: NonNullable<ReturnType<typeof scholarshipSyllabusEvidence>>,
-  config: ScholarshipConfig,
-) {
-  const values = Object.fromEntries(
+function syllabusValues(evidence: SyllabusEvidence, config: ScholarshipConfig) {
+  return Object.fromEntries(
     evidence.rows.map((row) => {
       const overrides = config.scenarios.realistic.overrides;
       const manual = Object.hasOwn(overrides, row.id)
@@ -608,10 +609,16 @@ export function calculateSyllabusMinimum(
           : config.useManualValues
             ? row.manual
             : null;
-      return [row.id, row.confirmed ?? manual];
+      return [row.id, row.confirmed ?? manual] as const;
     }),
   );
-  const target = config.target;
+}
+
+function syllabusRequirements(
+  evidence: SyllabusEvidence,
+  values: StudyCalculatorState["values"],
+  target: number,
+) {
   const state = { definition: evidence.definition, values, target };
   // Reuse the course calculator's attestation checks and its unrounded scoring.
   const plan = calculateStudyTargetPlan(state);
@@ -655,6 +662,72 @@ export function calculateSyllabusMinimum(
     stageMinima,
     minimumAverage:
       remaining > 0 ? required((shortfall * 100) / remaining) : null,
+  };
+}
+
+export function calculateSyllabusMinimum(
+  evidence: SyllabusEvidence,
+  config: ScholarshipConfig,
+) {
+  return syllabusRequirements(
+    evidence,
+    syllabusValues(evidence, config),
+    config.target,
+  );
+}
+
+/** Balance remaining scores at hundredth-point precision, first honoring each attestation minimum. */
+export function calculateSyllabusWorkPlan(
+  evidence: SyllabusEvidence,
+  config: ScholarshipConfig,
+  forecasts: Readonly<Record<string, number>> = {},
+) {
+  const values = syllabusValues(evidence, config);
+  const remaining = evidence.rows.filter((row) => values[row.id] == null);
+  const open: ScholarshipEvidenceRow[] = [];
+  for (const row of remaining) {
+    if (!Object.hasOwn(forecasts, row.id)) {
+      open.push(row);
+      continue;
+    }
+    const score = forecasts[row.id];
+    if (!percent(score)) throw new RangeError("Invalid forecast score");
+    values[row.id] = score;
+  }
+  const plan = syllabusRequirements(evidence, values, config.target);
+  const possible =
+    plan.targetPossible && !plan.stageMinima.some((stage) => stage.blocked);
+  const floor = { att1: 0, att2: 0, exam: 0 };
+  for (const stage of plan.stageMinima)
+    floor[stage.period] = Math.min(100, stage.needed ?? 0);
+  const scoreAt = (row: ScholarshipEvidenceRow, cents: number) =>
+    Math.max(floor[row.period], cents / 100);
+  const totalAt = (cents: number) =>
+    plan.earnedFinalPoints +
+    open.reduce(
+      (sum, row) => sum + (scoreAt(row, cents) * row.weightInFinal) / 100,
+      0,
+    );
+  // Find the smallest shared score on the display grid that covers the target;
+  // stages with a higher threshold keep their own floor throughout the search.
+  let low = 0;
+  let high = 10_000;
+  if (possible && open.length > 0) {
+    while (low < high) {
+      const mid = Math.floor((low + high) / 2);
+      if (totalAt(mid) + 1e-10 >= config.target) high = mid;
+      else low = mid + 1;
+    }
+  }
+  return {
+    rows: remaining.map((row) => ({
+      id: row.id,
+      forecast: values[row.id] ?? null,
+      recommended:
+        possible && values[row.id] == null ? scoreAt(row, low) : null,
+    })),
+    possible,
+    projectedFinal: possible || open.length === 0 ? stable(totalAt(low)) : null,
   };
 }
 

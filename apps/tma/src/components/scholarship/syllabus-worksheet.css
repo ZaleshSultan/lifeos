@@ -168,3 +168,77 @@
   padding: 8px 14px;
   font-weight: 650;
 }
+
+.work-plan table {
+  width: 100%;
+  margin-top: 12px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-variant-numeric: tabular-nums;
+}
+.work-plan th,
+.work-plan td {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--lo-border);
+  vertical-align: middle;
+}
+.work-plan thead th {
+  color: var(--lifeos-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+.work-plan th:first-child {
+  text-align: left;
+  overflow-wrap: anywhere;
+  padding-right: 5px;
+}
+.work-plan th:nth-child(2),
+.work-plan td:nth-child(2) {
+  width: 65px;
+  padding-right: 12px;
+  text-align: right;
+}
+.work-plan th:last-child,
+.work-plan td:last-child {
+  width: 68px;
+  text-align: right;
+}
+.work-plan tbody th {
+  font-size: 14px;
+  font-weight: 600;
+}
+.work-plan small {
+  display: block;
+  color: var(--lifeos-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+.work-plan td strong {
+  color: var(--lifeos-accent);
+}
+.work-plan td strong.work-plan-pinned {
+  color: var(--lifeos-text);
+}
+.work-plan input {
+  background: var(--lifeos-bg);
+  border: 1px solid #39393f;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 8px;
+  color: var(--lifeos-text);
+  text-align: right;
+}
+.work-plan input[aria-invalid="true"] {
+  border-color: #e4af5b;
+}
+.work-plan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 16px;
+  margin-top: 5px;
+}
+.work-plan-actions button {
+  padding: 0;
+  background: transparent;
+  font-size: 13px;
+}

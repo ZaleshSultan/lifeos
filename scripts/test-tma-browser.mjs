@@ -531,14 +531,17 @@ try {
       exact: true,
     });
     const input = (label) => page.getByLabel(label, { exact: true });
-    const required = (expected) =>
-      page.waitForFunction((value) => {
-        const text = document.querySelector(
-          'output[aria-label="Нужный средний балл"]',
-        )?.textContent;
-        const first = text?.replace(",", ".").match(/\d+(?:\.\d+)?/);
-        return first && Number(first[0]) === value;
-      }, expected);
+    const required = (expected, label = "Нужный средний балл") =>
+      page.waitForFunction(
+        ({ value, label }) => {
+          const text = document.querySelector(
+            `output[aria-label="${CSS.escape(label)}"]`,
+          )?.textContent;
+          const first = text?.replace(",", ".").match(/\d+(?:\.\d+)?/);
+          return first && Number(first[0]) === value;
+        },
+        { value: expected, label },
+      );
     await test(`${width}px subject-specific syllabus and average needed for the target`, async () => {
       await page.goto(origin + "/tma/?screen=dashboard");
       await subject.selectOption({ label: "Operating Systems" });
@@ -564,6 +567,123 @@ try {
           .boundingBox();
         assert.ok(box && box.height >= 44 && box.width >= 44);
       }
+    });
+    await test(`${width}px per-work forecasts, remaining targets, and course isolation`, async () => {
+      const plan = page.getByRole("region", { name: "План по работам" });
+      const forecast = (label) =>
+        plan.getByLabel("Прогноз: " + label, { exact: true });
+      const reset = plan.getByRole("button", { name: "Сбросить прогнозы" });
+      const openIds = [
+        "assignment_6",
+        "assignment_7",
+        "assignment_8",
+        "final_exam",
+      ];
+      const checkTargets = async (ids, expected) => {
+        for (const id of ids) {
+          const result = plan.getByTestId("work-target-" + id);
+          await result.waitFor();
+          const match = (await result.innerText())
+            .replace(",", ".")
+            .match(/\d+(?:\.\d+)?/);
+          assert.equal(match ? Number(match[0]) : null, expected, id);
+        }
+      };
+      await plan.waitFor();
+      await checkTargets([...openIds, "endterm"], 63.91);
+      assert.equal(await forecast("Assignment 1").count(), 0);
+      assert.equal(await forecast("Midterm").count(), 0);
+      await forecast("Endterm").fill("80");
+      await required(62.25, "За остальные работы");
+      await checkTargets(openIds, 62.25);
+      await checkTargets(["endterm"], 80);
+      assert.match(
+        await page
+          .locator(".syllabus-totals div")
+          .filter({ hasText: "Набрано" })
+          .locator("dd")
+          .innerText(),
+        /^29[,.]1\s*\/\s*100$/,
+      );
+      assert.equal(await input("Endterm").inputValue(), "");
+      assert.equal(await input("Assignment 1").inputValue(), "80");
+      assert.equal(await input("Midterm").inputValue(), "85");
+      await noOverflow(page);
+      await mkdir(artifact + "/browser", { recursive: true });
+      await plan.evaluate((section) =>
+        section.scrollIntoView({ block: "start" }),
+      );
+      await page.screenshot({
+        path: artifact + `/browser/tma-scholarship-plan-${width}.png`,
+        animations: "disabled",
+      });
+      await subject.selectOption({ label: "Digital Logic Design" });
+      assert.equal(await forecast("Endterm").inputValue(), "");
+      await forecast("Endterm").fill("65");
+      await forecast("Assignment 1").fill("90");
+      t.data.records.push({
+        ...t.data.records[0],
+        id: "fixture-new-official-grade",
+        courseTitle: "Digital Logic Design",
+        title: "Assignment 1",
+        score: 37,
+        percentage: 37,
+      });
+      await page.reload();
+      await subject.selectOption({ label: "Operating Systems" });
+      await checkTargets(openIds, 62.25);
+      assert.equal(await forecast("Endterm").inputValue(), "80");
+      assert.equal(await input("Endterm").inputValue(), "");
+      await forecast("Endterm").fill("101");
+      assert.equal(
+        await forecast("Endterm").getAttribute("aria-invalid"),
+        "true",
+      );
+      await checkTargets(openIds, null);
+      await forecast("Endterm").fill("0");
+      await required(70.52, "За остальные работы");
+      await checkTargets(openIds, 70.52);
+      await forecast("Финальный экзамен").fill("0");
+      await plan.getByText(/с таким прогнозом цель недостижима/i).waitFor();
+      await checkTargets(
+        ["assignment_6", "assignment_7", "assignment_8"],
+        null,
+      );
+      assert.equal(await forecast("Финальный экзамен").inputValue(), "0");
+      assert.equal(await input("Финальный экзамен").inputValue(), "");
+      for (const number of [6, 7, 8]) {
+        await forecast("Assignment " + number).fill("50");
+      }
+      assert.match(
+        await page.getByLabel("Итог по прогнозу", { exact: true }).innerText(),
+        /^38[,.]1$/,
+      );
+      await reset.click();
+      await checkTargets([...openIds, "endterm"], 63.91);
+      assert.equal(await forecast("Endterm").inputValue(), "");
+      assert.equal(await forecast("Финальный экзамен").inputValue(), "");
+      await subject.selectOption({ label: "Digital Logic Design" });
+      assert.equal(await forecast("Endterm").inputValue(), "65");
+      assert.equal(
+        await forecast("Assignment 1").count(),
+        0,
+        "a newly imported grade supersedes the prior forecast",
+      );
+      assert.equal(
+        await input("Assignment 1").count(),
+        0,
+        "an imported grade is read-only",
+      );
+      const official = page
+        .locator(".syllabus-fixed")
+        .filter({ hasText: "Assignment 1" });
+      assert.equal(await official.locator("strong").innerText(), "37");
+      await subject.selectOption({ label: "Operating Systems" });
+      assert.equal(
+        t.saves(),
+        0,
+        "forecast edits and resets do not write to the API",
+      );
     });
     await test(`${width}px scholarship draft and conflict recovery`, async () => {
       await page.reload();
@@ -594,6 +714,7 @@ try {
       await page.locator('input[value="90"]').waitFor();
       assert.equal(await target.inputValue(), "90");
       await target.fill("85");
+      await input("Прогноз: Endterm").fill("80");
       t.holdNextSave();
       const response = page.waitForResponse(
         (r) =>
@@ -606,6 +727,11 @@ try {
       const body = (await sent).postDataJSON();
       assert.equal(body.config.target, 85);
       assert.equal(body.expectedConfig.target, 90);
+      assert.deepEqual(
+        body.config,
+        { ...body.expectedConfig, target: 85 },
+        "explicit save must not record the forecast as a grade",
+      );
       await nav.getByRole("button", { name: "Учёба", exact: true }).click();
       t.releaseSave();
       await response;
