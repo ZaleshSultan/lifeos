@@ -16,9 +16,9 @@ export function onboardingContentForState(state: TmaSessionState): {
   if (state === "unregistered") {
     return {
       title: "Добро пожаловать в LifeOS",
-      body: "Нажми /start в Telegram, чтобы создать заявку.",
+      body: "Отправь заявку, чтобы получить доступ.",
       detail:
-        "Можно также создать заявку прямо здесь, если Telegram открыл Mini App с валидной сессией.",
+        "Заявку также можно отправить командой /start в Telegram.",
     };
   }
 
@@ -26,7 +26,7 @@ export function onboardingContentForState(state: TmaSessionState): {
     return {
       title: "Заявка создана",
       body: "Ожидает подтверждения администратором.",
-      detail: "После approve здесь появятся интеграции.",
+      detail: "После одобрения откроется главная страница.",
     };
   }
 

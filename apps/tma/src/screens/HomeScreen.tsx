@@ -1,466 +1,325 @@
 import {
-  idealHumanDayNumber,
-  idealHumanLocalDate,
-} from "../../../../packages/core/src/ideal-human.js";
-import { ScholarshipDailySummary } from "../components/scholarship/ScholarshipDailySummary";
-import {
-  Activity,
-  CalendarClock,
+  ChevronRight,
   CloudSun,
   Dumbbell,
-  GraduationCap,
-  HeartPulse,
-  NotebookText,
-  PlugZap,
+  Plus,
   RefreshCw,
 } from "lucide-react";
+import { useState } from "react";
 import {
-  useAcademicQuery,
   useGenerateMonthlyReviewMutation,
   useHomeQuery,
   useMonthlyReviewQuery,
   useStartGoogleOAuthMutation,
 } from "../api/hooks";
-import { recoveryModeLabels, type TmaSessionStatus } from "../api/types";
+import { todayQueryKey, useTodayQuery } from "../api/planning";
+import { useQueryClient } from "@tanstack/react-query";
+import type { TmaSessionStatus } from "../api/types";
 import { ErrorPanel, LoadingPanel } from "../components/AsyncState";
-import { AcademicGrades } from "../components/AcademicGrades";
-import { IntegrationStatusCard } from "../components/IntegrationStatusCard";
-import { MetricTile } from "../components/MetricTile";
-import { ProgressRing } from "../components/ProgressRing";
-import { TodayPanel } from "../components/TodayPanel";
-import { formatDateTime } from "../lib/format";
+import { TodayPanel, formatPlanTime } from "../components/TodayPanel";
 import { integrationCardsForSession } from "../lib/session-status";
 
 interface HomeScreenProps {
   onOpenCapture?: () => void;
-  onOpenScholarship?: () => void;
   onOpenWorkout: () => void;
-  onOpenIdealHuman: () => void;
   onOpenDailyLife?: () => void;
-  onOpenStudy: () => void;
   onOpenAi: (date: string) => void;
   session: TmaSessionStatus;
 }
 
+const cardClass =
+  "rounded-[18px] border border-white/[0.08] bg-[#151517] px-4 py-3";
+const linkClass = "min-h-11 text-sm font-semibold text-[#89aaff]";
+
+function Agenda({
+  date,
+  onOpenAi,
+}: Pick<HomeScreenProps, "onOpenAi"> & { date: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const query = useTodayQuery(date);
+  if (!query.data) {
+    return query.isLoading ? (
+      <LoadingPanel title="Загружаем план дня…" />
+    ) : (
+      <ErrorPanel
+        title="Не удалось загрузить план дня"
+        onRetry={() => void query.refetch()}
+      />
+    );
+  }
+  const { plan, events, reminders } = query.data;
+  const now = Date.now();
+  const items = [
+    ...events.map((item) => ({ ...item, kind: "Событие" })),
+    ...plan.blocks.map((item) => ({ ...item, kind: "План" })),
+    ...reminders.map((item) => ({
+      title: item.title,
+      startsAt: item.remindAt,
+      endsAt: item.remindAt,
+      kind: "Напоминание",
+    })),
+  ]
+    .filter((item) => Date.parse(item.endsAt) >= now)
+    .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt))
+    .slice(0, 3);
+  return (
+    <section aria-label="План дня" className={cardClass}>
+      <h2 className="text-lg font-semibold text-white">Ближайшее</h2>
+      {items.length ? (
+        <ol className="mt-1 divide-y divide-white/[0.07]">
+          {items.map((item, i) => (
+            <li
+              key={i}
+              className="grid grid-cols-[3.4rem_minmax(0,1fr)] items-baseline gap-2 py-3"
+            >
+              <time
+                dateTime={item.startsAt}
+                className="text-sm font-semibold tabular-nums text-[#89aaff]"
+              >
+                {formatPlanTime(item.startsAt, plan.timezone)}
+              </time>
+              <div className="min-w-0">
+                <p className="break-words text-sm font-medium text-white">
+                  {item.title}
+                </p>
+                <p className="mt-0.5 text-xs text-zinc-400">{item.kind}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="py-3 text-sm text-zinc-400">
+          До конца дня ничего не запланировано.
+        </p>
+      )}
+      <details
+        onToggle={(event) => setExpanded(event.currentTarget.open)}
+        className="border-t border-white/[0.07]"
+      >
+        <summary className="min-h-11 cursor-pointer py-3 text-sm font-semibold text-[#89aaff]">
+          План и календарь
+        </summary>
+        {expanded && <TodayPanel date={date} onOpenAi={onOpenAi} />}
+      </details>
+    </section>
+  );
+}
+
+function MonthReview() {
+  const query = useMonthlyReviewQuery();
+  const generate = useGenerateMonthlyReviewMutation();
+  const latest = query.data?.latest;
+  const status = { draft: "Черновик", generated: "Готов", failed: "Ошибка" };
+  return (
+    <div className="space-y-2 pb-2">
+      {query.isLoading ? (
+        <p role="status" className="text-sm text-zinc-400">
+          Загружаем отчёт…
+        </p>
+      ) : query.isError ? (
+        <ErrorPanel
+          title="Не удалось загрузить отчёт"
+          onRetry={() => void query.refetch()}
+        />
+      ) : latest ? (
+        <>
+          <p className="text-sm font-semibold">
+            {latest.reportTitle || latest.periodMonth} · {status[latest.status]}
+          </p>
+          {latest.reportMarkdown && (
+            <p className="whitespace-pre-wrap break-words text-sm text-zinc-400">
+              {latest.reportMarkdown}
+            </p>
+          )}
+        </>
+      ) : (
+        <p className="text-sm text-zinc-400">Отчёта пока нет.</p>
+      )}
+      {generate.isError && (
+        <p role="alert" className="text-sm text-rose-300">
+          Не удалось сформировать отчёт. Попробуй ещё раз.
+        </p>
+      )}
+      <button
+        type="button"
+        disabled={generate.isPending}
+        onClick={() => generate.mutate()}
+        className={linkClass}
+      >
+        {generate.isPending
+          ? "Готовим отчёт…"
+          : "Сформировать отчёт за прошлый месяц"}
+      </button>
+    </div>
+  );
+}
+
+function Connections({ session }: Pick<HomeScreenProps, "session">) {
+  const google = useStartGoogleOAuthMutation();
+  const status = {
+    connected: "Подключено",
+    disconnected: "Нет связи",
+    disabled: "Выключено",
+    not_configured: "Не настроено",
+    error: "Ошибка",
+  };
+  return (
+    <ul className="divide-y divide-white/[0.07]">
+      {integrationCardsForSession(session).map((item) => (
+        <li
+          key={item.title}
+          className="flex min-h-11 flex-wrap items-center justify-between gap-x-3 py-1 text-sm"
+        >
+          <span>{item.title}</span>
+          {item.action === "connect_google" ? (
+            <button
+              className={linkClass}
+              type="button"
+              disabled={google.isPending}
+              onClick={() => google.mutate()}
+            >
+              {google.isPending ? "Открываем…" : "Подключить Google"}
+            </button>
+          ) : (
+            <span className="text-zinc-400">{status[item.status]}</span>
+          )}
+        </li>
+      ))}
+      {google.isError && (
+        <li role="alert" className="py-2 text-sm text-rose-300">
+          Не удалось подключить Google. Попробуй ещё раз.
+        </li>
+      )}
+    </ul>
+  );
+}
+
 export function HomeScreen({
   onOpenCapture,
-  onOpenScholarship,
   onOpenWorkout,
-  onOpenIdealHuman,
   onOpenDailyLife,
-  onOpenStudy,
   onOpenAi,
   session,
 }: HomeScreenProps) {
-  const idealHumanDay = idealHumanDayNumber(idealHumanLocalDate(new Date()));
   const query = useHomeQuery();
-  const academicQuery = useAcademicQuery();
-  const monthlyReviewQuery = useMonthlyReviewQuery();
-  const generateMonthlyReview = useGenerateMonthlyReviewMutation();
-  const startGoogleOAuth = useStartGoogleOAuthMutation();
-
-  if (query.isLoading) {
-    return <LoadingPanel title="Загружаем твой день…" />;
-  }
-
-  if (query.isError) {
-    return (
+  const client = useQueryClient();
+  const [monthOpen, setMonthOpen] = useState(false);
+  const [connectionsOpen, setConnectionsOpen] = useState(false);
+  if (!query.data)
+    return query.isLoading ? (
+      <LoadingPanel title="Загружаем твой день…" />
+    ) : (
       <ErrorPanel
-        detail={query.error.message}
-        onRetry={() => void query.refetch()}
         title="Не удалось загрузить главную"
-      />
-    );
-  }
-
-  if (!query.data) {
-    return (
-      <ErrorPanel
+        detail={query.error?.message}
         onRetry={() => void query.refetch()}
-        title="Данные главной пока недоступны"
       />
     );
-  }
-
   const home = query.data;
-  const academic = academicQuery.data;
-  const nextAcademicEvent = academic?.nextAcademicEvent;
-  const activeCourse = academic?.activeCourse;
-  const latestReview = monthlyReviewQuery.data?.latest;
-  const reviewStats = latestReview?.statsJson;
-  const financeStats =
-    typeof reviewStats?.finance === "object" && reviewStats.finance !== null
-      ? (reviewStats.finance as Record<string, unknown>)
-      : {};
-  const healthStats =
-    typeof reviewStats?.health === "object" && reviewStats.health !== null
-      ? (reviewStats.health as Record<string, unknown>)
-      : {};
-  const integrationCards = integrationCardsForSession(session);
-
+  const date = new Intl.DateTimeFormat("ru-RU", {
+    day: "numeric",
+    month: "long",
+    weekday: "long",
+    timeZone: "UTC",
+  }).format(new Date(home.localDate + "T12:00:00Z"));
   return (
-    <div className="space-y-4">
-      <section className="lo-today-hero rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
-        <div className="flex items-center gap-4">
-          <ProgressRing label="focus" value={home.focusScore ?? 0} />
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400">
-              {home.localDate}
-            </p>
-            <h2 className="mt-1 truncate text-[26px] font-semibold leading-tight tracking-tight text-white">
-              {home.displayName
-                ? `Привет, ${home.displayName}`
-                : "Твой день, твой ритм"}
-            </h2>
-            <div className="mt-3 inline-flex rounded-full border border-emerald-300/20 bg-emerald-300/[0.08] px-2.5 py-1 text-xs font-semibold text-emerald-200">
-              {home.modeLabel}
-            </div>
-          </div>
+    <div className="min-w-0 space-y-4">
+      <header className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-[27px] font-bold text-white">Сегодня</h1>
+          <p className="mt-1 text-sm text-zinc-400 first-letter:uppercase">
+            <time dateTime={home.localDate}>{date}</time>
+          </p>
         </div>
-      </section>
-
-      {onOpenCapture ? (
+        <button
+          type="button"
+          aria-label="Обновить обзор"
+          className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-white/10 text-zinc-300"
+          disabled={query.isFetching}
+          onClick={() => {
+            void query.refetch();
+            void client.invalidateQueries({
+              queryKey: [...todayQueryKey, home.localDate],
+            });
+          }}
+        >
+          <RefreshCw size={17} aria-hidden="true" />
+        </button>
+      </header>
+      {home.weather && (
+        <p className="flex flex-wrap items-center gap-x-2 text-sm text-zinc-400">
+          <CloudSun size={17} aria-hidden="true" />
+          <span className="min-w-0 break-words">
+            {home.weather.locationName}
+          </span>
+          {home.weather.temperatureC != null && (
+            <strong className="text-white">
+              {Math.round(home.weather.temperatureC)}°
+            </strong>
+          )}
+          <span>{home.weather.weatherLabel}</span>
+        </p>
+      )}
+      {onOpenCapture && (
         <button
           type="button"
           onClick={onOpenCapture}
-          className="flex min-h-14 w-full items-center gap-3 rounded-xl border border-cyan-300/25 bg-cyan-300/[0.06] p-4 text-left active:scale-[0.99]"
+          className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#a9c1ff] px-4 text-sm font-bold text-[#111725]"
         >
-          <NotebookText
-            className="h-5 w-5 shrink-0 text-cyan-200"
-            aria-hidden="true"
-          />
-          <span className="min-w-0">
-            <span className="block font-semibold text-white">
-              Записать мысль
-            </span>
-            <span className="mt-1 block text-xs leading-relaxed text-zinc-300">
-              Текст, идея или расшифровка. Сначала просмотр, затем только
-              выбранные действия.
-            </span>
-          </span>
+          <Plus size={18} aria-hidden="true" />
+          Записать мысль
         </button>
-      ) : null}
-      <TodayPanel date={home.localDate} onOpenAi={onOpenAi} />
-      {onOpenDailyLife ? (
-        <button
-          type="button"
-          className="w-full rounded-xl border border-cyan-400/20 bg-cyan-400/[0.04] p-4 text-left active:scale-[0.99]"
-          onClick={onOpenDailyLife}
-        >
-          <span className="block text-lg font-semibold text-white">
-            Обзор дня · вода · питание
-          </span>
-          <span className="mt-1 block text-xs text-zinc-400">
-            Факты и источники, утренний / вечерний обзор, быстрые записи и
-            уведомления по твоему выбору.
-          </span>
-        </button>
-      ) : null}
-
-      <button
-        type="button"
-        onClick={onOpenIdealHuman}
-        className="w-full rounded-xl border border-cyan-400/30 bg-cyan-400/[0.08] p-4 text-left shadow-panel active:scale-[0.99]"
-      >
-        <span className="block text-xs font-semibold uppercase tracking-[0.15em] text-cyan-300">
-          IDEAL HUMAN · 03.11 — 02.12
-        </span>
-        <span className="mt-1 block text-lg font-semibold text-white">
-          {idealHumanDay
-            ? `Ideal Human — Day ${idealHumanDay}/30`
-            : "Открыть дневник 30 дней"}
-        </span>
-        <span className="mt-1 block text-xs text-zinc-400">
-          Тело · интеллект · съёмка · честные итоги
-        </span>
-      </button>
-      {onOpenScholarship ? (
-        <ScholarshipDailySummary onOpen={onOpenScholarship} />
-      ) : null}
-
-      <section className="rounded-xl border border-cyan-400/15 bg-cyan-400/[0.05] p-4 shadow-panel">
-        <div className="flex items-start gap-3">
-          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-cyan-400/20 bg-cyan-400/10 text-cyan-300">
-            <CloudSun className="h-5 w-5" />
-          </div>
-          {home.weather ? (
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between gap-3">
-                <div className="truncate text-sm font-semibold text-white">
-                  {home.weather.locationName}
-                </div>
-                <div className="shrink-0 text-xl font-semibold text-white">
-                  {home.weather.temperatureC === null
-                    ? "—"
-                    : `${Math.round(home.weather.temperatureC)}°`}
-                </div>
-              </div>
-              <p className="mt-1 text-sm text-zinc-400">
-                {home.weather.weatherLabel}
-                {home.weather.minTemperatureC !== null &&
-                home.weather.maxTemperatureC !== null
-                  ? ` · ${Math.round(home.weather.minTemperatureC)}…${Math.round(home.weather.maxTemperatureC)}°`
-                  : ""}
-                {home.weather.precipitationProbabilityPercent !== null
-                  ? ` · осадки ${Math.round(home.weather.precipitationProbabilityPercent)}%`
-                  : ""}
-              </p>
-            </div>
-          ) : (
-            <div className="min-w-0 flex-1">
-              <div className="text-sm font-semibold text-white">Погода</div>
-              <p className="mt-1 text-xs leading-relaxed text-zinc-500">
-                Выбери город в боте командой /weather Astana — он будет
-                отдельным для каждого пользователя.
-              </p>
-            </div>
-          )}
-        </div>
-      </section>
-
-      <section className="grid grid-cols-3 gap-2">
-        <MetricTile
-          label="Здоровье"
-          tone="mint"
-          value={
-            home.healthCompletenessScore === null ||
-            home.healthCompletenessScore === undefined
-              ? "n/a"
-              : `${Math.round(home.healthCompletenessScore)}%`
-          }
-        />
-        <MetricTile label="Фокус" value={home.focusScore ?? "n/a"} />
-        <MetricTile
-          label="Синхр."
-          tone={home.pendingSyncCount ? "amber" : "mint"}
-          value={home.pendingSyncCount ?? 0}
-        />
-      </section>
-
-      <section className="space-y-2">
-        <div className="flex items-center gap-2 text-sm font-semibold text-white">
-          <PlugZap className="h-5 w-5 text-cyan-400" />
-          Integrations
-        </div>
-        {integrationCards.map((card) => (
-          <IntegrationStatusCard
-            actionBusy={
-              card.action === "connect_google" && startGoogleOAuth.isPending
-            }
-            actionLabel={
-              card.action === "connect_google" ? "Connect Google" : undefined
-            }
-            description={card.description}
-            key={card.title}
-            onAction={
-              card.action === "connect_google"
-                ? () => startGoogleOAuth.mutate()
-                : undefined
-            }
-            status={card.status}
-            title={card.title}
-          />
-        ))}
-      </section>
-
-      <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
-        <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
-          <NotebookText className="h-5 w-5 text-amber-300" />
-          Monthly Review
-        </div>
-        {monthlyReviewQuery.isLoading ? (
-          <p className="text-sm text-zinc-500">Loading monthly review.</p>
-        ) : monthlyReviewQuery.isError ? (
-          <p className="text-sm text-rose-300">
-            Monthly review unavailable: {monthlyReviewQuery.error.message}
-          </p>
-        ) : latestReview ? (
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-2">
-              <div className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2">
-                <div className="text-xs text-zinc-500">Month</div>
-                <div className="mt-1 text-sm font-semibold text-white">
-                  {latestReview.periodMonth}
-                </div>
-              </div>
-              <div className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2">
-                <div className="text-xs text-zinc-500">Status</div>
-                <div className="mt-1 text-sm font-semibold text-white">
-                  {latestReview.status}
-                </div>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="rounded-lg border border-emerald-400/20 bg-emerald-400/[0.08] px-3 py-2">
-                <div className="text-xs text-emerald-300">Net</div>
-                <div className="mt-1 text-sm font-semibold text-white">
-                  {typeof financeStats.netCashflow === "number"
-                    ? `${financeStats.netCashflow.toLocaleString("ru-RU")} KZT`
-                    : "n/a"}
-                </div>
-              </div>
-              <div className="rounded-lg border border-cyan-400/20 bg-cyan-400/[0.08] px-3 py-2">
-                <div className="text-xs text-cyan-300">Avg steps</div>
-                <div className="mt-1 text-sm font-semibold text-white">
-                  {typeof healthStats.avgSteps === "number"
-                    ? Math.round(healthStats.avgSteps)
-                    : "n/a"}
-                </div>
-              </div>
-            </div>
-            <p className="break-words text-xs text-zinc-500">
-              {latestReview.obsidianPath ?? "Obsidian path pending"}
-            </p>
-            {latestReview.generatedAt ? (
-              <p className="text-xs text-zinc-600">
-                {formatDateTime(latestReview.generatedAt)}
-              </p>
-            ) : null}
-          </div>
-        ) : (
-          <p className="text-sm text-zinc-500">No monthly review generated.</p>
-        )}
-        <button
-          className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-amber-300/30 bg-amber-300/10 px-4 text-sm font-semibold text-amber-100 disabled:opacity-60"
-          disabled={generateMonthlyReview.isPending}
-          onClick={() => generateMonthlyReview.mutate()}
-          type="button"
-        >
-          <NotebookText className="h-4 w-4" />
-          Generate previous month
-        </button>
-      </section>
-
-      <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
-        <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
-          <GraduationCap className="h-5 w-5 text-cyan-400" />
-          Academic
-        </div>
-        {academicQuery.isLoading ? (
-          <p className="text-sm text-zinc-500">Loading academic data.</p>
-        ) : academicQuery.isError ? (
-          <p className="text-sm text-rose-300">
-            Academic unavailable: {academicQuery.error.message}
-          </p>
-        ) : academic ? (
-          <div className="space-y-3">
-            <div className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2">
-              <div className="text-xs text-zinc-500">Current mode</div>
-              <div className="mt-1 text-sm font-semibold text-white">
-                {academic.currentMode.label}
-              </div>
-            </div>
-            {nextAcademicEvent ? (
-              <div className="rounded-lg border border-cyan-400/20 bg-cyan-400/[0.08] px-3 py-2">
-                <div className="flex items-center gap-2 text-xs font-semibold uppercase text-cyan-300">
-                  <CalendarClock className="h-3.5 w-3.5" />
-                  Next event
-                </div>
-                <div className="mt-1 text-sm font-semibold text-white">
-                  {nextAcademicEvent.title ?? nextAcademicEvent.eventType}
-                </div>
-                <div className="mt-0.5 text-xs text-zinc-400">
-                  {nextAcademicEvent.startsAt
-                    ? formatDateTime(nextAcademicEvent.startsAt)
-                    : nextAcademicEvent.dueAt
-                      ? formatDateTime(nextAcademicEvent.dueAt)
-                      : "Time pending"}
-                </div>
-              </div>
-            ) : (
-              <p className="text-sm text-zinc-500">
-                No upcoming academic events.
-              </p>
-            )}
-            {activeCourse ? (
-              <div className="rounded-lg border border-emerald-400/20 bg-emerald-400/[0.08] px-3 py-2">
-                <div className="text-xs text-emerald-300">Active course</div>
-                <div className="mt-1 text-sm font-semibold text-white">
-                  {activeCourse.title}
-                </div>
-              </div>
-            ) : null}
-            <button
-              className="min-h-11 w-full rounded-lg border border-cyan-400/25 bg-cyan-400/10 px-3 py-2 text-sm font-medium text-cyan-200 active:scale-[0.98]"
-              onClick={onOpenStudy}
-              type="button"
-            >
-              Расписание, калькулятор и оценки
-            </button>
-            <AcademicGrades records={academic.academicRecords} />
-          </div>
-        ) : (
-          <p className="text-sm text-zinc-500">Academic data is empty.</p>
-        )}
-      </section>
-
-      {home.activeWorkout ? (
-        <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
-          <div className="flex items-start gap-3">
-            <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-emerald-400/20 bg-emerald-400/[0.08] text-emerald-300">
-              <Dumbbell className="h-5 w-5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-lg font-semibold tracking-tight text-white">
-                {home.activeWorkout.title}
-              </div>
-              <p className="mt-1 text-sm text-zinc-500">
-                {formatDateTime(home.activeWorkout.startedAt)}
-              </p>
-            </div>
-          </div>
-          <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/[0.06]">
-            <div
-              className="h-full rounded-full bg-emerald-400"
-              style={{ width: `${home.activeWorkout.progressPercent}%` }}
-            />
-          </div>
-          <button
-            className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-emerald-300 px-4 text-sm font-semibold text-graphite-950 active:scale-[0.99]"
-            onClick={onOpenWorkout}
-            type="button"
-          >
-            <Dumbbell className="h-4 w-4" />
-            Open Workout
-          </button>
-        </section>
-      ) : (
-        <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
-          <div className="flex items-center gap-3 text-zinc-400">
-            <Activity className="h-5 w-5 text-cyan-400" />
-            <span className="text-sm">No active workout</span>
-          </div>
-        </section>
       )}
-
-      <button
-        className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.03] text-sm font-semibold text-zinc-200 active:scale-[0.99]"
-        onClick={() => {
-          void query.refetch();
-          void academicQuery.refetch();
-        }}
-        type="button"
-      >
-        <RefreshCw className="h-4 w-4" />
-        Refresh
-      </button>
-
-      <section className="grid grid-cols-2 gap-2">
-        <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-3 shadow-panel">
-          <HeartPulse className="h-5 w-5 text-emerald-400" />
-          <div className="mt-2 text-sm text-zinc-500">Health mode</div>
-          <div className="text-base font-semibold">
-            {recoveryModeLabels[home.recoveryMode]}
-          </div>
-        </div>
-        <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-3 shadow-panel">
-          <Activity className="h-5 w-5 text-cyan-400" />
-          <div className="mt-2 text-sm text-zinc-500">Focus score</div>
-          <div className="text-base font-semibold">
-            {home.focusScore ?? "n/a"}
-          </div>
-        </div>
-      </section>
+      <Agenda date={home.localDate} onOpenAi={onOpenAi} />
+      {home.activeWorkout && (
+        <button
+          type="button"
+          onClick={onOpenWorkout}
+          className={
+            cardClass + " flex min-h-14 w-full items-center gap-3 text-left"
+          }
+        >
+          <Dumbbell
+            size={20}
+            aria-hidden="true"
+            className="shrink-0 text-[#89aaff]"
+          />
+          <span className="min-w-0 flex-1">
+            <strong className="block break-words text-base">
+              {home.activeWorkout.title}
+            </strong>
+            <span className="text-sm text-zinc-400">
+              Продолжить тренировку · {home.activeWorkout.progressPercent}%
+            </span>
+          </span>
+          <ChevronRight size={18} aria-hidden="true" />
+        </button>
+      )}
+      <div className={cardClass + " divide-y divide-white/[0.07]"}>
+        {onOpenDailyLife && (
+          <button
+            type="button"
+            onClick={onOpenDailyLife}
+            className="flex min-h-11 w-full items-center justify-between text-sm font-semibold"
+          >
+            Дневник дня <ChevronRight size={16} aria-hidden="true" />
+          </button>
+        )}
+        <details onToggle={(event) => setMonthOpen(event.currentTarget.open)}>
+          <summary className="min-h-11 cursor-pointer py-3 text-sm font-semibold">
+            Итоги месяца
+          </summary>
+          {monthOpen && <MonthReview />}
+        </details>
+        <details
+          onToggle={(event) => setConnectionsOpen(event.currentTarget.open)}
+        >
+          <summary className="min-h-11 cursor-pointer py-3 text-sm font-semibold">
+            Подключённые сервисы
+          </summary>
+          {connectionsOpen && <Connections session={session} />}
+        </details>
+      </div>
     </div>
   );
 }

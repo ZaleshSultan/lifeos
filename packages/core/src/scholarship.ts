@@ -61,6 +61,7 @@ export interface ScholarshipCourseInput {
   title: string;
   code: string;
   calculator: StudyCalculatorState | null;
+  externalCourseKey?: string | null;
   scholarship?: ScholarshipConfig | null;
 }
 export interface ScholarshipWorkInput {
@@ -265,17 +266,75 @@ const stable = (value: number) => Math.round(value * 1e10) / 1e10;
 const required = (value: number) =>
   Math.max(0, Math.ceil(value * 100 - 1e-8) / 100);
 
+function selectCourseEvidence(
+  course: ScholarshipCourseInput,
+  records: StudyGradeEvidence[],
+) {
+  const linked = course.externalCourseKey?.startsWith("moodle:")
+    ? course.externalCourseKey
+    : null;
+  const visible = records.filter((record) => {
+    const raw = record.rawJson;
+    return (
+      !studyEvidenceIsMocked(record) &&
+      !(
+        raw &&
+        typeof raw === "object" &&
+        "_grade_visibility_unknown" in raw &&
+        raw._grade_visibility_unknown === true
+      )
+    );
+  });
+  const candidates = visible
+    .map((record) => {
+      const raw = record.rawJson;
+      const id =
+        raw && typeof raw === "object" && "moodle_course_id" in raw
+          ? raw.moodle_course_id
+          : null;
+      const key =
+        (typeof id === "string" && id.trim() !== "") ||
+        (typeof id === "number" && Number.isSafeInteger(id))
+          ? "moodle:" + String(id).trim()
+          : null;
+      return { record, key, title: normalizeStudyTitle(record.courseTitle) };
+    })
+    .filter(
+      ({ record, key }) =>
+        (linked !== null && key === linked) ||
+        studyEvidenceBelongsToCourse(record, course),
+    );
+
+  const knownTitles = new Set(
+    candidates.filter(({ key }) => key !== null).map(({ title }) => title),
+  );
+  const sources = new Set<string>();
+  for (const { key, title } of candidates) {
+    if (key !== null) sources.add(key);
+    else if (!knownTitles.has(title)) sources.add("title:" + title);
+  }
+  const ambiguous =
+    sources.size > 1 ||
+    (linked !== null &&
+      candidates.some(({ key }) => key !== null && key !== linked));
+  const own = candidates
+    .filter(({ key }) => {
+      if (linked && key !== null) return key === linked;
+      return !ambiguous;
+    })
+    .map(({ record }) => record);
+  const skipped =
+    ambiguous && candidates.some(({ key }) => !linked || key === null);
+  return { own, skipped };
+}
+
 function buildEvidence(
   course: ScholarshipCourseInput,
   state: StudyCalculatorState,
   config: ScholarshipConfig,
-  records: StudyGradeEvidence[],
+  { own, skipped }: ReturnType<typeof selectCourseEvidence>,
   work: ScholarshipWorkInput[],
 ) {
-  const own = records.filter(
-    (row) =>
-      studyEvidenceBelongsToCourse(row, course) && !studyEvidenceIsMocked(row),
-  );
   const activeBindings = Object.entries(config.bindings).filter(
     ([id, binding]) =>
       state.definition.fields.some(
@@ -290,6 +349,10 @@ function buildEvidence(
     ),
   );
   const warnings: string[] = [];
+  if (skipped)
+    warnings.push(
+      "Найдено несколько подходящих курсов Moodle. Оценки без однозначной привязки к предмету пропущены.",
+    );
   if (activeBindings.length !== Object.keys(config.bindings).length)
     warnings.push(
       "Устаревшие сопоставления или разбиение экзамена игнорируются. Проверьте настройки после изменения формулы.",
@@ -512,6 +575,89 @@ function buildEvidence(
   return { definition, rows, warnings };
 }
 
+/** Source components for an editable syllabus worksheet, before any forecast assumptions. */
+export function scholarshipSyllabusEvidence(
+  course: ScholarshipCourseInput,
+  records: StudyGradeEvidence[],
+) {
+  const state = resolveStudyCalculator(course);
+  if (!state) return null;
+  const config = course.scholarship ?? defaultScholarshipConfig(state.target);
+  if (!validateScholarshipConfig(config)) return null;
+  return buildEvidence(
+    course,
+    state,
+    config,
+    selectCourseEvidence(course, records),
+    [],
+  );
+}
+
+/** Only individual, explicit inputs count. Scenario defaults never supply missing grades. */
+export function calculateSyllabusMinimum(
+  evidence: NonNullable<ReturnType<typeof scholarshipSyllabusEvidence>>,
+  config: ScholarshipConfig,
+) {
+  const values = Object.fromEntries(
+    evidence.rows.map((row) => {
+      const overrides = config.scenarios.realistic.overrides;
+      const manual = Object.hasOwn(overrides, row.id)
+        ? overrides[row.id]
+        : Object.hasOwn(overrides, row.originalFieldId)
+          ? overrides[row.originalFieldId]
+          : config.useManualValues
+            ? row.manual
+            : null;
+      return [row.id, row.confirmed ?? manual];
+    }),
+  );
+  const target = config.target;
+  const state = { definition: evidence.definition, values, target };
+  // Reuse the course calculator's attestation checks and its unrounded scoring.
+  const plan = calculateStudyTargetPlan(state);
+  const remaining = evidence.rows.reduce(
+    (sum, row) => sum + (values[row.id] == null ? row.weightInFinal : 0),
+    0,
+  );
+  const stageMinima = (["att1", "att2"] as const).map((period) => {
+    const fields = evidence.definition.fields.filter(
+      (field) => field.period === period,
+    );
+    let earned = 0,
+      pendingWeight = 0;
+    for (const field of fields) {
+      const value = values[field.id];
+      if (value == null) pendingWeight += field.weightPercent;
+      else earned += (value * field.weightPercent) / 100;
+    }
+    const gap = Math.max(
+      0,
+      stable(evidence.definition.attestationThreshold - earned),
+    );
+    return {
+      period,
+      gap,
+      blocked: gap > pendingWeight + 1e-8,
+      needed: pendingWeight > 0 ? required((gap * 100) / pendingWeight) : null,
+    };
+  });
+  const gradeGap = Math.max(0, stable(target - plan.earnedFinalPoints));
+  // Meeting both stage floors also contributes to the course total. Never add that weight twice.
+  const shortfall = Math.max(
+    gradeGap,
+    stable(stageMinima.reduce((sum, stage) => sum + stage.gap * 0.3, 0)),
+  );
+  return {
+    ...plan,
+    values,
+    gradeGap,
+    shortfall,
+    stageMinima,
+    minimumAverage:
+      remaining > 0 ? required((shortfall * 100) / remaining) : null,
+  };
+}
+
 export function calculateScholarshipCourse(
   course: ScholarshipCourseInput,
   records: StudyGradeEvidence[],
@@ -560,11 +706,12 @@ export function calculateScholarshipCourse(
         "Нет подтверждённой схемы оценивания. Настройте формулу курса в калькуляторе.",
       ],
     };
+  const courseEvidence = selectCourseEvidence(course, records);
   const { definition, rows, warnings } = buildEvidence(
     course,
     state,
     config,
-    records,
+    courseEvidence,
     options.work ?? [],
   );
   const confirmedValues = Object.fromEntries(
@@ -575,9 +722,8 @@ export function calculateScholarshipCourse(
   const verified = calculateStudyScenario(confirmedState);
   const attestationChecks: ScholarshipCoursePlan["attestationChecks"] = [];
   for (const period of ["att1", "att2"] as const) {
-    const official = records.filter(
+    const official = courseEvidence.own.filter(
       (row) =>
-        studyEvidenceBelongsToCourse(row, course) &&
         studyEvidenceOfficialPeriod(row, course) === period &&
         studyEvidencePercent(row) !== null,
     );

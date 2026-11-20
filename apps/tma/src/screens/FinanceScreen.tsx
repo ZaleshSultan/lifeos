@@ -239,7 +239,7 @@ function BudgetCard({
               }}
               type="button"
             >
-              Save
+              Сохранить
             </button>
             <button
               className="rounded-lg border border-white/[0.08] px-3 py-2 text-sm text-zinc-300"
@@ -474,33 +474,18 @@ export function FinanceScreen() {
 
   return (
     <div className="space-y-4">
-      <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
-        <div className="flex items-start gap-3">
-          <div className="grid h-11 w-11 place-items-center rounded-lg border border-emerald-400/20 bg-emerald-400/[0.08] text-emerald-300">
-            <CircleDollarSign className="h-5 w-5" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="text-sm font-medium text-zinc-500">Ledger</div>
-            <h2 className="mt-1 text-[26px] font-semibold text-white">
-              Finance
-            </h2>
-          </div>
-          <button
-            aria-label="Refresh finance"
-            className="grid h-11 w-11 place-items-center rounded-lg border border-white/[0.08] bg-white/[0.03] text-zinc-300"
-            onClick={() => void query.refetch()}
-            type="button"
-          >
-            <RefreshCw className="h-4 w-4" />
-          </button>
-        </div>
-      </section>
+      <header className="lo-page-head">
+        <h1>Финансы</h1>
+        <button type="button" aria-label="Обновить" onClick={() => void query.refetch()}>
+          <RefreshCw size={18} aria-hidden="true" />
+        </button>
+      </header>
 
       <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
-        <div className="text-sm font-semibold text-white">Monthly summary</div>
+        <div className="text-sm font-semibold text-white">За месяц</div>
         <div className="mt-3 grid grid-cols-3 gap-2">
           <div>
-            <div className="text-[11px] text-zinc-500">Income</div>
+            <div className="text-[11px] text-zinc-500">Доходы</div>
             <div className="mt-1 text-sm font-semibold text-emerald-300">
               {money(finance.monthlySummary.income, finance.currency)}
             </div>
@@ -512,7 +497,7 @@ export function FinanceScreen() {
             </div>
           </div>
           <div>
-            <div className="text-[11px] text-zinc-500">Net</div>
+            <div className="text-[11px] text-zinc-500">Баланс</div>
             <div
               className={cx(
                 "mt-1 text-sm font-semibold",
@@ -527,49 +512,14 @@ export function FinanceScreen() {
         </div>
       </section>
 
-      <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
-        <div className="text-sm font-semibold text-white">Base currency</div>
-        <form className="mt-3 flex gap-2" onSubmit={handleSaveBaseCurrency}>
-          <select
-            className="min-w-0 flex-1 rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 text-sm text-white"
-            onChange={(event) => setSelectedCurrency(event.target.value)}
-            value={activeBaseCurrency}
-          >
-            {(["KZT", "USD", "EUR", "RUB"] as const).map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </select>
-          <button
-            className="rounded-lg border border-emerald-400/20 bg-emerald-400/[0.08] px-3 py-2 text-sm font-semibold text-emerald-200 disabled:opacity-50"
-            disabled={saveFinanceSettings.isPending}
-            type="submit"
-          >
-            Save
-          </button>
-        </form>
-        <div className="mt-3 flex items-center justify-between border-t border-white/[0.06] pt-3">
-          <span className="text-xs text-zinc-500">
-            Missing legacy base amounts?
-          </span>
-          <button
-            onClick={() => void backfill.mutateAsync()}
-            disabled={backfill.isPending}
-            className="text-xs font-semibold text-emerald-300 hover:text-emerald-200 disabled:opacity-50 transition-colors"
-            type="button"
-          >
-            {backfill.isPending ? "Backfilling..." : "Run backfill"}
-          </button>
-        </div>
-      </section>
+
 
       <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
         <div className="flex items-center justify-between gap-3">
-          <div className="text-sm font-semibold text-white">Receipt upload</div>
+          <div className="text-sm font-semibold text-white">Чеки</div>
           <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-cyan-400/20 bg-cyan-400/[0.08] px-3 py-2 text-xs font-semibold text-cyan-200">
             <Upload className="h-4 w-4" />
-            {uploadReceipt.isPending ? "Processing..." : "Upload photo"}
+            {uploadReceipt.isPending ? "Processing..." : "Загрузить фото"}
             <input
               accept="image/jpeg,image/png,image/webp,application/pdf"
               className="hidden"
@@ -617,9 +567,9 @@ export function FinanceScreen() {
       <section className="grid grid-cols-3 gap-2">
         {(
           [
-            ["Today", finance.today],
-            ["Week", finance.week],
-            ["Month", finance.month],
+            ["Сегодня", finance.today],
+            ["Неделя", finance.week],
+            ["Месяц", finance.month],
           ] as const
         ).map(([label, period]) => (
           <div
@@ -639,9 +589,11 @@ export function FinanceScreen() {
 
       <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
         <div className="flex items-center justify-between gap-3">
-          <div className="text-sm font-semibold text-white">Add expense</div>
+          <div className="text-sm font-semibold text-white">Новый расход</div>
           <button
             className="grid h-9 w-9 place-items-center rounded-lg border border-emerald-400/20 bg-emerald-400/[0.08] text-emerald-200"
+            aria-label={showExpenseForm ? "Свернуть форму расхода" : "Добавить расход"}
+            aria-expanded={showExpenseForm}
             onClick={() => setShowExpenseForm((value) => !value)}
             type="button"
           >
@@ -738,6 +690,44 @@ export function FinanceScreen() {
         </section>
       ) : null}
 
+      <details className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
+        <summary className="lo-disclosure">Валюта и пересчёт</summary>
+        <form className="mt-3 flex gap-2" onSubmit={handleSaveBaseCurrency}>
+          <select
+            className="min-w-0 flex-1 rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 text-sm text-white"
+            aria-label="Базовая валюта"
+            onChange={(event) => setSelectedCurrency(event.target.value)}
+            value={activeBaseCurrency}
+          >
+            {(["KZT", "USD", "EUR", "RUB"] as const).map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
+          </select>
+          <button
+            className="rounded-lg border border-emerald-400/20 bg-emerald-400/[0.08] px-3 py-2 text-sm font-semibold text-emerald-200 disabled:opacity-50"
+            disabled={saveFinanceSettings.isPending}
+            type="submit"
+          >
+            Сохранить
+          </button>
+        </form>
+        <div className="mt-3 flex items-center justify-between border-t border-white/[0.06] pt-3">
+          <span className="text-xs text-zinc-500">
+            Пересчитать старые суммы в базовой валюте?
+          </span>
+          <button
+            onClick={() => void backfill.mutateAsync()}
+            disabled={backfill.isPending}
+            className="text-xs font-semibold text-emerald-300 hover:text-emerald-200 disabled:opacity-50 transition-colors"
+            type="button"
+          >
+            {backfill.isPending ? "Backfilling..." : "Пересчитать"}
+          </button>
+        </div>
+      </details>
+
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-3">
           <div className="text-sm font-semibold text-white">
@@ -812,7 +802,7 @@ export function FinanceScreen() {
         <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
           <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-white">
             <Tags className="h-4 w-4 text-cyan-300" />
-            Top categories
+            По категориям
           </div>
           {finance.topCategories.map((item) => (
             <div
@@ -831,7 +821,7 @@ export function FinanceScreen() {
       {finance.recentExpenses.length ? (
         <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
           <div className="mb-2 text-sm font-semibold text-white">
-            Recent expenses
+            Последние расходы
           </div>
           {finance.recentExpenses.map((transaction) => (
             <TransactionRow key={transaction.id} transaction={transaction} />
@@ -1033,7 +1023,7 @@ function ReceiptReviewModal({
       <div className="relative w-full max-w-lg rounded-xl border border-white/[0.08] bg-zinc-900 p-5 shadow-2xl max-h-[90vh] overflow-y-auto space-y-4">
         {/* Header */}
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-semibold text-white">Review Receipt</h3>
+          <h3 className="text-base font-semibold text-white">Проверка чека</h3>
           <button
             onClick={onClose}
             className="grid h-8 w-8 place-items-center rounded-lg border border-white/[0.08] bg-white/[0.03] text-zinc-400 hover:text-white"

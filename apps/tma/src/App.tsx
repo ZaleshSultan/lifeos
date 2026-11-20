@@ -129,8 +129,8 @@ export default function App() {
   const [captureDirty, setCaptureDirty] = useState(false);
   const [academicDirty, setAcademicDirty] = useState(false);
   const setScreen = (next: ScreenId) => {
+    if (next === screen) return true;
     if (
-      next !== screen &&
       (((screen === "ideal-human" || screen === "daily-life") &&
         idealHumanDirty) ||
         (screen === "ai" && aiRouterDirty) ||
@@ -140,12 +140,14 @@ export default function App() {
         "Есть несохранённые изменения. Открыть другой раздел и отменить их?",
       )
     )
-      return;
+      return false;
     setIdealHumanDirty(false);
     setAiRouterDirty(false);
     setCaptureDirty(false);
     setAcademicDirty(false);
     setRawScreen(next);
+    window.scrollTo({ top: 0, behavior: "auto" });
+    return true;
   };
   const [aiDate, setAiDate] = useState<string>();
   const sessionQuery = useSessionQuery();
@@ -162,9 +164,8 @@ export default function App() {
         onScreenChange={setScreen}
         screen={screen}
         showNavigation={false}
-        statusLabel="Session"
       >
-        <LoadingPanel title="Loading session" />
+        <LoadingPanel title="Проверяем вход…" />
       </AppShell>
     );
   }
@@ -175,12 +176,11 @@ export default function App() {
         onScreenChange={setScreen}
         screen={screen}
         showNavigation={false}
-        statusLabel="Offline"
       >
         <ErrorPanel
           detail={apiErrorMessage(sessionQuery.error)}
           onRetry={() => void sessionQuery.refetch()}
-          title="Session unavailable"
+          title="Не удалось проверить вход"
         />
       </AppShell>
     );
@@ -192,11 +192,10 @@ export default function App() {
         onScreenChange={setScreen}
         screen={screen}
         showNavigation={false}
-        statusLabel="Session"
       >
         <ErrorPanel
           onRetry={() => void sessionQuery.refetch()}
-          title="Session returned no data"
+          title="Не удалось загрузить аккаунт"
         />
       </AppShell>
     );
@@ -208,7 +207,6 @@ export default function App() {
         onScreenChange={setScreen}
         screen={screen}
         showNavigation={false}
-        statusLabel={sessionQuery.data.state}
       >
         <OnboardingStatusScreen
           onRetry={() => void sessionQuery.refetch()}
@@ -229,11 +227,8 @@ export default function App() {
             {screen === "home" ? (
               <HomeScreen
                 onOpenCapture={() => setScreen("capture")}
-                onOpenScholarship={() => setScreen("dashboard")}
                 onOpenWorkout={() => setScreen("workout")}
-                onOpenIdealHuman={() => setScreen("ideal-human")}
                 onOpenDailyLife={() => setScreen("daily-life")}
-                onOpenStudy={() => setScreen("study")}
                 onOpenAi={(date) => {
                   setAiDate(date);
                   setScreen("ai");
@@ -277,7 +272,7 @@ export default function App() {
                 onOpenLms={() => setScreen("lms")}
                 onOpenCalculator={(courseId) => {
                   const url = new URL(window.location.href);
-                  url.searchParams.set("studyTab", "calculator");
+                  url.searchParams.set("studyTab", "syllabi");
                   url.searchParams.set("courseId", courseId);
                   window.history.replaceState(null, "", url);
                   setScreen("study");

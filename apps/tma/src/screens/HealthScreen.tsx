@@ -1,225 +1,174 @@
-import {
-  Activity,
-  Footprints,
-  HeartPulse,
-  Moon,
-  Watch,
-  Zap,
-} from "lucide-react";
 import { useHealthQuery } from "../api/hooks";
 import { ErrorPanel, LoadingPanel } from "../components/AsyncState";
-import { MetricTile } from "../components/MetricTile";
-import { ProgressRing } from "../components/ProgressRing";
 import { HealthBridgeConnection } from "../components/HealthBridgeConnection";
-import { formatMinutes } from "../lib/format";
+
+const card = "rounded-[18px] border border-white/[0.08] bg-[#151517] p-4";
+const label = "text-sm text-zinc-400";
+const numerals = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 });
+
+function measure(n: number | null | undefined, unit = "") {
+  return n == null ? "—" : [numerals.format(n), unit].filter(Boolean).join(" ");
+}
+function duration(minutes: number | null | undefined) {
+  if (minutes == null) return "—";
+  const rounded = Math.round(minutes);
+  const h = Math.floor(rounded / 60),
+    m = rounded % 60;
+  return [h ? h + " ч" : "", m || !h ? m + " мин" : ""]
+    .filter(Boolean)
+    .join(" ");
+}
+function Measures({ items }: { items: string[][] }) {
+  return (
+    <dl className="divide-y divide-white/[0.07]">
+      {items.map(([name, value]) => (
+        <div
+          key={name}
+          className="flex items-baseline justify-between gap-3 py-2.5"
+        >
+          <dt className={label}>{name}</dt>
+          <dd className="text-right text-sm font-semibold tabular-nums text-white">
+            {value}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
 
 export function HealthScreen() {
   const query = useHealthQuery();
-
-  if (query.isLoading) {
-    return <LoadingPanel title="Loading health" />;
-  }
-
-  if (query.isError) {
-    return (
+  if (!query.data)
+    return query.isLoading ? (
+      <LoadingPanel title="Загружаем показатели…" />
+    ) : (
       <ErrorPanel
-        detail={query.error.message}
+        title="Не удалось загрузить показатели здоровья"
+        detail={query.error?.message}
         onRetry={() => void query.refetch()}
-        title="Health unavailable"
       />
     );
-  }
-
-  if (!query.data) {
-    return (
-      <ErrorPanel
-        onRetry={() => void query.refetch()}
-        title="Health returned no data"
-      />
-    );
-  }
-
   const health = query.data;
+  const weekly = health.weekly;
+  const keyMetrics = [
+    ["Сон", duration(health.sleepMinutes)],
+    ["Шаги", measure(health.steps)],
+    ["Пульс в покое", measure(health.restingHeartRate, "уд/мин")],
+    ["Активная энергия", measure(health.activeEnergyKcal, "ккал")],
+    ["Средний пульс", measure(health.averageHeartRate, "уд/мин")],
+    ["Кислород в крови", measure(health.spo2Avg, "%")],
+    ["Тренировки", duration(health.workoutMinutes)],
+  ];
+  const missingNames: Record<string, string> = {
+    sleep: "сон",
+    steps: "шаги",
+    resting_heart_rate: "пульс в покое",
+    resting_hr: "пульс в покое",
+    sleep_minutes: "сон",
+    workout_minutes: "тренировки",
+    spo2: "кислород в крови",
+    active_energy_kcal: "активная энергия",
+    hrv: "вариабельность пульса",
+  };
   const missing = Object.entries(health.missingMetrics ?? {})
-    .filter(([, isMissing]) => isMissing)
-    .map(([name]) => name.replaceAll("_", " "));
-  const trends = health.trends ?? [];
-
+    .filter(([, v]) => v)
+    .map(([name]) => missingNames[name] ?? name.replaceAll("_", " "));
   return (
-    <div className="space-y-4">
-      <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
-        <div className="flex items-center gap-4">
-          <ProgressRing
-            label="data"
-            tone="mint"
-            value={health.dataCompletenessScore}
-          />
-          <div className="min-w-0 flex-1">
-            <p className="text-sm text-zinc-500">{health.date}</p>
-            <h2 className="mt-1 text-[26px] font-semibold leading-tight tracking-tight text-white">
-              Health
-            </h2>
-            <p className="mt-2 text-sm text-zinc-500">
-              {health.hasMetrics
-                ? (health.sourceLabel ?? "Health metrics")
-                : "No Xiaomi Watch data yet. Connect Mi Fitness -> Health Connect or use /health_log."}
-            </p>
-          </div>
+    <div className="min-w-0 space-y-4">
+      <header>
+        <h1 className="text-[27px] font-bold text-white">Здоровье</h1>
+        <p className={"mt-1 " + label}>
+          {[health.date, health.sourceLabel].filter(Boolean).join(" · ")}
+        </p>
+      </header>
+      <section className={card}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-lg font-semibold">За день</h2>
+          {health.hasMetrics && (
+            <span className="rounded-full bg-white/[0.06] px-2.5 py-1 text-xs text-zinc-300">
+              Полнота данных {measure(health.dataCompletenessScore, "%")}
+            </span>
+          )}
         </div>
+        {health.hasMetrics || keyMetrics.some(([, v]) => v !== "—") ? (
+          <Measures items={keyMetrics} />
+        ) : (
+          <p className={"mt-2 " + label}>
+            Пока нет записей за этот день. Подключи часы или добавь данные в
+            Telegram командой /health_log.
+          </p>
+        )}
       </section>
-
-      <HealthBridgeConnection />
-
-      {!health.hasMetrics ? (
-        <section className="rounded-xl border border-amber-400/20 bg-amber-400/[0.08] p-4 text-sm text-amber-100 shadow-panel">
-          No Xiaomi Watch data yet. Connect Mi Fitness -&gt; Health Connect or
-          use /health_log.
+      {weekly || health.trends?.length ? (
+        <section className={card}>
+          <h2 className="text-lg font-semibold">За неделю</h2>
+          {weekly && (
+            <Measures
+              items={[
+                ["Среднее количество шагов", measure(weekly.avgSteps)],
+                ["Средняя длительность сна", duration(weekly.avgSleepMinutes)],
+                [
+                  "Средний пульс в покое",
+                  measure(weekly.avgRestingHeartRate, "уд/мин"),
+                ],
+                ["Всего тренировок", duration(weekly.totalWorkoutMinutes)],
+              ]}
+            />
+          )}
+          {!!health.trends?.length && (
+            <details className="border-t border-white/[0.08]">
+              <summary className="min-h-11 cursor-pointer py-3 text-sm font-semibold text-[#89aaff]">
+                По дням
+              </summary>
+              <table className="w-full text-sm text-zinc-300">
+                <thead>
+                  <tr>
+                    <th scope="col" className="text-left">
+                      Дата
+                    </th>
+                    <th scope="col">Шаги</th>
+                    <th scope="col" className="text-right">
+                      Сон
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {health.trends.map((day) => (
+                    <tr key={day.date}>
+                      <th scope="row" className="py-1.5 text-left font-normal">
+                        {day.date}
+                      </th>
+                      <td className="text-center tabular-nums">
+                        {measure(day.steps)}
+                      </td>
+                      <td className="text-right tabular-nums">
+                        {duration(day.sleepMinutes)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </details>
+          )}
         </section>
       ) : null}
-
-      <section className="grid grid-cols-2 gap-2">
-        <MetricTile
-          label="Sleep"
-          tone="cyan"
-          value={formatMinutes(health.sleepMinutes)}
-        />
-        <MetricTile
-          label="Resting HR"
-          tone="mint"
-          value={
-            health.restingHeartRate != null ? `${health.restingHeartRate} bpm` : "n/a"
-          }
-        />
-        <MetricTile
-          label="Active kcal"
-          tone="rose"
-          value={
-            health.activeEnergyKcal != null ? `${health.activeEnergyKcal.toFixed(1)} kcal` : "n/a"
-          }
-        />
-        <MetricTile
-          label="Steps"
-          tone="amber"
-          value={health.steps?.toLocaleString() ?? "n/a"}
-        />
-        <MetricTile
-          label="Average HR"
-          tone="rose"
-          value={health.averageHeartRate != null ? `${Math.round(health.averageHeartRate)} bpm` : "n/a"}
-        />
-        <MetricTile
-          label="SpO₂"
-          tone="cyan"
-          value={health.spo2Avg != null ? `${health.spo2Avg.toFixed(1)}%` : "n/a"}
-        />
-      </section>
-
-      <section className="grid grid-cols-2 gap-2">
-        <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
-          <Moon className="h-5 w-5 text-cyan-400" />
-          <div className="mt-3 text-sm text-zinc-500">Sleep</div>
-          <div className="mt-1 text-xl font-semibold">
-            {formatMinutes(health.sleepMinutes)}
-          </div>
-        </div>
-        <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
-          <HeartPulse className="h-5 w-5 text-rose-400" />
-          <div className="mt-3 text-sm text-zinc-500">Resting HR</div>
-          <div className="mt-1 text-xl font-semibold">
-            {health.restingHeartRate ?? "n/a"}
-          </div>
-        </div>
-        <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
-          <Footprints className="h-5 w-5 text-amber-400" />
-          <div className="mt-3 text-sm text-zinc-500">Steps</div>
-          <div className="mt-1 text-xl font-semibold">
-            {health.steps?.toLocaleString() ?? "n/a"}
-          </div>
-        </div>
-        <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
-          <Zap className="h-5 w-5 text-emerald-400" />
-          <div className="mt-3 text-sm text-zinc-500">Workout</div>
-          <div className="mt-1 text-xl font-semibold">
-            {formatMinutes(health.workoutMinutes)}
-          </div>
-        </div>
-      </section>
-
-      <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
-        <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
-          <Activity className="h-5 w-5 text-emerald-400" />
-          7-day trends
-        </div>
-        <div className="grid grid-cols-2 gap-2 text-sm">
-          <div className="rounded-lg bg-white/[0.04] p-3">
-            <div className="text-zinc-500">Avg steps</div>
-            <div className="mt-1 font-semibold text-white">
-              {health.weekly?.avgSteps?.toLocaleString() ?? "n/a"}
-            </div>
-          </div>
-          <div className="rounded-lg bg-white/[0.04] p-3">
-            <div className="text-zinc-500">Avg sleep</div>
-            <div className="mt-1 font-semibold text-white">
-              {formatMinutes(health.weekly?.avgSleepMinutes)}
-            </div>
-          </div>
-          <div className="rounded-lg bg-white/[0.04] p-3">
-            <div className="text-zinc-500">Avg RHR</div>
-            <div className="mt-1 font-semibold text-white">
-              {health.weekly?.avgRestingHeartRate != null
-                ? `${health.weekly.avgRestingHeartRate} bpm`
-                : "n/a"}
-            </div>
-          </div>
-          <div className="rounded-lg bg-white/[0.04] p-3">
-            <div className="text-zinc-500">Workout total</div>
-            <div className="mt-1 font-semibold text-white">
-              {formatMinutes(health.weekly?.totalWorkoutMinutes)}
-            </div>
-          </div>
-        </div>
-        {trends.length ? (
-          <div className="mt-3 space-y-1">
-            {trends.map((day) => (
-              <div
-                className="grid grid-cols-[1fr_auto] rounded-lg bg-white/[0.02] px-3 py-2 text-xs"
-                key={day.date}
-              >
-                <span className="text-zinc-500">{day.date}</span>
-                <span className="text-zinc-300">
-                  {day.steps?.toLocaleString() ?? "n/a"} steps -{" "}
-                  {formatMinutes(day.sleepMinutes)}
-                </span>
-              </div>
-            ))}
-          </div>
-        ) : null}
-      </section>
-
-      <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
-        <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
-          <Watch className="h-5 w-5 text-cyan-400" />
-          Sources
-        </div>
-        <div className="space-y-2">
-          {(health.sources ?? []).map((source) => (
-            <div
-              className="flex items-center justify-between gap-3 rounded-lg bg-white/[0.03] px-3 py-2 text-sm"
-              key={source.source}
-            >
-              <span className="text-zinc-200">{source.label}</span>
-              <span className="text-xs text-zinc-500">
-                {source.latestMetricAt
-                  ? source.latestMetricAt.slice(0, 10)
-                  : "never"}
-              </span>
-            </div>
-          ))}
-        </div>
-        <div className="mt-3 text-xs text-zinc-500">
-          Missing: {missing.length ? missing.join(", ") : "none"}
-        </div>
-      </section>
+      <details className={card}>
+        <summary className="min-h-11 cursor-pointer py-3 text-sm font-semibold">
+          Источники и подключение часов
+        </summary>
+        {!!health.sources?.length && (
+          <Measures
+            items={health.sources.map((s) => [
+              s.label,
+              s.latestMetricAt?.slice(0, 10) ?? "Нет записей",
+            ])}
+          />
+        )}
+        {missing.length > 0 && (
+          <p className={"mb-3 " + label}>Нет данных: {missing.join(", ")}.</p>
+        )}
+        <HealthBridgeConnection />
+      </details>
     </div>
   );
 }

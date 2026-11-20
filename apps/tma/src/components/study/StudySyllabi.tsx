@@ -71,9 +71,9 @@ function periodWeight(fields: StudyCalculatorField[], period: EditablePeriod) {
     .reduce((sum, field) => sum + field.weightPercent, 0);
 }
 
-export function StudySyllabi({ courses }: { courses: StudyWorkspaceCourse[] }) {
+export function StudySyllabi({ courses, initialCourseId }: { courses: StudyWorkspaceCourse[]; initialCourseId?: string | null }) {
   const configure = useConfigureStudyCalculatorMutation();
-  const [courseId, setCourseId] = useState(courses[0]?.id ?? "");
+  const [courseId, setCourseId] = useState(initialCourseId ?? courses[0]?.id ?? "");
   const course = courses.find((item) => item.id === courseId) ?? courses[0];
   const [draft, setDraft] = useState<SyllabusDraft | null>(
     course ? draftForCourse(course) : null,

@@ -1,4 +1,4 @@
-import { Bell, CircleAlert, RefreshCw, Trash2 } from "lucide-react";
+import { CircleAlert, Plus, RefreshCw, X } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import {
   useCancelReminderMutation,
@@ -40,8 +40,16 @@ function metadataSource(reminder: ReminderRecord): string {
   if (source === "google_tasks") return "Google Tasks";
   if (source === "google_calendar") return "Google Calendar";
   if (source === "moodle_ics" || source === "personal_ics") return "ICS";
-  return "Manual";
+  return "Вручную";
 }
+
+const statuses: Record<ReminderRecord["status"], string> = {
+  pending: "Запланировано",
+  processing: "Отправляется",
+  sent: "Отправлено",
+  cancelled: "Отменено",
+  failed: "Ошибка",
+};
 
 function ReminderRow({
   cancelPending,
@@ -72,19 +80,19 @@ function ReminderRow({
                 statusClass(reminder.status),
               )}
             >
-              {reminder.status}
+              {statuses[reminder.status]}
             </span>
           </div>
         </div>
         {reminder.status === "pending" ? (
           <button
-            aria-label={`Cancel ${reminder.message}`}
-            className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-rose-400/20 bg-rose-400/[0.08] text-rose-300 disabled:opacity-50"
+            aria-label={`Отменить напоминание «${reminder.message}»`}
+            className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-rose-400/20 bg-rose-400/[0.08] text-rose-300 disabled:opacity-50"
             disabled={cancelPending}
             onClick={onCancel}
             type="button"
           >
-            <Trash2 className="h-4 w-4" />
+            <X aria-hidden="true" className="h-4 w-4" />
           </button>
         ) : null}
       </div>
@@ -96,16 +104,17 @@ export function RemindersScreen() {
   const query = useRemindersQuery();
   const createReminder = useCreateReminderMutation();
   const cancelReminder = useCancelReminderMutation();
+  const [editing, setEditing] = useState(false);
   const [message, setMessage] = useState("");
   const [reminderAt, setReminderAt] = useState(defaultReminderDateTime);
 
-  if (query.isLoading) return <LoadingPanel title="Loading reminders" />;
+  if (query.isLoading) return <LoadingPanel title="Загружаем напоминания…" />;
   if (query.isError) {
     return (
       <ErrorPanel
         detail={query.error.message}
         onRetry={() => void query.refetch()}
-        title="Reminders unavailable"
+        title="Не удалось загрузить напоминания"
       />
     );
   }
@@ -124,6 +133,7 @@ export function RemindersScreen() {
       },
       {
         onSuccess() {
+          setEditing(false);
           setMessage("");
           setReminderAt(defaultReminderDateTime());
         },
@@ -133,52 +143,67 @@ export function RemindersScreen() {
 
   return (
     <div className="space-y-4">
-      <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
-        <div className="flex items-start gap-3">
-          <div className="grid h-11 w-11 place-items-center rounded-lg border border-amber-400/20 bg-amber-400/[0.08] text-amber-300">
-            <Bell className="h-5 w-5" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="text-sm font-medium text-zinc-500">Schedule</div>
-            <h2 className="mt-1 text-[26px] font-semibold text-white">
-              Reminders
-            </h2>
-          </div>
-          <button
-            aria-label="Refresh reminders"
-            className="grid h-11 w-11 place-items-center rounded-lg border border-white/[0.08] bg-white/[0.03] text-zinc-300"
-            onClick={() => void query.refetch()}
-            type="button"
-          >
-            <RefreshCw className="h-4 w-4" />
-          </button>
-        </div>
-      </section>
+      <header className="flex items-center justify-between gap-2">
+        <h1 className="text-[27px] font-bold leading-tight">Напоминания</h1>
+        <button
+          aria-label="Обновить напоминания"
+          className="grid min-h-11 min-w-11 place-items-center rounded-xl border border-white/10 text-zinc-300"
+          onClick={() => void query.refetch()}
+          disabled={query.isFetching}
+          type="button"
+        >
+          <RefreshCw size={17} aria-hidden="true" />
+        </button>
+      </header>
 
-      <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
+      <button
+        type="button"
+        aria-expanded={editing}
+        aria-controls="reminder-form"
+        className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#a9c1ff] px-4 text-sm font-bold text-[#111725]"
+        onClick={() => setEditing((open) => !open)}
+      >
+        {editing ? (
+          <X size={18} aria-hidden="true" />
+        ) : (
+          <Plus size={18} aria-hidden="true" />
+        )}
+        {editing ? "Свернуть форму" : "Новое напоминание"}
+      </button>
+      <section
+        id="reminder-form"
+        hidden={!editing}
+        className="rounded-[18px] border border-white/[0.08] bg-[#151517] p-4"
+      >
         <form className="space-y-3" onSubmit={onSubmit}>
-          <input
-            className="min-h-12 w-full rounded-lg border border-white/[0.08] bg-black/20 px-3 text-sm font-semibold text-white"
-            onChange={(event) => setMessage(event.target.value)}
-            placeholder="Reminder message"
-            value={message}
-          />
-          <input
-            className="min-h-12 w-full rounded-lg border border-white/[0.08] bg-black/20 px-3 text-sm font-semibold text-white"
-            onChange={(event) => setReminderAt(event.target.value)}
-            type="datetime-local"
-            value={reminderAt}
-          />
+          <label className="block space-y-1">
+            <span className="text-sm text-zinc-400">О чём напомнить</span>
+            <input
+              className="min-h-12 w-full rounded-lg border border-white/[0.08] bg-black/20 px-3 text-sm font-semibold text-white"
+              onChange={(event) => setMessage(event.target.value)}
+              placeholder="Например, вернуть книгу"
+              value={message}
+            />
+          </label>
+          <label className="block space-y-1">
+            <span className="text-sm text-zinc-400">Дата и время</span>
+            <input
+              className="min-h-12 w-full rounded-lg border border-white/[0.08] bg-black/20 px-3 text-sm font-semibold text-white"
+              onChange={(event) => setReminderAt(event.target.value)}
+              type="datetime-local"
+              value={reminderAt}
+            />
+          </label>
           <button
-            className="min-h-12 w-full rounded-lg bg-amber-300 px-4 text-sm font-semibold text-graphite-950 disabled:opacity-60"
+            className="min-h-12 w-full rounded-lg bg-[#a9c1ff] px-4 text-sm font-semibold text-graphite-950 disabled:opacity-60"
             disabled={createDisabled}
             type="submit"
           >
-            Add reminder
+            {createReminder.isPending ? "Сохраняем…" : "Сохранить"}
           </button>
         </form>
         {createReminder.isError ? (
-          <div className="mt-3 flex gap-2 text-sm text-rose-300">
+          <div role="alert" className="mt-3 flex gap-2 text-sm text-rose-300">
             <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
             <span>{createReminder.error.message}</span>
           </div>
@@ -186,9 +211,7 @@ export function RemindersScreen() {
       </section>
 
       <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
-        <div className="mb-2 text-sm font-semibold text-white">
-          Next 10 reminders
-        </div>
+        <h2 className="mb-1 text-lg font-semibold text-white">Список</h2>
         {reminders.length ? (
           reminders.map((reminder) => (
             <ReminderRow
@@ -199,12 +222,10 @@ export function RemindersScreen() {
             />
           ))
         ) : (
-          <p className="py-3 text-sm text-zinc-500">
-            No upcoming reminders. Add one here or use /remind in Telegram.
-          </p>
+          <p className="py-3 text-sm text-zinc-500">Напоминаний пока нет.</p>
         )}
         {cancelReminder.isError ? (
-          <p className="mt-2 text-sm text-rose-300">
+          <p role="alert" className="mt-2 text-sm text-rose-300">
             {cancelReminder.error.message}
           </p>
         ) : null}

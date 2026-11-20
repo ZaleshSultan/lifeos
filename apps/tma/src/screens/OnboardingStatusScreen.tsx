@@ -51,9 +51,6 @@ export function OnboardingStatusScreen({
             <StateIcon state={session.state} />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-semibold uppercase tracking-widest text-zinc-500">
-              Account
-            </p>
             <h2 className="mt-1 text-[26px] font-semibold leading-tight tracking-tight text-white">
               {content.title}
             </h2>
@@ -64,15 +61,6 @@ export function OnboardingStatusScreen({
               {content.detail}
             </p>
           </div>
-        </div>
-
-        <div className="mt-4 flex flex-wrap gap-2">
-          <span className="rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-1 text-xs font-medium text-zinc-300">
-            {session.state}
-          </span>
-          <span className="rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-1 text-xs font-medium text-zinc-400">
-            Telegram {session.telegramUserId}
-          </span>
         </div>
 
         {session.state === "unregistered" ? (
@@ -93,20 +81,20 @@ export function OnboardingStatusScreen({
           type="button"
         >
           <RefreshCw className="h-4 w-4" />
-          Refresh status
+          Обновить статус
         </button>
       </section>
 
       {register.isError ? (
         <ErrorPanel
           detail={register.error.message}
-          title="Could not create request"
+          title="Не удалось отправить заявку"
         />
       ) : null}
 
       {session.state === "active" ? (
         <section className="space-y-2">
-          <div className="text-sm font-semibold text-white">Integrations</div>
+          <div className="text-sm font-semibold text-white">Интеграции</div>
           {cards.map((card) => (
             <IntegrationStatusCard
               description={card.description}

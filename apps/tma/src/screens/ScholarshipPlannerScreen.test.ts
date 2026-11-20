@@ -95,89 +95,147 @@ beforeEach(() => {
     reset: vi.fn(),
   });
 });
-describe("Scholarship dashboard regression", () => {
-  it("shows all five courses, editable scenarios, targets and remaining-work guidance", () => {
-    const html = render();
-    for (const p of syllabusProfiles) expect(html).toContain(p.title);
-    expect(html).toContain("Стипендия");
-    expect(html).toContain("С чего начать");
-    expect(html).toContain("Пессимистичный");
-    expect(html).toContain("Реалистичный");
-    expect(html).toContain("Оптимистичный");
-    for (const target of [70, 75, 80, 90])
-      expect(html).toContain(`value="${target}"`);
-    expect(html).toContain("Своё значение");
-    expect(html).toContain("Lecture Async");
-    expect(html).toContain("Cisco certificate");
-    expect(html).toContain("Assignment 8");
-    expect(html).toContain("Рубежный контроль");
-    expect(html).toContain("не гарантирует выплату");
-    expect(html).toContain("а не запись нулей");
-    expect(html).toContain("Индивидуальные допущения");
-    expect(html).toContain("два знака после запятой");
-  });
-  it("displays critical DBMS and OS examples with hypothetical ATT2 and exam requirements", () => {
-    const c = courses().filter((course) => ["dbms", "os"].includes(course.id));
-    c[0].scholarship!.scenarios.realistic.periodTotals.att2 = 80;
-    c[1].scholarship!.scenarios.realistic.periodTotals.att2 = 70;
-    data(c, [
-      grade(c[0], "ATT1", 72.1),
-      grade(c[0], "Final Exam", 61),
-      grade(c[1], "ATT1", 66.25),
-      grade(c[1], "Final Exam", 73),
-    ]);
-    const html = render();
-    expect(html).toContain("70,03");
-    expect(html).toContain("70,08");
-    expect(html).toContain("60,93");
-    expect(html).toContain("72,82");
-    expect(html).toContain("оценок гипотетические");
-  });
-  it("updates risk and the daily summary when verified grades change", () => {
-    const [c] = courses();
-    data([c], [grade(c, "Final Exam", 90)]);
-    expect(render()).toContain("Запас: 75,00+");
-    data([c], [grade(c, "Final Exam", 0)]);
-    const html = render();
-    expect(html).toContain("Порог математически недостижим");
-    expect(html).toContain("Даже все оставшиеся работы на 100");
-    const daily = renderToStaticMarkup(
-      createElement(ScholarshipDailySummary, { onOpen: vi.fn() }),
-    );
-    expect(daily).toContain("недостижимый порог: 1");
-    expect(daily).toContain("Как сохранить стипендию");
-  });
-  it("makes scholarship the default dashboard while retaining the academic overview", () => {
+describe("Scholarship syllabus worksheet", () => {
+  const answer = (html: string) =>
+    html.match(/<output[^>]*>([^<]+)<\/output>/)?.[1];
+  const os = () => courses().find((c) => c.id === "os")!;
+
+  it("opens the actual dashboard route on the worksheet and exposes the courses and syllabus source", () => {
     const html = renderToStaticMarkup(
       createElement(StudyDashboardScreen, props),
     );
-    expect(html).toContain("Обзор учёбы");
-    expect(html).toContain("Scholarship Survival Planner");
+    for (const p of syllabusProfiles) expect(html).toContain(p.title);
+    expect(html).toContain("Оценки и веса");
+    expect(html).toContain("Первая аттестация");
+    expect(answer(html)).toBe("70");
+    expect(html).not.toContain("Реалистичный");
+    expect(html).not.toContain("Учебные дашборды");
   });
-  it("handles no courses, unknown formulas and stale deadlines honestly", () => {
+
+  it("uses the actual OS stage weights with eight assignments, five scored at 80 and a midterm of 85", () => {
+    const course = os();
+    course.scholarship!.scenarios.realistic.overrides = {
+      assignment_1: 80,
+      assignment_2: 80,
+      assignment_3: 80,
+      assignment_4: 80,
+      assignment_5: 80,
+      midterm: 85,
+    };
+    data([course]);
+    const html = render();
+    expect(answer(html)).toBe("63,91");
+    expect(html).toContain("29,1");
+    expect(html).toContain("40,9");
+    expect(html).toContain("64");
+    expect(html).toContain("Assignment 8");
+    expect(html).toContain("Syllabus Operating Systems CS.pdf");
+  });
+
+  it("uses verified scores before saved hypotheses, keeps an unknown blank, and never imports hidden grades", () => {
+    const course = os();
+    course.externalCourseKey = "moodle:1";
+    course.scholarship!.scenarios.realistic.overrides.assignment_1 = 100;
+    data(
+      [course],
+      [
+        {
+          ...grade(course, "Assignment 1", 50),
+          rawJson: { moodle_course_id: 1 },
+        },
+        {
+          ...grade(course, "Assignment 2", 90),
+          rawJson: { _grade_visibility_unknown: true },
+        },
+        {
+          ...grade(course, "Assignment 3", 90),
+          rawJson: { moodle_course_id: "2" },
+        },
+      ],
+    );
+    expect(answer(render())).toBe("71,28"); // 3 points earned on 6% of final weight.
+  });
+
+  it("uses linked Moodle grades after a course rename, ignoring a same-named foreign course", () => {
+    const course = os();
+    course.title = "My systems course";
+    course.externalCourseKey = "moodle:42";
+    data(
+      [course],
+      [
+        {
+          ...grade(course, "Assignment 1", 50),
+          courseTitle: "Archived course name",
+          rawJson: { moodle_course_id: 42 },
+        },
+        {
+          ...grade(course, "Assignment 2", 100),
+          rawJson: { moodle_course_id: 43 },
+        },
+        grade(course, "Assignment 3", 100),
+      ],
+    );
+    expect(answer(render())).toBe("71,28");
+  });
+
+  it("keeps unlinked Moodle sections separate even when their assignment names do not overlap", () => {
+    const course = os();
+    const records = [
+      {
+        ...grade(course, "Assignment 1", 50),
+        courseTitle: course.title + " | A",
+        rawJson: { moodle_course_id: 10 },
+      },
+      {
+        ...grade(course, "Assignment 2", 100),
+        courseTitle: course.title + " | B",
+        rawJson: { moodle_course_id: 11 },
+      },
+    ];
+    data([course], records);
+    expect(answer(render())).toBe("70");
+    expect(render()).toContain("несколько подходящих курсов Moodle");
+    course.title += " | A";
+    data([course], records);
+    expect(answer(render())).toBe("71,28");
+  });
+
+  it("preserves unambiguous title-only grades from older imports", () => {
+    const course = os();
+    course.externalCourseKey = "moodle:42";
+    data([course], [grade(course, "Assignment 1", 50)]);
+    expect(answer(render())).toBe("71,28");
+  });
+
+  it("distinguishes an explicit zero, an impossible target and a completed target", () => {
+    const course = os();
+    data([course], [grade(course, "Final Exam", 0)]);
+    expect(answer(render())).toBe("Цель недостижима");
+    course.calculator!.values = Object.fromEntries(
+      course.calculator!.definition.fields.map((f) => [f.id, 100]),
+    );
+    data([course]);
+    expect(answer(render())).toBe("Цель достигнута");
+  });
+  it("keeps a linked entry point in the daily summary", () => {
+    expect(
+      renderToStaticMarkup(
+        createElement(ScholarshipDailySummary, { onOpen: vi.fn() }),
+      ),
+    ).toContain("стипенди");
+  });
+  it("handles missing courses and missing formulas without a made-up forecast", () => {
     data([]);
     expect(render()).toContain("Нет активных предметов");
-    data([
-      {
-        ...courses()[0],
-        code: "CUSTOM",
-        title: "Unconfigured course",
-        calculator: null,
-      },
-    ]);
-    expect(render()).toContain("Нет подтверждённой схемы оценивания");
-    mocks.work.mockReturnValue({ isError: true, refetch: vi.fn() });
-    expect(render()).toContain("Дедлайны могут быть неполными");
+    data([{ ...os(), code: "custom", title: "Other", calculator: null }]);
+    expect(render()).toContain("Нет схемы оценивания");
+    expect(answer(render())).toBeUndefined();
   });
-  it("exposes loading and failure states without inventing grades", () => {
+  it("exposes loading and failure states", () => {
     mocks.study.mockReturnValue({ isLoading: true });
-    expect(render()).toContain("Считаем план");
-    mocks.study.mockReturnValue({
-      isError: true,
-      error: new Error("read failed"),
-      refetch: vi.fn(),
-    });
-    expect(render()).toContain("Не удалось загрузить");
+    expect(render()).toContain("Загружаем оценки");
+    mocks.study.mockReturnValue({ isError: true, refetch: vi.fn() });
+    expect(render()).toContain("Не удалось загрузить предметы");
   });
 });
 

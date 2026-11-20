@@ -1,0 +1,170 @@
+.syllabus-page,
+.syllabus-form {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+.syllabus-select {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  color: #b6b6c1;
+}
+.syllabus-select select {
+  height: 46px;
+  width: 100%;
+  min-width: 0;
+  padding: 0 12px;
+  border: 1px solid var(--lo-border);
+  background-color: var(--lifeos-panel);
+  color: var(--lifeos-text);
+}
+.syllabus-card {
+  min-width: 0;
+  background: #151517;
+  border: 1px solid #28282d;
+  border-radius: 18px;
+  padding: 16px;
+}
+.syllabus-card h2,
+.syllabus-fields summary {
+  font-size: 17px;
+  font-weight: 700;
+}
+.syllabus-card summary {
+  cursor: pointer;
+  min-height: 44px;
+  align-content: center;
+}
+.syllabus-answer-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.syllabus-answer-head > div:first-child {
+  min-width: 0;
+}
+.syllabus-answer-head > fieldset {
+  max-width: 100px;
+  flex-shrink: 0;
+}
+.syllabus-answer-head p {
+  font-size: 14px;
+  color: #c8c8ce;
+}
+.syllabus-answer output {
+  display: block;
+  color: #a4baff;
+  font-size: clamp(34px, 9vw, 43px);
+  font-weight: 700;
+  letter-spacing: -0.045em;
+  line-height: 1.16;
+  overflow-wrap: anywhere;
+}
+.syllabus-answer output.syllabus-answer-text {
+  font-size: 22px;
+  letter-spacing: -0.02em;
+}
+.syllabus-caption,
+.syllabus-row small {
+  font-size: 12px;
+  color: #b1b1bb;
+}
+.syllabus-caption {
+  margin-top: 6px;
+}
+.syllabus-totals {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding-top: 12px;
+  margin-top: 14px;
+  border-top: 1px solid #303035;
+}
+.syllabus-totals dt {
+  font-size: 12px;
+  color: #b1b1bb;
+}
+.syllabus-totals dd {
+  font-size: 16px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.syllabus-period {
+  margin-top: 18px;
+}
+.syllabus-period h3 {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  color: #eeeef2;
+  font-weight: 650;
+}
+.syllabus-period h3 span {
+  border-radius: 20px;
+  background: #24242a;
+  padding: 3px 8px;
+  font-size: 11px;
+  white-space: nowrap;
+  color: #c5c5cf;
+}
+.syllabus-row {
+  padding: 9px 0;
+  border-bottom: 1px solid #29292d;
+}
+.syllabus-row > div,
+.syllabus-fixed {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 62px;
+  align-items: center;
+  gap: 8px;
+}
+.syllabus-row label,
+.syllabus-fixed span {
+  font-size: 14px;
+  overflow-wrap: anywhere;
+  color: #e4e4e8;
+}
+.syllabus-row input,
+.syllabus-answer input {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.syllabus-row input {
+  margin-top: 0;
+  padding-left: 5px;
+  padding-right: 8px;
+}
+.syllabus-row small {
+  display: block;
+  line-height: 1.4;
+  margin-top: 2px;
+}
+.syllabus-row [id$="-error"] {
+  grid-column: 1/-1;
+}
+.syllabus-fixed strong {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  padding-right: 8px;
+}
+.syllabus-form fieldset {
+  min-width: 0;
+}
+.syllabus-warning {
+  color: #f2bc68;
+  font-size: 13px;
+  margin-top: 8px;
+}
+.syllabus-save,
+.syllabus-card button,
+.syllabus-warning button {
+  min-height: 44px;
+  border-radius: 12px;
+  color: #b5c9ff;
+  background: #202638;
+  padding: 8px 14px;
+  font-weight: 650;
+}

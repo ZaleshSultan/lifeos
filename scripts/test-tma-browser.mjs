@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { readFile, mkdir } from "node:fs/promises";
-import { resolve, extname } from "node:path";
+import { resolve, extname, sep } from "node:path";
 const { chromium } = await import(
   process.env.LIFEOS_PLAYWRIGHT_MODULE || "playwright"
 );
@@ -31,7 +31,7 @@ const server = createServer(async (req, res) => {
     const path = decodeURIComponent(new URL(req.url, "http://local").pathname);
     const relative = path.replace(/^\/tma\/?/, "") || "index.html";
     const file = resolve(root, relative);
-    if (!file.startsWith(root + "/")) throw new Error("bad path");
+    if (!file.startsWith(root + sep)) throw new Error("bad path");
     const body = await readFile(file);
     res.setHeader(
       "Content-Type",
@@ -525,93 +525,107 @@ try {
   for (const width of [320, 390]) {
     const t = await setup(width);
     const { page } = t;
-    await test(`${width}px scholarship cards, DBMS reconciliation and no overflow`, async () => {
-      await page.goto(origin + "/tma/?screen=dashboard");
-      await page
-        .getByRole("heading", { name: "Стипендия", exact: true })
-        .waitFor();
-      for (const p of syllabusProfiles)
-        assert.equal(
-          await page
-            .getByRole("article", { name: p.title, exact: true })
-            .count(),
-          1,
-        );
-      assert.ok((await page.locator("main").innerText()).includes("72,10"));
-      const dbms = page.getByRole("article", {
-        name: syllabusProfiles[0].title,
-        exact: true,
-      });
-      assert.match(
-        await dbms.innerText(),
-        /официальный итог Moodle 72,10; по компонентам 72,10/,
-      );
-      const evidenceSummary = dbms.getByText(
-        "Подтверждённые оценки и допущения",
-        { exact: true },
-      );
-      await evidenceSummary.click();
-      const external = evidenceSummary
-        .locator("..")
-        .getByText("Assignment Lecture Async 1 · итог внешней платформы", {
-          exact: false,
-        });
-      await external.waitFor();
-      assert.ok((await external.locator("..").innerText()).includes("88,00"));
-      await evidenceSummary.click();
-      assert.ok(
-        (await page.locator("main").innerText()).includes(
-          "не гарантирует выплату",
-        ),
-      );
-      for (const label of [
-        "Сегодня",
-        "Стипендия",
-        "Учёба",
-        "AI",
-        "Другие разделы",
-      ]) {
-        const box = await page
-          .getByRole("navigation")
-          .getByRole("button", { name: label, exact: true })
-          .boundingBox();
-        assert.ok(box.height >= 44 && box.width >= 44);
-      }
-      await noOverflow(page);
+    const nav = page.getByRole("navigation", { name: "Разделы LifeOS" });
+    const subject = page.getByRole("combobox", {
+      name: "Предмет",
+      exact: true,
     });
-    await test(`${width}px scholarship input and refresh recovery`, async () => {
-      const card = page.getByRole("article", {
-        name: syllabusProfiles[0].title,
-        exact: true,
-      });
-      await card.getByText("Изменить сценарии и цель", { exact: true }).click();
-      await card
-        .getByLabel("Личная цель итоговой оценки", { exact: true })
-        .fill("85");
-      await page.waitForFunction(() =>
-        Object.keys(sessionStorage).some(
-          (k) =>
-            k.includes(":scholarship:") &&
-            sessionStorage[k].includes('"target":85'),
-        ),
+    const input = (label) => page.getByLabel(label, { exact: true });
+    const required = (expected) =>
+      page.waitForFunction((value) => {
+        const text = document.querySelector(
+          'output[aria-label="Нужный средний балл"]',
+        )?.textContent;
+        const first = text?.replace(",", ".").match(/\d+(?:\.\d+)?/);
+        return first && Number(first[0]) === value;
+      }, expected);
+    await test(`${width}px subject-specific syllabus and average needed for the target`, async () => {
+      await page.goto(origin + "/tma/?screen=dashboard");
+      await subject.selectOption({ label: "Operating Systems" });
+      await required(70);
+      if (!(await input("Assignment 1").isVisible())) {
+        await page
+          .locator("summary")
+          .filter({ hasText: "Оценки и веса" })
+          .click();
+      }
+      for (let i = 1; i <= 5; i++) await input("Assignment " + i).fill("80");
+      await input("Midterm").fill("85");
+      // 29.1 points secured; 64% outstanding. Round up so the target is met.
+      await required(63.91);
+      await input("Assignment 6").fill("0");
+      await required(70.52);
+      await input("Assignment 6").fill("");
+      await required(63.91);
+      await noOverflow(page);
+      for (const name of ["Сегодня", "Учёба", "Стипендия", "Другие разделы"]) {
+        const box = await nav
+          .getByRole("button", { name, exact: true })
+          .boundingBox();
+        assert.ok(box && box.height >= 44 && box.width >= 44);
+      }
+    });
+    await test(`${width}px scholarship draft and conflict recovery`, async () => {
+      await page.reload();
+      await subject.selectOption({ label: "Operating Systems" });
+      await required(63.91);
+      const target = input("Цель по предмету");
+      await target.fill("85");
+      assert.equal(t.saves(), 0);
+      const os = t.data.courses.find(
+        (course) => course.title === "Operating Systems",
+      );
+      os.scholarship = { ...os.scholarship, target: 90 };
+      await page.reload();
+      await subject.selectOption({ label: "Operating Systems" });
+      await page
+        .getByRole("alert")
+        .filter({ hasText: "План изменился в другой сессии" })
+        .waitFor();
+      assert.equal(await target.inputValue(), "85");
+      assert.ok(
+        await page
+          .getByRole("button", { name: "Сохранить расчёт" })
+          .isDisabled(),
+      );
+      await page
+        .getByRole("button", { name: "Загрузить сохранённый план" })
+        .click();
+      await page.locator('input[value="90"]').waitFor();
+      assert.equal(await target.inputValue(), "90");
+      await target.fill("85");
+      t.holdNextSave();
+      const response = page.waitForResponse(
+        (r) =>
+          r.url().endsWith("/scholarship") && r.request().method() === "PUT",
+      );
+      const sent = page.waitForRequest(
+        (r) => r.url().endsWith("/scholarship") && r.method() === "PUT",
+      );
+      await page.getByRole("button", { name: "Сохранить расчёт" }).click();
+      const body = (await sent).postDataJSON();
+      assert.equal(body.config.target, 85);
+      assert.equal(body.expectedConfig.target, 90);
+      await nav.getByRole("button", { name: "Учёба", exact: true }).click();
+      t.releaseSave();
+      await response;
+      await nav.getByRole("button", { name: "Стипендия", exact: true }).click();
+      await subject.selectOption({ label: "Operating Systems" });
+      assert.equal(await target.inputValue(), "85");
+      assert.equal(t.saves(), 1);
+      assert.equal(
+        await page
+          .getByText("План изменился в другой сессии.", { exact: false })
+          .count(),
+        0,
       );
       await noOverflow(page);
-      await page.reload();
-      await page
-        .getByRole("heading", { name: "Стипендия", exact: true })
-        .waitFor();
-      await card.getByText("Изменить сценарии и цель", { exact: true }).click();
-      assert.equal(
-        await card
-          .getByLabel("Личная цель итоговой оценки", { exact: true })
-          .inputValue(),
-        "85",
-      );
-      assert.equal(t.saves(), 0);
     });
     await test(`${width}px Study draft survives navigation and refresh`, async () => {
       await page.getByRole("button", { name: "Учёба", exact: true }).click();
-      await page.getByRole("tab", { name: "Калькулятор", exact: true }).click();
+      await page
+        .getByLabel("Разделы учёбы", { exact: true })
+        .selectOption("calculator");
       await page.locator('input[name="final_exam"]').fill("61");
       await page.waitForFunction(() =>
         Object.keys(sessionStorage).some(
@@ -629,21 +643,8 @@ try {
         .getByRole("heading", { name: "Стипендия", exact: true })
         .waitFor();
       assert.equal(new URL(page.url()).searchParams.get("screen"), "dashboard");
-      const card = page.getByRole("article", {
-        name: syllabusProfiles[0].title,
-        exact: true,
-      });
-      await card.getByText("Изменить сценарии и цель", { exact: true }).click();
-      assert.equal(
-        await card
-          .getByLabel("Личная цель итоговой оценки", { exact: true })
-          .inputValue(),
-        "85",
-      );
       await page.getByRole("button", { name: "Учёба", exact: true }).click();
-      await page
-        .getByRole("tab", { name: "Калькулятор", exact: true })
-        .waitFor();
+      await page.getByLabel("Разделы учёбы", { exact: true }).waitFor();
       assert.equal(
         await page.locator('input[name="final_exam"]').inputValue(),
         "61",
@@ -655,153 +656,38 @@ try {
         "61",
       );
     });
-    await test(`${width}px server conflicts preserve recovered drafts`, async () => {
-      await page
-        .getByRole("navigation")
-        .getByRole("button", { name: "Стипендия", exact: true })
+    await test(`${width}px grouped navigation and AI disabled state`, async () => {
+      await nav
+        .getByRole("button", { name: "Другие разделы", exact: true })
         .click();
-      await page
-        .getByRole("heading", { name: "Стипендия", exact: true })
+      const menu = page.getByRole("dialog", { name: "Ещё" });
+      for (const name of ["Дела", "Самочувствие", "Сервисы"]) {
+        await menu.getByRole("heading", { name, exact: true }).waitFor();
+      }
+      await menu
+        .getByRole("button", { name: "Здоровье", exact: true })
         .waitFor();
-      t.data.courses[0].scholarship.target = 90;
-      await page
-        .getByRole("button", { name: "Обновить оценки и прогноз", exact: true })
-        .click();
-      const card = page.getByRole("article", {
-        name: syllabusProfiles[0].title,
-        exact: true,
-      });
-      await card.getByText("Изменить сценарии и цель", { exact: true }).click();
-      await card
-        .getByText("Настройки изменились в другой сессии.", { exact: false })
-        .waitFor();
-      assert.equal(
-        await card
-          .getByLabel("Личная цель итоговой оценки", { exact: true })
-          .inputValue(),
-        "85",
-      );
-      assert.equal(
-        await card
-          .getByRole("button", {
-            name: "Сохранить три сценария и настройки",
-            exact: true,
-          })
-          .isDisabled(),
-        true,
-      );
-      assert.equal(t.saves(), 0);
       await noOverflow(page);
-    });
-    await test(`${width}px an in-flight save survives leaving the section without a false conflict`, async () => {
-      const card = page.getByRole("article", {
-        name: syllabusProfiles[0].title,
-        exact: true,
-      });
-      await card
-        .getByRole("button", {
-          name: "Принять сохранённые настройки",
-          exact: true,
-        })
+      await menu
+        .getByRole("button", { name: "AI-помощник", exact: true })
         .click();
-      await card
-        .getByLabel("Личная цель итоговой оценки", { exact: true })
-        .fill("85");
-      t.holdNextSave();
-      const response = page.waitForResponse(
-        (response) =>
-          response.url().endsWith("/scholarship") &&
-          response.request().method() === "PUT",
-      );
-      await card
-        .getByRole("button", {
-          name: "Сохранить три сценария и настройки",
-          exact: true,
-        })
-        .click();
-      await page
-        .getByRole("navigation")
-        .getByRole("button", { name: "Учёба", exact: true })
-        .click();
-      await page.getByRole("heading", { name: "Учёба", exact: true }).waitFor();
-      t.releaseSave();
-      await response;
-      await page
-        .getByRole("navigation")
-        .getByRole("button", { name: "Стипендия", exact: true })
-        .click();
-      await page
-        .getByRole("heading", { name: "Стипендия", exact: true })
-        .waitFor();
-      await card.getByText("Изменить сценарии и цель", { exact: true }).click();
-      assert.equal(
-        await card
-          .getByLabel("Личная цель итоговой оценки", { exact: true })
-          .inputValue(),
-        "85",
-      );
-      assert.equal(
-        await card
-          .getByRole("button", {
-            name: "Сохранить три сценария и настройки",
-            exact: true,
-          })
-          .isDisabled(),
-        false,
-      );
-      assert.equal(
-        await card
-          .getByText("Настройки изменились в другой сессии.", { exact: false })
-          .count(),
-        0,
-      );
-      assert.equal(t.saves(), 1);
-      await page.waitForFunction(
-        () =>
-          !Object.keys(sessionStorage).some((key) =>
-            key.includes(":scholarship:"),
-          ),
-      );
-      await noOverflow(page);
-    });
-    await test(`${width}px AI disabled and More navigation are usable`, async () => {
-      await page.getByRole("button", { name: "AI", exact: true }).click();
       await page
         .getByRole("heading", {
           name: "AI assistance unavailable",
           exact: true,
         })
         .waitFor();
-      await noOverflow(page);
-      await page
-        .getByRole("button", { name: "Другие разделы", exact: true })
-        .click();
-      assert.equal(
-        await page
-          .getByRole("button", { name: "Здоровье", exact: true })
-          .count(),
-        1,
-      );
+      assert.equal(await menu.count(), 0);
       await noOverflow(page);
       assert.deepEqual(t.errors, []);
     });
     await mkdir(artifact + "/browser", { recursive: true });
-    await page
-      .getByRole("navigation")
-      .getByRole("button", { name: "Стипендия", exact: true })
-      .click();
-    await page
-      .getByRole("heading", { name: "Стипендия", exact: true })
-      .waitFor();
+    await nav.getByRole("button", { name: "Стипендия", exact: true }).click();
+    await subject.selectOption({ label: "Operating Systems" });
     await page.screenshot({
       path: artifact + `/browser/tma-${width}.png`,
       fullPage: true,
     });
-    await page
-      .getByRole("article", { name: syllabusProfiles[0].title, exact: true })
-      .screenshot({
-        path: artifact + `/browser/tma-dbms-${width}.png`,
-      });
     await t.context.close();
   }
   for (const width of [320, 390]) {
@@ -1117,13 +1003,14 @@ try {
           }),
           study.click(),
         ]);
-        await page
-          .getByRole("heading", { name: "Учёба", exact: true })
-          .waitFor();
+        await page.getByLabel("Разделы учёбы", { exact: true }).waitFor();
         assert.equal(t.router.settings.spending.maxRequestCostMicros, 10_000);
         await page
-          .getByRole("navigation")
-          .getByRole("button", { name: "AI", exact: true })
+          .getByRole("button", { name: "Другие разделы", exact: true })
+          .click();
+        await page
+          .getByRole("dialog", { name: "Ещё" })
+          .getByRole("button", { name: "AI-помощник", exact: true })
           .click();
         await page.getByLabel("Your question", { exact: true }).waitFor();
         await openSettings();
@@ -1398,7 +1285,7 @@ try {
     [
       "scholarship service failure",
       { studyError: true },
-      "Сервис временно недоступен",
+      "Не удалось загрузить предметы",
     ],
   ])
     await test(name, async () => {
@@ -1428,7 +1315,7 @@ try {
         .waitFor();
       assert.equal(
         await t.page
-          .getByRole("button", { name: "Retry", exact: true })
+          .getByRole("button", { name: "Повторить", exact: true })
           .count(),
         1,
       );

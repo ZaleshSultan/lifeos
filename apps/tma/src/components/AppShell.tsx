@@ -1,204 +1,173 @@
 import {
   Activity,
   Bell,
+  BookOpen,
+  Calculator,
+  Crosshair,
   Dumbbell,
   HeartPulse,
-  Target,
   House,
   Inbox,
-  GraduationCap,
-  LayoutDashboard,
-  MoreHorizontal,
+  LayoutGrid,
+  ListChecks,
   PlugZap,
   Settings2,
   Sparkles,
   WalletCards,
+  X,
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import type { ScreenId } from "../types";
-import { cx } from "../lib/styles";
 
 interface AppShellProps {
   screen: ScreenId;
-  onScreenChange: (screen: ScreenId) => void;
+  onScreenChange: (screen: ScreenId) => boolean | void;
   children: ReactNode;
   showNavigation?: boolean;
-  statusLabel?: string;
 }
+type Destination = { id: ScreenId; label: string; icon: LucideIcon };
 
-type NavigationItem = { id: ScreenId; label: string; icon: LucideIcon };
-
-const primaryTabs: NavigationItem[] = [
+const primary: Destination[] = [
   { id: "home", label: "Сегодня", icon: House },
-  { id: "dashboard", label: "Стипендия", icon: LayoutDashboard },
-  { id: "study", label: "Учёба", icon: GraduationCap },
-  { id: "ai", label: "AI", icon: Sparkles },
+  { id: "study", label: "Учёба", icon: BookOpen },
+  { id: "dashboard", label: "Стипендия", icon: Calculator },
 ];
-
-const secondaryTabs: NavigationItem[] = [
-  { id: "capture", label: "Входящие", icon: Inbox },
-  { id: "daily-life", label: "День и вода", icon: Activity },
-  { id: "ideal-human", label: "Ideal Human", icon: Target },
-  { id: "health", label: "Здоровье", icon: HeartPulse },
-  { id: "workout", label: "Тренировки", icon: Dumbbell },
-  { id: "focus", label: "Фокус", icon: Activity },
-  { id: "finance", label: "Финансы", icon: WalletCards },
-  { id: "sources", label: "Интеграции", icon: PlugZap },
-  { id: "reminders", label: "Напоминания", icon: Bell },
-  { id: "mode", label: "Режим", icon: Settings2 },
+const groups: { title: string; items: Destination[] }[] = [
+  {
+    title: "Дела",
+    items: [
+      { id: "capture", label: "Входящие", icon: Inbox },
+      { id: "reminders", label: "Напоминания", icon: Bell },
+      { id: "focus", label: "Фокус", icon: Crosshair },
+      { id: "mode", label: "Режим", icon: Settings2 },
+    ],
+  },
+  {
+    title: "Самочувствие",
+    items: [
+      { id: "daily-life", label: "День и вода", icon: Activity },
+      { id: "ideal-human", label: "Привычки", icon: ListChecks },
+      { id: "health", label: "Здоровье", icon: HeartPulse },
+      { id: "workout", label: "Тренировки", icon: Dumbbell },
+    ],
+  },
+  {
+    title: "Сервисы",
+    items: [
+      { id: "ai", label: "AI-помощник", icon: Sparkles },
+      { id: "finance", label: "Финансы", icon: WalletCards },
+      { id: "sources", label: "Интеграции", icon: PlugZap },
+    ],
+  },
 ];
-
-const screenNames: Partial<Record<ScreenId, string>> = {
-  home: "Обзор дня",
-  capture: "Входящие · мысли и действия",
-  dashboard: "Стипендия",
-  study: "Учебный центр",
-  lms: "Подключение LMS",
-  ai: "AI-помощник",
-  workout: "Тренировки",
-  "ideal-human": "Ideal Human · 30 дней",
-  "daily-life": "Обзор · вода · питание",
-  health: "Здоровье",
-  focus: "Фокус",
-  finance: "Финансы",
-  sources: "Интеграции",
-  reminders: "Напоминания",
-  mode: "Режим",
-};
 
 export function AppShell({
   children,
   onScreenChange,
   screen,
   showNavigation = true,
-  statusLabel = "LifeOS",
 }: AppShellProps) {
-  const [moreOpen, setMoreOpen] = useState(false);
-  const selectScreen = (next: ScreenId) => {
-    onScreenChange(next);
-    setMoreOpen(false);
-    window.scrollTo({ top: 0, behavior: "auto" });
-  };
-  const activeGroup = screen === "lms" ? "study" : screen;
-  const moreSelected = secondaryTabs.some((item) => item.id === screen);
-
+  const menu = useRef<HTMLDialogElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const activePrimary = screen === "lms" ? "study" : screen;
+  const isSecondary = !primary.some((item) => item.id === activePrimary);
+  function navigate(id: ScreenId) {
+    if (onScreenChange(id) === false) return;
+    if (menu.current?.open) menu.current.close();
+    if (id === screen) window.scrollTo({ top: 0, behavior: "auto" });
+  }
   return (
-    <div className="lo-shell mx-auto flex min-h-screen w-full max-w-md flex-col">
-      <header className="lo-header safe-shell sticky top-0 z-20 px-5">
-        <div className="lo-header-inner flex items-center justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="lo-brand-mark" aria-hidden="true">
-              <Zap className="h-[19px] w-[19px]" strokeWidth={2.5} />
-            </div>
-            <div className="min-w-0">
-              <div className="lo-brand-wordmark">
-                lifeos<span className="lo-brand-dot">.</span>
-              </div>
-              <div className="lo-header-subtitle">
-                {screenNames[screen] ?? "Личная система"}
-              </div>
-            </div>
-          </div>
-          <div className="lo-header-status" aria-label={statusLabel}>
-            <span className="lo-status-light" aria-hidden="true" />
-            <span>{statusLabel === "LifeOS" ? "в сети" : statusLabel}</span>
-          </div>
+    <div className="lo-shell">
+      <header className="lo-header safe-shell">
+        <div className="lo-header-inner">
+          <span className="lo-brand">
+            <Zap size={16} strokeWidth={2} aria-hidden="true" />
+            LifeOS
+          </span>
         </div>
       </header>
-
-      <main id="lifeos-main" className="lo-content flex-1 px-4 pb-32 pt-5">
+      <main id="lifeos-main" className="lo-content">
         {children}
       </main>
-
-      {showNavigation ? (
-        <nav
-          aria-label="Разделы LifeOS"
-          onKeyDown={(event) => {
-            if (event.key === "Escape") setMoreOpen(false);
-          }}
-          className="lo-bottom-nav fixed inset-x-0 bottom-0 z-30"
-        >
-          {moreOpen ? (
-            <div
-              id="more-sections"
-              className="lo-more-panel"
-              aria-label="Другие разделы"
-            >
-              <div className="lo-more-heading">Другие разделы</div>
-              <div className="lo-more-grid">
-                {secondaryTabs.map(({ id, label, icon: Icon }) => (
-                  <button
-                    key={id}
-                    type="button"
-                    aria-current={screen === id ? "page" : undefined}
-                    className={cx(
-                      "lo-more-link",
-                      screen === id && "lo-more-link--active",
-                    )}
-                    onClick={() => selectScreen(id)}
-                  >
-                    <Icon
-                      className="h-[18px] w-[18px] shrink-0"
-                      aria-hidden="true"
-                    />
-                    <span>{label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
-          <div className="lo-nav-inner">
-            {primaryTabs.map(({ id, label, icon: Icon }) => {
-              const active = activeGroup === id;
-              return (
+      {showNavigation && (
+        <>
+          <nav aria-label="Разделы LifeOS" className="lo-bottom-nav">
+            <div className="lo-nav-inner">
+              {primary.map(({ id, label, icon: Icon }) => (
                 <button
                   key={id}
                   type="button"
-                  aria-label={label}
-                  aria-current={active ? "page" : undefined}
-                  className={cx(
-                    "lo-nav-item",
-                    active && "lo-nav-item--active",
-                    id === "ai" && "lo-nav-item--ai",
-                  )}
-                  onClick={() => selectScreen(id)}
+                  aria-current={activePrimary === id ? "page" : undefined}
+                  className="lo-nav-item"
+                  onClick={() => navigate(id)}
                 >
-                  <span className="lo-nav-icon">
-                    <Icon
-                      className="h-[21px] w-[21px]"
-                      strokeWidth={active ? 2.35 : 1.9}
-                      aria-hidden="true"
-                    />
-                  </span>
-                  <span className="lo-nav-label">{label}</span>
+                  <Icon size={20} aria-hidden="true" />
+                  <span>{label}</span>
                 </button>
-              );
-            })}
-            <button
-              type="button"
-              aria-label="Другие разделы"
-              aria-controls="more-sections"
-              aria-expanded={moreOpen}
-              className={cx(
-                "lo-nav-item",
-                (moreOpen || moreSelected) && "lo-nav-item--active",
-              )}
-              onClick={() => setMoreOpen((open) => !open)}
-            >
-              <span className="lo-nav-icon">
-                <MoreHorizontal
-                  className="h-[22px] w-[22px]"
-                  aria-hidden="true"
-                />
-              </span>
-              <span className="lo-nav-label">Ещё</span>
-            </button>
-          </div>
-        </nav>
-      ) : null}
+              ))}
+              <button
+                type="button"
+                className="lo-nav-item"
+                data-active={isSecondary || menuOpen}
+                aria-label="Другие разделы"
+                aria-controls="more-sections"
+                aria-haspopup="dialog"
+                aria-expanded={menuOpen}
+                onClick={() => {
+                  menu.current?.showModal();
+                  setMenuOpen(true);
+                }}
+              >
+                <LayoutGrid size={20} aria-hidden="true" />
+                <span>Ещё</span>
+              </button>
+            </div>
+          </nav>
+          <dialog
+            id="more-sections"
+            ref={menu}
+            className="lo-menu"
+            aria-labelledby="lo-menu-title"
+            onClose={() => setMenuOpen(false)}
+            onClick={(e) => {
+              if (e.target === e.currentTarget) menu.current?.close();
+            }}
+          >
+            <div className="lo-menu-body">
+              <div className="lo-menu-header">
+                <h2 id="lo-menu-title">Ещё</h2>
+                <button
+                  type="button"
+                  aria-label="Закрыть меню"
+                  onClick={() => menu.current?.close()}
+                >
+                  <X size={20} />
+                </button>
+              </div>
+              {groups.map((group) => (
+                <section key={group.title} aria-label={group.title}>
+                  <h3>{group.title}</h3>
+                  <div className="lo-menu-grid">
+                    {group.items.map(({ id, label, icon: Icon }) => (
+                      <button
+                        key={id}
+                        type="button"
+                        aria-current={screen === id ? "page" : undefined}
+                        onClick={() => navigate(id)}
+                      >
+                        <Icon size={17} aria-hidden="true" />
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
+          </dialog>
+        </>
+      )}
     </div>
   );
 }

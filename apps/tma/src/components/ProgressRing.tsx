@@ -5,7 +5,7 @@ interface ProgressRingProps {
 }
 
 const tones = {
-  cyan: "#22d3ee",
+  cyan: "#89aaff",
   mint: "#4ade80",
   amber: "#fbbf24",
 };
@@ -20,7 +20,7 @@ export function ProgressRing({
 
   return (
     <div
-      className="grid h-24 w-24 shrink-0 place-items-center rounded-full p-1 shadow-[0_0_36px_rgba(34,211,238,0.12)]"
+      className="grid h-24 w-24 shrink-0 place-items-center rounded-full p-1"
       style={{
         background: `conic-gradient(${accent} ${normalized}%, rgba(255,255,255,0.08) ${normalized}% 100%)`,
       }}

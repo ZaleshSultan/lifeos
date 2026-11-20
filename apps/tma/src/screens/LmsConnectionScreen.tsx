@@ -322,9 +322,6 @@ export function LmsConnectionScreen({ onBack }: { onBack: () => void }) {
           <LockKeyhole className="h-5 w-5 shrink-0 text-cyan-400" />
           Подключение AITU
         </h1>
-        <p className="mt-2 text-sm leading-relaxed text-zinc-400">
-          Оценки, задания и дедлайны из университета — в одном месте.
-        </p>
       </header>
       {query.isLoading ? (
         <LoadingPanel title="Проверяем состояние LMS…" />

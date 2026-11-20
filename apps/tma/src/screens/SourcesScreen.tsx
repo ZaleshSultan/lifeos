@@ -260,34 +260,17 @@ export function SourcesScreen() {
 
   return (
     <div className="space-y-4">
-      <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
-        <div className="flex items-start gap-3">
-          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-cyan-400/20 bg-cyan-400/[0.08] text-cyan-300">
-            <PlugZap className="h-5 w-5" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="text-sm font-medium text-zinc-500">
-              Integrations
-            </div>
-            <h2 className="mt-1 text-[26px] font-semibold leading-tight tracking-tight text-white">
-              Sources
-            </h2>
-          </div>
-          <button
-            aria-label="Refresh"
-            className="grid h-11 w-11 place-items-center rounded-lg border border-white/[0.08] bg-white/[0.03] text-zinc-300 active:scale-[0.98]"
-            onClick={() => void query.refetch()}
-            type="button"
-          >
-            <RefreshCw className="h-4 w-4" />
-          </button>
-        </div>
-      </section>
+      <header className="lo-page-head">
+        <h1>Интеграции</h1>
+        <button type="button" aria-label="Обновить" onClick={() => void query.refetch()}>
+          <RefreshCw size={18} aria-hidden="true" />
+        </button>
+      </header>
 
       <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
         <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-white">
           <CheckCircle2 className="h-5 w-5 text-emerald-400" />
-          Integrations
+          Подключения
         </div>
         {sourceRows(summary.sources).map((source) => (
           <SourceRow
@@ -305,21 +288,21 @@ export function SourcesScreen() {
       <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
         <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-white">
           <CalendarClock className="h-5 w-5 text-cyan-400" />
-          Schedule
+          Предстоящие события
         </div>
         {summary.sourceEvents.length ? (
           summary.sourceEvents.map((event) => (
             <EventRow event={event} key={event.id} />
           ))
         ) : (
-          <p className="mt-3 text-sm text-zinc-500">No upcoming events.</p>
+          <p className="mt-3 text-sm text-zinc-500">Ближайших событий нет.</p>
         )}
       </section>
 
       <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
         <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
           <Send className="h-5 w-5 text-cyan-400" />
-          Sync Runs
+          История синхронизации
         </div>
         {summary.syncRuns.length ? (
           <div className="space-y-2">
@@ -330,7 +313,7 @@ export function SourcesScreen() {
         ) : (
           <div className="flex items-center gap-2 text-sm text-zinc-500">
             <Clock3 className="h-4 w-4" />
-            No sync runs recorded.
+            Пока нет синхронизаций.
           </div>
         )}
       </section>

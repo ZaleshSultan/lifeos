@@ -7,7 +7,6 @@ import {
   Infinity,
   Percent,
   RotateCcw,
-  Settings2,
   SlidersHorizontal,
   Trash2,
 } from "lucide-react";
@@ -336,19 +335,15 @@ export function ModeScreen() {
 
   return (
     <div className="space-y-4">
+      <h1>Режим</h1>
       <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
         <div className="flex items-start gap-3">
-          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-cyan-400/20 bg-cyan-400/[0.08] text-cyan-300">
-            <Settings2 className="h-5 w-5" />
-          </div>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-1 text-xs font-medium capitalize text-zinc-300">
                 {current.source}
               </span>
-              <span className="rounded-full border border-cyan-400/20 bg-cyan-400/[0.08] px-2.5 py-1 text-xs font-medium text-cyan-300">
-                Current mode
-              </span>
+
             </div>
             <h2 className="mt-1 break-words text-[26px] font-semibold leading-tight tracking-tight text-white">
               {current.label}
@@ -365,42 +360,39 @@ export function ModeScreen() {
         </div>
       </section>
 
-      <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
-        <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
-          <BookOpenCheck className="h-5 w-5 text-cyan-400" />
-          Mode explanation
-        </div>
+      <details className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
+        <summary className="lo-disclosure">Что влияет на режим</summary>
         <p className="text-sm leading-relaxed text-zinc-300">
           {currentModeExplanation.explanation}
         </p>
         <div className="mt-3 grid gap-2">
           <div className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2">
-            <div className="text-xs text-zinc-500">Activates</div>
+            <div className="text-xs text-zinc-500">Условия включения</div>
             <div className="mt-1 text-sm font-semibold text-zinc-100">
               {currentModeExplanation.activates}
             </div>
           </div>
           <div className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2">
-            <div className="text-xs text-zinc-500">Priorities</div>
+            <div className="text-xs text-zinc-500">Приоритеты</div>
             <div className="mt-1 text-sm font-semibold text-zinc-100">
               {currentModeExplanation.priorities.join(", ")}
             </div>
           </div>
           {currentModeExplanation.avoid?.length ? (
             <div className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2">
-              <div className="text-xs text-zinc-500">Reduces</div>
+              <div className="text-xs text-zinc-500">Снижает</div>
               <div className="mt-1 text-sm font-semibold text-zinc-100">
                 {currentModeExplanation.avoid.join(", ")}
               </div>
             </div>
           ) : null}
         </div>
-      </section>
+      </details>
 
       <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
         <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
           <SlidersHorizontal className="h-5 w-5 text-cyan-400" />
-          Mode selector
+          Выбор режима
         </div>
         <div className="grid grid-cols-2 gap-2">
           {modeOptions.map((option) => {
@@ -425,11 +417,8 @@ export function ModeScreen() {
         </div>
       </section>
 
-      <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
-        <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
-          <CalendarDays className="h-5 w-5 text-cyan-400" />
-          Academic timeline
-        </div>
+      <details className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
+        <summary className="lo-disclosure">Учебный календарь</summary>
         {academicQuery.isLoading ? (
           <p className="text-sm text-zinc-500">Loading academic schedule.</p>
         ) : academicQuery.isError ? (
@@ -441,7 +430,7 @@ export function ModeScreen() {
             {academic.nextAcademicEvent ? (
               <div className="rounded-lg border border-cyan-400/20 bg-cyan-400/[0.08] px-3 py-3">
                 <div className="text-xs font-medium text-cyan-300">
-                  Next exam or deadline
+                  Ближайший экзамен или срок
                 </div>
                 <div className="mt-1 text-sm font-semibold text-white">
                   {academic.nextAcademicEvent.title ??
@@ -465,7 +454,7 @@ export function ModeScreen() {
 
             <div className="mt-4">
               <div className="mb-1 text-xs font-semibold uppercase text-zinc-500">
-                Finals
+                Экзамены
               </div>
               {academic.finals.length ? (
                 academic.finals.map((event) => (
@@ -494,13 +483,10 @@ export function ModeScreen() {
         ) : (
           <p className="text-sm text-zinc-500">Academic data is empty.</p>
         )}
-      </section>
+      </details>
 
-      <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
-        <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
-          <SlidersHorizontal className="h-5 w-5 text-cyan-400" />
-          Mode map
-        </div>
+      <details className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
+        <summary className="lo-disclosure">Карта режимов</summary>
         <div className="space-y-2">
           {modeOptions
             .filter((option): option is { value: LifeMode; label: string } => {
@@ -535,13 +521,13 @@ export function ModeScreen() {
               );
             })}
         </div>
-      </section>
+      </details>
 
       {selectedMode === "auto" ? null : (
         <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
           <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
             <Clock3 className="h-5 w-5 text-emerald-400" />
-            Duration selector
+            Срок действия
           </div>
           <div className="grid grid-cols-2 gap-2">
             {durationOptions.map((option) => {
@@ -597,7 +583,7 @@ export function ModeScreen() {
           type="button"
         >
           <Trash2 className="h-4 w-4" />
-          Clear Override
+          Восстановить автоматический режим
         </button>
       </section>
 
@@ -637,7 +623,7 @@ export function ModeScreen() {
 
         <div className="mt-4 grid grid-cols-2 gap-2">
           <div className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2">
-            <div className="text-xs text-zinc-500">Window</div>
+            <div className="text-xs text-zinc-500">Период</div>
             <div className="mt-1 text-sm font-semibold text-zinc-100">
               {courseQuery.isLoading
                 ? "Loading"
@@ -645,7 +631,7 @@ export function ModeScreen() {
             </div>
           </div>
           <div className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2">
-            <div className="text-xs text-zinc-500">Progress</div>
+            <div className="text-xs text-zinc-500">Прогресс</div>
             <div className="mt-1 text-sm font-semibold text-zinc-100">
               {course ? `${formatPercent(currentCourseProgress)}%` : "--"}
             </div>
@@ -663,7 +649,7 @@ export function ModeScreen() {
           <label className="min-w-0">
             <span className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-zinc-500">
               <BookOpenCheck className="h-4 w-4 text-emerald-400" />
-              Course progress
+              Прогресс курса
             </span>
             <input
               className="h-2 w-full appearance-none rounded-full bg-white/[0.08] accent-emerald-300"
@@ -679,7 +665,7 @@ export function ModeScreen() {
           <label>
             <span className="mb-2 flex items-center gap-1 text-xs font-semibold uppercase tracking-widest text-zinc-500">
               <Percent className="h-3.5 w-3.5" />
-              Value
+              Значение
             </span>
             <input
               className="h-10 w-full rounded-lg border border-white/[0.08] bg-black/20 px-2 text-center text-sm font-semibold text-white"
@@ -702,7 +688,7 @@ export function ModeScreen() {
           type="button"
         >
           <Check className="h-4 w-4" />
-          Save Progress
+          Сохранить прогресс
         </button>
 
         {courseQuery.isError ? (
@@ -720,7 +706,7 @@ export function ModeScreen() {
       <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-panel">
         <div className="flex items-center gap-2 text-sm font-semibold text-white">
           <RotateCcw className="h-5 w-5 text-cyan-400" />
-          Weights
+          Веса приоритетов
         </div>
         <div className="mt-3 grid grid-cols-2 gap-2">
           {topWeights.map(([key, value]) => (
