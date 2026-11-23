@@ -35,3 +35,4 @@ export * from "./capture-intelligence.js";
 export * from "./ai-provider-quota.js";
 export * from "./academic-concierge.js";
 export * from "./voice-command.js";
+export * from "./personal-workout.js";

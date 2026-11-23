@@ -313,6 +313,7 @@ export function tmaStore(events: string[] = []): LifeOSStore {
     async exchangeWebLoginToken() { return null; },
     async resolveWebSession() { return null; },
     async revokeWebSession() {},
+    personalTemplate: vi.fn(), startPersonalWorkout: vi.fn(), changePersonalWorkout: vi.fn(),
     async resolveTelegramUser() {
       return null;
     },
@@ -3660,7 +3661,7 @@ describe("bot server", () => {
     expect((await request({ reps: 7, weightKg: 40, restSeconds: 90 })).status).toBe(409);
     const history = await fetch(`http://127.0.0.1:${port}/api/tma/workout/history`);
     expect(history.status).toBe(200);
-    expect(store.getWorkoutHistory).toHaveBeenCalledWith("user-1");
+    expect(store.getWorkoutHistory).toHaveBeenCalledWith("user-1",0);
     await expect(history.json()).resolves.toMatchObject({ data: [{ volumeKg: 320 }] });
   });
 

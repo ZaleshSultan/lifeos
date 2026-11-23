@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkoutSession } from "../api/workout";
 
+vi.mock("../telegram", () => ({telegram:{initData:"",hapticImpact:vi.fn()}}));
 const state = vi.hoisted(() => ({
   session: null as WorkoutSession | null,
   pending: false,

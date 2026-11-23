@@ -1,3 +1,4 @@
+import { countedTotals } from "@lifeos/core/personal-workout";
 import type { WorkoutHistorySession, WorkoutSetInput } from "../api/workout";
 
 export interface SetDraft {
@@ -63,8 +64,10 @@ export function exerciseProgress(
   const key = name.trim().toLocaleLowerCase();
   return sessions
     .flatMap((session) => {
-      const sets = session.exercises
-        .filter((exercise) => exercise.name.trim().toLocaleLowerCase() === key)
+      const exercises = session.exercises.filter(
+        (exercise) => exercise.name.trim().toLocaleLowerCase() === key,
+      );
+      const sets = exercises
         .flatMap((exercise) => exercise.sets)
         .filter((set) => set.completed);
       if (!sets.length) return [];
@@ -77,11 +80,7 @@ export function exerciseProgress(
           date: session.startedAt,
           completedSets: sets.length,
           reps: sets.reduce((sum, set) => sum + (set.targetReps ?? 0), 0),
-          volumeKg: sets.reduce(
-            (sum, set) =>
-              sum + (set.targetReps ?? 0) * (set.targetWeightKg ?? 0),
-            0,
-          ),
+          volumeKg: countedTotals(exercises).volumeKg,
           maxWeightKg: weights.length ? Math.max(...weights) : null,
         },
       ];

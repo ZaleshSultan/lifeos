@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@lifeos/core": "workspace:*",
     "@tanstack/react-query": "^5.90.12",
     "@twa-dev/sdk": "^8.0.2",
     "clsx": "^2.1.1",

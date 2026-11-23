@@ -1,4 +1,10 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import type { LiftSnapshot, SetSnapshot } from "@lifeos/core";
 import { telegram } from "../telegram";
 import { request } from "./client";
 import { queryKeys } from "./hooks";
@@ -24,18 +30,23 @@ export interface WorkoutProgram {
 }
 
 export interface RecordedWorkoutSet extends WorkoutSet {
+  plan?: SetSnapshot;
   restSeconds: number | null;
 }
 
 export interface RecordedWorkoutExercise extends Omit<WorkoutExercise, "sets"> {
+  load?: LiftSnapshot;
   sets: RecordedWorkoutSet[];
 }
 
 export interface WorkoutSession extends Omit<CurrentWorkout, "exercises"> {
+  personalRevision?: number;
+  sessionNote?: string;
   exercises: RecordedWorkoutExercise[];
 }
 
 export interface WorkoutHistorySession extends WorkoutSession {
+  timezone?: string;
   endedAt: string;
   volumeKg: number;
 }
@@ -53,7 +64,10 @@ export const workoutApi = {
       method: "PUT",
       body: JSON.stringify(program),
     }),
-  history: () => request<WorkoutHistorySession[]>("/api/tma/workout/history"),
+  history: (offset = 0) =>
+    request<WorkoutHistorySession[]>(
+      "/api/tma/workout/history?offset=" + offset,
+    ),
   start: (programDayId?: string) =>
     request<WorkoutSession>("/api/tma/workout/start", {
       method: "POST",
@@ -96,9 +110,13 @@ export function useWorkoutProgramQuery() {
 }
 
 export function useWorkoutHistoryQuery(enabled = true) {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: workoutKeys.history,
-    queryFn: workoutApi.history,
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) => workoutApi.history(pageParam),
+    getNextPageParam: (last, pages) =>
+      last.length === 50 ? pages.length * 50 : undefined,
+    select: (data) => data.pages.flat(),
     enabled,
   });
 }
@@ -153,7 +171,14 @@ export function useWorkoutActions() {
       telegram.hapticImpact("medium");
     },
   });
-  return { start, set, finish };
+  function acceptPersonal(session: WorkoutSession) {
+    if (session.mode === "completed") {
+      client.setQueryData(queryKeys.workout, null);
+      void client.invalidateQueries({ queryKey: workoutKeys.history });
+    } else client.setQueryData(queryKeys.workout, session);
+    void client.invalidateQueries({ queryKey: queryKeys.home });
+  }
+  return { start, set, finish, acceptPersonal };
 }
 
 export function workoutErrorMessage(error: unknown): string {
@@ -164,6 +189,12 @@ export function workoutErrorMessage(error: unknown): string {
       error?: string;
       message?: string;
     };
+    if (body.error === "workout_conflict")
+      return "Запись изменилась. Загрузи актуальную версию перед новой правкой.";
+    if (body.error === "workout_empty")
+      return "Сначала отметь хотя бы один подход.";
+    if (body.error === "workout_set_limit")
+      return "Достигнут предел подходов в упражнении.";
     if (body.error?.includes("not_found"))
       return "Запись не найдена. Обнови экран.";
     if (body.error?.includes("completed") || body.error?.includes("closed"))

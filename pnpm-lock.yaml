@@ -58,6 +58,9 @@ importers:
 
   apps/tma:
     dependencies:
+      "@lifeos/core":
+        specifier: workspace:*
+        version: link:../../packages/core
       "@tanstack/react-query":
         specifier: ^5.90.12
         version: 5.100.10(react@19.2.6)

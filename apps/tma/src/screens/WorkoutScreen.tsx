@@ -15,6 +15,9 @@ import {
   type RecordedWorkoutSet,
   type WorkoutSetInput,
 } from "../api/workout";
+import { PersonalTemplateCard } from "../components/PersonalTemplate";
+import { PersonalSession, WorkoutTotals } from "../components/PersonalSession";
+import type { WorkoutSession } from "../api/workout";
 import { ErrorPanel, LoadingPanel } from "../components/AsyncState";
 import { WorkoutExerciseGif } from "../components/WorkoutExerciseGif";
 import { WorkoutHistory } from "../components/WorkoutHistory";
@@ -171,7 +174,8 @@ function RecordedSet({
   );
 }
 
-export function WorkoutScreen() {
+export function WorkoutScreen({ account }: { account?: number } = {}) {
+  const [receipt, setReceipt] = useState<WorkoutSession | null>(null);
   const [tab, setTab] = useState<"session" | "program" | "history">("session");
   const [dayId, setDayId] = useState("");
   const [finishConfirm, setFinishConfirm] = useState(false);
@@ -247,78 +251,111 @@ export function WorkoutScreen() {
           onRetry={() => void query.refetch()}
         />
       ) : !workout ? (
-        <section className={`${workoutPanelClass} space-y-4`}>
-          <div>
-            <Dumbbell className="mb-3 h-6 w-6 text-cyan-300" />
-            <h2 className="text-xl font-semibold">Начать тренировку</h2>
-            <p className="mt-2 text-sm text-zinc-400">
-              Выбери день своей программы. Фактические повторы, вес и отдых
-              можно менять во время тренировки.
-            </p>
-          </div>
-          {program.isLoading ? (
-            <LoadingPanel title="Загружаем программу" />
-          ) : program.isError ? (
-            <ErrorPanel
-              title="Не удалось загрузить программу"
-              detail={workoutErrorMessage(program.error)}
-              onRetry={() => void program.refetch()}
+        <>
+          {receipt && (
+            <section className={workoutPanelClass + " space-y-2"}>
+              <h2 className="font-semibold">Тренировка сохранена</h2>
+              <WorkoutTotals session={receipt} />
+              <button
+                className={workoutButtonClass}
+                onClick={() => setTab("history")}
+              >
+                Открыть историю
+              </button>
+            </section>
+          )}
+          {account !== undefined && (
+            <PersonalTemplateCard
+              account={account}
+              onStart={(s) => {
+                setReceipt(null);
+                actions.acceptPersonal(s);
+              }}
             />
-          ) : program.data ? (
-            <>
-              <label className="block space-y-2 text-sm text-zinc-300">
-                <span>{program.data.title}</span>
-                <select
-                  className={workoutInputClass}
-                  value={selectedDayId ?? ""}
-                  onChange={(event) => setDayId(event.target.value)}
+          )}
+          <section className={`${workoutPanelClass} space-y-4`}>
+            <div>
+              <Dumbbell className="mb-3 h-6 w-6 text-cyan-300" />
+              <h2 className="text-xl font-semibold">Начать тренировку</h2>
+              <p className="mt-2 text-sm text-zinc-400">
+                Выбери день своей программы. Фактические повторы, вес и отдых
+                можно менять во время тренировки.
+              </p>
+            </div>
+            {program.isLoading ? (
+              <LoadingPanel title="Загружаем программу" />
+            ) : program.isError ? (
+              <ErrorPanel
+                title="Не удалось загрузить программу"
+                detail={workoutErrorMessage(program.error)}
+                onRetry={() => void program.refetch()}
+              />
+            ) : program.data ? (
+              <>
+                <label className="block space-y-2 text-sm text-zinc-300">
+                  <span>{program.data.title}</span>
+                  <select
+                    className={workoutInputClass}
+                    value={selectedDayId ?? ""}
+                    onChange={(event) => setDayId(event.target.value)}
+                  >
+                    {program.data.days.map((day) => (
+                      <option key={day.id} value={day.id}>
+                        {day.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className={`${workoutButtonClass} w-full bg-cyan-300 text-graphite-950`}
+                  disabled={actions.start.isPending || !selectedDayId}
+                  onClick={() => actions.start.mutate(selectedDayId)}
                 >
-                  {program.data.days.map((day) => (
-                    <option key={day.id} value={day.id}>
-                      {day.title}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  {actions.start.isPending
+                    ? "Начинаем…"
+                    : "Начать выбранный день"}
+                </button>
+              </>
+            ) : (
               <button
                 type="button"
                 className={`${workoutButtonClass} w-full bg-cyan-300 text-graphite-950`}
-                disabled={actions.start.isPending || !selectedDayId}
-                onClick={() => actions.start.mutate(selectedDayId)}
+                onClick={() => setTab("program")}
               >
-                {actions.start.isPending
-                  ? "Начинаем…"
-                  : "Начать выбранный день"}
+                Создать свою программу
               </button>
-            </>
-          ) : (
+            )}
             <button
               type="button"
-              className={`${workoutButtonClass} w-full bg-cyan-300 text-graphite-950`}
-              onClick={() => setTab("program")}
+              className={`${workoutButtonClass} w-full`}
+              disabled={actions.start.isPending}
+              onClick={() => actions.start.mutate(undefined)}
             >
-              Создать свою программу
+              Начать стандартный план LifeOS
             </button>
-          )}
-          <button
-            type="button"
-            className={`${workoutButtonClass} w-full`}
-            disabled={actions.start.isPending}
-            onClick={() => actions.start.mutate(undefined)}
-          >
-            Начать стандартный план LifeOS
-          </button>
-          {actions.start.isError ? (
-            <p role="alert" className="text-sm text-rose-200">
-              {workoutErrorMessage(actions.start.error)}
-            </p>
-          ) : null}
-          {actions.finish.isSuccess ? (
-            <p role="status" className="text-sm text-emerald-200">
-              Тренировка сохранена в истории.
-            </p>
-          ) : null}
-        </section>
+            {actions.start.isError ? (
+              <p role="alert" className="text-sm text-rose-200">
+                {workoutErrorMessage(actions.start.error)}
+              </p>
+            ) : null}
+            {actions.finish.isSuccess ? (
+              <p role="status" className="text-sm text-emerald-200">
+                Тренировка сохранена в истории.
+              </p>
+            ) : null}
+          </section>
+        </>
+      ) : workout.personalRevision !== undefined && account !== undefined ? (
+        <PersonalSession
+          key={workout.id}
+          session={workout}
+          account={account}
+          onFinish={(s) => {
+            setReceipt(s);
+            actions.acceptPersonal(s);
+          }}
+        />
       ) : (
         <>
           <section className={workoutPanelClass}>

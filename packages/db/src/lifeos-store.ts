@@ -78,7 +78,13 @@ import {
   type IdealHumanDay,
   parseWorkoutProgram,
   parseWorkoutSet,
-  workoutVolumeKg,
+  fullBodyTemplate,
+  parsePersonalTemplate,
+  countedTotals,
+  type PersonalTemplate,
+  type DraftChange,
+  type LiftSnapshot,
+  type SetSnapshot,
   type WorkoutProgram,
   type WorkoutProgramSet,
 } from "@lifeos/core";
@@ -767,6 +773,7 @@ export interface FocusItemRecord extends FocusScoringItem {
 export type ModeAwareFocusItemRecord = ModeAwareFocusItem<FocusItemRecord>;
 
 export interface WorkoutSetSummary {
+  plan?: SetSnapshot;
   id: string;
   index: number;
   targetReps: number | null;
@@ -777,6 +784,7 @@ export interface WorkoutSetSummary {
 }
 
 export interface WorkoutExerciseSummary {
+  load?: LiftSnapshot;
   id: string;
   name: string;
   note: string | null;
@@ -785,6 +793,8 @@ export interface WorkoutExerciseSummary {
 }
 
 export interface CurrentWorkoutSummary {
+  personalRevision?: number;
+  sessionNote?: string;
   id: string;
   title: string;
   mode: string;
@@ -802,7 +812,7 @@ export interface WorkoutHistorySession extends CurrentWorkoutSummary {
 }
 
 export class WorkoutStateError extends Error {
-  constructor(public readonly code: "workout_not_found" | "workout_completed") {
+  constructor(public readonly code: "workout_not_found" | "workout_completed" | "workout_conflict" | "workout_empty" | "workout_set_limit") {
     super(code);
   }
 }
@@ -1520,9 +1530,25 @@ export interface LifeOSStore extends LmsSessionStore, WebSessionStore, HealthCre
   getIdealHumanDays?(userId: string): Promise<IdealHumanDay[]>;
   saveIdealHumanDay?(userId: string, day: IdealHumanDay, expectedRevision: number): Promise<IdealHumanDay>;
   clearIdealHumanReflection?(userId: string, date: string, expectedRevision: number): Promise<IdealHumanDay>;
+  personalTemplate(
+    userId: string,
+    edit?: PersonalTemplate,
+  ): Promise<PersonalTemplate>;
+  startPersonalWorkout(
+    userId: string,
+    id: string,
+  ): Promise<CurrentWorkoutSummary>;
+  changePersonalWorkout(
+    userId: string,
+    id: string,
+    revision: number,
+    requestId: string,
+    change: DraftChange,
+  ): Promise<CurrentWorkoutSummary>;
+
   getWorkoutProgram(userId: string): Promise<WorkoutProgram | null>;
   saveWorkoutProgram(userId: string, program: WorkoutProgram): Promise<WorkoutProgram>;
-  getWorkoutHistory(userId: string): Promise<WorkoutHistorySession[]>;
+  getWorkoutHistory(userId: string, offset?:number): Promise<WorkoutHistorySession[]>;
   updateWorkoutSet(input: {
     userId: string;
     setId: string;
@@ -4617,7 +4643,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
   }): Promise<WorkoutRecord> {
     const { data: existing, error: existingError } = await this.client
       .from("workouts")
-      .select("id, title, started_at")
+      .select("id, title, started_at, metadata")
       .eq("user_id", input.userId)
       .is("ended_at", null)
       .order("started_at", { ascending: false })
@@ -4629,7 +4655,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     }
 
     if (existing) {
-      await this.ensureDefaultWorkoutPlan(
+      if (jsonObject(existing.metadata).personalRevision == null) await this.ensureDefaultWorkoutPlan(
         input.userId,
         existing.id,
         input.lifeMode,
@@ -4791,6 +4817,62 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     return idealHumanStore(this.client).clearReflection(userId, date, expectedRevision);
   }
 
+  private personalError(error: { message: string }): never {
+    switch (error.message) {
+      case "workout_not_found":
+      case "workout_conflict":
+      case "workout_empty":
+      case "workout_set_limit":
+        throw new WorkoutStateError(error.message);
+      default:
+        throw new Error("Failed to persist personal workout", { cause: error });
+    }
+  }
+
+  async personalTemplate(userId: string, edit?: PersonalTemplate) {
+    const { data, error } = await this.client.rpc("personal_workout_template", {
+      p_user: userId,
+      p_exercises: (edit?.exercises ?? fullBodyTemplate()) as unknown as Json,
+      ...(edit ? { p_revision: edit.revision } : {}),
+    });
+    if (error) this.personalError(error);
+    return parsePersonalTemplate(data);
+  }
+
+  private async requireWorkout(userId: string, workoutId: string) {
+    const result = await this.getCurrentWorkout({ userId, workoutId });
+    if (!result) throw new WorkoutStateError("workout_not_found");
+    return result;
+  }
+
+  async startPersonalWorkout(userId: string, id: string) {
+    await this.personalTemplate(userId);
+    const { data, error } = await this.client.rpc("start_personal_workout", {
+      p_user: userId,
+      p_id: id,
+    });
+    if (error) this.personalError(error);
+    return this.requireWorkout(userId, data);
+  }
+
+  async changePersonalWorkout(
+    userId: string,
+    id: string,
+    revision: number,
+    requestId: string,
+    change: DraftChange,
+  ) {
+    const { error } = await this.client.rpc("change_personal_workout", {
+      p_user: userId,
+      p_id: id,
+      p_revision: revision,
+      p_request: requestId,
+      p_change: change as unknown as Json,
+    });
+    if (error) this.personalError(error);
+    return this.requireWorkout(userId, id);
+  }
+
   async getWorkoutProgram(userId: string): Promise<WorkoutProgram | null> {
     const { data, error } = await this.client.from("user_settings")
       .select("settings").eq("user_id", userId).maybeSingle();
@@ -4812,10 +4894,10 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     return parsed;
   }
 
-  async getWorkoutHistory(userId: string): Promise<WorkoutHistorySession[]> {
+  async getWorkoutHistory(userId: string, offset=0): Promise<WorkoutHistorySession[]> {
     const { data, error } = await this.client.from("workouts").select("*")
       .eq("user_id", userId).not("ended_at", "is", null)
-      .order("ended_at", { ascending: false }).limit(50);
+      .order("ended_at", { ascending: false }).order("id",{ascending:false}).range(offset,offset+49);
     if (error) throwSupabaseError(error, "Failed to load workout history");
     if (data.length === 0) return [];
     const sets: WorkoutSetRow[] = [];
@@ -4835,7 +4917,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       return {
         ...summary,
         endedAt: row.ended_at!,
-        volumeKg: workoutVolumeKg(summary.exercises.flatMap((exercise) => exercise.sets)),
+        volumeKg: countedTotals(summary.exercises).volumeKg,
       };
     });
   }
@@ -4846,10 +4928,11 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     if (setError) throwSupabaseError(setError, "Failed to load workout set");
     if (!set) throw new WorkoutStateError("workout_not_found");
     const { data: workout, error } = await this.client.from("workouts")
-      .select("id, ended_at").eq("user_id", userId).eq("id", set.workout_id).maybeSingle();
+      .select("id, ended_at, metadata").eq("user_id", userId).eq("id", set.workout_id).maybeSingle();
     if (error) throwSupabaseError(error, "Failed to load workout for editing");
     if (!workout) throw new WorkoutStateError("workout_not_found");
     if (workout.ended_at) throw new WorkoutStateError("workout_completed");
+    if (jsonObject(workout.metadata).personalRevision != null) throw new WorkoutStateError("workout_conflict");
     return workout.id;
   }
 
@@ -4941,7 +5024,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
   }): Promise<CurrentWorkoutSummary> {
     const { data: existing, error: existingError } = await this.client
       .from("workouts")
-      .select("id, started_at, ended_at")
+      .select("id, started_at, ended_at, metadata")
       .eq("user_id", input.userId)
       .eq("id", input.workoutId)
       .maybeSingle();
@@ -4955,6 +5038,10 @@ export class SupabaseLifeOSStore implements LifeOSStore {
 
     if (!existing) throw new WorkoutStateError("workout_not_found");
 
+    if (jsonObject(existing.metadata).personalRevision != null) {
+      if (existing.ended_at) return this.requireWorkout(input.userId,input.workoutId);
+      throw new WorkoutStateError("workout_conflict");
+    }
     const completedAt = existing.ended_at ?? input.completedAt;
     const durationMinutes = Math.max(
       1,
@@ -10539,15 +10626,20 @@ export class SupabaseLifeOSStore implements LifeOSStore {
   ): CurrentWorkoutSummary {
     const grouped = new Map<string, WorkoutExerciseSummary>();
     const gifUrls = workoutGifUrls(workout.metadata);
+    const metadata = jsonObject(workout.metadata);
+    const lifts = (metadata.personalLifts ?? []) as LiftSnapshot[];
+    for (const load of lifts) grouped.set(load.key,{id:load.key,name:load.name,note:null,load,sets:[]});
 
     for (const set of sets) {
       const exercise = set.exercise_id
         ? exerciseById.get(set.exercise_id)
         : null;
-      const exerciseKey = set.exercise_id ?? "unassigned";
+      const details = jsonObject(set.metadata);
+      const exerciseKey = typeof details.liftKey === "string" ? details.liftKey : set.exercise_id ?? "unassigned";
       const existing = grouped.get(exerciseKey);
       const summarySet: WorkoutSetSummary = {
         id: set.id,
+        ...(typeof details.slot === "string" ? {plan:{slot:details.slot,warmup:details.warmup===true}} : {}),
         index: set.set_index,
         targetReps: set.reps,
         targetWeightKg: numberOrNull(set.weight_kg),
@@ -10582,6 +10674,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
 
     return {
       id: workout.id,
+      ...(typeof metadata.personalRevision === "number" ? {personalRevision:metadata.personalRevision,sessionNote:workout.notes ?? ""}:{}),
       title: workout.title ?? "Workout",
       mode: workout.ended_at ? "completed" : "active",
       startedAt: workout.started_at,
@@ -10597,7 +10690,7 @@ export class SupabaseLifeOSStore implements LifeOSStore {
               latestCompleted.rest_seconds,
             )
           : null,
-      exercises: [...grouped.values()],
+      exercises: [...grouped.values()].map(ex => ({...ex, sets:ex.sets.sort((a,b)=>a.index-b.index)})),
     };
   }
 
