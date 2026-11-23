@@ -33,6 +33,7 @@ const primary: Destination[] = [
   { id: "home", label: "Сегодня", icon: House },
   { id: "study", label: "Учёба", icon: BookOpen },
   { id: "dashboard", label: "Стипендия", icon: Calculator },
+  { id: "workout", label: "Тренировки", icon: Dumbbell },
 ];
 const groups: { title: string; items: Destination[] }[] = [
   {
@@ -50,7 +51,6 @@ const groups: { title: string; items: Destination[] }[] = [
       { id: "daily-life", label: "День и вода", icon: Activity },
       { id: "ideal-human", label: "Привычки", icon: ListChecks },
       { id: "health", label: "Здоровье", icon: HeartPulse },
-      { id: "workout", label: "Тренировки", icon: Dumbbell },
     ],
   },
   {

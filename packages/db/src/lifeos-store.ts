@@ -812,7 +812,7 @@ export interface WorkoutHistorySession extends CurrentWorkoutSummary {
 }
 
 export class WorkoutStateError extends Error {
-  constructor(public readonly code: "workout_not_found" | "workout_completed" | "workout_conflict" | "workout_empty" | "workout_set_limit") {
+  constructor(public readonly code: "workout_not_found" | "workout_completed" | "workout_conflict" | "workout_empty" | "workout_set_limit" | "workout_active_other") {
     super(code);
   }
 }
@@ -4852,7 +4852,11 @@ export class SupabaseLifeOSStore implements LifeOSStore {
       p_id: id,
     });
     if (error) this.personalError(error);
-    return this.requireWorkout(userId, data);
+    const workout = await this.requireWorkout(userId, data);
+    if (workout.personalRevision === undefined) {
+      throw new WorkoutStateError("workout_active_other");
+    }
+    return workout;
   }
 
   async changePersonalWorkout(

@@ -38,7 +38,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .lo-content .rounded-2xl.border.border-white\/\[0\.08\].bg-white\/\[0\.03\] { background: var(--lifeos-panel); border-color: var(--lo-border); border-radius: 17px; }
 .lo-content .text-zinc-500, .lo-content .text-zinc-600 { color: #a1a1aa; }
 .lo-bottom-nav { position: fixed; z-index: 30; inset: auto 0 0; margin-inline: auto; width: min(100%,448px); padding: 3px 8px max(5px, env(safe-area-inset-bottom)); border-top: 1px solid var(--lo-border); background: #101012; }
-.lo-nav-inner { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); }
+.lo-nav-inner { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(max-content, 1fr); }
 .lo-nav-item { min-height: 51px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; color: #aaaab4; font-size: 11px; font-weight: 600; }
 .lo-nav-item[aria-current=page], .lo-nav-item[data-active=true] { color: var(--lifeos-accent); }
 .lo-nav-item[aria-current=page] svg { stroke-width: 2.4; }

@@ -86,7 +86,7 @@ Implemented backend routes:
 
 ### Personal Full Body
 
-Open **Тренировки → Мой Full Body** in the linked owner's Mini App. The owner comes from the configured default LifeOS user ID, or the default Telegram user ID when the former is unset.
+Open **Тренировки** in the bottom navigation, then **Мой Full Body → Начать тренировку** in the linked owner's Mini App. An active session reopens directly. If another program is in progress, its sets and the personal template remain available. The owner comes from the configured default LifeOS user ID, or the default Telegram user ID when the former is unset.
 
 - `POST /api/tma/workout/personal/template` reads or initializes the owner's template. `PUT` updates its current revision. The existing multi-day program is stored separately.
 - `POST /api/tma/workout/personal/start` takes a client-generated request UUID. `PATCH /api/tma/workout/personal/:id` takes a change, revision and request UUID. Completing a session also writes the timeline entry and mirror queue item in the same transaction.

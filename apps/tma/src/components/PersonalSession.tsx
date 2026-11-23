@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   countedTotals,
@@ -57,6 +57,7 @@ interface LocalState {
   exercise?: string;
   set?: string;
   fields: Record<string, Form>;
+  steps?: Record<string, string>;
   note?: string;
   pending?: Command;
 }
@@ -72,6 +73,29 @@ function decimal(s: string) {
   return /^\d+(?:[.,]\d{1,2})?$/.test(s.trim())
     ? Number(s.replace(",", "."))
     : NaN;
+}
+export function nextPersonalSet(
+  exercises: WorkoutSession["exercises"],
+  completedId: string,
+) {
+  const index = exercises.findIndex((ex) =>
+    ex.sets.some((set) => set.id === completedId),
+  );
+  if (index < 0) return {};
+  const current = exercises[index];
+  const setIndex = current.sets.findIndex((set) => set.id === completedId);
+  const nextSet =
+    current.sets.slice(setIndex + 1).find((set) => !set.completed) ??
+    current.sets.find((set) => !set.completed);
+  if (nextSet) return { exercise: current.id, set: nextSet.id };
+  for (const ex of [
+    ...exercises.slice(index + 1),
+    ...exercises.slice(0, index),
+  ]) {
+    const pending = ex.sets.find((set) => !set.completed);
+    if (pending) return { exercise: ex.id, set: pending.id };
+  }
+  return { exercise: current.id, set: completedId };
 }
 function Stepper({
   label,
@@ -153,7 +177,10 @@ export function PersonalSession({
   const [durable, setDurable] = useState(true);
   const [confirm, setConfirm] = useState(false);
   const [error, setError] = useState("");
-  const [stepInput, setStepInput] = useState<string | null>(null);
+  useEffect(() => {
+    const startKey = "lifeos:full-body:start:" + account;
+    if (readDraft(startKey, "") === session.id) writeDraft(startKey, null);
+  }, [account, session.id]);
   function persist(next: LocalState) {
     setLocal(next);
     setDurable(writeDraft(key, next));
@@ -163,6 +190,7 @@ export function PersonalSession({
     session.exercises.find((e) => e.sets.some((s) => !s.completed)) ??
     session.exercises[0];
   const load = ex.load!;
+  const stepInput = local.steps?.[ex.id];
   const s =
     ex.sets.find((s) => s.id === local.set) ??
     ex.sets.find((s) => !s.completed) ??
@@ -182,10 +210,17 @@ export function PersonalSession({
     reps <= 1000 &&
     Number.isInteger(reps);
   function edit(p: Partial<Form>) {
-    persist({
-      ...local,
-      fields: { ...local.fields, [s.id]: { ...form, ...p } },
-    });
+    const fields = { ...local.fields };
+    const changed = { ...form, ...p };
+    const original = fromSet(s);
+    if (
+      changed.weight === original.weight &&
+      changed.reps === original.reps &&
+      changed.warmup === original.warmup
+    )
+      delete fields[s.id];
+    else fields[s.id] = changed;
+    persist({ ...local, fields });
     setError("");
   }
   const save = useMutation({
@@ -196,28 +231,25 @@ export function PersonalSession({
         ...local,
         pending: undefined,
         fields: { ...local.fields },
+        steps: { ...local.steps },
       };
       if (cmd.kind === "set" || cmd.kind === "remove")
         delete next.fields[cmd.id];
       if (cmd.kind === "note") delete next.note;
       if (cmd.kind === "step") {
-        setStepInput(null);
+        delete next.steps[cmd.exercise];
         void client.invalidateQueries({ queryKey: personalKey });
       }
-      if (cmd.kind === "add") next.set = cmd.id;
+      if (cmd.kind === "add") {
+        next.exercise = cmd.exercise;
+        next.set = cmd.id;
+      }
       if (cmd.kind === "set" && cmd.completed) {
-        const current = fresh.exercises.find((e) => e.id === ex.id)!;
-        const unfinished = current.sets.find((x) => !x.completed);
-        if (unfinished) next.set = unfinished.id;
-        else {
-          const following = fresh.exercises.find((e) =>
-            e.sets.some((x) => !x.completed),
-          );
-          if (following) {
-            next.exercise = following.id;
-            next.set = undefined;
-          }
-        }
+        const wasDone = session.exercises.some((e) =>
+          e.sets.some((set) => set.id === cmd.id && set.completed),
+        );
+        if (!wasDone)
+          Object.assign(next, nextPersonalSet(fresh.exercises, cmd.id));
       }
       if (fresh.mode === "completed") {
         writeDraft(key, null);
@@ -233,6 +265,7 @@ export function PersonalSession({
   });
   function send(change: DraftChange) {
     if (local.pending || save.isPending) return;
+    if (change.kind !== "finish") setConfirm(false);
     const cmd = {
       ...change,
       revision: session.personalRevision!,
@@ -242,8 +275,10 @@ export function PersonalSession({
     setError("");
     save.mutate(cmd);
   }
-  const dirty =
-    Object.keys(local.fields).length > 0 || local.note !== undefined;
+  const hasDraft = (exercise: WorkoutSession["exercises"][number]) =>
+    local.steps?.[exercise.id] !== undefined ||
+    exercise.sets.some((set) => local.fields[set.id] !== undefined);
+  const dirty = session.exercises.some(hasDraft) || local.note !== undefined;
   const pending = Boolean(local.pending);
   const blocked = save.isPending || pending;
   const storeSet = (completed: boolean) => {
@@ -259,29 +294,12 @@ export function PersonalSession({
   };
   return (
     <div className="space-y-3">
-      <section className={panel + " space-y-2"}>
-        <h2 className="text-xl font-semibold">{session.title}</h2>
-        <p className="text-xs text-zinc-300">
+      <header className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 px-1">
+        <h2 className="font-semibold">{session.title}</h2>
+        <p className="text-xs text-zinc-300" aria-live="polite">
           Выполнено {session.completedSets} из {session.totalSets} подходов
         </p>
-        <progress
-          className="w-full accent-cyan-300"
-          max={Math.max(1, session.totalSets)}
-          value={session.completedSets}
-        />
-        <WorkoutTotals session={session} />
-      </section>
-      <div role="status" className="px-1 text-sm text-zinc-300">
-        {save.isPending
-          ? "Отправляем…"
-          : pending
-            ? "Сервер ещё не подтвердил запись"
-            : !durable
-              ? "Память телефона недоступна. Сохрани изменения на сервере."
-              : dirty
-                ? "Черновик на этом устройстве"
-                : "Сохранено на сервере"}
-      </div>
+      </header>
       {(error || (pending && !save.isPending)) && (
         <div className={panel + " space-y-2"}>
           <p role="alert">
@@ -316,34 +334,24 @@ export function PersonalSession({
       )}
       <fieldset disabled={blocked} className={panel + " space-y-3"}>
         <label className="block text-xs text-zinc-400">
-          Упражнение
+          Упражнение {session.exercises.indexOf(ex) + 1} из{" "}
+          {session.exercises.length}
           <select
-            className={input + " mt-1"}
+            className={input + " mt-1 font-semibold"}
             aria-label="Упражнение"
             value={ex.id}
-            onChange={(e) => {
-              setStepInput(null);
-              persist({ ...local, exercise: e.target.value, set: undefined });
-            }}
+            onChange={(e) =>
+              persist({ ...local, exercise: e.target.value, set: undefined })
+            }
           >
             {session.exercises.map((e, i) => (
               <option value={e.id} key={e.id}>
                 {i + 1}. {e.name}
+                {hasDraft(e) ? " *" : ""}
               </option>
             ))}
           </select>
         </label>
-        <p className="text-sm text-zinc-300">
-          {loadLabels[load.mode]}
-          {load.variant ? " · " + load.variant : ""}
-          {load.baseKg !== null
-            ? " · " +
-              (load.mode === "smith" ? "Гриф" : "Платформа") +
-              " " +
-              fmt(load.baseKg) +
-              " кг"
-            : ""}
-        </p>
         <div className="flex flex-wrap gap-2">
           {ex.sets.map((x, i) => (
             <button
@@ -352,6 +360,7 @@ export function PersonalSession({
               aria-pressed={x.id === s?.id}
               className={
                 button +
+                " min-w-[44px]" +
                 (x.id === s?.id ? " border-cyan-300 text-cyan-200" : "")
               }
               onClick={() => persist({ ...local, exercise: ex.id, set: x.id })}
@@ -387,13 +396,21 @@ export function PersonalSession({
                 set={(reps) => edit({ reps })}
               />
             </div>
-            {load.mode === "dumbbells" && Number.isFinite(kg) && (
-              <p className="text-xs text-zinc-300">
-                {fmt(kg)} кг на гантель · 2 гантели
-              </p>
-            )}
+            <p className="text-xs text-zinc-300">
+              {load.mode === "dumbbells" && Number.isFinite(kg)
+                ? fmt(kg) + " кг на гантель · 2 гантели"
+                : loadLabels[load.mode]}
+              {load.variant ? " · " + load.variant : ""}
+              {load.baseKg !== null
+                ? " · " +
+                  (load.mode === "smith" ? "Гриф" : "Платформа") +
+                  " " +
+                  fmt(load.baseKg) +
+                  " кг"
+                : ""}
+            </p>
             {prev && (
-              <div className="rounded-lg bg-white/5 p-3 text-sm">
+              <div className="text-sm">
                 <p>
                   В прошлый раз: {fmt(prev.weightKg)} кг × {prev.reps}
                 </p>
@@ -402,8 +419,50 @@ export function PersonalSession({
                     {deltaText(kg - prev.weightKg, reps - prev.reps, load.mode)}
                   </p>
                 )}
+              </div>
+            )}
+            {!valid && (
+              <p role="alert" className="text-sm text-amber-200">
+                Вес от 0 до 2000 кг, до двух знаков после запятой. Повторения от
+                1 до 1000.
+              </p>
+            )}
+            <button
+              className={
+                button + " min-h-12 w-full bg-cyan-300 text-graphite-950"
+              }
+              disabled={!valid}
+              onClick={() => storeSet(true)}
+            >
+              {s.completed ? "Сохранить исправление" : "Выполнено"}
+            </button>
+          </>
+        )}
+        <div role="status" className="text-xs text-zinc-300">
+          {save.isPending
+            ? "Отправляем…"
+            : pending
+              ? "Сервер ещё не подтвердил запись"
+              : !durable
+                ? "Память телефона недоступна. Сохрани изменения на сервере."
+                : dirty
+                  ? "Черновик на этом устройстве"
+                  : "Сохранено на сервере"}
+        </div>
+        {s && (
+          <>
+            <label className="flex min-h-11 items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={form.warmup}
+                onChange={(e) => edit({ warmup: e.target.checked })}
+              />
+              Разминочный подход
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {prev && (
                 <button
-                  className={button + " mt-2"}
+                  className={button}
                   onClick={() =>
                     edit({
                       weight: String(prev.weightKg),
@@ -413,30 +472,7 @@ export function PersonalSession({
                 >
                   Повторить прошлый результат
                 </button>
-              </div>
-            )}
-            <label className="flex min-h-11 items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={form.warmup}
-                onChange={(e) => edit({ warmup: e.target.checked })}
-              />
-              Разминочный подход
-            </label>
-            {!valid && (
-              <p role="alert" className="text-sm text-amber-200">
-                Вес от 0 до 2000 кг, до двух знаков после запятой. Повторения от
-                1 до 1000.
-              </p>
-            )}
-            <button
-              className={button + " w-full bg-cyan-300 text-graphite-950"}
-              disabled={!valid}
-              onClick={() => storeSet(true)}
-            >
-              {s.completed ? "Сохранить исправление" : "Выполнено"}
-            </button>
-            <div className="flex flex-wrap gap-2">
+              )}
               {s.completed ? (
                 <button
                   className={button}
@@ -456,7 +492,15 @@ export function PersonalSession({
               )}
               <button
                 className={button}
-                onClick={() => send({ kind: "remove", id: s.id })}
+                onClick={() => {
+                  if (
+                    !s.completed ||
+                    window.confirm(
+                      "Убрать выполненный подход из этой тренировки?",
+                    )
+                  )
+                    send({ kind: "remove", id: s.id });
+                }}
               >
                 Убрать подход
               </button>
@@ -465,15 +509,15 @@ export function PersonalSession({
         )}
         <button
           className={button}
-          disabled={ex.sets.length >= 30}
+          disabled={ex.sets.length >= 30 || (Boolean(s) && !valid)}
           onClick={() =>
             send({
               kind: "add",
               id: crypto.randomUUID(),
               exercise: ex.id,
-              weightKg: s?.targetWeightKg ?? 0,
-              reps: s?.targetReps ?? 12,
-              warmup: false,
+              weightKg: s ? kg : 0,
+              reps: s ? reps : 12,
+              warmup: s ? form.warmup : false,
             })
           }
         >
@@ -481,7 +525,7 @@ export function PersonalSession({
         </button>
         <details>
           <summary className="min-h-11 cursor-pointer text-sm text-zinc-300">
-            Шаг веса · {fmt(load.step)} кг
+            Шаг веса · {fmt(load.step)} кг{stepInput !== undefined ? " *" : ""}
           </summary>
           <label className="block text-sm">
             Новый шаг, кг
@@ -489,7 +533,13 @@ export function PersonalSession({
               className={input}
               inputMode="decimal"
               value={stepInput ?? String(load.step)}
-              onChange={(e) => setStepInput(e.target.value)}
+              onChange={(e) => {
+                const value = e.target.value;
+                const steps = { ...local.steps };
+                if (value === String(load.step)) delete steps[ex.id];
+                else steps[ex.id] = value;
+                persist({ ...local, steps });
+              }}
             />
           </label>
           <button
@@ -527,7 +577,15 @@ export function PersonalSession({
             className={input}
             value={local.note ?? session.sessionNote ?? ""}
             maxLength={500}
-            onChange={(e) => persist({ ...local, note: e.target.value })}
+            onChange={(e) =>
+              persist({
+                ...local,
+                note:
+                  e.target.value === (session.sessionNote ?? "")
+                    ? undefined
+                    : e.target.value,
+              })
+            }
           />
         </label>
         {local.note !== undefined && (
@@ -541,10 +599,16 @@ export function PersonalSession({
       </fieldset>
       {dirty && (
         <p className="text-xs text-zinc-300">
-          Сохрани правки перед завершением. Изменённые подходы отмечены
-          звёздочкой.
+          Сохрани правки перед завершением. Изменённые упражнения и подходы
+          отмечены звёздочкой.
         </p>
       )}
+      <details className={panel}>
+        <summary className="min-h-11 cursor-pointer text-sm font-semibold">
+          Итоги тренировки
+        </summary>
+        <WorkoutTotals session={session} />
+      </details>
       {confirm && (
         <p className="text-sm">
           Сохранить {session.completedSets} из {session.totalSets} подходов в
