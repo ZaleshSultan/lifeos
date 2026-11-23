@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { fullBodyTemplate } from "@lifeos/core";
 import { SupabaseLifeOSStore } from "./lifeos-store.js";
 
 interface FakeRow {
@@ -164,8 +165,8 @@ class FakeQuery {
   }
 
   maybeSingle(): Promise<{ data: FakeRow | null; error: null }> {
-    const data =
-      this.action === "select" ? (this.filteredRows()[0] ?? null) : null;
+    const matched = this.filteredRows()[0];
+    const data = this.action === "update" && matched ? this.updateRow() : matched ?? null;
     this.recordQuery();
     return Promise.resolve({ data, error: null });
   }
@@ -333,6 +334,8 @@ class FakeQuery {
           if (rowVal.toLowerCase() !== searchVal.toLowerCase()) {
             return false;
           }
+        } else if (key === "personal_workout->>revision") {
+          if (String((row.personal_workout as { revision?: number } | null)?.revision) !== value) return false;
         } else if (row[key as keyof FakeRow] !== value) {
           return false;
         }
@@ -469,11 +472,34 @@ function workoutClient(): FakeSupabaseClient {
 }
 
 describe("workout persistence", () => {
+  it("loads and updates only an already provisioned personal template with revision checks", async () => {
+    const client = workoutClient();
+    const store = storeWith(client);
+    const template = { exercises: fullBodyTemplate(), revision: 0 };
+    client.userSettings = [
+      { user_id: "user-a", personal_workout: template, settings: { quiet: true } },
+      { user_id: "user-b", personal_workout: null },
+    ];
+    expect(await store.personalTemplate("user-a", "existing")).toEqual(template);
+    expect(await store.personalTemplate("user-b", "existing")).toBeNull();
+    const edit = structuredClone(template);
+    edit.exercises[0].sets[0].reps = 17;
+    const result = { ...edit, revision: 1 };
+    expect(await store.personalTemplate("user-a", edit)).toEqual(result);
+    expect(await store.personalTemplate("user-a", edit)).toEqual(result);
+    await expect(store.personalTemplate("user-a", template)).rejects.toMatchObject({ code: "workout_conflict" });
+    await expect(store.personalTemplate("user-b", edit)).rejects.toMatchObject({ code: "workout_not_found" });
+    expect(client.userSettings).toMatchObject([
+      { user_id: "user-a", personal_workout: result, settings: { quiet: true } },
+      { user_id: "user-b", personal_workout: null },
+    ]);
+    expect(client.rpcCalls).toEqual([]);
+  });
+
   it("resumes only a personal workout when another session was started concurrently", async () => {
     const client = workoutClient();
     const rpc = vi.fn().mockResolvedValue({ data: "workout-a", error: null });
     const store = storeWith(Object.assign(client, { rpc }));
-    vi.spyOn(store, "personalTemplate").mockResolvedValue({ revision: 0, exercises: [] });
 
     await expect(store.startPersonalWorkout("user-a", "new-session"))
       .rejects.toMatchObject({ code: "workout_active_other" });

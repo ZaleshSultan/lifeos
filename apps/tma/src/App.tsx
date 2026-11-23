@@ -130,6 +130,7 @@ export default function App() {
   const [aiRouterDirty, setAiRouterDirty] = useState(false);
   const [captureDirty, setCaptureDirty] = useState(false);
   const [academicDirty, setAcademicDirty] = useState(false);
+  const [workoutDirty, setWorkoutDirty] = useState(false);
   const setScreen = (next: ScreenId) => {
     if (next === screen) return true;
     if (
@@ -137,7 +138,8 @@ export default function App() {
         idealHumanDirty) ||
         (screen === "ai" && aiRouterDirty) ||
         (screen === "capture" && captureDirty) ||
-        (screen === "study" && academicDirty)) &&
+        (screen === "study" && academicDirty) ||
+        (screen === "workout" && workoutDirty)) &&
       !window.confirm(
         "Есть несохранённые изменения. Открыть другой раздел и отменить их?",
       )
@@ -147,6 +149,7 @@ export default function App() {
     setAiRouterDirty(false);
     setCaptureDirty(false);
     setAcademicDirty(false);
+    setWorkoutDirty(false);
     setRawScreen(next);
     window.scrollTo({ top: 0, behavior: "auto" });
     return true;
@@ -251,7 +254,9 @@ export default function App() {
                 onDirtyChange={setAiRouterDirty}
               />
             ) : null}
-            {screen === "workout" ? <WorkoutScreen account={sessionQuery.data.telegramUserId} /> : null}
+            {screen === "workout" ? (
+              <WorkoutScreen account={sessionQuery.data.telegramUserId} onDirtyChange={setWorkoutDirty} />
+            ) : null}
             {screen === "daily-life" ? (
               <DailyLifeScreen
                 onOpenIdealHuman={() => setScreen("ideal-human")}

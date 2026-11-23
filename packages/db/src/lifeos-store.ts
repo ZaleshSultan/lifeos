@@ -7,6 +7,7 @@ import type { ScholarshipConfig } from "../../core/src/scholarship.js";
 import { healthCredentialStore, type HealthCredentialStore } from "./health-credential-store.js";
 import { webSessionStore, type WebSessionStore } from "./web-session-store.js";
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { SupabaseAssistantStore, type AssistantStore } from "./assistant-store.js";
 import {
   decryptSecret,
@@ -1530,10 +1531,7 @@ export interface LifeOSStore extends LmsSessionStore, WebSessionStore, HealthCre
   getIdealHumanDays?(userId: string): Promise<IdealHumanDay[]>;
   saveIdealHumanDay?(userId: string, day: IdealHumanDay, expectedRevision: number): Promise<IdealHumanDay>;
   clearIdealHumanReflection?(userId: string, date: string, expectedRevision: number): Promise<IdealHumanDay>;
-  personalTemplate(
-    userId: string,
-    edit?: PersonalTemplate,
-  ): Promise<PersonalTemplate>;
+  personalTemplate(userId: string, action?: PersonalTemplate | "existing"): Promise<PersonalTemplate | null>;
   startPersonalWorkout(
     userId: string,
     id: string,
@@ -4819,6 +4817,8 @@ export class SupabaseLifeOSStore implements LifeOSStore {
 
   private personalError(error: { message: string }): never {
     switch (error.message) {
+      case "workout_template_missing":
+        throw new WorkoutStateError("workout_not_found");
       case "workout_not_found":
       case "workout_conflict":
       case "workout_empty":
@@ -4829,14 +4829,37 @@ export class SupabaseLifeOSStore implements LifeOSStore {
     }
   }
 
-  async personalTemplate(userId: string, edit?: PersonalTemplate) {
+  private async getPersonalTemplate(userId: string): Promise<PersonalTemplate | null> {
+    const { data, error } = await this.client.from("user_settings")
+      .select("personal_workout").eq("user_id", userId).maybeSingle();
+    if (error) throwSupabaseError(error, "Failed to load personal workout template");
+    return data?.personal_workout == null ? null : parsePersonalTemplate(data.personal_workout);
+  }
+
+  async personalTemplate(userId: string, action?: PersonalTemplate | "existing") {
+    if (action === "existing") return this.getPersonalTemplate(userId);
+    if (action !== undefined) return this.savePersonalTemplate(userId, action);
     const { data, error } = await this.client.rpc("personal_workout_template", {
       p_user: userId,
-      p_exercises: (edit?.exercises ?? fullBodyTemplate()) as unknown as Json,
-      ...(edit ? { p_revision: edit.revision } : {}),
+      p_exercises: fullBodyTemplate() as unknown as Json,
     });
     if (error) this.personalError(error);
     return parsePersonalTemplate(data);
+  }
+
+  private async savePersonalTemplate(userId: string, edit: PersonalTemplate) {
+    const next = { exercises: edit.exercises, revision: edit.revision + 1 };
+    const { data, error } = await this.client.from("user_settings")
+      .update({ personal_workout: next as unknown as Json })
+      .eq("user_id", userId).eq("personal_workout->>revision", String(edit.revision))
+      .select("personal_workout").maybeSingle();
+    if (error) throwSupabaseError(error, "Failed to save personal workout template");
+    if (data) return parsePersonalTemplate(data.personal_workout);
+
+    const existing = await this.getPersonalTemplate(userId);
+    if (!existing) throw new WorkoutStateError("workout_not_found");
+    if (isDeepStrictEqual(existing.exercises, edit.exercises)) return existing;
+    throw new WorkoutStateError("workout_conflict");
   }
 
   private async requireWorkout(userId: string, workoutId: string) {
@@ -4846,7 +4869,6 @@ export class SupabaseLifeOSStore implements LifeOSStore {
   }
 
   async startPersonalWorkout(userId: string, id: string) {
-    await this.personalTemplate(userId);
     const { data, error } = await this.client.rpc("start_personal_workout", {
       p_user: userId,
       p_id: id,

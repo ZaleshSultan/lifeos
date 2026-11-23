@@ -59,24 +59,28 @@ export async function handleWorkoutRoute(
   try {
     if (pathname.startsWith("/api/tma/workout/personal/")) {
       const templatePath = pathname === "/api/tma/workout/personal/template";
-      if (!context.personalOwner) {
-        if (templatePath && request.method === "POST") send(null);
-        else writeJson(response, 404, { error: "workout_not_found" });
+      const readTemplate = templatePath && request.method === "POST";
+      const saveTemplate = templatePath && request.method === "PUT";
+      const start = pathname === "/api/tma/workout/personal/start" && request.method === "POST";
+      const change = request.method === "PATCH" && /^\/api\/tma\/workout\/personal\/[\da-f-]+$/i.test(pathname);
+      if (!readTemplate && !saveTemplate && !start && !change) {
+        writeJson(response, 404, { error: "not_found" });
         return true;
       }
-      if (templatePath && request.method === "POST")
-        send(await store.personalTemplate(userId));
-      else if (templatePath && request.method === "PUT")
+
+      const existing = await store.personalTemplate(userId, "existing");
+      const template = existing ?? (context.personalOwner && !change
+        ? await store.personalTemplate(userId) : null);
+      if (readTemplate) send(template);
+      else if (!template) writeJson(response, 404, { error: "workout_not_found" });
+      else if (saveTemplate)
         send(
           await store.personalTemplate(
             userId,
             parsePersonalTemplate(await readJsonBody(request)),
           ),
         );
-      else if (
-        request.method === "POST" &&
-        pathname === "/api/tma/workout/personal/start"
-      ) {
+      else if (start) {
         const body = record(await readJsonBody(request));
         send(
           await store.startPersonalWorkout(
@@ -84,10 +88,7 @@ export async function handleWorkoutRoute(
             uuid(String(body.requestId)),
           ),
         );
-      } else if (
-        request.method === "PATCH" &&
-        /^\/api\/tma\/workout\/personal\/[\da-f-]+$/i.test(pathname)
-      ) {
+      } else {
         const id = uuid(pathname.split("/").at(-1)!);
         const { change, revision, requestId } = parseDraftCommand(
           await readJsonBody(request),
@@ -101,7 +102,7 @@ export async function handleWorkoutRoute(
             change,
           ),
         );
-      } else writeJson(response, 404, { error: "not_found" });
+      }
       return true;
     }
     if (pathname === "/api/tma/workout/current" && request.method === "GET") {

@@ -227,12 +227,14 @@ export interface Database {
         {
           user_id: string;
           settings: Json;
+          personal_workout: Json | null;
           created_at: string;
           updated_at: string;
         },
         {
           user_id: string;
           settings?: Json;
+          personal_workout?: Json | null;
           created_at?: string;
           updated_at?: string;
         }
