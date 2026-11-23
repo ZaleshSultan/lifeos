@@ -3482,7 +3482,12 @@ async function handleRequest(
 
     if (await handleWorkoutRoute({
       request, response, pathname: requestUrl.pathname,
-      userId: auth.user.userId, store, readJsonBody, writeJson,
+      userId: auth.user.userId,
+      personalOwner: options.defaultUserId
+        ? auth.user.userId === options.defaultUserId
+        : options.defaultTelegramUserId != null && auth.user.telegramUserId === options.defaultTelegramUserId,
+      timezone: auth.user.timezone,
+      store, readJsonBody, writeJson,
     })) return;
 
     if (request.method === "GET" && requestUrl.pathname === "/api/tma/health") {

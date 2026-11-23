@@ -80,6 +80,9 @@ class FakeStore implements LifeOSStore {
   async getPlanningSnapshot() {
     return { tasks: [], events: [], reminders: [], projects: [], courses: [], schedules: [], assessments: [], history: [], truncated: false, historyTruncated: false };
   }
+  personalTemplate = vi.fn<LifeOSStore["personalTemplate"]>();
+  startPersonalWorkout = vi.fn<LifeOSStore["startPersonalWorkout"]>();
+  changePersonalWorkout = vi.fn<LifeOSStore["changePersonalWorkout"]>();
   readonly tasks: CreateTaskInput[] = [];
   readonly captures: CreateLifeCaptureInput[] = [];
   readonly entities: LifeEntityRecord[] = [];

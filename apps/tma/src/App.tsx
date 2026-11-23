@@ -111,6 +111,8 @@ const SCREENS: ScreenId[] = [
   "mode",
 ];
 
+
+
 function initialScreen(): ScreenId {
   const params = new URLSearchParams(window.location.search);
   const requestedScreen = params.get("screen");
@@ -249,7 +251,7 @@ export default function App() {
                 onDirtyChange={setAiRouterDirty}
               />
             ) : null}
-            {screen === "workout" ? <WorkoutScreen /> : null}
+            {screen === "workout" ? <WorkoutScreen account={sessionQuery.data.telegramUserId} /> : null}
             {screen === "daily-life" ? (
               <DailyLifeScreen
                 onOpenIdealHuman={() => setScreen("ideal-human")}

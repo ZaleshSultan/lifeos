@@ -84,6 +84,15 @@ Implemented backend routes:
 - `POST /api/tma/reminders`
 - `GET /api/oauth/google/callback`
 
+### Personal Full Body
+
+Open **Тренировки → Мой Full Body** in the linked owner's Mini App. The owner comes from the configured default LifeOS user ID, or the default Telegram user ID when the former is unset.
+
+- `POST /api/tma/workout/personal/template` reads or initializes the owner's template. `PUT` updates its current revision. The existing multi-day program is stored separately.
+- `POST /api/tma/workout/personal/start` takes a client-generated request UUID. `PATCH /api/tma/workout/personal/:id` takes a change, revision and request UUID. Completing a session also writes the timeline entry and mirror queue item in the same transaction.
+- The current session and history use the existing workout endpoints. History accepts an optional numeric `offset` and returns up to 50 sessions per page. Exercise variants and load conventions are saved with each workout. Only completed sets contribute to recorded repetitions and volume.
+- Apply `20261123000100_personal_full_body.sql` before releasing the bot and TMA. Run `supabase/tests/personal_full_body.sql` against a disposable migrated database for the persistence checks.
+
 ## Onboarding Flow
 
 ```text

@@ -1,5 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
+  parseDraftCommand,
+  parsePersonalTemplate,
   parseWorkoutProgram,
   parseWorkoutSet,
   WorkoutInputError,
@@ -11,6 +13,8 @@ interface WorkoutRouteContext {
   response: ServerResponse;
   pathname: string;
   userId: string;
+  personalOwner?: boolean;
+  timezone?: string;
   store: LifeOSStore;
   readJsonBody: (request: IncomingMessage) => Promise<unknown>;
   writeJson: (
@@ -53,6 +57,53 @@ export async function handleWorkoutRoute(
   if (!pathname.startsWith("/api/tma/workout/")) return false;
   const send = (data: unknown) => writeJson(response, 200, { data });
   try {
+    if (pathname.startsWith("/api/tma/workout/personal/")) {
+      const templatePath = pathname === "/api/tma/workout/personal/template";
+      if (!context.personalOwner) {
+        if (templatePath && request.method === "POST") send(null);
+        else writeJson(response, 404, { error: "workout_not_found" });
+        return true;
+      }
+      if (templatePath && request.method === "POST")
+        send(await store.personalTemplate(userId));
+      else if (templatePath && request.method === "PUT")
+        send(
+          await store.personalTemplate(
+            userId,
+            parsePersonalTemplate(await readJsonBody(request)),
+          ),
+        );
+      else if (
+        request.method === "POST" &&
+        pathname === "/api/tma/workout/personal/start"
+      ) {
+        const body = record(await readJsonBody(request));
+        send(
+          await store.startPersonalWorkout(
+            userId,
+            uuid(String(body.requestId)),
+          ),
+        );
+      } else if (
+        request.method === "PATCH" &&
+        /^\/api\/tma\/workout\/personal\/[\da-f-]+$/i.test(pathname)
+      ) {
+        const id = uuid(pathname.split("/").at(-1)!);
+        const { change, revision, requestId } = parseDraftCommand(
+          await readJsonBody(request),
+        );
+        send(
+          await store.changePersonalWorkout(
+            userId,
+            id,
+            revision,
+            requestId,
+            change,
+          ),
+        );
+      } else writeJson(response, 404, { error: "not_found" });
+      return true;
+    }
     if (pathname === "/api/tma/workout/current" && request.method === "GET") {
       send(await store.getCurrentWorkout({ userId }));
       return true;
@@ -67,7 +118,19 @@ export async function handleWorkoutRoute(
       return true;
     }
     if (pathname === "/api/tma/workout/history" && request.method === "GET") {
-      send(await store.getWorkoutHistory(userId));
+      const offset = Number(
+        new URL(request.url ?? pathname, "http://localhost").searchParams.get(
+          "offset",
+        ) ?? 0,
+      );
+      if (!Number.isSafeInteger(offset) || offset < 0 || offset > 2147483597)
+        throw new WorkoutInputError("Invalid offset");
+      send(
+        (await store.getWorkoutHistory(userId, offset)).map((session) => ({
+          ...session,
+          timezone: context.timezone,
+        })),
+      );
       return true;
     }
     if (pathname === "/api/tma/workout/start" && request.method === "POST") {
@@ -165,7 +228,7 @@ export async function handleWorkoutRoute(
       return true;
     }
     if (error instanceof WorkoutStateError) {
-      writeJson(response, error.code === "workout_completed" ? 409 : 404, {
+      writeJson(response, error.code === "workout_not_found" ? 404 : 409, {
         error: error.code,
       });
       return true;

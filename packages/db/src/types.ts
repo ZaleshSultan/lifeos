@@ -2077,6 +2077,9 @@ export interface Database {
       };
     };
     Functions: {
+      personal_workout_template: { Args: {p_user:string; p_exercises:Json; p_revision?:number}; Returns: Json };
+      start_personal_workout: { Args: {p_user:string; p_id:string}; Returns:string };
+      change_personal_workout: { Args: {p_user:string; p_id:string; p_revision:number; p_request:string; p_change:Json}; Returns:string };
       save_ai_router_settings: {
         Args: {
           p_user_id: string;
