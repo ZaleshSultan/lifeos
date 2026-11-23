@@ -469,6 +469,36 @@ function workoutClient(): FakeSupabaseClient {
 }
 
 describe("workout persistence", () => {
+  it("resumes only a personal workout when another session was started concurrently", async () => {
+    const client = workoutClient();
+    const rpc = vi.fn().mockResolvedValue({ data: "workout-a", error: null });
+    const store = storeWith(Object.assign(client, { rpc }));
+    vi.spyOn(store, "personalTemplate").mockResolvedValue({ revision: 0, exercises: [] });
+
+    await expect(store.startPersonalWorkout("user-a", "new-session"))
+      .rejects.toMatchObject({ code: "workout_active_other" });
+    expect(rpc).toHaveBeenCalledWith("start_personal_workout", { p_user: "user-a", p_id: "new-session" });
+    expect(client.queries.every((query) => query.action === "select" && query.filters.user_id === "user-a")).toBe(true);
+
+    client.workouts[0].metadata = { personalRevision: 0 };
+    await expect(store.startPersonalWorkout("user-a", "new-session"))
+      .resolves.toMatchObject({ id: "workout-a", personalRevision: 0 });
+  });
+
+  it("keeps legacy mutations from editing a personal workout outside its revision checks", async () => {
+    const client = workoutClient();
+    client.workouts[0].metadata = { personalRevision: 0 };
+    const store = storeWith(client);
+    const set = { userId: "user-a", setId: "set-a" };
+    const completedAt = "2026-09-24T11:00:00Z";
+    const conflict = { code: "workout_conflict" };
+    await expect(store.updateWorkoutSet({ ...set, values: { reps: 12, weightKg: 9, restSeconds: 90 } })).rejects.toMatchObject(conflict);
+    await expect(store.completeWorkoutSet({ ...set, completedAt })).rejects.toMatchObject(conflict);
+    await expect(store.undoWorkoutSet(set)).rejects.toMatchObject(conflict);
+    await expect(store.completeWorkout({ userId: "user-a", workoutId: "workout-a", completedAt })).rejects.toMatchObject(conflict);
+    expect(client.queries.every((query) => query.action === "select" && query.filters.user_id === "user-a")).toBe(true);
+  });
+
   it("round-trips a program while preserving unrelated settings and another user", async () => {
     const client = workoutClient();
     client.userSettings = [

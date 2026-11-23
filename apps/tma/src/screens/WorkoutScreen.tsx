@@ -199,6 +199,16 @@ export function WorkoutScreen({ account }: { account?: number } = {}) {
     ? dayId
     : program.data?.days[0]?.id;
   const busy = actions.set.isPending || actions.finish.isPending;
+  const personalTemplate = account !== undefined && (
+    <PersonalTemplateCard
+      account={account}
+      activeWorkoutTitle={workout?.title}
+      onStart={(session) => {
+        setReceipt(session.mode === "completed" ? session : null);
+        actions.acceptPersonal(session);
+      }}
+    />
+  );
 
   return (
     <div className="space-y-4">
@@ -264,19 +274,11 @@ export function WorkoutScreen({ account }: { account?: number } = {}) {
               </button>
             </section>
           )}
-          {account !== undefined && (
-            <PersonalTemplateCard
-              account={account}
-              onStart={(s) => {
-                setReceipt(null);
-                actions.acceptPersonal(s);
-              }}
-            />
-          )}
+          {personalTemplate}
           <section className={`${workoutPanelClass} space-y-4`}>
             <div>
               <Dumbbell className="mb-3 h-6 w-6 text-cyan-300" />
-              <h2 className="text-xl font-semibold">Начать тренировку</h2>
+              <h2 className="text-xl font-semibold">Тренировка по программе</h2>
               <p className="mt-2 text-sm text-zinc-400">
                 Выбери день своей программы. Фактические повторы, вес и отдых
                 можно менять во время тренировки.
@@ -358,6 +360,7 @@ export function WorkoutScreen({ account }: { account?: number } = {}) {
         />
       ) : (
         <>
+          {personalTemplate}
           <section className={workoutPanelClass}>
             <p className="text-xs text-zinc-400">
               {formatDateTime(workout.startedAt)}

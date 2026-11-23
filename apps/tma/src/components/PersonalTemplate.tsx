@@ -14,6 +14,8 @@ import {
   writeDraft,
 } from "../api/personal-workout";
 import { workoutErrorMessage, type WorkoutSession } from "../api/workout";
+import { ApiError } from "../api/errors";
+import { queryKeys } from "../api/hooks";
 import {
   workoutButtonClass as button,
   workoutInputClass as input,
@@ -56,14 +58,17 @@ function EditTemplate({
   template,
   saved,
   cancel,
+  reload,
 }: {
   template: PersonalTemplate;
   saved: (t: PersonalTemplate) => void;
   cancel: () => void;
+  reload: () => Promise<PersonalTemplate | null>;
 }) {
   const [draft, setDraft] = useState(() => structuredClone(template));
   const [active, setActive] = useState(draft.exercises[0].key);
   const [error, setError] = useState("");
+  const [reloading, setReloading] = useState(false);
   const index = draft.exercises.findIndex((e) => e.key === active);
   const ex = draft.exercises[index];
   const change = (patch: Partial<PlannedLift>) =>
@@ -78,13 +83,37 @@ function EditTemplate({
     onSuccess: saved,
     networkMode: "always",
   });
+  async function reloadSavedTemplate() {
+    setReloading(true);
+    try {
+      const fresh = await reload();
+      if (!fresh) throw new Error();
+      setDraft(structuredClone(fresh));
+      setActive(
+        fresh.exercises.some((e) => e.key === active)
+          ? active
+          : fresh.exercises[0].key,
+      );
+      save.reset();
+      setError("");
+    } catch {
+      setError(
+        "Не удалось загрузить шаблон. Твои правки остались в редакторе.",
+      );
+    } finally {
+      setReloading(false);
+    }
+  }
   function move(offset: number) {
     const list = [...draft.exercises];
     [list[index], list[index + offset]] = [list[index + offset], list[index]];
     setDraft({ ...draft, exercises: list });
   }
   return (
-    <fieldset disabled={save.isPending} className={panel + " space-y-3"}>
+    <fieldset
+      disabled={save.isPending || reloading}
+      className={panel + " space-y-3"}
+    >
       <h2 className="text-lg font-semibold">Редактор шаблона</h2>
       <select
         aria-label="Упражнение шаблона"
@@ -121,7 +150,7 @@ function EditTemplate({
           Удалить упражнение
         </button>
       </div>
-      <div className="space-y-2" key={active}>
+      <div className="space-y-2" key={draft.revision + ":" + active}>
         <label className="block text-xs">
           Название
           <input
@@ -261,6 +290,13 @@ function EditTemplate({
       {(error || save.isError) && (
         <p role="alert">{error || workoutErrorMessage(save.error)}</p>
       )}
+      {save.error instanceof ApiError && save.error.status === 409 && (
+        <button className={button} onClick={() => void reloadSavedTemplate()}>
+          {reloading
+            ? "Загружаем…"
+            : "Отменить мои правки и загрузить актуальный шаблон"}
+        </button>
+      )}
       <div className="grid grid-cols-2 gap-2">
         <button className={button} onClick={cancel}>
           Закрыть
@@ -289,9 +325,11 @@ function EditTemplate({
 export function PersonalTemplateCard({
   account,
   onStart,
+  activeWorkoutTitle,
 }: {
   account: number;
   onStart: (s: WorkoutSession) => void;
+  activeWorkoutTitle?: string;
 }) {
   const client = useQueryClient();
   const query = useQuery({
@@ -307,9 +345,13 @@ export function PersonalTemplateCard({
       writeDraft(key, null);
       onStart(s);
     },
+    onError: (error) => {
+      if (error instanceof ApiError && error.status === 409)
+        void client.invalidateQueries({ queryKey: queryKeys.workout });
+    },
   });
   if (query.isLoading) return <LoadingPanel title="Загружаем шаблон" />;
-  if (query.isError)
+  if (query.isError && !query.data)
     return (
       <ErrorPanel
         title="Шаблон недоступен"
@@ -322,6 +364,9 @@ export function PersonalTemplateCard({
     return (
       <EditTemplate
         template={query.data}
+        reload={async () =>
+          (await query.refetch({ throwOnError: true })).data ?? null
+        }
         saved={(t) => {
           client.setQueryData([...personalKey, account], t);
           setEdit(false);
@@ -335,37 +380,61 @@ export function PersonalTemplateCard({
   const sets = query.data.exercises.reduce((n, e) => n + e.sets.length, 0);
   return (
     <section className={panel + " space-y-3"}>
-      <h2 className="text-xl font-semibold">Мой Full Body</h2>
-      <details>
-        <summary className="min-h-11 cursor-pointer text-sm text-zinc-300">
-          {query.data.exercises.length} упражнений · {sets} подходов по плану
-        </summary>
-        <ol className="space-y-2 text-sm">
-          {query.data.exercises.map((e, i) => (
-            <li key={e.key}>
-              {i + 1}. {e.name}
-              <div className="text-zinc-400">
-                {e.sets.map((s) => s.weightKg + " × " + s.reps).join(" · ")}
-              </div>
-            </li>
-          ))}
-        </ol>
-      </details>
-      <button
-        className={button + " w-full bg-cyan-300 text-graphite-950"}
-        disabled={start.isPending}
-        onClick={() => {
-          const id = readDraft<string>(key, "") || crypto.randomUUID();
-          writeDraft(key, id);
-          start.mutate(id);
-        }}
-      >
-        {start.isPending ? "Открываем…" : "Начать тренировку"}
-      </button>
-      <button className={button + " w-full"} onClick={() => setEdit(true)}>
-        Настроить шаблон
-      </button>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-xl font-semibold">Мой Full Body</h2>
+        <button className={button} onClick={() => setEdit(true)}>
+          Настроить шаблон
+        </button>
+      </div>
+      <p className="text-sm text-zinc-300">
+        {query.data.exercises.length} упражнений · {sets} подходов по плану
+      </p>
+      {activeWorkoutTitle ? (
+        <p className="text-sm text-amber-200">
+          Сначала заверши тренировку «{activeWorkoutTitle}», чтобы начать «Мой
+          Full Body».
+        </p>
+      ) : (
+        <button
+          className={button + " w-full bg-cyan-300 text-graphite-950"}
+          disabled={start.isPending}
+          onClick={() => {
+            const id = readDraft<string>(key, "") || crypto.randomUUID();
+            writeDraft(key, id);
+            start.mutate(id);
+          }}
+        >
+          {start.isPending ? "Открываем…" : "Начать тренировку"}
+        </button>
+      )}
       {start.isError && <p role="alert">{workoutErrorMessage(start.error)}</p>}
+      <ol
+        className="divide-y divide-white/10 text-sm"
+        aria-label="Упражнения по порядку"
+      >
+        {query.data.exercises.map((e, i) => (
+          <li key={e.key} className="py-2">
+            <p className="font-semibold">
+              {i + 1}. {e.name}
+            </p>
+            <p className="mt-0.5 text-zinc-200">
+              {e.sets
+                .map(
+                  (s) =>
+                    s.weightKg.toLocaleString("ru-RU") +
+                    " кг × " +
+                    s.reps +
+                    (s.warmup ? " (разминка)" : ""),
+                )
+                .join(" · ")}
+            </p>
+            <p className="text-xs text-zinc-400">
+              {loadLabels[e.mode]}
+              {e.variant ? " · " + e.variant : ""}
+            </p>
+          </li>
+        ))}
+      </ol>
     </section>
   );
 }

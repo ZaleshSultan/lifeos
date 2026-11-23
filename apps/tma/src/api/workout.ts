@@ -189,6 +189,8 @@ export function workoutErrorMessage(error: unknown): string {
       error?: string;
       message?: string;
     };
+    if (body.error === "workout_active_other")
+      return "Открыта другая тренировка. Заверши её перед стартом Full Body.";
     if (body.error === "workout_conflict")
       return "Запись изменилась. Загрузи актуальную версию перед новой правкой.";
     if (body.error === "workout_empty")
