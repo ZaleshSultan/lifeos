@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   loadLabels,
   parsePersonalTemplate,
@@ -12,6 +12,7 @@ import {
   personalKey,
   readDraft,
   writeDraft,
+  type usePersonalTemplateQuery,
 } from "../api/personal-workout";
 import { workoutErrorMessage, type WorkoutSession } from "../api/workout";
 import { ApiError } from "../api/errors";
@@ -59,16 +60,24 @@ function EditTemplate({
   saved,
   cancel,
   reload,
+  onDirtyChange,
 }: {
   template: PersonalTemplate;
   saved: (t: PersonalTemplate) => void;
   cancel: () => void;
   reload: () => Promise<PersonalTemplate | null>;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const [draft, setDraft] = useState(() => structuredClone(template));
+  const [baseline, setBaseline] = useState(template);
   const [active, setActive] = useState(draft.exercises[0].key);
   const [error, setError] = useState("");
   const [reloading, setReloading] = useState(false);
+  const dirty = JSON.stringify(draft) !== JSON.stringify(baseline);
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+    return () => onDirtyChange?.(false);
+  }, [dirty, onDirtyChange]);
   const index = draft.exercises.findIndex((e) => e.key === active);
   const ex = draft.exercises[index];
   const change = (patch: Partial<PlannedLift>) =>
@@ -89,6 +98,7 @@ function EditTemplate({
       const fresh = await reload();
       if (!fresh) throw new Error();
       setDraft(structuredClone(fresh));
+      setBaseline(fresh);
       setActive(
         fresh.exercises.some((e) => e.key === active)
           ? active
@@ -298,7 +308,16 @@ function EditTemplate({
         </button>
       )}
       <div className="grid grid-cols-2 gap-2">
-        <button className={button} onClick={cancel}>
+        <button
+          className={button}
+          onClick={() => {
+            if (
+              !dirty ||
+              window.confirm("Закрыть шаблон и отменить несохранённые правки?")
+            )
+              cancel();
+          }}
+        >
           Закрыть
         </button>
         <button
@@ -326,16 +345,20 @@ export function PersonalTemplateCard({
   account,
   onStart,
   activeWorkoutTitle,
+  resume,
+  query,
+  onDirtyChange,
+  beforeStart,
 }: {
   account: number;
   onStart: (s: WorkoutSession) => void;
   activeWorkoutTitle?: string;
+  resume?: () => void;
+  query: ReturnType<typeof usePersonalTemplateQuery>;
+  onDirtyChange?: (dirty: boolean) => void;
+  beforeStart?: () => boolean;
 }) {
   const client = useQueryClient();
-  const query = useQuery({
-    queryKey: [...personalKey, account],
-    queryFn: personalApi.template,
-  });
   const [edit, setEdit] = useState(false);
   const key = "lifeos:full-body:start:" + account;
   const start = useMutation({
@@ -364,6 +387,7 @@ export function PersonalTemplateCard({
     return (
       <EditTemplate
         template={query.data}
+        onDirtyChange={onDirtyChange}
         reload={async () =>
           (await query.refetch({ throwOnError: true })).data ?? null
         }
@@ -389,7 +413,14 @@ export function PersonalTemplateCard({
       <p className="text-sm text-zinc-300">
         {query.data.exercises.length} упражнений · {sets} подходов по плану
       </p>
-      {activeWorkoutTitle ? (
+      {resume ? (
+        <button
+          className={button + " w-full bg-cyan-300 text-graphite-950"}
+          onClick={resume}
+        >
+          Продолжить тренировку
+        </button>
+      ) : activeWorkoutTitle ? (
         <p className="text-sm text-amber-200">
           Сначала заверши тренировку «{activeWorkoutTitle}», чтобы начать «Мой
           Full Body».
@@ -399,6 +430,7 @@ export function PersonalTemplateCard({
           className={button + " w-full bg-cyan-300 text-graphite-950"}
           disabled={start.isPending}
           onClick={() => {
+            if (beforeStart && !beforeStart()) return;
             const id = readDraft<string>(key, "") || crypto.randomUUID();
             writeDraft(key, id);
             start.mutate(id);

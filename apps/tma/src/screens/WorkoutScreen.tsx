@@ -6,7 +6,8 @@ import {
   Save,
   Timer,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { usePersonalTemplateQuery } from "../api/personal-workout";
 import {
   useWorkoutActions,
   useWorkoutProgramQuery,
@@ -174,12 +175,54 @@ function RecordedSet({
   );
 }
 
-export function WorkoutScreen({ account }: { account?: number } = {}) {
+function OtherPlans({
+  collapsed,
+  title,
+  children,
+}: {
+  collapsed: boolean;
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <details
+      open={!collapsed}
+      className={collapsed ? workoutPanelClass : undefined}
+    >
+      <summary
+        hidden={!collapsed}
+        className="min-h-11 cursor-pointer text-sm font-semibold"
+      >
+        {title}
+      </summary>
+      {children}
+    </details>
+  );
+}
+
+export function WorkoutScreen({
+  account,
+  onDirtyChange: notifyDirty,
+}: { account?: number; onDirtyChange?: (value: boolean) => void }) {
   const [receipt, setReceipt] = useState<WorkoutSession | null>(null);
   const [tab, setTab] = useState<"session" | "program" | "history">("session");
   const [dayId, setDayId] = useState("");
   const [finishConfirm, setFinishConfirm] = useState(false);
   const [unsavedSets, setUnsavedSets] = useState<string[]>([]);
+  const [programDirty, setProgramDirty] = useState(false);
+  const [templateDirty, setTemplateDirty] = useState(false);
+  const [showProgramBuilder, setShowProgramBuilder] = useState(false);
+  const hasUnsaved = programDirty || templateDirty || unsavedSets.length > 0;
+  useEffect(() => {
+    notifyDirty?.(hasUnsaved);
+    return () => notifyDirty?.(false);
+  }, [hasUnsaved, notifyDirty]);
+  const canLeave = () =>
+    !hasUnsaved ||
+    window.confirm("Перейти и отменить несохранённые правки в тренировках?");
+  function navigateTab(next: typeof tab) {
+    if (next !== tab && canLeave()) setTab(next);
+  }
   const onDirtyChange = useCallback((id: string, dirty: boolean) => {
     setUnsavedSets((ids) =>
       dirty
@@ -193,6 +236,9 @@ export function WorkoutScreen({ account }: { account?: number } = {}) {
   }, []);
   const query = useWorkoutSessionQuery();
   const program = useWorkoutProgramQuery();
+  const template = usePersonalTemplateQuery(account);
+  const collapseOther =
+    account !== undefined && template.data !== null && !template.isError;
   const actions = useWorkoutActions();
   const workout = query.data;
   const selectedDayId = program.data?.days.some((day) => day.id === dayId)
@@ -202,10 +248,19 @@ export function WorkoutScreen({ account }: { account?: number } = {}) {
   const personalTemplate = account !== undefined && (
     <PersonalTemplateCard
       account={account}
+      query={template}
+      onDirtyChange={setTemplateDirty}
+      beforeStart={canLeave}
+      resume={
+        workout?.personalRevision !== undefined
+          ? () => navigateTab("session")
+          : undefined
+      }
       activeWorkoutTitle={workout?.title}
       onStart={(session) => {
         setReceipt(session.mode === "completed" ? session : null);
         actions.acceptPersonal(session);
+        setTab("session");
       }}
     />
   );
@@ -228,7 +283,7 @@ export function WorkoutScreen({ account }: { account?: number } = {}) {
             key={id}
             aria-pressed={tab === id}
             className={`${workoutButtonClass} min-w-0 border-0 px-1 text-xs ${tab === id ? "bg-cyan-300/10 text-cyan-200" : "text-zinc-400"}`}
-            onClick={() => setTab(id)}
+            onClick={() => navigateTab(id)}
           >
             {title}
           </button>
@@ -238,20 +293,29 @@ export function WorkoutScreen({ account }: { account?: number } = {}) {
       {tab === "history" ? (
         <WorkoutHistory />
       ) : tab === "program" ? (
-        program.isLoading ? (
-          <LoadingPanel title="Загружаем программу" />
-        ) : program.isError ? (
-          <ErrorPanel
-            title="Программа недоступна"
-            detail={workoutErrorMessage(program.error)}
-            onRetry={() => void program.refetch()}
-          />
-        ) : (
-          <WorkoutProgramEditor
-            program={program.data ?? null}
-            hasActiveWorkout={Boolean(workout)}
-          />
-        )
+        <>
+          {personalTemplate}
+          <OtherPlans
+            collapsed={collapseOther && !showProgramBuilder}
+            title="Своя программа по дням"
+          >
+            {program.isLoading ? (
+              <LoadingPanel title="Загружаем программу" />
+            ) : program.isError && !program.data ? (
+              <ErrorPanel
+                title="Программа недоступна"
+                detail={workoutErrorMessage(program.error)}
+                onRetry={() => void program.refetch()}
+              />
+            ) : (
+              <WorkoutProgramEditor
+                program={program.data ?? null}
+                hasActiveWorkout={Boolean(workout)}
+                onDirtyChange={setProgramDirty}
+              />
+            )}
+          </OtherPlans>
+        </>
       ) : query.isLoading ? (
         <LoadingPanel title="Загружаем тренировку" />
       ) : query.isError ? (
@@ -268,85 +332,100 @@ export function WorkoutScreen({ account }: { account?: number } = {}) {
               <WorkoutTotals session={receipt} />
               <button
                 className={workoutButtonClass}
-                onClick={() => setTab("history")}
+                onClick={() => navigateTab("history")}
               >
                 Открыть историю
               </button>
             </section>
           )}
           {personalTemplate}
-          <section className={`${workoutPanelClass} space-y-4`}>
-            <div>
-              <Dumbbell className="mb-3 h-6 w-6 text-cyan-300" />
-              <h2 className="text-xl font-semibold">Тренировка по программе</h2>
-              <p className="mt-2 text-sm text-zinc-400">
-                Выбери день своей программы. Фактические повторы, вес и отдых
-                можно менять во время тренировки.
-              </p>
-            </div>
-            {program.isLoading ? (
-              <LoadingPanel title="Загружаем программу" />
-            ) : program.isError ? (
-              <ErrorPanel
-                title="Не удалось загрузить программу"
-                detail={workoutErrorMessage(program.error)}
-                onRetry={() => void program.refetch()}
-              />
-            ) : program.data ? (
-              <>
-                <label className="block space-y-2 text-sm text-zinc-300">
-                  <span>{program.data.title}</span>
-                  <select
-                    className={workoutInputClass}
-                    value={selectedDayId ?? ""}
-                    onChange={(event) => setDayId(event.target.value)}
+          <OtherPlans
+            collapsed={collapseOther}
+            title="Другие программы тренировок"
+          >
+            <section className={`${workoutPanelClass} space-y-4`}>
+              <div>
+                <Dumbbell className="mb-3 h-6 w-6 text-cyan-300" />
+                <h2 className="text-xl font-semibold">
+                  Тренировка по программе
+                </h2>
+                <p className="mt-2 text-sm text-zinc-400">
+                  Выбери день своей программы. Фактические повторы, вес и отдых
+                  можно менять во время тренировки.
+                </p>
+              </div>
+              {program.isLoading ? (
+                <LoadingPanel title="Загружаем программу" />
+              ) : program.isError ? (
+                <ErrorPanel
+                  title="Не удалось загрузить программу"
+                  detail={workoutErrorMessage(program.error)}
+                  onRetry={() => void program.refetch()}
+                />
+              ) : program.data ? (
+                <>
+                  <label className="block space-y-2 text-sm text-zinc-300">
+                    <span>{program.data.title}</span>
+                    <select
+                      className={workoutInputClass}
+                      value={selectedDayId ?? ""}
+                      onChange={(event) => setDayId(event.target.value)}
+                    >
+                      {program.data.days.map((day) => (
+                        <option key={day.id} value={day.id}>
+                          {day.title}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    className={`${workoutButtonClass} w-full bg-cyan-300 text-graphite-950`}
+                    disabled={actions.start.isPending || !selectedDayId}
+                    onClick={() => {
+                      if (canLeave()) actions.start.mutate(selectedDayId);
+                    }}
                   >
-                    {program.data.days.map((day) => (
-                      <option key={day.id} value={day.id}>
-                        {day.title}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                    {actions.start.isPending
+                      ? "Начинаем…"
+                      : "Начать выбранный день"}
+                  </button>
+                </>
+              ) : (
                 <button
                   type="button"
                   className={`${workoutButtonClass} w-full bg-cyan-300 text-graphite-950`}
-                  disabled={actions.start.isPending || !selectedDayId}
-                  onClick={() => actions.start.mutate(selectedDayId)}
+                  onClick={() => {
+                    if (!canLeave()) return;
+                    setShowProgramBuilder(true);
+                    setTab("program");
+                  }}
                 >
-                  {actions.start.isPending
-                    ? "Начинаем…"
-                    : "Начать выбранный день"}
+                  Создать свою программу
                 </button>
-              </>
-            ) : (
+              )}
               <button
                 type="button"
-                className={`${workoutButtonClass} w-full bg-cyan-300 text-graphite-950`}
-                onClick={() => setTab("program")}
+                className={`${workoutButtonClass} w-full`}
+                disabled={actions.start.isPending}
+                onClick={() => {
+                  if (canLeave()) actions.start.mutate(undefined);
+                }}
               >
-                Создать свою программу
+                Начать стандартный план LifeOS
               </button>
-            )}
-            <button
-              type="button"
-              className={`${workoutButtonClass} w-full`}
-              disabled={actions.start.isPending}
-              onClick={() => actions.start.mutate(undefined)}
-            >
-              Начать стандартный план LifeOS
-            </button>
-            {actions.start.isError ? (
-              <p role="alert" className="text-sm text-rose-200">
-                {workoutErrorMessage(actions.start.error)}
-              </p>
-            ) : null}
-            {actions.finish.isSuccess ? (
-              <p role="status" className="text-sm text-emerald-200">
-                Тренировка сохранена в истории.
-              </p>
-            ) : null}
-          </section>
+              {actions.start.isError ? (
+                <p role="alert" className="text-sm text-rose-200">
+                  {workoutErrorMessage(actions.start.error)}
+                </p>
+              ) : null}
+              {actions.finish.isSuccess ? (
+                <p role="status" className="text-sm text-emerald-200">
+                  Тренировка сохранена в истории.
+                </p>
+              ) : null}
+            </section>
+          </OtherPlans>
         </>
       ) : workout.personalRevision !== undefined && account !== undefined ? (
         <PersonalSession

@@ -60,15 +60,21 @@ function programDays(program: WorkoutProgram | null): DayDraft[] {
 export function WorkoutProgramEditor({
   program,
   hasActiveWorkout,
+  onDirtyChange,
 }: {
   program: WorkoutProgram | null;
   hasActiveWorkout: boolean;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const [title, setTitle] = useState(program?.title ?? "Моя программа");
   const [days, setDays] = useState(() => programDays(program));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [validation, setValidation] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+    return () => onDirtyChange?.(false);
+  }, [dirty, onDirtyChange]);
   const save = useSaveWorkoutProgram();
   useEffect(() => {
     // A background query refresh must not overwrite an unfinished form.

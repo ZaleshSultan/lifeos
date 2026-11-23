@@ -4,9 +4,17 @@ import type {
 } from "@lifeos/core/personal-workout";
 import { request } from "./client";
 import type { WorkoutSession } from "./workout";
+import { useQuery } from "@tanstack/react-query";
 
 const base = "/api/tma/workout/personal";
 export const personalKey = ["workout", "personal-template"] as const;
+export function usePersonalTemplateQuery(account?: number) {
+  return useQuery({
+    queryKey: [...personalKey, account],
+    queryFn: personalApi.template,
+    enabled: account !== undefined,
+  });
+}
 export const personalApi = {
   template: () =>
     request<PersonalTemplate | null>(base + "/template", { method: "POST" }),

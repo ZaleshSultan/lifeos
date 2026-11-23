@@ -1,9 +1,14 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fullBodyTemplate } from "@lifeos/core/personal-workout";
+import { personalKey } from "../api/personal-workout";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkoutSession } from "../api/workout";
 
-vi.mock("../telegram", () => ({telegram:{initData:"",hapticImpact:vi.fn()}}));
+vi.mock("../telegram", () => ({
+  telegram: { initData: "", hapticImpact: vi.fn() },
+}));
 const state = vi.hoisted(() => ({
   session: null as WorkoutSession | null,
   pending: false,
@@ -29,6 +34,24 @@ vi.mock("../api/workout", () => ({
 }));
 
 import { WorkoutScreen } from "./WorkoutScreen";
+
+function renderWorkout(owner?: boolean) {
+  const client = new QueryClient();
+  const account = owner === undefined ? undefined : 11;
+  if (account) {
+    client.setQueryData(
+      [...personalKey, account],
+      owner ? { revision: 0, exercises: fullBodyTemplate() } : null,
+    );
+  }
+  return renderToStaticMarkup(
+    createElement(
+      QueryClientProvider,
+      { client },
+      createElement(WorkoutScreen, { account }),
+    ),
+  );
+}
 
 beforeEach(() => {
   state.pending = false;
@@ -63,7 +86,7 @@ beforeEach(() => {
 
 describe("workout screen", () => {
   it("keeps completed set controls enabled after a mutation and displays zero values", () => {
-    const html = renderToStaticMarkup(createElement(WorkoutScreen));
+    const html = renderWorkout();
     expect(html).toContain("Отменить");
     expect(html).not.toContain("disabled=");
     expect(html).toContain('aria-label="Приседания, подход 1: Вес, кг"');
@@ -73,7 +96,7 @@ describe("workout screen", () => {
 
   it("shows a saved exercise GIF beside the active workout", () => {
     state.session!.exercises[0].gifUrl = "https://example.com/squat.gif";
-    const html = renderToStaticMarkup(createElement(WorkoutScreen));
+    const html = renderWorkout();
     expect(html).toContain('src="https://example.com/squat.gif"');
     expect(html).toContain('alt="Техника упражнения: Приседания"');
     expect(html).toContain('loading="lazy"');
@@ -81,21 +104,30 @@ describe("workout screen", () => {
 
   it("blocks input while saving and displays a failed set mutation", () => {
     state.pending = true;
-    expect(renderToStaticMarkup(createElement(WorkoutScreen))).toContain(
-      "disabled=",
-    );
+    expect(renderWorkout()).toContain("disabled=");
     state.pending = false;
     state.error = true;
-    expect(renderToStaticMarkup(createElement(WorkoutScreen))).toContain(
-      "Не удалось сохранить подход.",
-    );
+    expect(renderWorkout()).toContain("Не удалось сохранить подход.");
   });
 
   it("offers creation of the user's program without silently starting defaults", () => {
     state.session = null;
-    const html = renderToStaticMarkup(createElement(WorkoutScreen));
+    const html = renderWorkout();
     expect(html).toContain("Создать свою программу");
     expect(html).toContain("Начать стандартный план LifeOS");
     expect(html).not.toContain("Приседания");
+  });
+  it("puts Full Body first for its owner, and keeps the existing program immediately available for other accounts", () => {
+    state.session = null;
+    const personal = renderWorkout(true);
+    expect(personal.indexOf("Мой Full Body")).toBeLessThan(
+      personal.indexOf("Другие программы тренировок"),
+    );
+    expect(personal).toMatch(
+      /<details(?![^>]*\bopen)[^>]*><summary[^>]*>Другие программы тренировок/,
+    );
+    const ordinary = renderWorkout(false);
+    expect(ordinary).not.toContain("Мой Full Body");
+    expect(ordinary).toMatch(/<details[^>]*\bopen[^>]*>/);
   });
 });
