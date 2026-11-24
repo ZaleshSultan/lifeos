@@ -23,6 +23,9 @@ button { -webkit-tap-highlight-color: transparent; }
 ::selection { background: #34477a; color: white; }
 .safe-shell { padding-top: env(safe-area-inset-top); }
 .lo-shell { margin-inline: auto; width: min(100%, 448px); min-height: 100dvh; }
+@media (min-width: 720px) {
+  .lo-shell:has([data-study-schedule]) { width: min(100%, 1440px); }
+}
 .lo-header { border-bottom: 1px solid #202024; }
 .lo-header-inner { display: flex; align-items: center; justify-content: space-between; min-height: 44px; padding: 0 16px; }
 .lo-brand { display: inline-flex; align-items: center; gap: 7px; color: #a0a0aa; font-size: 13px; font-weight: 650; }
