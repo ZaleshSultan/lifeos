@@ -269,6 +269,7 @@ export function StudySchedule({
   return (
     <section
       ref={root}
+      data-study-schedule=""
       className={styles.shell}
       aria-label="Расписание занятий"
     >

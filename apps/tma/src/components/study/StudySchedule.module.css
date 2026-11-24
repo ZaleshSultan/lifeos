@@ -142,7 +142,7 @@
   overscroll-behavior-x: contain;
 }
 .board {
-  --hour: 104px;
+  --hour: 116px;
   display: grid;
   grid-template-columns: 53px repeat(var(--days), minmax(0, 1fr));
   min-width: calc(53px + var(--days) * 139px);
@@ -268,6 +268,7 @@
   font-variant-numeric: tabular-nums;
 }
 .title {
+  flex-shrink: 0;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
@@ -278,6 +279,7 @@
   font-weight: 680;
 }
 .meta {
+  flex-shrink: 0;
   margin-top: auto;
   white-space: nowrap;
   text-overflow: ellipsis;

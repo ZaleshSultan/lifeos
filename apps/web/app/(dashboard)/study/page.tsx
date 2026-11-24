@@ -99,7 +99,7 @@ export default async function StudyPage({
     </Link>
   );
   return (
-    <div className="mx-auto max-w-3xl space-y-4">
+    <div className={`mx-auto space-y-4 ${tab === "schedule" ? "w-full" : "max-w-3xl"}`}>
       <header className="flex items-center justify-between gap-4">
         <h1 className="text-[28px] font-bold leading-tight tracking-tight">
           Учёба
