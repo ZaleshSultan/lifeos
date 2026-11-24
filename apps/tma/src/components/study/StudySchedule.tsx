@@ -1,13 +1,16 @@
-import { CalendarDays, Clock3, MapPin, UserRound } from "lucide-react";
-import { useState } from "react";
+"use client";
+
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { StudyWeekday, StudyWorkspaceCourse } from "../../api/study";
-import { cx } from "../../lib/styles";
+import { studyDateLabel, studyDays, studyWeekday } from "./model";
 import {
-  studyDateLabel,
-  studyDaySessions,
-  studyDays,
-  studyWeekday,
-} from "./model";
+  defaultSchedulePeriod,
+  layoutScheduleDay,
+  localScheduleDate,
+  scheduleHourBounds,
+  schedulePeriods,
+} from "./schedule-grid-model";
+import styles from "./StudySchedule.module.css";
 
 const sessionLabels: Record<string, string> = {
   lecture: "Лекция",
@@ -17,6 +20,208 @@ const sessionLabels: Record<string, string> = {
   lab: "Лабораторная",
   laboratory: "Лабораторная",
 };
+const hues = [345, 271, 157, 216, 86, 13, 42, 240, 185, 324, 66, 200];
+
+type Lesson = ReturnType<typeof layoutScheduleDay>[number];
+type PeriodDates = Pick<StudyWorkspaceCourse, "startsOn" | "endsOn">;
+type ScheduleView = "week" | "day";
+const plurals = new Intl.PluralRules("ru");
+
+function lessonCount(count: number) {
+  const forms: Record<string, string> = { one: "пара", few: "пары" };
+  return count + " " + (forms[plurals.select(count)] ?? "пар");
+}
+
+function dateRange({ startsOn, endsOn }: PeriodDates) {
+  if (startsOn && endsOn)
+    return studyDateLabel(startsOn) + " — " + studyDateLabel(endsOn);
+  if (startsOn) return "С " + studyDateLabel(startsOn);
+  if (endsOn) return "До " + studyDateLabel(endsOn);
+  return "Без указанных дат";
+}
+
+function courseStyle(code: string): CSSProperties {
+  let hash = 0;
+  for (const letter of code)
+    hash = (Math.imul(hash, 31) + letter.charCodeAt(0)) >>> 0;
+  return { "--course-hue": hues[hash % hues.length] } as CSSProperties;
+}
+
+function timeRange(lesson: Lesson) {
+  return (
+    lesson.schedule.startTime.slice(0, 5) +
+    "–" +
+    lesson.schedule.endTime.slice(0, 5)
+  );
+}
+
+function sessionKind(lesson: Lesson) {
+  const type = lesson.schedule.sessionType;
+  return type ? (sessionLabels[type] ?? type) : "";
+}
+
+function compactRoom(room: string | null) {
+  if (!room) return "";
+  if (/^онлайн(?:\s|$)/iu.test(room)) return "Онлайн";
+  return room.replace(/\s*\([^()]+\)\s*$/u, "").trim() || room;
+}
+
+function LessonDetails({
+  lesson,
+  onClose,
+}: {
+  lesson: Lesson;
+  onClose: () => void;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    if (dialog.current && !dialog.current.open) dialog.current.showModal();
+  }, []);
+  const { course, schedule } = lesson;
+  const day = studyDays.find((item) => item.id === schedule.dayOfWeek)?.label;
+  return (
+    <dialog
+      ref={dialog}
+      className={styles.dialog}
+      aria-label={course.title}
+      onClose={onClose}
+    >
+      <div className={styles.dialogContent} style={courseStyle(course.code)}>
+        <p className={styles.detailTime}>
+          {day} · {timeRange(lesson)}
+        </p>
+        <h3>{course.title}</h3>
+        <dl className={styles.detailList}>
+          {sessionKind(lesson) && (
+            <>
+              <dt>Вид занятия</dt>
+              <dd>{sessionKind(lesson)}</dd>
+            </>
+          )}
+          <dt>Место</dt>
+          <dd>{schedule.room || "Не указано"}</dd>
+          {schedule.instructorName && (
+            <>
+              <dt>Преподаватель</dt>
+              <dd>{schedule.instructorName}</dd>
+            </>
+          )}
+          <dt>Код курса</dt>
+          <dd>{course.code}</dd>
+          <dt>Период курса</dt>
+          <dd>{dateRange(course)}</dd>
+        </dl>
+        <form method="dialog">
+          <button className={styles.close} autoFocus>
+            Закрыть
+          </button>
+        </form>
+      </div>
+    </dialog>
+  );
+}
+
+function WeekBoard({
+  courses,
+  onLesson,
+}: {
+  courses: StudyWorkspaceCourse[];
+  onLesson: (item: Lesson) => void;
+}) {
+  const days = studyDays
+    .map((day) => ({ ...day, lessons: layoutScheduleDay(courses, day.id) }))
+    .filter((day) => day.id !== "sunday" || day.lessons.length > 0);
+  const { first, last } = scheduleHourBounds(courses);
+  const hours = Array.from({ length: last - first + 1 }, (_, i) => first + i);
+  const duration = (last - first) * 60;
+  const boardStyle = {
+    "--days": days.length,
+    "--hours": hours.length - 1,
+  } as CSSProperties;
+  return (
+    <div
+      className={styles.scroll}
+      tabIndex={0}
+      role="region"
+      aria-label="Недельная сетка расписания"
+    >
+      <div className={styles.board} style={boardStyle}>
+        <div aria-hidden="true" className={styles.timeHead}>
+          Время
+        </div>
+        {days.map((day) => (
+          <div key={day.id} className={styles.dayHead}>
+            <strong>{day.label}</strong>
+            <span>{lessonCount(day.lessons.length)}</span>
+          </div>
+        ))}
+        <div className={styles.timeAxis} aria-hidden="true">
+          {hours.map((hour) => (
+            <span
+              key={hour}
+              style={{ top: ((hour - first) * 100) / (last - first) + "%" }}
+            >
+              {String(hour).padStart(2, "0")}:00
+            </span>
+          ))}
+        </div>
+        {days.map((day) => (
+          <div
+            className={styles.dayColumn}
+            key={day.id}
+            role="group"
+            aria-label={day.label}
+            data-empty={!day.lessons.length}
+          >
+            {day.lessons.map((lesson) => {
+              const { course, schedule } = lesson;
+              const meta = [sessionKind(lesson), compactRoom(schedule.room)]
+                .filter(Boolean)
+                .join(" · ");
+              return (
+                <button
+                  key={schedule.id}
+                  className={styles.slot}
+                  type="button"
+                  style={{
+                    ...courseStyle(course.code),
+                    top: ((lesson.start - first * 60) * 100) / duration + "%",
+                    height: `calc(${((lesson.end - lesson.start) * 100) / duration}% - 1px)`,
+                    left: `calc(${(lesson.lane * 100) / lesson.laneCount}% + 2px)`,
+                    width: `calc(${100 / lesson.laneCount}% - 4px)`,
+                  }}
+                  aria-haspopup="dialog"
+                  aria-label={[
+                    day.label,
+                    timeRange(lesson),
+                    course.title,
+                    meta,
+                    schedule.instructorName,
+                  ]
+                    .filter(Boolean)
+                    .join(", ")}
+                  title={[
+                    course.title,
+                    timeRange(lesson),
+                    meta,
+                    schedule.instructorName,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                  onClick={() => onLesson(lesson)}
+                >
+                  <span className={styles.time}>{timeRange(lesson)}</span>
+                  <strong className={styles.title}>{course.title}</strong>
+                  {meta && <span className={styles.meta}>{meta}</span>}
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export function StudySchedule({
   courses,
@@ -25,121 +230,159 @@ export function StudySchedule({
   courses: StudyWorkspaceCourse[];
   timezone: string;
 }) {
-  const today = studyWeekday(timezone);
-  const [selected, setSelected] = useState<StudyWeekday | null>(null);
-  const day = selected ?? today;
-  const sessions = studyDaySessions(courses, day);
-  const total = courses.reduce(
-    (count, course) => count + course.schedules.length,
-    0,
-  );
+  const root = useRef<HTMLElement>(null);
+  const [narrow, setNarrow] = useState(false);
+  const [preferredView, setPreferredView] = useState<ScheduleView | null>(null);
+  const [periodKey, setPeriodKey] = useState<string | null>(null);
+  const [selectedDay, setSelectedDay] = useState<StudyWeekday | null>(null);
+  const [detail, setDetail] = useState<Lesson | null>(null);
+  useEffect(() => {
+    const node = root.current;
+    if (!node) return;
+    const measure = () => setNarrow(node.clientWidth < 680);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  const today = localScheduleDate(timezone);
+  const periods = schedulePeriods(courses);
+  const defaultKey = defaultSchedulePeriod(periods, today);
+  const selected =
+    periods.find((p) => p.key === periodKey) ??
+    periods.find((p) => p.key === defaultKey);
+  const current = selected?.courses ?? [];
+  const view = preferredView ?? (narrow ? "day" : "week");
+  const day =
+    selectedDay ??
+    (selected?.startsOn && selected.startsOn > today
+      ? "monday"
+      : studyWeekday(timezone));
+  const dayName = studyDays.find((d) => d.id === day)?.label;
+  const lessons = layoutScheduleDay(current, day);
+  const count = current.reduce((sum, c) => sum + c.schedules.length, 0);
+  const zoneLabel = ["Asia/Almaty", "Asia/Qyzylorda"].includes(timezone)
+    ? "Время Астаны"
+    : timezone;
+
   return (
-    <section className="space-y-4" aria-label="Расписание занятий">
-      <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
-        <div className="flex items-center gap-2 text-white">
-          <CalendarDays className="h-5 w-5 text-cyan-400" aria-hidden="true" />
-          <h2 className="font-semibold">Учебная неделя</h2>
+    <section
+      ref={root}
+      className={styles.shell}
+      aria-label="Расписание занятий"
+    >
+      <header className={styles.header}>
+        <div>
+          <h2>Расписание занятий</h2>
+          <p>
+            {count > 0 && <>{lessonCount(count)} в неделю · </>}
+            {zoneLabel}
+          </p>
         </div>
-        <p className="mt-2 text-sm text-zinc-400">
-          Повторяющееся расписание · {total} занятий
-        </p>
-        <p className="mt-1 break-words text-xs text-zinc-400">
-          Время: {timezone}. Даты экзаменов сюда не включены.
-        </p>
-        <div
-          className="mt-4 grid grid-cols-4 gap-2"
-          role="group"
-          aria-label="День недели"
-        >
-          {studyDays.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              aria-label={`${item.label}${item.id === today ? ", сегодня" : ""}`}
-              aria-pressed={day === item.id}
-              onClick={() => setSelected(item.id)}
-              className={cx(
-                "min-h-11 min-w-11 rounded-lg border px-1 py-2 text-sm font-semibold transition-colors active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400",
-                day === item.id
-                  ? "border-cyan-400/40 bg-cyan-400/10 text-cyan-200"
-                  : "border-white/[0.08] bg-white/[0.03] text-zinc-300 hover:bg-white/[0.08]",
-              )}
+        {selected && (
+          <label className={styles.period}>
+            Учебный период
+            <select
+              value={selected.key}
+              onChange={(event) => {
+                setPeriodKey(event.target.value);
+                setSelectedDay(null);
+              }}
             >
-              <span className="block">{item.short}</span>
-              {item.id === today ? (
-                <span className="block text-[10px] font-normal">Сегодня</span>
-              ) : null}
-            </button>
-          ))}
-        </div>
-      </div>
-      <h3 className="text-sm font-semibold text-zinc-300">
-        {studyDays.find((item) => item.id === day)?.label}
-      </h3>
-      {!sessions.length ? (
-        <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 text-sm text-zinc-400">
-          {total
-            ? "На этот день занятия не указаны. Выбери другой день недели."
-            : "Расписание пока не добавлено. После импорта учебного плана обнови этот экран."}
-        </div>
+              {periods.map((period) => (
+                <option key={period.key} value={period.key}>
+                  {dateRange(period)}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+      </header>
+      {!count ? (
+        <p className={styles.empty}>Расписание занятий пока не добавлено.</p>
       ) : (
-        <ol className="space-y-3">
-          {sessions.map(({ course, schedule }) => (
-            <li
-              key={schedule.id}
-              className="min-w-0 rounded-xl border border-white/[0.08] bg-white/[0.03] p-4"
+        <>
+          <div
+            className={styles.switch}
+            role="group"
+            aria-label="Вид расписания"
+          >
+            <button
+              type="button"
+              aria-pressed={view === "week"}
+              onClick={() => setPreferredView("week")}
             >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="inline-flex items-center gap-2 text-sm font-semibold tabular-nums text-cyan-200">
-                  <Clock3 className="h-4 w-4" aria-hidden="true" />
-                  {schedule.startTime.slice(0, 5)}–
-                  {schedule.endTime.slice(0, 5)}
-                </span>
-                {schedule.sessionType ? (
-                  <span className="break-words text-xs text-zinc-400">
-                    {sessionLabels[schedule.sessionType] ??
-                      schedule.sessionType}
-                  </span>
-                ) : null}
+              Неделя
+            </button>
+            <button
+              type="button"
+              aria-pressed={view === "day"}
+              onClick={() => setPreferredView("day")}
+            >
+              День
+            </button>
+          </div>
+          {view === "week" ? (
+            <WeekBoard courses={current} onLesson={setDetail} />
+          ) : (
+            <>
+              <div
+                className={styles.dayPicker}
+                role="group"
+                aria-label="День недели"
+              >
+                {studyDays.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    aria-label={item.label}
+                    aria-pressed={day === item.id}
+                    onClick={() => setSelectedDay(item.id)}
+                  >
+                    {item.short}
+                  </button>
+                ))}
               </div>
-              <h4 className="mt-3 break-words text-base font-semibold text-white">
-                {course.title}
-              </h4>
-              <p className="mt-1 break-words text-xs text-zinc-400">
-                {course.code}
-              </p>
-              <div className="mt-3 space-y-2 text-sm text-zinc-300">
-                <p className="flex items-start gap-2">
-                  <MapPin
-                    className="mt-0.5 h-4 w-4 shrink-0 text-zinc-400"
-                    aria-hidden="true"
-                  />
-                  <span className="min-w-0 break-words">
-                    {schedule.room
-                      ? `Аудитория ${schedule.room}`
-                      : "Аудитория не указана"}
-                  </span>
-                </p>
-                {schedule.instructorName ? (
-                  <p className="flex items-start gap-2">
-                    <UserRound
-                      className="mt-0.5 h-4 w-4 shrink-0 text-zinc-400"
-                      aria-hidden="true"
-                    />
-                    <span className="min-w-0 break-words">
-                      {schedule.instructorName}
-                    </span>
-                  </p>
-                ) : null}
-              </div>
-              <p className="mt-3 text-xs text-zinc-400">
-                {course.startsOn || course.endsOn
-                  ? `Период курса: ${course.startsOn ? studyDateLabel(course.startsOn) : "начало не указано"} — ${course.endsOn ? studyDateLabel(course.endsOn) : "окончание не указано"}`
-                  : "Даты действия расписания не указаны"}
-              </p>
-            </li>
-          ))}
-        </ol>
+              <h3 className={styles.dayTitle}>
+                {dayName} <span>· {lessonCount(lessons.length)}</span>
+              </h3>
+              {!lessons.length ? (
+                <p className={styles.empty}>В этот день пар нет.</p>
+              ) : (
+                <ol className={styles.agenda}>
+                  {lessons.map((lesson) => (
+                    <li key={lesson.schedule.id}>
+                      <button
+                        type="button"
+                        style={courseStyle(lesson.course.code)}
+                        onClick={() => setDetail(lesson)}
+                        aria-haspopup="dialog"
+                      >
+                        <span className={styles.time}>{timeRange(lesson)}</span>
+                        <strong>{lesson.course.title}</strong>
+                        <span>
+                          {[
+                            sessionKind(lesson),
+                            lesson.schedule.room || "Аудитория не указана",
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </span>
+                        {lesson.schedule.instructorName && (
+                          <span>{lesson.schedule.instructorName}</span>
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </>
+          )}
+        </>
+      )}
+      {detail && (
+        <LessonDetails lesson={detail} onClose={() => setDetail(null)} />
       )}
     </section>
   );
